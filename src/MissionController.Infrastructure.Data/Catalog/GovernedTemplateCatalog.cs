@@ -21,7 +21,7 @@ public static partial class GovernedTemplateCatalog
     /// Bumped whenever the seeded set changes. The registry stores this so startup can skip a
     /// redundant full-catalog upsert when the on-disk set already matches the shipped build.
     /// </summary>
-    public const string CatalogVersion = "2.0.0";
+    public const string CatalogVersion = "2.1.0";
 
     // --- Model governance -----------------------------------------------------------------
     // Pro is reserved for templates whose output requires correlation or adversarial reasoning
@@ -32,16 +32,18 @@ public static partial class GovernedTemplateCatalog
     private const string ModelFlash = "gemini-2.5-flash";
 
     // --- Egress governance ----------------------------------------------------------------
-    // Single source of truth for the one approved FQDN. Declaring it centrally rather than
-    // re-typing it in every template removes the possibility of a per-template typo silently
-    // widening the in-memory egress firewall's whitelist.
-    private const string VertexRegionalFqdn = "us-central1-aiplatform.googleapis.com";
+    // Single source of truth for the approved AI-gateway FQDN, declared centrally so a
+    // per-template typo can never silently widen the whitelist. Since the IModelStreamClient
+    // refactor, the ACTIVE egress pin is applied by the provider client itself (it knows which
+    // host it is about to call); this rule is the governance declaration recorded in templates
+    // and audit rows. It names the default provider (Anthropic Claude).
+    private const string AiGatewayFqdn = "api.anthropic.com";
 
-    private static readonly EgressRule VertexEgress = new(
-        VertexRegionalFqdn,
+    private static readonly EgressRule AiGatewayEgress = new(
+        AiGatewayFqdn,
         443,
         true,
-        "Vertex AI Google Cloud (regional endpoint pinned for data residency)");
+        "Anthropic Claude API (default governed AI gateway; egress pinned by provider client)");
 
     // --- Tool host binaries ----------------------------------------------------------------
     private const string CmdExe = @"C:\Windows\System32\cmd.exe";
@@ -99,7 +101,7 @@ public static partial class GovernedTemplateCatalog
             category,
             model,
             tool,
-            VertexEgress,
+            AiGatewayEgress,
             systemPrompt,
             parameters ?? new Dictionary<string, string>());
 

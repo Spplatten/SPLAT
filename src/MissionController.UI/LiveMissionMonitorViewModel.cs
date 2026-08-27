@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.UI.Xaml;
 using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
@@ -44,6 +45,15 @@ public partial class LiveMissionMonitorViewModel : ObservableObject
     [ObservableProperty]
     private string _jailPath = "None";
 
+    // True once the engine signals no live model is connected. Drives a persistent banner so the
+    // simulated analysis in the AI pane can never be mistaken for genuine model output.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SimulatedBannerVisibility))]
+    private bool _isSimulatedAnalysis;
+
+    public Visibility SimulatedBannerVisibility =>
+        IsSimulatedAnalysis ? Visibility.Visible : Visibility.Collapsed;
+
     public LiveMissionMonitorViewModel(IMissionExecutionEngine engine)
     {
         _engine = engine;
@@ -64,6 +74,7 @@ public partial class LiveMissionMonitorViewModel : ObservableObject
         MissionLog = string.Empty;
         StdoutStream = string.Empty;
         AiAnalysisStream = string.Empty;
+        IsSimulatedAnalysis = false;
         _cts = new CancellationTokenSource();
 
         try
@@ -84,6 +95,10 @@ public partial class LiveMissionMonitorViewModel : ObservableObject
                         break;
                     case MissionChunkType.AiToken:
                         AiAnalysisStream += chunk.Content;
+                        break;
+                    case MissionChunkType.SimulatedNotice:
+                        IsSimulatedAnalysis = true;
+                        MissionLog += $"[{chunk.TimestampUtc:HH:mm:ss}] SIMULATED: {chunk.Content}\n";
                         break;
                     case MissionChunkType.Metric:
                         MissionLog += $"[{chunk.TimestampUtc:HH:mm:ss}] METRIC: {chunk.Content}\n";

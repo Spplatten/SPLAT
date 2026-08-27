@@ -13,7 +13,7 @@ using MissionController.Infrastructure.Network.Edr;
 using MissionController.Infrastructure.Network.Http;
 using MissionController.Infrastructure.Network.Identity;
 using MissionController.Infrastructure.Network.Siem;
-using MissionController.Infrastructure.Network.Vertex;
+using MissionController.Infrastructure.Network.Ai;
 using MissionController.Infrastructure.Windows.Jails;
 using MissionController.Infrastructure.Windows.JobObjects;
 using MissionController.Infrastructure.Windows.Process;
@@ -53,7 +53,11 @@ public partial class App : Application
         services.AddSingleton(firewall);
         services.AddSingleton<IEgressFirewall>(firewall);
         services.AddSingleton<IDataLossPreventionSanitizer, RegexDataLossPreventionSanitizer>();
-        services.AddSingleton<IVertexStreamClient, VertexAiStreamClient>();
+        // Provider-by-available-key routing: Claude is the default and wins when both keys exist;
+        // a Gemini key alone still lights up live analysis instead of the simulated placeholder.
+        services.AddSingleton<ClaudeStreamClient>();
+        services.AddSingleton<GeminiStreamClient>();
+        services.AddSingleton<IModelStreamClient, ModelClientRouter>();
         services.AddSingleton<ISiemForwarder, SiemForwarder>();
         services.AddSingleton<IEdrIngestionBridge, EdrIngestionBridge>();
 

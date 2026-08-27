@@ -132,13 +132,31 @@ public interface IEdrIngestionBridge
     Task<bool> SetDeviceIsolationStateAsync(string deviceId, bool isolate, string justification, CancellationToken cancellationToken = default);
 }
 
-public interface IVertexStreamClient
+/// <summary>
+/// Result of probing whether a real AI model is reachable. When <see cref="IsLive"/> is false the
+/// caller MUST surface a visible simulated-output notice - never render placeholder text as if it
+/// were genuine model output. This is the contract that closes the "silent mannequin" gap.
+/// </summary>
+public record ModelAvailability(
+    bool IsLive,
+    string ProviderName,
+    string ModelId,
+    string? UnavailableReason);
+
+/// <summary>
+/// Provider-agnostic streaming AI client. Concrete implementations own their egress host and pin it
+/// through the Layer-4 egress firewall themselves, so a swap of provider never widens the whitelist.
+/// </summary>
+public interface IModelStreamClient
 {
-    IAsyncEnumerable<string> StreamGenerateContentAsync(
-        string modelName,
+    Task<ModelAvailability> CheckAvailabilityAsync(
+        string requestedModel,
+        CancellationToken cancellationToken = default);
+
+    IAsyncEnumerable<string> StreamAnalysisAsync(
+        string requestedModel,
         string systemPrompt,
         string userPrompt,
-        string allowedEgressFqdn,
         CancellationToken cancellationToken = default);
 }
 

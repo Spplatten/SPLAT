@@ -333,3 +333,7 @@ public record RevocationStatus(
     bool IsRevoked,
     RevocationEntry? Entry = null);
 
+public record AiGatewayValidationResult(
+    bool IsValid,
+    string Message);
+

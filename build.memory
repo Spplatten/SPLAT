@@ -25,7 +25,7 @@
 ## The 8-Layer Enterprise Governed AI Agent Stack
 
 1. **Layer 1: Intent & Interaction:** 1-Click Agent Squad Dashboard, First-Run Welcome Wizard, and Electric Blue glowing action buttons (`⚡`).
-2. **Layer 2: Cognitive Brain:** Google Gemini 2.5 Pro & Flash multi-token streaming reasoning core.
+2. **Layer 2: Cognitive Brain:** Anthropic Claude Opus 5 (default) with Google Gemini as key-routed alternate provider; honest SIMULATED labeling when no key is configured.
 3. **Layer 3: Local Semantic Memory:** In-process 128-dimensional vector embedding engine with cosine similarity search over past incidents.
 4. **Layer 4: Zero-Trust Egress Firewall & DLP:** In-memory `DelegatingHandler` socket whitelist + regex engine scrubbing passwords, NTLM hashes, private keys, and emails before cloud transmission.
 5. **Layer 5: Kernel Confinement & Hardware Sandbox:** Suspended `CreateProcessW` (0x00000004) + Win32 Job Object RAM/CPU clamps + Restricted Token Admin SID stripping + Per-mission NT ACL Jails with severed inheritance.
@@ -52,4 +52,4 @@
 - **Packaging Pipeline (`packaging/build-msix.ps1`):** Self-contained `win-x64` Release compilation, enterprise code-signing certificate generation, and Authenticode SHA-256 digital signing.
 - **Intune & SCCM Silent Deployment (`packaging/install-enterprise.ps1`):** Silent installer deploying cert to `TrustedPeople` and installing MSIX bundle.
 - **Clean De-Provisioning (`packaging/uninstall-enterprise.ps1`):** Completely removes AppX and purges DPAPI vaults and active jails.
-- **Test Suite (`tests/MissionController.Tests`):** **41/41 unit, integration, and security test suites passing (100% green)**.
+- **Test Suite (`tests/MissionController.Tests`):** **59/59 unit, integration, and security test suites passing (100% green)**.

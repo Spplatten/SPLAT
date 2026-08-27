@@ -112,11 +112,11 @@
                 <StackPanel Spacing="18" Visibility="{x:Bind GetStep2Visibility(ViewModel.CurrentStep), Mode=OneWay}">
                     <StackPanel Spacing="4">
                         <TextBlock Text="Step 2 of 3: Connect Your Agents' Reasoning Brain" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock Text="Connect your Google Gemini API Key or Vertex AI Enterprise Token to empower your agents with advanced diagnostic intelligence." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        <TextBlock Text="Connect an Anthropic (sk-ant-…) or Google Gemini (AIza…) API key to give your agents real diagnostic intelligence — the key is routed to the right provider automatically. No key? Missions still run — the analysis is just clearly labeled as simulated." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                     </StackPanel>
 
                     <StackPanel Spacing="10" Margin="0,8,0,0">
-                        <TextBlock Text="Gemini API Key / Cloud Bearer Token" FontSize="12" FontWeight="SemiBold" />
+                        <TextBlock Text="AI Provider API Key (Anthropic or Gemini)" FontSize="12" FontWeight="SemiBold" />
                         <Grid ColumnSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -124,12 +124,12 @@
                             </Grid.ColumnDefinitions>
                             <PasswordBox
                                 Grid.Column="0"
-                                PlaceholderText="AIzaSy... or ya29..."
+                                PlaceholderText="sk-ant-..."
                                 Password="{x:Bind ViewModel.ApiKeyInput, Mode=TwoWay}"
                                 Height="36" />
                             <Button
                                 Grid.Column="1"
-                                Content="Test &amp; Connect"
+                                Content="Save Key"
                                 Style="{StaticResource AccentButtonStyle}"
                                 Command="{x:Bind ViewModel.ValidateKeyCommand}" />
                         </Grid>

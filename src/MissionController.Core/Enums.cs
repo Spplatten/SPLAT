@@ -32,6 +32,10 @@ public enum MissionChunkType
     Metric,
     SystemWarning,
     StatusChange,
+    // Raised when no live model is connected and the AI analysis that follows is a local
+    // simulation. The UI renders this as an unmistakable banner so simulated text can never
+    // masquerade as genuine model output.
+    SimulatedNotice,
     Completed
 }
 

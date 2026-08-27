@@ -5,7 +5,7 @@
 [![.NET 9](https://img.shields.io/badge/.NET-9.0%20LTS-512BD4?style=flat&logo=dotnet)](https://dotnet.microsoft.com/)
 [![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D6?style=flat&logo=windows)](https://microsoft.com/windows)
 [![Zero-Trust](https://img.shields.io/badge/Architecture-8--Layer%20Governed%20Stack-brightgreen)](https://csrc.nist.gov/publications/detail/sp/800-207/final)
-[![Tests](https://img.shields.io/badge/Tests-41%2F41%20Passing%20(100%25)-success)](https://github.com/Platten-Industries/SPLAT/tree/main/tests/MissionController.Tests)
+[![Tests](https://img.shields.io/badge/Tests-59%2F59%20Passing%20(100%25)-success)](https://github.com/Platten-Industries/SPLAT/tree/main/tests/MissionController.Tests)
 [![GitHub](https://img.shields.io/badge/GitHub-Platten--Industries%2FSPLAT-blue?logo=github)](https://github.com/Platten-Industries/SPLAT)
 
 ---
@@ -33,8 +33,8 @@ flowchart TD
     end
 
     subgraph L2 ["Layer 2: Cognitive Planning & Reasoning (Brain)"]
-        GeminiPro["🧠 Google Gemini 2.5 Pro (Deep Multi-Step Reasoning)"]
-        GeminiFlash["⚡ Google Gemini 2.5 Flash (Sub-Second Triage)"]
+        ClaudeOpus["🧠 Anthropic Claude Opus 5 (Default Reasoning Core)"]
+        GeminiAlt["⚡ Google Gemini 2.5 (Alternate Provider via Key Routing)"]
     end
 
     subgraph L3 ["Layer 3: Local Ephemeral & Long-Term Semantic Memory"]
@@ -150,7 +150,9 @@ SPLAT/
 │   │   ├── Dlp/RegexDataLossPreventionSanitizer.cs  # Layer 4 In-Memory DLP Sanitizer
 │   │   ├── Http/EgressFirewallHandler.cs           # SocketsHttpHandler with 1:1:1 FQDN whitelist
 │   │   ├── Identity/                               # JWT, API Key, Token Lifecycle, & Circuit Breaker
-│   │   ├── Vertex/VertexAiStreamClient.cs          # Google Vertex AI / Gemini 2.5 streaming client
+│   │   ├── Ai/ClaudeStreamClient.cs                # Anthropic Claude streaming client (default)
+│   │   ├── Ai/GeminiStreamClient.cs                # Google Gemini streaming client (key-routed)
+│   │   ├── Ai/ModelClientRouter.cs                 # Provider-by-available-key router
 │   │   ├── Siem/SiemForwarder.cs                   # Sentinel HMAC, CEF, & RFC 5424 Syslog streaming
 │   │   └── Edr/EdrIngestionBridge.cs               # Defender & CrowdStrike endpoint posture bridge
 │   │
@@ -244,8 +246,47 @@ powershell.exe -ExecutionPolicy Bypass -File .\packaging\install-enterprise.ps1
 
 ---
 
-## 📜 License & Compliance Standards
-Internal Enterprise License — Confidential & Proprietary.
-* **SOC 2 Type II:** CC6.1, CC6.8, CC7.2
-* **HIPAA Security Rule:** 45 CFR § 164.312(b), § 164.312(e)(1)
-* **CMMC 2.0 / NIST SP 800-171:** AU.2.041, AU.2.042, SC.3.177
+## 📜 Licensure, Open Source & Compliance Standards
+
+### Proprietary License
+**Internal Enterprise License — Confidential & Proprietary.**  
+Copyright © Platten Industries. All rights reserved. Licensed solely for internal enterprise evaluation, deployment, and IT operations across authorized enterprise workstations and managed endpoints.
+
+---
+
+### Third-Party & Open Source Software (OSS) Licenses
+SPLAT / Mission Controller incorporates the following open-source libraries and frameworks:
+
+| Component / Library | Version | License | Licensure & Attribution Notes |
+| :--- | :--- | :--- | :--- |
+| **[.NET 9 Runtime](https://github.com/dotnet/runtime)** | 9.0 LTS | **MIT** | Copyright © .NET Foundation and Contributors. |
+| **[Microsoft.WindowsAppSDK](https://github.com/microsoft/WindowsAppSDK)** | `1.6.250108002` | **Microsoft Software License** | Governed by Microsoft Software License Terms for Windows App SDK. |
+| **[Microsoft.Graphics.Win2D](https://github.com/microsoft/Win2D)** | `1.3.2` | **MIT** | Copyright © Microsoft Corporation. |
+| **[Microsoft.Data.Sqlite](https://github.com/dotnet/efcore)** | `9.0.2` | **MIT** | Copyright © .NET Foundation and Contributors. |
+| **SQLite Native Core** | Embedded | **Public Domain** | SQLite is dedicated to the public domain. |
+| **[CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet)** | `8.4.0` | **MIT** | Copyright © .NET Foundation and Contributors. |
+| **[CommunityToolkit.WinUI.Controls.Primitives](https://github.com/CommunityToolkit/Windows)** | `8.1.240916` | **MIT** | Copyright © Windows Community Toolkit Contributors. |
+| **[Microsoft.Extensions.DependencyInjection](https://github.com/dotnet/runtime)** | `9.0.2` | **MIT** | Copyright © .NET Foundation and Contributors. |
+| **[System.Security.Cryptography.ProtectedData](https://github.com/dotnet/runtime)** | `9.0.2` | **MIT** | Copyright © .NET Foundation and Contributors. |
+| **[System.IO.FileSystem.AccessControl](https://github.com/dotnet/runtime)** | `5.0.0` | **MIT** | Copyright © .NET Foundation and Contributors. |
+
+---
+
+### Cloud Provider & AI Model Licensing (Google Vertex AI)
+* **Google Cloud Master Services Agreement (MSA) & Cloud AI Terms:**
+  * Requires active Google Cloud Platform (GCP) enterprise tenant credentials and quota allocation for `gemini-2.5-flash` and `gemini-2.5-pro` streaming models.
+  * **Enterprise Data Governance & Privacy:** Configured with zero public data ingestion; in-memory DLP filtering pre-sanitizes credentials and PII prior to cloud transmission.
+  * **Business Associate Agreement (BAA):** Must be executed under GCP for healthcare environments processing Protected Health Information (PHI).
+
+---
+
+### Operating System & Enterprise Code Signing Requirements
+* **OS Platform:** Windows 10/11 Enterprise or Pro (x64) with active enterprise licensing for Group Policy, Intune/SCCM, and native Win32 Job Object isolation.
+* **MSIX Code Signing Certificate:** Distribution of the `runFullTrust` MSIX bundle requires signing with a valid **Enterprise PKI / Trusted Root CA Certificate** (or commercial EV Code Signing Certificate) trusted by endpoint security policies.
+
+---
+
+### Regulatory Compliance & Security Standards
+* **SOC 2 Type II:** CC6.1 (Restricted Tokens & Privilege Separation), CC6.8 (In-Memory Egress Whitelisting), CC7.2 (Continuous Security Auditing).
+* **HIPAA Security Rule:** 45 CFR § 164.312(b) (Cryptographic Chained Audit Controls) & 45 CFR § 164.312(e)(1) (Transmission Security & DLP Masking).
+* **CMMC 2.0 / NIST SP 800-171:** AU.2.041 & AU.2.042 (Tamper-Evident SHA-256 Non-Repudiation Audit Logs), SC.3.177 (Strict 1:1:1 FQDN Isolation).

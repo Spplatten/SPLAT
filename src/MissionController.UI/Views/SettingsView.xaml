@@ -15,7 +15,7 @@
         <!-- Header -->
         <StackPanel Grid.Row="0" Spacing="4">
             <TextBlock Text="Enterprise Cloud Tenant &amp; DPAPI Settings" FontSize="24" FontWeight="SemiBold" />
-            <TextBlock Text="Manage Google Cloud authentication, OAuth 2.0 PKCE loopback, and Windows DPAPI credential storage" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock Text="Manage AI provider API keys, OAuth 2.0 PKCE loopback, and Windows DPAPI credential storage" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
         </StackPanel>
 
         <!-- Settings Cards -->
@@ -31,6 +31,20 @@
                         <TextBlock Text="Secrets are encrypted at rest using Windows DPAPI (CurrentUser scope) with in-memory zeroing on dispose." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
                         <StackPanel Spacing="8" Margin="0,8,0,0">
+                            <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Anthropic Claude API Key (Default AI Provider)" FontSize="11" FontWeight="SemiBold" />
+                                    <TextBlock Text="{x:Bind ViewModel.AnthropicKeyStatus, Mode=OneWay}" FontSize="12" Foreground="#F2A15C" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Google Gemini API Key" FontSize="11" FontWeight="SemiBold" />
+                                    <TextBlock Text="{x:Bind ViewModel.GeminiKeyStatus, Mode=OneWay}" FontSize="12" Foreground="#6CCB5F" />
+                                </StackPanel>
+                            </Border>
+
                             <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
                                 <Grid>
                                     <Grid.ColumnDefinitions>

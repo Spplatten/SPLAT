@@ -56,13 +56,17 @@ public class SanitizationAndRevocationTests
         }
     }
 
-    private sealed class MockVertexStreamClient : IVertexStreamClient
+    private sealed class MockVertexStreamClient : IModelStreamClient
     {
-        public async IAsyncEnumerable<string> StreamGenerateContentAsync(
-            string modelName,
+        public Task<ModelAvailability> CheckAvailabilityAsync(
+            string requestedModel,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ModelAvailability(true, "MockProvider", requestedModel, null));
+
+        public async IAsyncEnumerable<string> StreamAnalysisAsync(
+            string requestedModel,
             string systemPrompt,
             string userPrompt,
-            string allowedEgressFqdn,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             await Task.Yield();

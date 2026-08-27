@@ -15,7 +15,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
 {
     private readonly IJailManager _jailManager;
     private readonly IProcessLauncher _processLauncher;
-    private readonly IVertexStreamClient _vertexStreamClient;
+    private readonly IModelStreamClient _modelClient;
     private readonly IAuditLedger _auditLedger;
     private readonly Func<string, IJobSandbox> _jobSandboxFactory;
     private readonly ISemanticMemoryIndex? _semanticMemoryIndex;
@@ -26,7 +26,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
     public MissionExecutionEngine(
         IJailManager jailManager,
         IProcessLauncher processLauncher,
-        IVertexStreamClient vertexStreamClient,
+        IModelStreamClient modelClient,
         IAuditLedger auditLedger,
         Func<string, IJobSandbox> jobSandboxFactory,
         ISemanticMemoryIndex? semanticMemoryIndex = null,
@@ -36,7 +36,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
     {
         _jailManager = jailManager;
         _processLauncher = processLauncher;
-        _vertexStreamClient = vertexStreamClient;
+        _modelClient = modelClient;
         _auditLedger = auditLedger;
         _jobSandboxFactory = jobSandboxFactory;
         _semanticMemoryIndex = semanticMemoryIndex;
@@ -104,6 +104,15 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
 
         jailPath = await _jailManager.ProvisionJailAsync(missionId, cancellationToken);
 
+        // A jail directory now exists on disk, so the guard must open BEFORE the next yield:
+        // an async iterator abandoned at a yield outside the try would skip the finally and leak
+        // the jail. Everything below runs inside try/finally (body intentionally left at this
+        // indentation to keep the guarded region reviewable as one diff) so the jail is drained
+        // on EVERY exit path - success, tool failure, AI fault, cancellation, abandonment.
+        bool jailDrained = false;
+        try
+        {
+
         yield return new MissionChunk(
             missionId,
             MissionChunkType.StatusChange,
@@ -146,17 +155,59 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         var stdoutProgress = new Progress<string>();
         var stderrProgress = new Progress<string>();
 
-        var execResult = await _processLauncher.LaunchSuspendedInJobAsync(
-            template.Tool.ExecutablePath,
-            resolvedArguments,
-            jailPath,
-            jobSandbox,
-            template.Tool.RequiresRestrictedToken,
-            template.Tool.TimeoutSeconds,
-            stdoutProgress,
-            stderrProgress,
-            cancellationToken);
+        // The Win32 launch path (CreateProcessW, token restriction, job assignment) is the most
+        // failure-prone native call in the mission. Capture instead of throwing so the operator
+        // gets a readable failure chunk and a sealed MISSION_FAILED audit row - an unhandled
+        // exception here would otherwise kill the UI's stream with no terminal record.
+        ProcessExecutionResult? launchResult = null;
+        Exception? launchFailure = null;
+        try
+        {
+            launchResult = await _processLauncher.LaunchSuspendedInJobAsync(
+                template.Tool.ExecutablePath,
+                resolvedArguments,
+                jailPath,
+                jobSandbox,
+                template.Tool.RequiresRestrictedToken,
+                template.Tool.TimeoutSeconds,
+                stdoutProgress,
+                stderrProgress,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            launchFailure = ex;
+        }
 
+        if (launchFailure is not null)
+        {
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.Stderr,
+                $"⚠ MISSION FAILED: the confined sensor tool could not be executed ({launchFailure.Message}). No AI analysis was performed.",
+                DateTime.UtcNow);
+
+            await _auditLedger.AppendLogAsync(
+                missionId,
+                template.TemplateId,
+                "MISSION_FAILED",
+                $"Tool launch failure: {launchFailure.GetType().Name}: {launchFailure.Message}",
+                operatorIdentity,
+                cancellationToken);
+
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.StatusChange,
+                "Mission aborted. Failure sealed in the audit ledger; jail will be drained.",
+                DateTime.UtcNow);
+            yield break;
+        }
+
+        var execResult = launchResult!;
         fullOutput.Append(execResult.StandardOutput);
         if (!string.IsNullOrEmpty(execResult.StandardError))
         {
@@ -234,13 +285,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             }
         }
 
-        // 7. AI Synthesis & Streaming over Vertex AI
-        yield return new MissionChunk(
-            missionId,
-            MissionChunkType.StatusChange,
-            $"Engaging {template.TargetModel} for telemetry analysis (Egress locked to {template.EgressRule.AllowedFqdn})...",
-            DateTime.UtcNow);
-
+        // 7. AI Synthesis & Streaming (provider-governed)
         string effectiveSystemPrompt = template.SystemPrompt;
         if (parameters.TryGetValue("UserInstruction", out var userInstruction) && !string.IsNullOrWhiteSpace(userInstruction))
         {
@@ -256,12 +301,44 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             effectiveSystemPrompt = _credentialSanitizer.Sanitize(effectiveSystemPrompt).SanitizedText;
         }
 
+        // Probe for a live model FIRST. If none is connected, emit a loud SimulatedNotice so the
+        // analysis that follows can never be mistaken for genuine model output.
+        var availability = await _modelClient.CheckAvailabilityAsync(template.TargetModel, cancellationToken);
+        if (availability.IsLive)
+        {
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.StatusChange,
+                $"Engaging {availability.ProviderName} model '{availability.ModelId}' for analysis (egress governed)...",
+                DateTime.UtcNow);
+            await _auditLedger.AppendLogAsync(
+                missionId,
+                template.TemplateId,
+                "AI_MODEL_ENGAGED",
+                $"Provider: {availability.ProviderName} | Model: {availability.ModelId}",
+                operatorIdentity,
+                cancellationToken);
+        }
+        else
+        {
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.SimulatedNotice,
+                $"No live AI model connected ({availability.UnavailableReason}). The analysis below is a local simulation, not real model output.",
+                DateTime.UtcNow);
+            await _auditLedger.AppendLogAsync(
+                missionId,
+                template.TemplateId,
+                "AI_SIMULATED_FALLBACK",
+                availability.UnavailableReason ?? "No live model connected.",
+                operatorIdentity,
+                cancellationToken);
+        }
 
-        await foreach (var aiChunk in _vertexStreamClient.StreamGenerateContentAsync(
+        await foreach (var aiChunk in _modelClient.StreamAnalysisAsync(
             template.TargetModel,
             effectiveSystemPrompt,
             sanitizedPayload,
-            template.EgressRule.AllowedFqdn,
             cancellationToken))
         {
             fullAiAnalysis.Append(aiChunk);
@@ -299,11 +376,24 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             DateTime.UtcNow);
 
         await _jailManager.DrainAndCleanupJailAsync(jailPath);
+        jailDrained = true;
 
         yield return new MissionChunk(
             missionId,
             MissionChunkType.Completed,
             "Mission Completed Successfully. All resources released, DLP sanitized, semantic memory indexed, and audit ledger sealed.",
             DateTime.UtcNow);
+
+        }
+        finally
+        {
+            if (!jailDrained && !string.IsNullOrEmpty(jailPath))
+            {
+                // Backstop for every abnormal exit (launch failure, AI fault, cancellation,
+                // abandoned enumerator). Best-effort: a cleanup exception must never mask the
+                // original fault or throw from a finally during unwind.
+                try { await _jailManager.DrainAndCleanupJailAsync(jailPath); } catch { }
+            }
+        }
     }
 }

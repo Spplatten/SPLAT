@@ -45,7 +45,7 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
                         MaxMemoryBytes: 64 * 1024 * 1024,
                         MaxCpuPercent: 50,
                         RequiresRestrictedToken: true),
-                    new EgressRule("us-central1-aiplatform.googleapis.com", 443, true, "Google Vertex AI Gemini Endpoint"),
+                    new EgressRule("api.anthropic.com", 443, true, "Governed AI Gateway (default: Anthropic Claude; egress pinned by provider client)"),
                     "You are Atlas-Net, a Senior Network Intelligence AI Agent. Analyze ping packet roundtrips, socket states, and DNS latency. Provide: 1) Executive Health Summary, 2) Root Cause Analysis, 3) Plain-English Remediation.",
                     new List<TemplateParameterField>
                     {
@@ -86,7 +86,7 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
                         MaxMemoryBytes: 128 * 1024 * 1024,
                         MaxCpuPercent: 60,
                         RequiresRestrictedToken: false),
-                    new EgressRule("us-central1-aiplatform.googleapis.com", 443, true, "Google Vertex AI Gemini Endpoint"),
+                    new EgressRule("api.anthropic.com", 443, true, "Governed AI Gateway (default: Anthropic Claude; egress pinned by provider client)"),
                     "You are Sentinel-SecOps, a Principal SOC Threat Hunting AI Agent. Evaluate Windows Security Events 4624/4625 for brute-force surges, spray attacks, and unauthorized lateral movement.",
                     new List<TemplateParameterField>
                     {
@@ -127,7 +127,7 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
                         MaxMemoryBytes: 64 * 1024 * 1024,
                         MaxCpuPercent: 50,
                         RequiresRestrictedToken: true),
-                    new EgressRule("us-central1-aiplatform.googleapis.com", 443, true, "Google Vertex AI Gemini Endpoint"),
+                    new EgressRule("api.anthropic.com", 443, true, "Governed AI Gateway (default: Anthropic Claude; egress pinned by provider client)"),
                     "You are Titan-SysOps, a Storage Optimization AI Agent. Calculate free disk percentages and identify capacity bottlenecks.",
                     new List<TemplateParameterField>
                     {
@@ -165,7 +165,7 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
                         MaxMemoryBytes: 64 * 1024 * 1024,
                         MaxCpuPercent: 50,
                         RequiresRestrictedToken: true),
-                    new EgressRule("us-central1-aiplatform.googleapis.com", 443, true, "Google Vertex AI Gemini Endpoint"),
+                    new EgressRule("api.anthropic.com", 443, true, "Governed AI Gateway (default: Anthropic Claude; egress pinned by provider client)"),
                     "You are Aegis-Endpoint, a Corporate Compliance & Endpoint Security AI Agent. Verify Microsoft Defender real-time service state.",
                     new List<TemplateParameterField>
                     {
@@ -203,7 +203,7 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
                         MaxMemoryBytes: 64 * 1024 * 1024,
                         MaxCpuPercent: 50,
                         RequiresRestrictedToken: true),
-                    new EgressRule("us-central1-aiplatform.googleapis.com", 443, true, "Google Vertex AI Gemini Endpoint"),
+                    new EgressRule("api.anthropic.com", 443, true, "Governed AI Gateway (default: Anthropic Claude; egress pinned by provider client)"),
                     "You are Vanguard-AD, an Identity & Access Threat Hunter AI Agent. Analyze domain group memberships, Kerberos tickets, and user privilege delegations. Identify over-privileged accounts and shadow admin tokens.",
                     new List<TemplateParameterField>
                     {
@@ -241,7 +241,7 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
                         MaxMemoryBytes: 128 * 1024 * 1024,
                         MaxCpuPercent: 60,
                         RequiresRestrictedToken: true),
-                    new EgressRule("us-central1-aiplatform.googleapis.com", 443, true, "Google Vertex AI Gemini Endpoint"),
+                    new EgressRule("api.anthropic.com", 443, true, "Governed AI Gateway (default: Anthropic Claude; egress pinned by provider client)"),
                     "You are Zephyr-Azure, a Cloud Infrastructure & Hybrid Entra ID AI Agent. Analyze cloud connectivity, TLS roundtrip latency to login.microsoftonline.com, and tenant reachability.",
                     new List<TemplateParameterField>
                     {
@@ -279,7 +279,7 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
                         MaxMemoryBytes: 128 * 1024 * 1024,
                         MaxCpuPercent: 60,
                         RequiresRestrictedToken: true),
-                    new EgressRule("us-central1-aiplatform.googleapis.com", 443, true, "Google Vertex AI Gemini Endpoint"),
+                    new EgressRule("api.anthropic.com", 443, true, "Governed AI Gateway (default: Anthropic Claude; egress pinned by provider client)"),
                     "You are Chronos-Patch, a Vulnerability Management & Patch Compliance AI Agent. Evaluate installed hotfixes, calculate patch staleness, and assess vulnerability exposure.",
                     new List<TemplateParameterField>
                     {
@@ -317,7 +317,7 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
                         MaxMemoryBytes: 64 * 1024 * 1024,
                         MaxCpuPercent: 50,
                         RequiresRestrictedToken: true),
-                    new EgressRule("us-central1-aiplatform.googleapis.com", 443, true, "Google Vertex AI Gemini Endpoint"),
+                    new EgressRule("api.anthropic.com", 443, true, "Governed AI Gateway (default: Anthropic Claude; egress pinned by provider client)"),
                     "You are Cypher-Registry, a Windows Forensics & Persistence Hunter AI Agent. Examine startup registry keys and binary paths for suspicious names, unquoted service executables, and malware persistence mechanisms.",
                     new List<TemplateParameterField>
                     {
