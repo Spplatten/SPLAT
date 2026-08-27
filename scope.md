@@ -1,95 +1,97 @@
-# SPLAT Master Scope: Enterprise Hyper-Operator Flight Computer (2X Expanded Scope)
+﻿# Scope of Work (SOW): Enterprise IT Mission Controller
 
-> **Status: Target architecture / roadmap.** This document defines the 2X expansion vision. The system as currently built and shipped is the 8-Layer Governed Stack documented in [README.md](README.md); capabilities below (ETW kernel radar, JIT probe synthesis, local SLM arbiter, P2P gossip mesh) are not yet implemented.
-
-## Product Identity & Vision
-**Product Name:** SPLAT — *Autonomous Endpoint Diagnostic Engine & Local Kernel Hyper-Operator* (internal codename: Enterprise IT Mission Controller)
-
-SPLAT transitions from a standard passive "IT task runner" into the industry's first **Autonomous Endpoint Diagnostic Engine & Local Kernel Hyper-Operator**. Instead of waiting for a human technician to manually click buttons on a checklist, the Mission Controller becomes an active local telemetry flight computer that continuously monitors Windows kernel performance, dynamically synthesizes sandboxed native C/C++ diagnostic probes on the fly, and uses dual-engine (Local SLM + Cloud Vertex AI) reasoning to auto-remediate campus and enterprise fleets before outages cascade.
+**Project Identity:** AI-Native IT & SysOps Mission Controller (SPLAT)  
+**Target Platform:** Windows 10/11 Enterprise & Pro (Intune / SCCM Managed)  
+**Primary Language / Runtime:** C# 13 / .NET 9 LTS (Native WinUI 3 / Windows App SDK 1.6)  
 
 ---
 
-## The Breakthrough Architecture: Hyper-Operator Engine
+## 1. Project Objectives & Deliverables
 
 ```
 +===================================================================================================+
-|                        ENTERPRISE HYPER-OPERATOR FLIGHT COMPUTER                                  |
+|                                    PROJECT SOW WORKFLOW & BOUNDARIES                              |
 +===================================================================================================+
 |                                                                                                   |
-|  [ PRESENTATION: REAL-TIME FLIGHT HUD ]                                                           |
-|  - High-framerate WinUI 3 + Skia/DirectX GPU-accelerated telemetry radar                          |
-|  - Microsecond-level visual traces of OS kernel context switches, socket churn, and heap state    |
-|  - "Flight Mode" automated remediation vs. "Manual Override" live operational cockpit             |
+|  [ IN-SCOPE DELIVERABLES ]                                                                        |
+|  ├── Core 1:1:1 Engine (1 Template -> 1 Model -> 1 Tool -> 1 Egress FQDN)                         |
+|  ├── Win32 Job Object Subprocess Clamping (CREATE_SUSPENDED -> AssignToJob -> ResumeThread)       |
+|  ├── NT ACL Filesystem Jailing (%LOCALAPPDATA%\MissionController\Jails\{MissionId})               |
+|  ├── SChannel & Enterprise Proxy Traversal (WPAD, PAC, Zscaler TLS root inspection)               |
+|  ├── Dual Identity Subsystem (RFC 8252 PKCE Loopback & IT Service Account JSON)                   |
+|  ├── In-Memory Egress Firewall (Custom DelegatingHandler with FQDN blocking)                      |
+|  ├── SQLite WAL Storage Engine + Sequential SHA-256 Chained Hash Audit Ledger                     |
+|  ├── WinUI 3 Desktop Shell (Catalog, Tuning Cards, Live Monitor, Audit Viewer)                    |
+|  └── MSIX Enterprise Deployment Package (runFullTrust, Intune silent install ready)               |
 |                                                                                                   |
-+-------------------------------------------------+-------------------------------------------------+
-                                                  | In-Memory Zero-Copy RingBuffer (Shared Memory)
-                                                  v
-+-------------------------------------------------+-------------------------------------------------+
-|  [ KERNEL TELEMETRY & JUST-IN-TIME (JIT) SYNTHESIS ENGINE ]                                       |
-|                                                                                                   |
-|  +-----------------------------+  +--------------------------------+  +------------------------+  |
-|  |   ETW / eBPF KERNEL RADAR   |  |   JIT NATIVE PROBE SYNTHESIS   |  |  DUAL-ENGINE ARBITER   |  |
-|  | - Kernel-level Event Tracing|  | - LLM generates ephemeral C    |  | - Local SLM (Llama/Phi)|  |
-|  | - Real-time IO/Socket drops |  | - On-the-fly Clang/TCC compile |  |   (Sub-5ms Triage)     |  |
-|  | - Zero-overhead tracing ring|  | - Stripped native DLL/EXE tool |  | - Cloud Gemini 2.5 Pro |  |
-|  +-----------------------------+  +--------------------------------+  +------------------------+  |
-|                                                                                                   |
-+-------------------------------------------------+-------------------------------------------------+
-                                                  |
-           +--------------------------------------+--------------------------------------+
-           |                                                                             |
-           v                                                                             v
-+------------------------------------+                         +------------------------------------+
-|  [ PROACTIVE HYPER-JAIL RUNTIME ]  |                         |  [ SECURE PEER MESH TELEMETRY ]    |
-|                                    |                         |                                    |
-|  - Windows AppContainer Isolation  |                         |  - Local Campus P2P Gossip Protocol|
-|  - Hard RAM/CPU clamped Job Tree   |                         |  - Outage Anomaly Propagation      |
-|  - In-memory execution only        |                         |  - Zero-Cloud Local Redundancy     |
-|    (Zero forensic disk footprint)  |                         |  - Mutual TLS Ed25519 Signed       |
-+------------------------------------+                         +-----------------+------------------+
-                                                                                 |
-                                                                                 | SChannel TLS 1.3 / mTLS
-                                                                                 v
-+===================================================================================================+
-|                     GOOGLE VERTEX AI REASONING MATRIX (GEMINI 2.5 PRO)                            |
+|  [ EXPLICIT OUT-OF-SCOPE EXCLUSIONS ]                                                             |
+|  ├── Cross-platform desktop targets (macOS / Linux desktop)                                      |
+|  ├── Multi-agent recursive DAG routing / agent debate swarms                                      |
+|  ├── Open-ended developer IDE features (code editors, terminal emulators, syntax highlighters)   |
+|  └── External database servers (remote PostgreSQL / MongoDB clusters)                            |
 +===================================================================================================+
 ```
 
 ---
 
-## The 4 Radical Pillar Expansions
+## 2. Phased Milestone Breakdown
 
-### 1. Real-Time Kernel Radar via ETW (Event Tracing for Windows)
-* **The Shift:** Normal tools poll APIs or run slow scripts every few minutes.
-* **The 2X Tech:** The app hooks directly into native Kernel ETW providers (Disk I/O, Sockets, Kernel Memory Allocation, TCP Retransmissions). It continuously streams kernel events into a high-performance in-memory ring buffer.
-* **The Impact:** The AI doesn't ask *"What is wrong?"*; it watches thread starvation and network interface packet drops in sub-millisecond real time.
+### Phase 1: Windows Kernel Hardening & Filesystem Jailing (`Infrastructure.Windows`)
+* **Win32 Job Object Sandboxing:**
+  * P/Invoke bindings for `kernel32.dll` (`CreateJobObject`, `SetInformationJobObject`, `AssignProcessToJobObject`).
+  * Enforce `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, `JOB_OBJECT_LIMIT_JOB_MEMORY`, and `JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK`.
+  * Safe suspended process startup: `CreateProcessW` with `CREATE_SUSPENDED` (0x00000004), bind to Job Object, then `ResumeThread`.
+* **NT ACL Directory Jails:**
+  * Provision dynamic directories at `%LOCALAPPDATA%\MissionController\Jails\{MissionId}\`.
+  * Strip inherited drive permissions via `directorySecurity.SetAccessRuleProtection(true, false)`.
+  * Grant exclusive `FileSystemAccessRule` only to the current user SID and sandbox worker.
+  * Implement post-mission handle-release drain cycles with startup orphan cleanup routines.
+* **Windows DPAPI Credential Vault:**
+  * Token encryption via `ProtectedData.Protect` (`DataProtectionScope.CurrentUser`) with pinned byte arrays and cryptographic zeroing memory wipes.
 
-### 2. Just-In-Time (JIT) Native Probe Synthesis
-* **The Shift:** Pre-baked static scripts (`.ps1`, `.exe`) become outdated the moment an unprecedented zero-day or edge-case OS bug appears.
-* **The 2X Tech:** When an anomaly is detected, the Vertex AI reasoning model writes targeted, minimal C code for a custom diagnostic probe. The desktop engine compiles it on the fly in memory using an embedded C compiler (e.g., TinyCC or LLVM/Clang) directly into raw machine code inside the sandboxed NT ACL jail, runs the diagnostic in 2 milliseconds, extracts the metric, and immediately incinerates the binary.
-* **The Impact:** Zero script sprawl. The controller generates the exact binary tool it needs for the exact micro-problem it encounters, executes it safely, and wipes the trace.
-* **The Governance Invariant (Non-Negotiable):** Before any synthesized probe executes, its full C source, compiled binary SHA-256, and requesting-agent identity are committed to the Layer 7 chained audit ledger. The *disk* footprint is zero; the *audit* footprint is total. This reconciles ephemeral execution with non-repudiation, and gives coexisting EDR platforms (CrowdStrike, Defender for Endpoint) a signed provenance trail to whitelist against — fileless execution of unattested binaries would otherwise be indistinguishable from malware tradecraft and quarantined on sight.
+### Phase 2: Enterprise Networking, Identity & Vertex AI (`Infrastructure.Network`)
+* **Enterprise SChannel & Proxy Auto-Traversal:**
+  * `SocketsHttpHandler` configured with `CertificateRevocationCheckMode = X509RevocationMode.Online`, `UseProxy = true`, and `DefaultProxyCredentials = CredentialCache.DefaultNetworkCredentials` for seamless Zscaler/Netskope inspection.
+* **Dual Identity Subsystem:**
+  * *Support A:* RFC 8252 PKCE loopback on `127.0.0.1:0` with default browser launch and local port binding.
+  * *Support B:* Direct Enterprise Google Cloud Service Account JSON parser for pre-provisioned corporate tenants.
+* **In-Memory Egress Firewall:**
+  * Custom `DelegatingHandler` validating all outbound URIs against the active template's `allowed_egress_domain`.
+* **Vertex AI SSE Streaming Client:**
+  * `IAsyncEnumerable<string>` parser consuming `gemini-2.5-flash` / `gemini-2.5-pro` `streamGenerateContent` endpoints.
 
-### 3. Dual-Engine Intelligence (Local SLM + Vertex AI Flash/Pro)
-* **The Shift:** Relying purely on cloud round-trips introduces 300–800ms latency and fails if the local network switch is offline.
-* **The 2X Tech:** An embedded local Small Language Model (SLM via ONNX Runtime / llama.cpp using CPU/NPU acceleration) handles instant, sub-5ms heuristic triage and offline health analysis. When high-level strategic reasoning is required, it escalates to Gemini 2.5 Pro via Vertex AI.
-* **The Impact:** Full operational functionality even during complete campus WAN/Internet blackouts.
+### Phase 3: In-Process Data & 1:1:1 Template Runtime (`Core` & `Data`)
+* **Embedded SQLite WAL Engine:**
+  * SQLite configured with `PRAGMA journal_mode = WAL;`, `PRAGMA synchronous = NORMAL;`, and single-instance file locking.
+* **Tamper-Evident SHA-256 Audit Ledger:**
+  * Sequential audit log worker backed by a bounded background `Channel<AuditLogEntry>` to eliminate WAL write contention.
+  * Formula: $\text{EntryHash} = \text{SHA256}(\text{PreviousHash} \parallel \text{TimestampUtc} \parallel \text{MissionId} \parallel \text{Action} \parallel \text{Details})$.
+* **1:1:1 Execution Pipeline Coordinator:**
+  * Enforce strict contract: $\text{1 Template} \longrightarrow \text{1 Model} \longrightarrow \text{1 Dedicated Native Tool (.exe)} \longrightarrow \text{1 Allowed Egress FQDN}$.
 
-### 4. Campus Fleet Anomaly Radar (Peer-to-Peer Gossip Mesh)
-* **The Shift:** Enterprise agents operate as blind silos on individual workstations.
-* **The 2X Tech:** Instances on the same local subnet/VLAN communicate over an encrypted, zero-configuration P2P gossip protocol (using mutual Ed25519-authenticated TLS).
-* **The Impact:** If 5 machines in Campus Building B experience an identical DNS resolution timeout or Active Directory domain controller authentication drop, the nodes form a local consensus and flag a Correlated Infrastructure Incident to the SysAdmin before helpdesk tickets even begin to file.
+### Phase 4: WinUI 3 Desktop Shell & MVVM ViewModels (`UI`)
+* **MVVM Layer (`CommunityToolkit.Mvvm`):**
+  * `MissionDashboardViewModel`: System health, active Win32 jobs, recent missions.
+  * `TemplateCatalogViewModel`: Governed template selection and 3-to-5 field guided parameter tuning cards.
+  * `LiveMissionMonitorViewModel`: Real-time streaming output dispatched via `DispatcherQueue.TryEnqueue` with live Job Object CPU/RAM meters.
+  * `SecurityAuditViewModel`: Chained audit log explorer with one-click cryptographic verification.
+  * `JailInspectorViewModel`: Active Win32 Job Objects, jailed processes, and filesystem isolation status.
+
+### Phase 5: Packaging, MSIX & Enterprise Validation (`Packaging`)
+* **MSIX Configuration:**
+  * Package manifest configured with `<rescap:Capability Name="runFullTrust" />` and `<desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>`.
+* **Deployment Validation:**
+  * Silent installation parameter validation for Microsoft Intune / SCCM deployment.
+  * EDR baseline testing against Windows Defender for Endpoint.
 
 ---
 
-## Expanded Scope Matrix: Standard vs. 2X Hyper-Operator
+## 3. Acceptance Criteria & Definition of Done (DoD)
 
-| Capability | Previous Enterprise Plan | 2X Hyper-Operator Scope |
-| :--- | :--- | :--- |
-| **Diagnostics Model** | Passive: Wait for operator to click "Run". | **Continuous Kernel Radar:** Real-time ETW memory and network telemetry ring buffer. |
-| **Tool Execution** | Static pre-compiled `.exe` utilities. | **JIT Ephemeral C Probes:** On-demand in-memory compilation and ephemeral execution. |
-| **Model Topology** | Cloud Vertex AI only. | **Dual-Engine Arbiter:** Sub-millisecond Local NPU/SLM triage + Cloud Gemini 2.5 Pro escalation. |
-| **Fleet Coordination** | Isolated single-workstation instances. | **Local P2P Gossip Radar:** Autonomous subnet-wide incident correlation & mutual Ed25519 mTLS. |
-| **UI Experience** | Standard Forms & Dashboard. | **Flight HUD Cockpit:** DirectX/Skia GPU telemetry canvas + Live Stream & Flight Mode automated remediation. |
-| **Forensic Footprint** | Disk-resident logs & temporary files. | **Zero-Footprint In-Memory Runtime:** Volatile ring buffers & immediate binary incineration. |
-| **Compliance Proofs** | Sequential hash chain & manual exports. | **Live Merkle Proof Trees & Real-Time SIEM Exporter:** Continuous streaming to Sentinel, CEF, and Syslog. |
+| Category | Acceptance Criteria |
+| :--- | :--- |
+| **Sandboxing** | Killing the Mission Controller UI instantly terminates all running child tool processes via the Win32 Job Object with zero orphaned zombie processes. |
+| **Filesystem Jail** | Child tool execution attempting to access `%USERPROFILE%\Documents` or `C:\Windows` throws an immediate Access Denied exception. |
+| **Network Egress** | An outbound HTTP request targeting any domain other than the active template's `allowed_egress_domain` is dropped in-memory by the `DelegatingHandler`. |
+| **Identity & Proxy** | Google Vertex AI streams tokens smoothly through enterprise Zscaler/MITM proxies without certificate validation failures. |
+| **Audit Integrity** | Manually editing any row in the SQLite audit table triggers an instant integrity violation flag upon running the cryptographic verification tool. |
