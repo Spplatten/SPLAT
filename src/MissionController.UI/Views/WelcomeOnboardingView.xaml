@@ -1,4 +1,4 @@
-﻿<Page
+<Page
     x:Class="MissionController.UI.Views.WelcomeOnboardingView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -17,7 +17,7 @@
         <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,28,0,16" Spacing="6">
             <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
                 <FontIcon Glyph="&#xE756;" FontSize="28" Foreground="#00E5FF" />
-                <TextBlock Text="Welcome to AI Agent Mission Controller" FontSize="26" FontWeight="Bold" />
+                <TextBlock Text="Welcome to SPLAT" FontSize="26" FontWeight="Bold" />
             </StackPanel>
             <TextBlock Text="Deploy autonomous, enterprise-governed AI agents to solve IT, Security, and System tasks safely." FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
         </StackPanel>

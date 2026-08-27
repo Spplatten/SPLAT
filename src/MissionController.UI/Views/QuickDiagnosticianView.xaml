@@ -1,4 +1,4 @@
-﻿<Page
+<Page
     x:Class="MissionController.UI.Views.QuickDiagnosticianView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -21,7 +21,7 @@
             <StackPanel Grid.Row="0" Spacing="4">
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <FontIcon Glyph="&#xE946;" FontSize="24" Foreground="#00E5FF" />
-                    <TextBlock Text="Autonomous AI Agent Squad &amp; Self-Healing Fleet" FontSize="24" FontWeight="Bold" />
+                    <TextBlock Text="SPLAT Autonomous AI Agent Squad &amp; Self-Healing Fleet" FontSize="24" FontWeight="Bold" />
                 </StackPanel>
                 <TextBlock Text="Dispatch 8 dedicated, sandboxed AI agents with 1 click, or give them a custom directive." FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>

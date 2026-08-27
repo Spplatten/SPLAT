@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
@@ -7,16 +7,16 @@
   IgnorableNamespaces="uap rescap desktop6">
 
   <Identity
-    Name="Enterprise.MissionController"
+    Name="PlattenIndustries.SPLAT"
     Publisher="CN=Enterprise IT Systems, O=Enterprise, C=US"
     Version="1.0.0.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>AI-Native IT &amp; SysOps Mission Controller</DisplayName>
-    <PublisherDisplayName>Enterprise IT Infrastructure</PublisherDisplayName>
+    <DisplayName>SPLAT — Autonomous AI Agent Fleet &amp; System Appliance</DisplayName>
+    <PublisherDisplayName>Platten Industries</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
-    <Description>Enterprise-hardened AI-Native IT and SysOps Mission Controller desktop application.</Description>
+    <Description>SPLAT: Enterprise-hardened Autonomous AI Agent Fleet &amp; System Protection Appliance.</Description>
   </Properties>
 
   <Dependencies>
@@ -29,12 +29,12 @@
   </Resources>
 
   <Applications>
-    <Application Id="MissionControllerApp"
+    <Application Id="SPLATApp"
       Executable="MissionController.UI.exe"
       EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-        DisplayName="Mission Controller"
-        Description="AI-Native IT and SysOps Mission Controller"
+        DisplayName="SPLAT"
+        Description="SPLAT — Autonomous AI Agent Fleet"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

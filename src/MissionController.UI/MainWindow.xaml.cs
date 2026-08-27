@@ -34,7 +34,7 @@ public sealed partial class MainWindow : Window
 
         if (appWindow != null)
         {
-            appWindow.Title = "Mission Controller — Autonomous AI Agent Squad";
+            appWindow.Title = "SPLAT — Autonomous AI Agent Fleet & System Appliance";
             appWindow.Resize(new SizeInt32(1280, 840));
 
             // Center window on screen
