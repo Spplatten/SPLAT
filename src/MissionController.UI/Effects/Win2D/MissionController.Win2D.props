@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <!-- The renderer is always compiled; bytecode generation remains opt-in so a
+         developer machine without the Windows SDK fxc tool still builds. -->
+    <DefineConstants>$(DefineConstants);MISSIONCONTROLLER_WIN2D</DefineConstants>
+    <EnableMissionControllerWin2DShaderBuild Condition="'$(EnableMissionControllerWin2DShaderBuild)' == ''">false</EnableMissionControllerWin2DShaderBuild>
+  </PropertyGroup>
+
+</Project>

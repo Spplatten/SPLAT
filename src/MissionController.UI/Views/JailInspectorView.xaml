@@ -1,0 +1,97 @@
+﻿<Page
+    x:Class="MissionController.UI.Views.JailInspectorView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Spacing="4">
+            <TextBlock Text="Win32 Subprocess Confinement &amp; Jail Inspector" FontSize="24" FontWeight="SemiBold" />
+            <TextBlock Text="Hardware &amp; filesystem isolation controls enforcing hard resource clamping and zero-zombie process termination" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+        <!-- Jail Status & Actions Banner -->
+        <Border Grid.Row="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Text="JAIL SUBSYSTEM STATUS" FontSize="11" FontWeight="Bold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    <TextBlock Text="{x:Bind ViewModel.JailStatusMessage, Mode=OneWay}" FontSize="15" FontWeight="SemiBold" Foreground="#4CC2FF" />
+                </StackPanel>
+
+                <Button Grid.Column="1" Content="Sweep Orphaned Jails" Style="{StaticResource LuminousAccentButtonStyle}" Click="SweepButton_Click" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+
+        <!-- Security Guardrails Grid -->
+        <Grid Grid.Row="2" ColumnSpacing="16" RowSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Card 1: Win32 Job Object Hard Limits -->
+            <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="18">
+                <StackPanel Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE7EF;" FontSize="16" Foreground="#4CC2FF" />
+                        <TextBlock Text="Win32 Job Object Guardrails" FontSize="15" FontWeight="Bold" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="8">
+                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                            <TextBlock Text="• JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: Enforced on all spawned workers." FontSize="12" />
+                        </Border>
+                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                            <TextBlock Text="• JOB_OBJECT_LIMIT_JOB_MEMORY: Hard physical RAM cap per template." FontSize="12" />
+                        </Border>
+                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                            <TextBlock Text="• JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK: Prevents nested PowerShell/CLI job errors." FontSize="12" />
+                        </Border>
+                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                            <TextBlock Text="• Suspended Process Creation: CREATE_SUSPENDED binding before ResumeThread." FontSize="12" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Card 2: NT ACL Directory Isolation -->
+            <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="18">
+                <StackPanel Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE8D7;" FontSize="16" Foreground="#6CCB5F" />
+                        <TextBlock Text="NT ACL Filesystem Jails" FontSize="15" FontWeight="Bold" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="8">
+                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                            <TextBlock Text="• Root Path: %LOCALAPPDATA%\MissionController\Jails\{MissionId}\" FontSize="12" FontFamily="Consolas" />
+                        </Border>
+                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                            <TextBlock Text="• Parent Drive Inheritance: Stripped explicitly (SetAccessRuleProtection)." FontSize="12" />
+                        </Border>
+                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                            <TextBlock Text="• Restricted Token: Medium/Low integrity token dropping S-1-5-32-544 (Admin)." FontSize="12" />
+                        </Border>
+                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                            <TextBlock Text="• Handle Drain Cycle: Exponential backoff file cleanup retry loop." FontSize="12" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Page>

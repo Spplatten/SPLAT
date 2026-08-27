@@ -1,0 +1,66 @@
+﻿<Application
+    x:Class="MissionController.UI.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:converters="using:MissionController.UI.Converters">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#454CC2FF" />
+                    <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#D04CC2FF" />
+                    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#FF7AD8FF" />
+                    <SolidColorBrush x:Key="AccentButtonBorderBrushPressed" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#FF00131D" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#334CC2FF" />
+                    <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#FF087DAA" />
+                    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#FF00131D" />
+                    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#FF087DAA" />
+                    <SolidColorBrush x:Key="AccentButtonBorderBrushPressed" Color="#FF004866" />
+                    <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#FFFFFFFF" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <converters:BoolNegationConverter x:Key="BoolNegationConverter" />
+            <converters:NullToVisibilityConverter x:Key="NullToVisibilityConverter" />
+
+            <!-- Electric Energy Linear Gradient -->
+            <LinearGradientBrush x:Key="ElectricBlueEnergyBrush" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#0066FF" Offset="0.0" />
+                <GradientStop Color="#00C8FF" Offset="0.5" />
+                <GradientStop Color="#00E5FF" Offset="1.0" />
+            </LinearGradientBrush>
+
+            <LinearGradientBrush x:Key="ElectricBorderGlowBrush" StartPoint="0,0" EndPoint="1,0">
+                <GradientStop Color="#8000E5FF" Offset="0.0" />
+                <GradientStop Color="#FF00F0FF" Offset="0.5" />
+                <GradientStop Color="#8000E5FF" Offset="1.0" />
+            </LinearGradientBrush>
+
+            <!-- Electric Energy Button Style with Blue Lightning Glow -->
+            <Style x:Key="ElectricEnergyButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="{StaticResource ElectricBlueEnergyBrush}" />
+                <Setter Property="Foreground" Value="#FFFFFFFF" />
+                <Setter Property="BorderBrush" Value="{StaticResource ElectricBorderGlowBrush}" />
+                <Setter Property="BorderThickness" Value="2" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Padding" Value="20,12" />
+                <Setter Property="FontWeight" Value="Bold" />
+                <Setter Property="FontSize" Value="14" />
+            </Style>
+
+            <Style x:Key="CompactActivityRingStyle" TargetType="ProgressRing">
+                <Setter Property="Width" Value="18" />
+                <Setter Property="Height" Value="18" />
+                <Setter Property="Foreground" Value="#4CC2FF" />
+                <Setter Property="IsHitTestVisible" Value="False" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

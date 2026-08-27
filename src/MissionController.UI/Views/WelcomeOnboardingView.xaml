@@ -1,0 +1,199 @@
+﻿<Page
+    x:Class="MissionController.UI.Views.WelcomeOnboardingView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Top Welcome Header -->
+        <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,28,0,16" Spacing="6">
+            <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                <FontIcon Glyph="&#xE756;" FontSize="28" Foreground="#00E5FF" />
+                <TextBlock Text="Welcome to AI Agent Mission Controller" FontSize="26" FontWeight="Bold" />
+            </StackPanel>
+            <TextBlock Text="Deploy autonomous, enterprise-governed AI agents to solve IT, Security, and System tasks safely." FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Main Wizard Content (Cards by Step) -->
+        <Border Grid.Row="1" MaxWidth="780" MaxHeight="540" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{StaticResource ElectricBorderGlowBrush}" BorderThickness="1" CornerRadius="12" Padding="28" VerticalAlignment="Center">
+            <Grid>
+                <!-- STEP 1: Meet Your AI Agent Squad -->
+                <StackPanel Spacing="16" Visibility="{x:Bind GetStep1Visibility(ViewModel.CurrentStep), Mode=OneWay}">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Step 1 of 3: Meet Your Autonomous AI Agent Squad" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="Each AI agent is a specialized expert configured with a dedicated reasoning model and sandboxed Windows tools." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <Grid ColumnSpacing="12" RowSpacing="10" Margin="0,6,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Agent 1: Atlas-Net -->
+                        <Border Grid.Row="0" Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="12">
+                            <StackPanel Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="🌐" FontSize="16" />
+                                    <TextBlock Text="Atlas-Net" FontWeight="Bold" FontSize="13" Foreground="#00E5FF" />
+                                    <Border Background="#2000E5FF" CornerRadius="4" Padding="4,1">
+                                        <TextBlock Text="Network Agent" FontSize="9" FontWeight="SemiBold" Foreground="#00E5FF" />
+                                    </Border>
+                                </StackPanel>
+                                <TextBlock Text="Diagnoses Wi-Fi/Ethernet drops, packet loss, DNS latency, and rogue listening sockets." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Agent 2: Sentinel-SecOps -->
+                        <Border Grid.Row="0" Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="12">
+                            <StackPanel Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="🛡️" FontSize="16" />
+                                    <TextBlock Text="Sentinel-SecOps" FontWeight="Bold" FontSize="13" Foreground="#FF7043" />
+                                    <Border Background="#20FF7043" CornerRadius="4" Padding="4,1">
+                                        <TextBlock Text="Security Agent" FontSize="9" FontWeight="SemiBold" Foreground="#FF7043" />
+                                    </Border>
+                                </StackPanel>
+                                <TextBlock Text="Hunts for brute-force attacks, Event 4625 failed login surges, and account intrusions." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Agent 3: Titan-SysOps -->
+                        <Border Grid.Row="1" Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="12">
+                            <StackPanel Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="💾" FontSize="16" />
+                                    <TextBlock Text="Titan-SysOps" FontWeight="Bold" FontSize="13" Foreground="#AB47BC" />
+                                    <Border Background="#20AB47BC" CornerRadius="4" Padding="4,1">
+                                        <TextBlock Text="Storage Agent" FontSize="9" FontWeight="SemiBold" Foreground="#AB47BC" />
+                                    </Border>
+                                </StackPanel>
+                                <TextBlock Text="Monitors disk drive capacity, finds bloated caches, and suggests safe cleanup targets." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Agent 4: Aegis-Endpoint -->
+                        <Border Grid.Row="1" Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="12">
+                            <StackPanel Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="🔒" FontSize="16" />
+                                    <TextBlock Text="Aegis-Endpoint" FontWeight="Bold" FontSize="13" Foreground="#6CCB5F" />
+                                    <Border Background="#206CCB5F" CornerRadius="4" Padding="4,1">
+                                        <TextBlock Text="Compliance Agent" FontSize="9" FontWeight="SemiBold" Foreground="#6CCB5F" />
+                                    </Border>
+                                </StackPanel>
+                                <TextBlock Text="Verifies Microsoft Defender real-time protection, signature freshness, and SChannel TLS." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- Sandboxed Protection Guarantee -->
+                    <Border Background="#1000E5FF" BorderBrush="#3000E5FF" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,4,0,0">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE815;" FontSize="16" Foreground="#00E5FF" VerticalAlignment="Center" />
+                            <TextBlock Text="Agent Safety Guarantee: Every agent executes inside a locked Win32 Job Object sandbox with Admin privileges stripped." FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- STEP 2: Connect AI Provider -->
+                <StackPanel Spacing="18" Visibility="{x:Bind GetStep2Visibility(ViewModel.CurrentStep), Mode=OneWay}">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Step 2 of 3: Connect Your Agents' Reasoning Brain" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="Connect your Google Gemini API Key or Vertex AI Enterprise Token to empower your agents with advanced diagnostic intelligence." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="10" Margin="0,8,0,0">
+                        <TextBlock Text="Gemini API Key / Cloud Bearer Token" FontSize="12" FontWeight="SemiBold" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <PasswordBox
+                                Grid.Column="0"
+                                PlaceholderText="AIzaSy... or ya29..."
+                                Password="{x:Bind ViewModel.ApiKeyInput, Mode=TwoWay}"
+                                Height="36" />
+                            <Button
+                                Grid.Column="1"
+                                Content="Test &amp; Connect"
+                                Style="{StaticResource AccentButtonStyle}"
+                                Command="{x:Bind ViewModel.ValidateKeyCommand}" />
+                        </Grid>
+
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                            <ProgressRing IsActive="{x:Bind ViewModel.IsTestingKey, Mode=OneWay}" Width="14" Height="14" />
+                            <TextBlock Text="{x:Bind ViewModel.KeyStatusMessage, Mode=OneWay}" FontSize="12" Foreground="#4CC2FF" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Border Background="#1500E5FF" BorderBrush="#3000E5FF" BorderThickness="1" CornerRadius="8" Padding="12">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon Glyph="&#xE783;" FontSize="18" Foreground="#00E5FF" VerticalAlignment="Center" />
+                            <TextBlock Text="Encrypted via Windows DPAPI. Your credentials never touch unencrypted storage." FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- STEP 3: Ready to Launch -->
+                <StackPanel Spacing="18" Visibility="{x:Bind GetStep3Visibility(ViewModel.CurrentStep), Mode=OneWay}">
+                    <StackPanel HorizontalAlignment="Center" Spacing="6">
+                        <FontIcon Glyph="&#xEC0A;" FontSize="38" Foreground="#00E5FF" HorizontalAlignment="Center" />
+                        <TextBlock Text="Your AI Agent Squad Is Ready!" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center" />
+                        <TextBlock Text="Your autonomous agents are pre-configured, hardened, and ready for dispatch." FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+                    </StackPanel>
+
+                    <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="16">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="⚡ WHAT YOUR AGENTS WILL DO FOR YOU:" FontWeight="Bold" FontSize="12" Foreground="#00E5FF" />
+                            <TextBlock Text="• Investigate slow internet, latency, and socket anomalies automatically." FontSize="12" />
+                            <TextBlock Text="• Audit authentication logs to defend against unauthorized logins and attacks." FontSize="12" />
+                            <TextBlock Text="• Explain every technical finding in plain, easy-to-understand English." FontSize="12" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Bottom Electric Action Bar -->
+        <Grid Grid.Row="2" MaxWidth="780" Margin="0,16,0,28">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Back Button -->
+            <Button
+                Grid.Column="0"
+                Content="Back"
+                Visibility="{x:Bind GetBackVisibility(ViewModel.CurrentStep), Mode=OneWay}"
+                Command="{x:Bind ViewModel.PreviousStepCommand}" />
+
+            <!-- Electric Energy Glowing Next / Dispatch Button -->
+            <Button
+                Grid.Column="2"
+                Style="{StaticResource ElectricEnergyButtonStyle}"
+                Click="NextOrFinishButton_Click">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="⚡" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" />
+                    <TextBlock Text="{x:Bind GetNextButtonText(ViewModel.CurrentStep), Mode=OneWay}" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
+                    <FontIcon Glyph="&#xE76C;" FontSize="12" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+        </Grid>
+    </Grid>
+</Page>

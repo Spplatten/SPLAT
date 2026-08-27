@@ -1,0 +1,25 @@
+<Project>
+  <PropertyGroup>
+    <EnableMissionControllerDirect3DShaderBuild Condition="'$(EnableMissionControllerDirect3DShaderBuild)' == ''">false</EnableMissionControllerDirect3DShaderBuild>
+    <MissionControllerDirect3DFxcPath Condition="'$(MissionControllerDirect3DFxcPath)' == ''"></MissionControllerDirect3DFxcPath>
+    <MissionControllerDirect3DDxcPath Condition="'$(MissionControllerDirect3DDxcPath)' == ''"></MissionControllerDirect3DDxcPath>
+    <MissionControllerDirect3DShaderSource>$(MSBuildThisFileDirectory)MissionControllerComposite.hlsl</MissionControllerDirect3DShaderSource>
+    <MissionControllerDirect3DShaderScript>$(MSBuildThisFileDirectory)Compile-Direct3DShaders.ps1</MissionControllerDirect3DShaderScript>
+    <MissionControllerDirect3DShaderOutputDirectory>$(IntermediateOutputPath)Direct3DShaders</MissionControllerDirect3DShaderOutputDirectory>
+    <MissionControllerDirect3DShaderRuntimeDirectory>Graphics\Shaders</MissionControllerDirect3DShaderRuntimeDirectory>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(EnableMissionControllerDirect3DShaderBuild)' == 'true'">
+    <None Update="$(MissionControllerDirect3DShaderSource)" />
+    <Content Include="$(MissionControllerDirect3DShaderOutputDirectory)\MissionControllerComposite.VS.cso" CopyToOutputDirectory="PreserveNewest" Link="$(MissionControllerDirect3DShaderRuntimeDirectory)\MissionControllerComposite.VS.cso" />
+    <Content Include="$(MissionControllerDirect3DShaderOutputDirectory)\MissionControllerComposite.PS.cso" CopyToOutputDirectory="PreserveNewest" Link="$(MissionControllerDirect3DShaderRuntimeDirectory)\MissionControllerComposite.PS.cso" />
+    <Content Include="$(MissionControllerDirect3DShaderOutputDirectory)\MissionControllerComposite.CS.cso" CopyToOutputDirectory="PreserveNewest" Link="$(MissionControllerDirect3DShaderRuntimeDirectory)\MissionControllerComposite.CS.cso" />
+  </ItemGroup>
+
+  <Target
+    Name="CompileMissionControllerDirect3DShaders"
+    BeforeTargets="PrepareForBuild"
+    Condition="'$(EnableMissionControllerDirect3DShaderBuild)' == 'true'">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MissionControllerDirect3DShaderScript)&quot; -Source &quot;$(MissionControllerDirect3DShaderSource)&quot; -OutputDirectory &quot;$(MissionControllerDirect3DShaderOutputDirectory)&quot; -FxcPath &quot;$(MissionControllerDirect3DFxcPath)&quot; -DxcPath &quot;$(MissionControllerDirect3DDxcPath)&quot;" />
+  </Target>
+</Project>

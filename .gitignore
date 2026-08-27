@@ -1,0 +1,21 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+dist/
+.win2d-check/
+
+# Test & tooling artifacts
+TestResults/
+*.trx
+*.binlog
+
+# User/IDE state
+*.user
+*.suo
+.vs/
+.idea/
+
+# MSIX signing material — never commit certificates or keys
+*.pfx
+*.cer
+*.snk

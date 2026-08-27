@@ -1,0 +1,78 @@
+﻿<Page
+    x:Class="MissionController.UI.Views.SettingsView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Spacing="4">
+            <TextBlock Text="Enterprise Cloud Tenant &amp; DPAPI Settings" FontSize="24" FontWeight="SemiBold" />
+            <TextBlock Text="Manage Google Cloud authentication, OAuth 2.0 PKCE loopback, and Windows DPAPI credential storage" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+        <!-- Settings Cards -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="16">
+                <!-- Card 1: DPAPI Status -->
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="18">
+                    <StackPanel Spacing="12">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE72E;" FontSize="16" Foreground="#4CC2FF" />
+                            <TextBlock Text="Windows DPAPI Credential Vault" FontSize="16" FontWeight="Bold" />
+                        </StackPanel>
+                        <TextBlock Text="Secrets are encrypted at rest using Windows DPAPI (CurrentUser scope) with in-memory zeroing on dispose." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                        <StackPanel Spacing="8" Margin="0,8,0,0">
+                            <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock Text="OAuth 2.0 PKCE Token" FontSize="11" FontWeight="SemiBold" />
+                                        <TextBlock Text="{x:Bind ViewModel.OAuthStatus, Mode=OneWay}" FontSize="12" Foreground="#4CC2FF" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock Text="Service Account Token" FontSize="11" FontWeight="SemiBold" />
+                                        <TextBlock Text="{x:Bind ViewModel.SaStatus, Mode=OneWay}" FontSize="12" Foreground="#D29BFF" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+
+                        <Button Content="Refresh Vault Status" Click="RefreshVault_Click" HorizontalAlignment="Left" Margin="0,6,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Card 2: Enterprise Network SChannel & Proxy -->
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="18">
+                    <StackPanel Spacing="10">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE968;" FontSize="16" Foreground="#6CCB5F" />
+                            <TextBlock Text="Enterprise Proxy &amp; SChannel Trust" FontSize="16" FontWeight="Bold" />
+                        </StackPanel>
+                        <TextBlock Text="Active network configuration uses SocketsHttpHandler with Online CRL checking, Default Network Credentials, and automatic WPAD/PAC proxy discovery (Zscaler/Netskope MITM compatible)." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

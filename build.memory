@@ -1,0 +1,83 @@
+# Master Product & Architecture Ledger (build.memory)
+
+## Product Identity & Placement
+- **Product Name:** Enterprise IT Mission Controller
+- **Role:** AI-Native Operational Appliance for Windows Enterprise Workstations.
+- **Product Definition:** An enterprise-governed execution dashboard allowing IT staff to safely run AI-accelerated system diagnostic runbooks without writing code or exposing corporate credentials. It is NOT a developer IDE, code workspace, or open-ended consumer chatbot.
+
+---
+
+## Target Organizations & User Personas
+### Organizational Profiles
+- **Campus-Style Environments (Universities, Hospitals, Research Hubs):** Multi-building subnetted topologies with federated domain boundaries, large helpdesk rotas, and high turnover of student techs or junior administrators who need guided runbooks without domain-admin elevation.
+- **Corporate & Distributed Enterprises:** Centralized Active Directory / Microsoft Entra ID with thousands of Windows endpoints governed by Microsoft Intune, SCCM/MECM, and strict Endpoint Detection & Response (EDR) agents (CrowdStrike, Microsoft Defender for Endpoint).
+- **Regulated Industries (Finance, Healthcare, Defense Contractors):** Entities subject to HIPAA, SOC 2 Type II, or CMMC requirements where unmonitored "Shadow AI" or raw data egress into public LLMs represents a catastrophic compliance breach.
+
+### Target User Personas
+- **Tier-1 / Tier-2 IT & Field Support:** Frontline technicians managing campus workstations, branch network switches, printer queues, and local account permissions using simple, guided tuning forms.
+- **Senior Infrastructure / SysAdmin Leads:** Architects who write, test, and publish signed 1:1:1 operational templates to standardize how the department handles diagnostics, endpoint hygiene, and log analysis.
+- **Corporate SecOps & Compliance Directors:** Security stakeholders who require all AI-driven diagnostics to run under local cryptographic audit chaining, Merkle tree verification, and strictly approved network egress firewalls.
+
+---
+
+## Windows Enterprise & Campus Deployment Model
+- **Fleet Distribution:** Distributed via Microsoft Intune / SCCM as an Enterprise-Signed MSIX Package.
+- **Privilege Model:** Runs strictly in Windows Userspace (Zero Local Admin / Zero UAC Prompts for Daily Use).
+- **Proxy & Network Integration:** Inherits Corporate Proxy Configurations (PAC, WPAD, Zscaler TLS Break-and-Inspect Roots) using SChannel certificate stores.
+- **Target Operational Workflows:**
+  - *Campus Lab / Branch Office Diagnostics:* Subnet latency, DNS flush, event log sweep.
+  - *Active Directory / Entra ID Hygiene:* Orphan account scans, group membership audits.
+  - *Endpoint Compliance & Patch Audits:* BitLocker status, TPM health, Defender signature verify.
+  - *Network Infrastructure Triage:* Switchport log parsing, firewall traffic anomaly reports.
+
+---
+
+## Core Enterprise & Campus Value Pillars
+1. **Eliminates Shadow AI in IT Operations:** Halts technicians from pasting sensitive corporate IP configs, Active Directory structures, or system crash dumps into consumer web chatbots by providing an IT-sanctioned, enterprise-governed client.
+2. **Zero-Privilege Subprocess Sandboxing:** Runs diagnostic tools inside per-mission NT ACL directory jails clamped by native Win32 Job Objects. Administrative tokens are stripped, guaranteeing that junior technicians cannot accidentally damage system-wide directories or spawn runaway processes.
+3. **Campus-Scale Fleet Governance:** Standardizes operational procedures across massive campus or corporate IT teams. A senior architect publishes a single-tool template once; hundreds of field technicians execute it with identical precision and compliance.
+4. **Immutable Compliance Audit Ledger & Merkle Proofs:** Every diagnostic action, input parameter, tool output, and AI token stream is cryptographically logged using an in-process SQLite WAL database with sequential SHA-256 hash chaining and Merkle tree root verification for compliance audits.
+
+---
+
+## Technical Specifications & Hardening
+
+### 1. Runtime & Package Configuration
+- **Runtime:** C# (.NET 9 LTS) + WinUI 3 (Windows App SDK 1.6) utilizing MVVM pattern.
+- **MSIX Manifest Hardening:**
+  - `<rescap:Capability Name="runFullTrust" />`
+  - `<desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>` (prevents virtualization of directory jails).
+- **Network Pipeline:** `SocketsHttpHandler` configured with:
+  - `CertificateRevocationCheckMode = X509RevocationMode.Online`
+  - `UseProxy = true`
+  - `DefaultProxyCredentials = CredentialCache.DefaultNetworkCredentials`
+
+### 2. Identity & Credential Vault
+- **Dual Auth Subsystem:**
+  - *Option A:* Zero-touch RFC 8252 PKCE loopback on `127.0.0.1:0` with dynamic port binding.
+  - *Option B:* Direct Service Account JSON key vault for headless / pre-provisioned enterprise IT tenants.
+- **Storage:** Windows DPAPI (`DataProtectionScope.CurrentUser`) with memory-pinned zeroed buffers and automatic proactive background token renewal prior to 3600s expiration.
+
+### 3. Subprocess Confinement & Win32 Jailing
+- **Suspended Spawn & Immediate Job Binding:** Subprocesses created with native `CreateProcessW` using `CREATE_SUSPENDED` (0x00000004), assigned to Win32 Job Object, and resumed via `ResumeThread` (race-condition immune).
+- **Job Object Constraints (`JOBOBJECT_EXTENDED_LIMIT_INFORMATION`):**
+  - `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (terminates child processes on app exit)
+  - `JOB_OBJECT_LIMIT_JOB_MEMORY` & `JOB_OBJECT_LIMIT_PROCESS_MEMORY` (hard memory limits)
+  - `JOB_OBJECT_LIMIT_BREAKAWAY_OK` & `JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK` (handles child nested jobs cleanly)
+- **Token Sandboxing:** Drops administrative SIDs (`S-1-5-32-544`) and strips elevation privileges via `CreateRestrictedToken`.
+- **Filesystem Isolation:** Per-mission NT ACL directory jails (`%LOCALAPPDATA%\MissionController\Jails\{MissionId}\`) with parent drive inheritance explicitly stripped via `SetAccessRuleProtection(true, false)`.
+- **Drain Cycle:** Post-mission handle-release drain cycle with retry backoff and startup sweep of orphaned directories.
+
+### 4. 1:1:1 Template Engine & In-Memory Egress Firewall
+- **1:1:1 Invariant:** 1 Template $\rightarrow$ 1 Model $\rightarrow$ 1 Dedicated Native Tool $\rightarrow$ 1 Allowed Egress FQDN.
+- **In-Memory Egress Firewall:** Custom `DelegatingHandler` strictly enforcing HTTP request domain whitelist matching `allowed_egress_domain`.
+- **Audit Storage:** SQLite in WAL mode (`synchronous = NORMAL`) with sequential SHA-256 tamper-evident chained hashing.
+- **Live Telemetry:** `IAsyncEnumerable<string>` token streaming directly from Google Gemini / Vertex AI endpoints into the UI via thread-safe `DispatcherQueue.TryEnqueue`.
+
+---
+
+## Expansion Pillar III: SIEM, EDR & Merkle Export Engine
+- **Enterprise SIEM Forwarder (`ISiemForwarder`):** Real-time streaming for RFC 5424 Syslog with structured data headers, ArcSight CEF, and Azure/Microsoft Sentinel Log Analytics REST ingestion via HMAC-SHA256 authorization signatures.
+- **EDR Ingestion & Posture Bridge (`IEdrIngestionBridge`):** Real-time device health, active alerts, Defender/Falcon process inspection, and network containment/isolation state controls.
+- **Cryptographic Merkle Proofs & Compliance Exporter (`IMerkleProofEngine`, `IComplianceArchiveExporter`):** Builds binary SHA-256 Merkle trees over audit records and produces signed, standalone `.zip` evidence bundles (with `verify_proofs.py` and `verify_proofs.ps1` offline scripts) for SOC 2 Type II, HIPAA, and CMMC Level 2 audits.
+
