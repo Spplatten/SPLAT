@@ -1,9 +1,11 @@
-# Master Scope Document: Enterprise Hyper-Operator Flight Computer (2X Expanded Scope)
+# SPLAT Master Scope: Enterprise Hyper-Operator Flight Computer (2X Expanded Scope)
+
+> **Status: Target architecture / roadmap.** This document defines the 2X expansion vision. The system as currently built and shipped is the 8-Layer Governed Stack documented in [README.md](README.md); capabilities below (ETW kernel radar, JIT probe synthesis, local SLM arbiter, P2P gossip mesh) are not yet implemented.
 
 ## Product Identity & Vision
-**Product Name:** Enterprise IT Mission Controller — *Autonomous Endpoint Diagnostic Engine & Local Kernel Hyper-Operator*
+**Product Name:** SPLAT — *Autonomous Endpoint Diagnostic Engine & Local Kernel Hyper-Operator* (internal codename: Enterprise IT Mission Controller)
 
-The Enterprise IT Mission Controller transitions from a standard passive "IT task runner" into the industry's first **Autonomous Endpoint Diagnostic Engine & Local Kernel Hyper-Operator**. Instead of waiting for a human technician to manually click buttons on a checklist, the Mission Controller becomes an active local telemetry flight computer that continuously monitors Windows kernel performance, dynamically synthesizes sandboxed native C/C++ diagnostic probes on the fly, and uses dual-engine (Local SLM + Cloud Vertex AI) reasoning to auto-remediate campus and enterprise fleets before outages cascade.
+SPLAT transitions from a standard passive "IT task runner" into the industry's first **Autonomous Endpoint Diagnostic Engine & Local Kernel Hyper-Operator**. Instead of waiting for a human technician to manually click buttons on a checklist, the Mission Controller becomes an active local telemetry flight computer that continuously monitors Windows kernel performance, dynamically synthesizes sandboxed native C/C++ diagnostic probes on the fly, and uses dual-engine (Local SLM + Cloud Vertex AI) reasoning to auto-remediate campus and enterprise fleets before outages cascade.
 
 ---
 
@@ -66,6 +68,7 @@ The Enterprise IT Mission Controller transitions from a standard passive "IT tas
 * **The Shift:** Pre-baked static scripts (`.ps1`, `.exe`) become outdated the moment an unprecedented zero-day or edge-case OS bug appears.
 * **The 2X Tech:** When an anomaly is detected, the Vertex AI reasoning model writes targeted, minimal C code for a custom diagnostic probe. The desktop engine compiles it on the fly in memory using an embedded C compiler (e.g., TinyCC or LLVM/Clang) directly into raw machine code inside the sandboxed NT ACL jail, runs the diagnostic in 2 milliseconds, extracts the metric, and immediately incinerates the binary.
 * **The Impact:** Zero script sprawl. The controller generates the exact binary tool it needs for the exact micro-problem it encounters, executes it safely, and wipes the trace.
+* **The Governance Invariant (Non-Negotiable):** Before any synthesized probe executes, its full C source, compiled binary SHA-256, and requesting-agent identity are committed to the Layer 7 chained audit ledger. The *disk* footprint is zero; the *audit* footprint is total. This reconciles ephemeral execution with non-repudiation, and gives coexisting EDR platforms (CrowdStrike, Defender for Endpoint) a signed provenance trail to whitelist against — fileless execution of unattested binaries would otherwise be indistinguishable from malware tradecraft and quarantined on sight.
 
 ### 3. Dual-Engine Intelligence (Local SLM + Vertex AI Flash/Pro)
 * **The Shift:** Relying purely on cloud round-trips introduces 300–800ms latency and fails if the local network switch is offline.

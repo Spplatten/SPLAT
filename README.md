@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-# SPLAT
-Windows A.I Agent Autonomater
-=======
 # SPLAT 🛡️⚡
 
 > **Security & Performance Live Autonomous Toolkit — Autonomous AI Agent Fleet, Zero-Trust Execution Runtime, & Self-Healing Kernel Appliance by Platten Industries**
@@ -9,20 +5,20 @@ Windows A.I Agent Autonomater
 [![.NET 9](https://img.shields.io/badge/.NET-9.0%20LTS-512BD4?style=flat&logo=dotnet)](https://dotnet.microsoft.com/)
 [![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D6?style=flat&logo=windows)](https://microsoft.com/windows)
 [![Zero-Trust](https://img.shields.io/badge/Architecture-8--Layer%20Governed%20Stack-brightgreen)](https://csrc.nist.gov/publications/detail/sp/800-207/final)
-[![Tests](https://img.shields.io/badge/Tests-41%2F41%20Passing%20(100%25)-success)](file:///C:/C_AGENT_BUILDER/tests/MissionController.Tests)
+[![Tests](https://img.shields.io/badge/Tests-41%2F41%20Passing%20(100%25)-success)](https://github.com/Platten-Industries/SPLAT/tree/main/tests/MissionController.Tests)
 [![GitHub](https://img.shields.io/badge/GitHub-Platten--Industries%2FSPLAT-blue?logo=github)](https://github.com/Platten-Industries/SPLAT)
 
 ---
 
 ## 🌟 Executive Overview
 
-**SPLAT** is an enterprise-grade AI-native operational appliance engineered for Windows enterprise and campus workstations. Developed by **Platten Industries**, it empowers everyone—from senior SecOps threat hunters down to everyday staff and Tier-1 helpdesk technicians—to dispatch **autonomous, specialized AI agents** that safely investigate, diagnose, and self-heal system issues.
+**SPLAT** (internal codename: *Mission Controller* — the name carried by the solution and project files) is an enterprise-grade AI-native operational appliance engineered for Windows enterprise and campus workstations. Developed by **Platten Industries**, it empowers everyone—from senior SecOps threat hunters down to everyday staff and Tier-1 helpdesk technicians—to dispatch **autonomous, specialized AI agents** that safely investigate, diagnose, and self-heal system issues.
 
-Unlike unmonitored consumer AI chatbots or dangerous unrestricted script engines, every agent in Mission Controller is confined by an **8-Layer Governed Architecture**:
+Unlike unmonitored consumer AI chatbots or dangerous unrestricted script engines, every agent in SPLAT is confined by an **8-Layer Governed Architecture**:
 * **Zero Kernel Risk:** Native sensor tools execute inside suspended Win32 Job Objects with Admin privileges stripped (`S-1-5-32-544`) and parent directory inheritance severed.
 * **Zero Data Leakage:** In-memory DLP filters automatically redact passwords, NTLM hashes, private keys, and personal emails before cloud transmission.
-* **Zero Hallucinations:** Agents inspect real, ground-truth kernel telemetry and synthesize plain-English executive answers alongside signed 1-click self-healing fixes.
-* **100% Non-Repudiation:** Every action, argument, token, and fix is cryptographically sealed in a SHA-256 chained hash ledger with Merkle root verification.
+* **Ground-Truth Telemetry:** Agents reason over real kernel telemetry rather than guesses, and synthesize plain-English executive answers alongside signed 1-click self-healing fixes.
+* **Tamper-Evident Non-Repudiation:** Every action, argument, token, and fix is cryptographically sealed in a SHA-256 chained hash ledger with Merkle root verification.
 
 ---
 
@@ -134,7 +130,7 @@ The local semantic memory index (`SqliteSemanticMemoryIndex.cs`) allows operator
 ## 📁 Repository Structure
 
 ```
-C:\C_AGENT_BUILDER\
+SPLAT/
 ├── src/
 │   ├── MissionController.Core/                     # Domain models, strict contracts, & engine orchestration
 │   │   ├── Enums.cs                                # System states, compliance frameworks, SIEM protocols
@@ -227,23 +223,23 @@ Passed!  - Failed: 0, Passed: 41, Skipped: 0, Total: 41, Duration: 5 s - Mission
 ## 🚀 Running & Deploying
 
 ### Quick Launch on Desktop
-Double-click the **`Mission Controller`** shortcut on your Windows Desktop or run:
+Double-click the **`SPLAT`** shortcut on your Windows Desktop, or from the repository root run:
 ```powershell
-C:\C_AGENT_BUILDER\dist\App\MissionController.UI.exe
+.\dist\App\MissionController.UI.exe
 ```
 
 ### Running All Automated Tests
 ```powershell
-dotnet test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
+dotnet test .\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
 ### Enterprise MSIX Silent Distribution (Intune / SCCM)
 ```powershell
 # Build signed enterprise bundle
-powershell.exe -ExecutionPolicy Bypass -File C:\C_AGENT_BUILDER\packaging\build-msix.ps1
+powershell.exe -ExecutionPolicy Bypass -File .\packaging\build-msix.ps1
 
 # Silent deployment
-powershell.exe -ExecutionPolicy Bypass -File C:\C_AGENT_BUILDER\packaging\install-enterprise.ps1
+powershell.exe -ExecutionPolicy Bypass -File .\packaging\install-enterprise.ps1
 ```
 
 ---
@@ -253,4 +249,3 @@ Internal Enterprise License — Confidential & Proprietary.
 * **SOC 2 Type II:** CC6.1, CC6.8, CC7.2
 * **HIPAA Security Rule:** 45 CFR § 164.312(b), § 164.312(e)(1)
 * **CMMC 2.0 / NIST SP 800-171:** AU.2.041, AU.2.042, SC.3.177
->>>>>>> dbbf174 (feat(branding): rename application and fleet to SPLAT by Platten Industries)
