@@ -18,7 +18,7 @@
 |  ├── Win32 Job Object Subprocess Clamping (CREATE_SUSPENDED -> AssignToJob -> ResumeThread)       |
 |  ├── NT ACL Filesystem Jailing (%LOCALAPPDATA%\MissionController\Jails\{MissionId})               |
 |  ├── SChannel & Enterprise Proxy Traversal (WPAD, PAC, Zscaler TLS root inspection)               |
-|  ├── Dual Identity Subsystem (RFC 8252 PKCE Loopback & IT Service Account JSON)                   |
+|  ├── Provider API-Key Identity (DPAPI vault + key-routed provider selection)                      |
 |  ├── In-Memory Egress Firewall (Custom DelegatingHandler with FQDN blocking)                      |
 |  ├── SQLite WAL Storage Engine + Sequential SHA-256 Chained Hash Audit Ledger                     |
 |  ├── WinUI 3 Desktop Shell (Catalog, Tuning Cards, Live Monitor, Audit Viewer)                    |
@@ -49,16 +49,18 @@
 * **Windows DPAPI Credential Vault:**
   * Token encryption via `ProtectedData.Protect` (`DataProtectionScope.CurrentUser`) with pinned byte arrays and cryptographic zeroing memory wipes.
 
-### Phase 2: Enterprise Networking, Identity & Vertex AI (`Infrastructure.Network`)
+### Phase 2: Enterprise Networking, Identity & AI Model Gateway (`Infrastructure.Network`)
 * **Enterprise SChannel & Proxy Auto-Traversal:**
   * `SocketsHttpHandler` configured with `CertificateRevocationCheckMode = X509RevocationMode.Online`, `UseProxy = true`, and `DefaultProxyCredentials = CredentialCache.DefaultNetworkCredentials` for seamless Zscaler/Netskope inspection.
-* **Dual Identity Subsystem:**
-  * *Support A:* RFC 8252 PKCE loopback on `127.0.0.1:0` with default browser launch and local port binding.
-  * *Support B:* Direct Enterprise Google Cloud Service Account JSON parser for pre-provisioned corporate tenants.
+* **Provider API-Key Identity:**
+  * Single onboarding paste-box: `ProviderKeyClassifier` routes `sk-ant-*` (Anthropic) vs `AIza…` (Google) keys to the DPAPI vault slot the matching client reads; Gemini keys are live-validated before persisting.
+  * *Enterprise tier (retained dormant, not wired):* RFC 8252 PKCE loopback and Google Cloud Service Account JSON subsystems remain in the codebase for a future managed-tenant rollout.
 * **In-Memory Egress Firewall:**
-  * Custom `DelegatingHandler` validating all outbound URIs against the active template's `allowed_egress_domain`.
-* **Vertex AI SSE Streaming Client:**
-  * `IAsyncEnumerable<string>` parser consuming `gemini-2.5-flash` / `gemini-2.5-pro` `streamGenerateContent` endpoints.
+  * Custom `DelegatingHandler` validating all outbound URIs against the single FQDN pinned for the active request; each AI provider client pins its own host, so a provider swap can never widen the whitelist.
+* **Provider-Routed AI Streaming Clients (`IModelStreamClient`):**
+  * `ClaudeStreamClient` — Anthropic Messages API SSE (`claude-opus-5`), the default provider.
+  * `GeminiStreamClient` — Gemini Developer API v1beta SSE (`gemini-2.5-flash` / `gemini-2.5-pro`), engaged when it holds the sole configured key.
+  * `ModelClientRouter` — provider-by-available-key selection; honesty invariants: no key ⇒ labeled `SIMULATED OUTPUT` placeholder + persistent UI banner + `AI_SIMULATED_FALLBACK` audit row; live failure ⇒ loud `MODEL REQUEST FAILED` chunk (never canned text posing as analysis).
 
 ### Phase 3: In-Process Data & 1:1:1 Template Runtime (`Core` & `Data`)
 * **Embedded SQLite WAL Engine:**
@@ -92,6 +94,7 @@
 | :--- | :--- |
 | **Sandboxing** | Killing the Mission Controller UI instantly terminates all running child tool processes via the Win32 Job Object with zero orphaned zombie processes. |
 | **Filesystem Jail** | Child tool execution attempting to access `%USERPROFILE%\Documents` or `C:\Windows` throws an immediate Access Denied exception. |
-| **Network Egress** | An outbound HTTP request targeting any domain other than the active template's `allowed_egress_domain` is dropped in-memory by the `DelegatingHandler`. |
-| **Identity & Proxy** | Google Vertex AI streams tokens smoothly through enterprise Zscaler/MITM proxies without certificate validation failures. |
+| **Network Egress** | An outbound HTTP request targeting any domain other than the provider host pinned for the active request is dropped in-memory by the `DelegatingHandler`. |
+| **Identity & Proxy** | The governed AI gateway (Anthropic Claude default; Google Gemini key-routed alternate) streams tokens smoothly through enterprise Zscaler/MITM proxies without certificate validation failures. |
+| **Model Honesty** | With no provider key configured, every mission's analysis pane carries an unmistakable `SIMULATED OUTPUT` banner and the ledger records `AI_SIMULATED_FALLBACK`; placeholder text can never masquerade as genuine model output. |
 | **Audit Integrity** | Manually editing any row in the SQLite audit table triggers an instant integrity violation flag upon running the cryptographic verification tool. |
