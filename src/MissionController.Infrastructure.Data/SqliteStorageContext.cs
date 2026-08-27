@@ -70,13 +70,8 @@ public sealed class SqliteStorageContext
                 CREATE TABLE IF NOT EXISTS Templates (
                     TemplateId TEXT PRIMARY KEY,
                     Name TEXT NOT NULL,
-                    Description TEXT NOT NULL,
                     Category TEXT NOT NULL,
-                    TargetModel TEXT NOT NULL,
-                    ToolJson TEXT NOT NULL,
-                    EgressJson TEXT NOT NULL,
-                    SystemPrompt TEXT NOT NULL,
-                    ParametersJson TEXT NOT NULL
+                    TemplateJson TEXT NOT NULL DEFAULT '{}'
                 );
 
                 CREATE TABLE IF NOT EXISTS Missions (
@@ -97,6 +92,18 @@ public sealed class SqliteStorageContext
                 );
             ";
             cmd.ExecuteNonQuery();
+
+            // Migration check: ensure TemplateJson column exists
+            try
+            {
+                using var alterCmd = conn.CreateCommand();
+                alterCmd.CommandText = "ALTER TABLE Templates ADD COLUMN TemplateJson TEXT NOT NULL DEFAULT '{}';";
+                alterCmd.ExecuteNonQuery();
+            }
+            catch
+            {
+                // Column already exists
+            }
         }
     }
 }

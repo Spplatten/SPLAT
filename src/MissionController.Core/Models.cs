@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Serialization;
 using MissionController.Core.Enums;
 
 namespace MissionController.Core.Models;
@@ -69,6 +70,7 @@ public record RemediationExecutionResult(
 /// Strict 1:1:1 Constraint Model:
 /// Strictly 1 Template -> 1 Model -> 1 Dedicated Native Tool -> 1 Allowed Egress FQDN.
 /// </summary>
+[method: JsonConstructor]
 public record SingleToolTemplate(
     string TemplateId,
     string Name,
@@ -83,6 +85,7 @@ public record SingleToolTemplate(
     IReadOnlyList<RemediationAction>? AvailableRemediations = null)
 {
     public IReadOnlyList<RemediationAction> Remediations => AvailableRemediations ?? Array.Empty<RemediationAction>();
+
 
     public SingleToolTemplate(
         string templateId,
@@ -158,18 +161,18 @@ public record MissionChunk(
     long MemoryBytesUsed = 0);
 
 public record AuditLogEntry(
-    long SequenceNumber,
+    long Id,
+    DateTime TimestampUtc,
     Guid MissionId,
     string TemplateId,
     string Action,
     string Details,
     string OperatorIdentity,
-    string CurrentHash,
     string PreviousHash,
-    DateTime TimestampUtc)
+    string EntryHash)
 {
-    public long Id => SequenceNumber;
-    public string EntryHash => CurrentHash;
+    public long SequenceNumber => Id;
+    public string CurrentHash => EntryHash;
 }
 
 public record MerkleTreeNode(
@@ -185,39 +188,63 @@ public record MerkleTree(
 
 public record MerkleProofStep(
     string SiblingHash,
-    bool IsRightSibling);
+    bool IsLeftSibling);
 
 public record MerkleProof(
     long EntryId,
     string LeafHash,
     string RootHash,
-    IReadOnlyList<MerkleProofStep> Steps);
+    IReadOnlyList<MerkleProofStep> ProofSteps)
+{
+    public IReadOnlyList<MerkleProofStep> Steps => ProofSteps;
+}
+
+public record CompliancePackageManifest(
+    string PackageId,
+    ComplianceFramework Framework,
+    DateTimeOffset ExportedAtUtc,
+    string ExportedBy,
+    string MerkleRootHash,
+    int TotalAuditEntries,
+    string DigitalSignature,
+    string SignatureAlgorithm,
+    IReadOnlyList<string> IncludedFiles);
 
 public record EdrDevicePosture(
-    bool IsAntivirusActive,
-    bool IsFirewallEnabled,
-    bool IsBitLockerEncrypted,
-    string OsBuildVersion,
-    bool IsHostIsolated,
-    string OverallHealthStatus,
-    DateTimeOffset LastEvaluatedUtc);
+    string DeviceId,
+    string Hostname,
+    EdrProviderType Provider,
+    EndpointIsolationState IsolationState,
+    bool RealTimeProtectionEnabled,
+    string AntivirusEngineVersion,
+    string SecurityIntelligenceVersion,
+    DateTimeOffset LastSyncTimeUtc,
+    IReadOnlyList<string> ActiveThreats);
 
 public record EdrSecurityAlert(
     string AlertId,
-    string Severity,
     string Title,
+    string Category,
+    string Severity,
+    string Status,
+    DateTimeOffset DetectedTimeUtc,
     string Description,
-    string ProcessName,
-    int ProcessId,
-    DateTimeOffset TimestampUtc);
+    string MitreTechniqueId);
+
 
 public record SiemConfiguration(
     SiemProtocol Protocol,
-    string HostOrEndpoint,
-    int Port,
-    bool UseTls,
+    string HostOrUrl,
+    int Port = 514,
+    bool UseTls = true,
     string? WorkspaceId = null,
-    string? SharedKey = null);
+    string? SharedKey = null,
+    string LogType = "MissionControllerAudit",
+    int Facility = 16,
+    int DefaultSeverity = 6)
+{
+    public string HostOrEndpoint => HostOrUrl;
+}
 
 public record SyslogMessage(
     int Facility,
@@ -227,7 +254,8 @@ public record SyslogMessage(
     string AppName,
     string ProcessId,
     string MessageId,
-    string Message);
+    string Message,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>? StructuredData = null);
 
 public record CefEvent(
     string DeviceVendor,
@@ -236,7 +264,10 @@ public record CefEvent(
     string DeviceEventClassId,
     string Name,
     int Severity,
-    IReadOnlyDictionary<string, string> Extensions);
+    IReadOnlyDictionary<string, string> ExtensionFields)
+{
+    public IReadOnlyDictionary<string, string> Extensions => ExtensionFields;
+}
 
 
 public record JobResourceMetrics(

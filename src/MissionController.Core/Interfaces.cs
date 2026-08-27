@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using MissionController.Core.Enums;
 using MissionController.Core.Models;
 
 namespace MissionController.Core.Interfaces;
@@ -72,24 +73,63 @@ public interface IDataLossPreventionSanitizer
     DlpSanitizationResult Sanitize(string input);
 }
 
+public interface ICredentialSanitizer
+{
+    SanitizationResult Sanitize(string input);
+}
+
+public interface IIncidentRevocationManager
+{
+    Task RevokeAsync(string identifier, string revocationType, string reason, string revokedBy, CancellationToken cancellationToken = default);
+    Task<RevocationStatus> CheckRevocationAsync(string identifier, CancellationToken cancellationToken = default);
+    Task<bool> IsRevokedAsync(string identifier, CancellationToken cancellationToken = default);
+}
+
+public interface ITokenValidator
+{
+    Task<TokenValidationResult> ValidateTokenAsync(string rawToken, CancellationToken cancellationToken = default);
+}
+
+public interface IApiKeyValidator
+{
+    Task<TokenValidationResult> ValidateApiKeyAsync(string apiKey, CancellationToken cancellationToken = default);
+}
+
+public interface ITokenLifecycleManager
+{
+    Task<string?> GetValidAccessTokenAsync(string secretKey, int bufferSeconds = 120, CancellationToken cancellationToken = default);
+    Task<TokenRefreshResult> RefreshTokenAsync(string secretKey, CancellationToken cancellationToken = default);
+}
+
 public interface IMerkleProofEngine
 {
-    string ComputeRootHash(IReadOnlyList<string> hashes);
+    MerkleTree BuildTree(IReadOnlyList<AuditLogEntry> entries);
+    MerkleProof GenerateProof(MerkleTree tree, long entryId);
+    bool VerifyProof(MerkleProof proof);
 }
 
 public interface IComplianceArchiveExporter
 {
-    Task<string> ExportComplianceArchiveAsync(string outputPath, CancellationToken cancellationToken = default);
+    Task<string> ExportCompliancePackageAsync(
+        ComplianceFramework framework,
+        string outputDirectory,
+        IReadOnlyList<AuditLogEntry> entries,
+        string operatorIdentity,
+        CancellationToken cancellationToken = default);
 }
 
 public interface ISiemForwarder
 {
-    Task ForwardEventAsync(string eventType, string details, CancellationToken cancellationToken = default);
+    Task ForwardAuditEntryAsync(AuditLogEntry entry, SiemConfiguration config, CancellationToken cancellationToken = default);
+    Task ForwardCefEventAsync(CefEvent cefEvent, SiemConfiguration config, CancellationToken cancellationToken = default);
+    Task<bool> TestConnectionAsync(SiemConfiguration config, CancellationToken cancellationToken = default);
 }
 
 public interface IEdrIngestionBridge
 {
-    Task IngestTelemetryAsync(string source, string telemetryData, CancellationToken cancellationToken = default);
+    Task<EdrDevicePosture> GetLocalDevicePostureAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<EdrSecurityAlert>> GetRecentAlertsAsync(int maxCount = 20, CancellationToken cancellationToken = default);
+    Task<bool> SetDeviceIsolationStateAsync(string deviceId, bool isolate, string justification, CancellationToken cancellationToken = default);
 }
 
 public interface IVertexStreamClient
@@ -150,37 +190,3 @@ public interface IMissionExecutionEngine
         string operatorIdentity,
         CancellationToken cancellationToken = default);
 }
-
-public interface ITokenValidator
-{
-    Task<TokenValidationResult> ValidateTokenAsync(string rawToken, CancellationToken cancellationToken = default);
-}
-
-public interface IApiKeyValidator
-{
-    Task<TokenValidationResult> ValidateApiKeyAsync(string apiKey, CancellationToken cancellationToken = default);
-    void RegisterApiKey(string apiKey, SecurityIdentityContext identity);
-}
-
-public interface ITokenLifecycleManager
-{
-    Task<string?> GetValidAccessTokenAsync(string secretKey, int bufferSeconds = 120, CancellationToken cancellationToken = default);
-    Task<TokenRefreshResult> RefreshTokenAsync(string secretKey, CancellationToken cancellationToken = default);
-    void RegisterRefreshHandler(string secretKey, Func<CancellationToken, Task<TokenDescriptor?>> refreshHandler);
-    void TrackTokenExpiry(string secretKey, DateTimeOffset expiresAtUtc);
-}
-
-public interface ICredentialSanitizer
-{
-    SanitizationResult Sanitize(string input);
-    string RestoreCredentials(string sanitizedInput, IReadOnlyDictionary<string, string> opaqueMap);
-    void RegisterKnownSecret(string secret);
-}
-
-public interface IIncidentRevocationManager
-{
-    Task RevokeAsync(string identifier, string revocationType, string reason, string revokedBy, CancellationToken cancellationToken = default);
-    Task<RevocationStatus> CheckRevocationAsync(string identifier, CancellationToken cancellationToken = default);
-    Task<bool> IsRevokedAsync(string identifier, CancellationToken cancellationToken = default);
-}
-

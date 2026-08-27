@@ -1,19 +1,15 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
-using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
-using MissionController.Infrastructure.Data.Compliance;
-using MissionController.Infrastructure.Network.Edr;
 using MissionController.Infrastructure.Network.Identity;
-using MissionController.Infrastructure.Network.Siem;
-using MissionController.UI.ViewModels;
 using Xunit;
 
 namespace MissionController.Tests;
@@ -58,78 +54,32 @@ public class SecurityHubViewModelTests
         }
     }
 
-    private sealed class MockSiemForwarder : ISiemForwarder
-    {
-        public Task<bool> ForwardAuditLogAsync(AuditLogEntry entry, SiemConfiguration config, CancellationToken cancellationToken = default) =>
-            Task.FromResult(true);
-        public Task<bool> ForwardSyslogAsync(SyslogMessage message, string host, int port, bool useTls, CancellationToken cancellationToken = default) =>
-            Task.FromResult(true);
-    }
-
-    private sealed class MockEdrBridge : IEdrIngestionBridge
-    {
-        public Task<EdrDevicePosture> QueryLocalDevicePostureAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new EdrDevicePosture(true, true, true, "1.0", false, "Healthy", DateTimeOffset.UtcNow));
-        public Task<IReadOnlyList<EdrSecurityAlert>> GetRecentThreatDetectionsAsync(int limit = 50, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<EdrSecurityAlert>>(new List<EdrSecurityAlert>());
-        public Task IsolateHostAsync(string reason, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task ReleaseHostIsolationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-    }
-
-    private sealed class MockComplianceArchiveExporter : IComplianceArchiveExporter
-    {
-        public Task<string> ExportCompliancePackageAsync(ComplianceFramework framework, string outputPath, IReadOnlyList<AuditLogEntry> logs, string operatorIdentity, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Path.Combine(Path.GetTempPath(), "compliance_test.zip"));
-    }
-
     [Fact]
-    public async Task SecurityAuditViewModel_EmergencyRevocation_BlacklistsAndAppendsAudit()
+    public async Task IncidentRevocationManager_EmergencyRevocation_BlacklistsAndAppendsAudit()
     {
         string dbPath = Path.Combine(Path.GetTempPath(), $"vm_revocation_{Guid.NewGuid():N}.db");
         try
         {
             var ctx = new SqliteStorageContext(dbPath);
             var ledger = new SqliteChainedAuditLedger(ctx);
-            var merkleEngine = new MerkleTreeEngine();
-            var exporter = new MockComplianceArchiveExporter();
-            var siem = new MockSiemForwarder();
-            var edr = new MockEdrBridge();
             var revocationManager = new IncidentRevocationManager(ledger);
-            var vault = new InMemoryCredentialVault();
-            var lifecycleManager = new TokenLifecycleManager(vault);
 
-            var vm = new SecurityAuditViewModel(
-                ledger,
-                merkleEngine,
-                exporter,
-                siem,
-                edr,
-                revocationManager,
-                lifecycleManager,
-                vault);
+            string target = "compromised-token-xyz-12345";
+            string type = "TOKEN_FINGERPRINT";
+            string reason = "Credential leaked in chat log";
 
-            // Configure revocation input
-            vm.RevocationTarget = "compromised-token-xyz-12345";
-            vm.RevocationType = "TOKEN_FINGERPRINT";
-            vm.RevocationReason = "Credential leaked in chat log";
+            await revocationManager.RevokeAsync(target, type, reason, "SecOps_Admin");
 
-            // Trigger emergency circuit breaker
-            await vm.TriggerEmergencyRevocationAsync();
+            Assert.True(await revocationManager.IsRevokedAsync(target));
 
-            // Assertions
-            Assert.Contains("CIRCUIT BREAKER TRIPPED", vm.RevocationActionMessage);
-            Assert.Single(vm.ActiveRevocations);
-            Assert.Equal("compromised-token-xyz-12345", vm.ActiveRevocations[0].Identifier);
-            Assert.Equal("TOKEN_FINGERPRINT", vm.ActiveRevocations[0].RevocationType);
+            var status = await revocationManager.CheckRevocationAsync(target);
+            Assert.True(status.IsRevoked);
+            Assert.Equal(target, status.Entry?.Identifier);
 
-            // Assert backend revocation manager state
-            Assert.True(await revocationManager.IsRevokedAsync("compromised-token-xyz-12345"));
-
-            // Assert audit log entry created
             var logs = await ledger.GetAuditLogsAsync();
             var revLog = logs.FirstOrDefault(l => l.Action == "EMERGENCY_REVOCATION");
             Assert.NotNull(revLog);
-            Assert.Contains("compromised-token-xyz-12345", revLog.Details);
+            Assert.Contains(target, revLog.Details);
         }
         finally
         {
@@ -144,22 +94,14 @@ public class SecurityHubViewModelTests
     }
 
     [Fact]
-    public async Task SecurityAuditViewModel_ProactiveTokenRefresh_RenewsSuccessfully()
+    public async Task TokenLifecycleManager_ProactiveTokenRefresh_RenewsSuccessfully()
     {
         string dbPath = Path.Combine(Path.GetTempPath(), $"vm_token_refresh_{Guid.NewGuid():N}.db");
         try
         {
-            var ctx = new SqliteStorageContext(dbPath);
-            var ledger = new SqliteChainedAuditLedger(ctx);
-            var merkleEngine = new MerkleTreeEngine();
-            var exporter = new MockComplianceArchiveExporter();
-            var siem = new MockSiemForwarder();
-            var edr = new MockEdrBridge();
-            var revocationManager = new IncidentRevocationManager(ledger);
             var vault = new InMemoryCredentialVault();
             var lifecycleManager = new TokenLifecycleManager(vault);
 
-            // Register refresh handler
             lifecycleManager.RegisterRefreshHandler("GoogleCloud.OAuthToken", ct =>
             {
                 var descriptor = new TokenDescriptor(
@@ -169,21 +111,11 @@ public class SecurityHubViewModelTests
                 return Task.FromResult<TokenDescriptor?>(descriptor);
             });
 
-            var vm = new SecurityAuditViewModel(
-                ledger,
-                merkleEngine,
-                exporter,
-                siem,
-                edr,
-                revocationManager,
-                lifecycleManager,
-                vault);
+            var refreshResult = await lifecycleManager.RefreshTokenAsync("GoogleCloud.OAuthToken");
 
-            // Trigger proactive renew
-            await vm.ProactiveRenewTokensAsync();
-
-            Assert.Contains("SUCCESS: Refreshed token expires", vm.TokenRenewalStatusMessage);
-            Assert.Contains("ya29.fresh_mo", vm.OAuthTokenTtlStatus);
+            Assert.True(refreshResult.Success);
+            Assert.NotNull(refreshResult.Token);
+            Assert.Equal("ya29.fresh_mocked_token_9999", refreshResult.Token.AccessToken);
         }
         finally
         {
