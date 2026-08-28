@@ -58,8 +58,7 @@
                             Height="112"
                             Style="{StaticResource SplatCardStyle}"
                             Padding="10,8"
-                            Margin="0,0,8,8"
-                            effects:BorderGlowShader.IsEnabled="True">
+                            Margin="0,0,8,8">
                             <Grid RowSpacing="2">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
@@ -90,7 +89,9 @@
             </GridView>
 
             <!-- Custom Natural Language Agent Directive -->
-            <Border Grid.Row="2" Background="{ThemeResource SplatSurfaceBrush}" BorderBrush="{StaticResource ElectricBorderGlowBrush}" BorderThickness="1" CornerRadius="10" Padding="14" effects:BorderGlowShader.IsEnabled="True">
+            <!-- Border glow removed here: this panel wraps the hero Dispatch button, and a glowing
+                 frame around it flattens the one element that is supposed to draw the eye. -->
+            <Border Grid.Row="2" Background="{ThemeResource SplatSurfaceBrush}" BorderBrush="{StaticResource ElectricBorderGlowBrush}" BorderThickness="1" CornerRadius="10" Padding="14">
                 <StackPanel Spacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <TextBlock Text="⚡" FontSize="15" FontWeight="Bold" Foreground="{ThemeResource SplatAccentBrush}" />
@@ -117,6 +118,7 @@
                             Command="{x:Bind ViewModel.RunCustomAskCommand}"
                             IsEnabled="{x:Bind ViewModel.IsRunning, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}"
                             VerticalAlignment="Center"
+                            effects:AuroraEnergyShader.IsEnabled="True"
                             effects:ButtonPressShader.IsEnabled="True">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <TextBlock Text="⚡" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />

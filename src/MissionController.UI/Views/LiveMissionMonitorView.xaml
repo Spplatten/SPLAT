@@ -47,7 +47,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- Status Card -->
-            <Border Grid.Column="0" Style="{StaticResource SplatCardStyle}" Padding="14" effects:BorderGlowShader.IsEnabled="True">
+            <Border Grid.Column="0" Style="{StaticResource SplatCardStyle}" Padding="14">
                 <StackPanel Spacing="4">
                     <TextBlock Text="STATUS" Style="{StaticResource SplatPageSectionLabelStyle}" />
                     <TextBlock Text="{x:Bind ViewModel.CurrentStatus, Mode=OneWay}" FontSize="15" FontWeight="Bold" Foreground="{ThemeResource SplatAccentBrush}" TextTrimming="CharacterEllipsis" />
@@ -55,7 +55,7 @@
             </Border>
 
             <!-- CPU Gauge Card -->
-            <Border Grid.Column="1" Style="{StaticResource SplatCardStyle}" Padding="14" effects:BorderGlowShader.IsEnabled="True">
+            <Border Grid.Column="1" Style="{StaticResource SplatCardStyle}" Padding="14">
                 <StackPanel Spacing="4">
                     <TextBlock Text="WIN32 JOB CPU USAGE" Style="{StaticResource SplatPageSectionLabelStyle}" />
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
@@ -67,7 +67,7 @@
             </Border>
 
             <!-- Memory Gauge Card -->
-            <Border Grid.Column="2" Style="{StaticResource SplatCardStyle}" Padding="14" effects:BorderGlowShader.IsEnabled="True">
+            <Border Grid.Column="2" Style="{StaticResource SplatCardStyle}" Padding="14">
                 <StackPanel Spacing="4">
                     <TextBlock Text="JOB WORKING SET RAM" Style="{StaticResource SplatPageSectionLabelStyle}" />
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
@@ -79,7 +79,7 @@
             </Border>
 
             <!-- Jail Isolation Card -->
-            <Border Grid.Column="3" Style="{StaticResource SplatCardStyle}" Padding="14" effects:BorderGlowShader.IsEnabled="True">
+            <Border Grid.Column="3" Style="{StaticResource SplatCardStyle}" Padding="14">
                 <StackPanel Spacing="4">
                     <TextBlock Text="NT ACL JAIL" Style="{StaticResource SplatPageSectionLabelStyle}" />
                     <TextBlock Text="Inheritance Severed" FontSize="14" FontWeight="Bold" Foreground="{ThemeResource SplatSuccessBrush}" />
@@ -96,7 +96,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- Left Pane: Sandboxed Tool Stdout -->
-            <Border Grid.Column="0" Style="{StaticResource SplatCardStyle}" Padding="16" effects:BorderGlowShader.IsEnabled="True">
+            <Border Grid.Column="0" Style="{StaticResource SplatCardStyle}" Padding="16">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -123,7 +123,7 @@
             </Border>
 
             <!-- Right Pane: AI Reasoning Streaming Engine -->
-            <Border Grid.Column="1" Style="{StaticResource SplatCardStyle}" Padding="16" effects:BorderGlowShader.IsEnabled="True">
+            <Border Grid.Column="1" Style="{StaticResource SplatCardStyle}" Padding="16">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />

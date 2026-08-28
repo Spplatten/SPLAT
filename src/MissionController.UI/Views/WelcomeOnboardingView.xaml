@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:effects="using:MissionController.UI.Effects"
     Style="{StaticResource SplatPageStyle}"
     mc:Ignorable="d">
 
@@ -187,10 +188,11 @@
                 Visibility="{x:Bind GetBackVisibility(ViewModel.CurrentStep), Mode=OneWay}"
                 Command="{x:Bind ViewModel.PreviousStepCommand}" />
 
-            <!-- Electric Energy Glowing Next / Dispatch Button -->
+            <!-- Hero action. The aurora is intentionally the only animated colour on this screen. -->
             <Button
                 Grid.Column="2"
                 Style="{StaticResource ElectricEnergyButtonStyle}"
+                effects:AuroraEnergyShader.IsEnabled="True"
                 Click="NextOrFinishButton_Click">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <TextBlock Text="⚡" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" />
