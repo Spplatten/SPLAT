@@ -21,17 +21,17 @@ float saturateSafe(float value)
     return saturate(value);
 }
 
-float hash12(float2 point)
+float hash12(float2 samplePoint)
 {
-    point = frac(point * float2(123.34, 345.45));
-    point += dot(point, point + 34.345);
-    return frac(point.x * point.y);
+    samplePoint = frac(samplePoint * float2(123.34, 345.45));
+    samplePoint += dot(samplePoint, samplePoint + 34.345);
+    return frac(samplePoint.x * samplePoint.y);
 }
 
-float valueNoise(float2 point)
+float valueNoise(float2 samplePoint)
 {
-    float2 cell = floor(point);
-    float2 local = frac(point);
+    float2 cell = floor(samplePoint);
+    float2 local = frac(samplePoint);
     local = local * local * (3.0 - 2.0 * local);
 
     float bottom = lerp(hash12(cell), hash12(cell + float2(1.0, 0.0)), local.x);

@@ -3,6 +3,27 @@
     <!-- The renderer is always compiled; bytecode generation remains opt-in so a
          developer machine without the Windows SDK fxc tool still builds. -->
     <DefineConstants>$(DefineConstants);MISSIONCONTROLLER_WIN2D</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Probe for the SDK shader compiler so bytecode generation turns itself on where it can work.
+       Previously this defaulted to false and had to be set by hand, which meant the shaders were
+       never built and never rendered - the effects existed only as source. Auto-detection keeps the
+       original intent (a machine without the Windows SDK must still build) without requiring anyone
+       to know the flag exists. Set it explicitly to override in either direction. -->
+  <ItemGroup>
+    <_Win2DFxcCandidate Include="$(ProgramFiles)\Windows Kits\10\bin\**\x64\fxc.exe" />
+    <_Win2DFxcCandidate Include="$(ProgramW6432)\Windows Kits\10\bin\**\x64\fxc.exe" />
+    <_Win2DFxcCandidate Include="C:\Program Files (x86)\Windows Kits\10\bin\**\x64\fxc.exe" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- Flattened to a property first: MSBuild allows an item list in a property VALUE but not in a
+         condition (MSB4099), so probing directly inside the condition below is a hard build error. -->
+    <_Win2DFxcFound>@(_Win2DFxcCandidate)</_Win2DFxcFound>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <EnableMissionControllerWin2DShaderBuild Condition="'$(EnableMissionControllerWin2DShaderBuild)' == '' and '$(_Win2DFxcFound)' != ''">true</EnableMissionControllerWin2DShaderBuild>
     <EnableMissionControllerWin2DShaderBuild Condition="'$(EnableMissionControllerWin2DShaderBuild)' == ''">false</EnableMissionControllerWin2DShaderBuild>
   </PropertyGroup>
 

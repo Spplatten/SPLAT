@@ -128,23 +128,84 @@ public sealed class ShaderCanvasControl : UserControl, IDisposable
 
         try
         {
-            var shaderPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Effects", "Win2D", "MissionControllerGlow.bin");
-            if (System.IO.File.Exists(shaderPath))
+            var directory = System.IO.Path.Combine(AppContext.BaseDirectory, "Effects", "Win2D");
+            var shaderPath = System.IO.Path.Combine(directory, ResolveShaderFileName(Mode));
+
+            // Modes 0-3 live inside the Glow mega-shader and are selected by its "mode" constant, so
+            // fall back to it whenever a dedicated shader is missing rather than rendering nothing.
+            if (!System.IO.File.Exists(shaderPath))
             {
-                _renderer = Win2DShaderCanvasRenderer.FromFile(_canvas, shaderPath);
+                shaderPath = System.IO.Path.Combine(directory, GlowShaderFileName);
             }
-            else
+
+            if (!System.IO.File.Exists(shaderPath))
             {
-                // Fallback: minimal dummy bytecode if .bin not compiled yet
+                // No compiled bytecode at all. The build only produces it where the Windows SDK
+                // shader compiler exists, so this stays a silent no-op rather than a hard failure.
                 return;
             }
 
-            UpdateShaderFrame();
+            _renderer = Win2DShaderCanvasRenderer.FromFile(_canvas, shaderPath);
+            _loadedModeShader = shaderPath;
 
+            UpdateShaderFrame();
         }
         catch
         {
             // Fail open on environments without compiled bytecode or unsupported GPU profiles
+        }
+    }
+
+    private const string GlowShaderFileName = "MissionControllerGlow.bin";
+
+    /// <summary>Bytecode currently bound, so a Mode change knows whether it must rebuild.</summary>
+    private string? _loadedModeShader;
+
+    /// <summary>
+    /// Maps a mode to its dedicated bytecode. RadarScan, CyberGrid, ElectricShield and NeuralSynapse
+    /// are standalone shaders; the remaining modes are branches inside the Glow mega-shader.
+    /// </summary>
+    private static string ResolveShaderFileName(ShaderEffectMode mode) => mode switch
+    {
+        ShaderEffectMode.RadarScan => "MissionControllerRadarScan.bin",
+        ShaderEffectMode.CyberGrid => "MissionControllerCyberGrid.bin",
+        ShaderEffectMode.ElectricShield => "MissionControllerElectricShield.bin",
+        ShaderEffectMode.NeuralSynapse => "MissionControllerNeuralSynapse.bin",
+        _ => GlowShaderFileName
+    };
+
+    /// <summary>
+    /// Swapping mode can mean swapping bytecode, which the renderer takes at construction. Rebuild
+    /// only when the target file actually changes so mode flips within the mega-shader stay cheap.
+    /// </summary>
+    private void ReloadRendererIfShaderChanged()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        var expected = System.IO.Path.Combine(AppContext.BaseDirectory, "Effects", "Win2D", ResolveShaderFileName(Mode));
+        if (!System.IO.File.Exists(expected))
+        {
+            expected = System.IO.Path.Combine(AppContext.BaseDirectory, "Effects", "Win2D", GlowShaderFileName);
+        }
+
+        if (string.Equals(_loadedModeShader, expected, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        bool wasAnimating = IsAnimated;
+        _renderer?.Dispose();
+        _renderer = null;
+        _loadedModeShader = null;
+
+        InitializeRenderer();
+
+        if (_renderer is not null && wasAnimating)
+        {
+            _renderer.StartAnimation();
         }
     }
 
@@ -173,6 +234,12 @@ public sealed class ShaderCanvasControl : UserControl, IDisposable
     {
         if (d is ShaderCanvasControl control)
         {
+            // A Mode change may point at different bytecode, which is bound at renderer construction.
+            if (e.Property == ModeProperty)
+            {
+                control.ReloadRendererIfShaderChanged();
+            }
+
             control.UpdateShaderFrame();
         }
     }

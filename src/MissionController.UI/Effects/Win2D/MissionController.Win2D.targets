@@ -11,7 +11,11 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(EnableMissionControllerWin2DShaderBuild)' == 'true'">
-    <Content Include="$(IntermediateOutputPath)Win2DShaders\%(Win2DShader.Filename).bin" CopyToOutputDirectory="PreserveNewest" Link="Effects\Win2D\%(Win2DShader.Filename).bin" />
+    <!-- Item TRANSFORM, not %() batching: batching does not expand inside a top-level ItemGroup, so
+         the previous form was passed through literally and the build failed trying to copy a file
+         named "%(Win2DShader.Filename).bin". The transform also carries these into publish output,
+         which the target's own Copy to OutDir does not. -->
+    <Content Include="@(Win2DShader->'$(IntermediateOutputPath)Win2DShaders\%(Filename).bin')" CopyToOutputDirectory="PreserveNewest" Link="Effects\Win2D\%(Filename).bin" />
   </ItemGroup>
 
   <Target
