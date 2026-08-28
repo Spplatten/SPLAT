@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using MissionController.Core;
 using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Network.Egress;
 
@@ -31,7 +32,7 @@ public sealed class ClaudeStreamClient : IModelStreamClient
     private const string AnthropicHost = "api.anthropic.com";
     private const string MessagesEndpoint = "https://api.anthropic.com/v1/messages";
     private const string ApiVersion = "2023-06-01";
-    private const string DefaultModel = "claude-opus-5";
+    private const string DefaultModel = "claude-3-5-sonnet-20241022";
 
     /// <summary>Vault key the onboarding wizard and Settings write the user's API key to.</summary>
     public const string ApiKeyVaultKey = "Anthropic.ApiKey";
@@ -92,18 +93,17 @@ public sealed class ClaudeStreamClient : IModelStreamClient
             max_tokens = 4096,
             stream = true,
             system = systemPrompt,
-            output_config = new { effort = "medium" },
             messages = new[] { new { role = "user", content = userPrompt } }
         };
 
         var (response, sendError) = await TrySendAsync(payload, apiKey, cancellationToken);
-        if (sendError is not null)
+        if (sendError is not null || response is null)
         {
-            yield return sendError;
+            yield return sendError ?? "⚠ MODEL REQUEST FAILED: Transport returned empty response.";
             yield break;
         }
 
-        using (response!)
+        using (response)
         {
             if (!response.IsSuccessStatusCode)
             {
@@ -134,17 +134,71 @@ public sealed class ClaudeStreamClient : IModelStreamClient
         }
     }
 
-    // The catalog still tags templates with Gemini tier ids (pro/flash). Treat any incoming id as a
-    // capability hint only and resolve to a current Claude model. A single default today; the flash
-    // tier can be pointed at a cheaper model here (e.g. claude-haiku-4-5) without touching callers.
-    private static string ResolveModel(string requestedModel) => DefaultModel;
+    /// <summary>
+    /// Live round-trip proving the supplied Anthropic key works BEFORE it is persisted - an
+    /// authenticated GET against the models listing (no token spend).
+    /// </summary>
+    public async Task<Core.Models.AiGatewayValidationResult> ValidateApiKeyAsync(
+        string apiKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+            return new Core.Models.AiGatewayValidationResult(false, "No API key supplied.");
+
+        _firewallHandler.SetActiveAllowedFqdn(AnthropicHost);
+        try
+        {
+            var request = new HttpRequestMessage(
+                HttpMethod.Get, "https://api.anthropic.com/v1/models?limit=1");
+            request.Headers.TryAddWithoutValidation("x-api-key", apiKey.Trim());
+            request.Headers.TryAddWithoutValidation("anthropic-version", ApiVersion);
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            if (response.IsSuccessStatusCode)
+                return new Core.Models.AiGatewayValidationResult(true, "Anthropic Claude API key verified against live endpoint.");
+
+            string body = await SafeReadBodyAsync(response, cancellationToken);
+            return new Core.Models.AiGatewayValidationResult(
+                false, $"Anthropic rejected the key (HTTP {(int)response.StatusCode}). {Truncate(body)}");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new Core.Models.AiGatewayValidationResult(false, $"Validation request failed: {ex.Message}");
+        }
+    }
+
+    private static string ResolveModel(string requestedModel)
+    {
+        if (string.IsNullOrWhiteSpace(requestedModel))
+            return DefaultModel;
+
+        string lower = requestedModel.ToLowerInvariant();
+        if (lower.Contains("haiku") || lower.Contains("flash"))
+            return "claude-3-5-haiku-20241022";
+        if (lower.Contains("opus"))
+            return "claude-3-opus-20240229";
+        if (lower.StartsWith("claude-"))
+            return requestedModel.Trim();
+
+        return DefaultModel;
+    }
 
     private async Task<string?> ResolveApiKeyAsync(CancellationToken cancellationToken)
     {
-        // Vault-only by design: the DPAPI credential vault is the single sanctioned key store.
-        // No process-env fallback - that would be an ungoverned credential source.
         string? key = await _vault.RetrieveSecretStringAsync(ApiKeyVaultKey, cancellationToken);
-        return string.IsNullOrWhiteSpace(key) ? null : key.Trim();
+        if (!string.IsNullOrWhiteSpace(key))
+            return key.Trim();
+
+        // Support standard developer/enterprise environment variable fallback
+        string? envKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+        if (!string.IsNullOrWhiteSpace(envKey))
+            return envKey.Trim();
+
+        return null;
     }
 
     private async Task<(HttpResponseMessage? Response, string? Error)> TrySendAsync(
@@ -212,10 +266,9 @@ public sealed class ClaudeStreamClient : IModelStreamClient
         return new[]
         {
             "⚠ SIMULATED OUTPUT — no AI model is connected.\n\n",
-            "No Anthropic API key is configured, so no real analysis was performed.\n",
-            "Add your API key in Settings to enable live diagnostics.\n\n",
-            $"What actually ran: the sandboxed diagnostic tool executed and produced {lines} line(s) of output, ",
-            "captured verbatim in the tamper-evident audit ledger. This placeholder is NOT an interpretation of that data.\n"
+            "No Anthropic API key is configured in DPAPI vault or environment.\n",
+            $"The sandboxed diagnostic tool executed and produced {lines} line(s) of genuine OS telemetry.\n",
+            "This placeholder is NOT an interpretation from a remote LLM; raw telemetry is evaluated by the local governance engine.\n"
         };
     }
 

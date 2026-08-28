@@ -5,7 +5,7 @@
 [![.NET 9](https://img.shields.io/badge/.NET-9.0%20LTS-512BD4?style=flat&logo=dotnet)](https://dotnet.microsoft.com/)
 [![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D6?style=flat&logo=windows)](https://microsoft.com/windows)
 [![Zero-Trust](https://img.shields.io/badge/Architecture-8--Layer%20Governed%20Stack-brightgreen)](https://csrc.nist.gov/publications/detail/sp/800-207/final)
-[![Tests](https://img.shields.io/badge/Tests-59%2F59%20Passing%20(100%25)-success)](https://github.com/Platten-Industries/SPLAT/tree/main/tests/MissionController.Tests)
+[![Tests](https://img.shields.io/badge/Tests-77%2F77%20Passing%20(100%25)-success)](https://github.com/Platten-Industries/SPLAT/tree/main/tests/MissionController.Tests)
 [![GitHub](https://img.shields.io/badge/GitHub-Platten--Industries%2FSPLAT-blue?logo=github)](https://github.com/Platten-Industries/SPLAT)
 
 ---
@@ -81,9 +81,9 @@ flowchart TD
 
 ---
 
-## 🤖 The 8 Governed Autonomous AI Agents
+## 🤖 Governed Autonomous AI Agent Template Fleet
 
-The platform includes 8 out-of-the-box specialized AI agents bound to the **Strict 1:1:1 Governance Invariant** ($\text{1 Template} \rightarrow \text{1 Model} \rightarrow \text{1 Dedicated Native Tool} \rightarrow \text{1 Allowed Egress FQDN}$):
+The platform ships a 40+ template governed catalog bound to the **Strict 1:1:1 Governance Invariant** ($\text{1 Template} \rightarrow \text{1 Model} \rightarrow \text{1 Dedicated Native Tool} \rightarrow \text{1 Allowed Egress FQDN}$). The table below highlights the original frontline agents; the Fleet Catalog contains the expanded identity, endpoint, network, SysOps, compliance, and campus runbooks.
 
 | # | Agent Identity | Specialization | Confined Sensor Tool | Governed 1-Click Fix |
 | :---: | :--- | :--- | :--- | :--- |
@@ -95,6 +95,12 @@ The platform includes 8 out-of-the-box specialized AI agents bound to the **Stri
 | **6** | ☁️ **Zephyr-Azure** | Cloud Health & Hybrid Sync | `powershell.exe` Entra ID SSO Probe | ⚡ **Flush Cloud SSO Endpoints & DNS Cache** |
 | **7** | 🛡️ **Chronos-Patch** | Patch & CVE Compliance | `powershell.exe` HotFix & Rollup Sensor | ⚡ **Trigger Windows Update Detection Scan** |
 | **8** | 🧹 **Cypher-Registry** | Forensics & Persistence | `cmd.exe /c "reg query ...\Run"` | ⚡ **Clear Stale RunOnce Keys** *(Rollback enabled)* |
+
+### Agent Template Builder & Project Studio
+
+Operators can create a `custom-` agent template by selecting a governed base sensor and authoring its role, objective, deliverables, and success criteria. The sensor executable, sandbox limits, remediation surface, and approved egress remain inherited from the base template.
+
+Project Studio stores finite `project-custom-` playbooks containing up to six ordered agent stages. Each stage runs through the existing mission engine, and only a bounded, DLP-protected evidence context is forwarded to the next stage. There is no recursive routing, parallel swarm, or open-ended loop.
 
 ---
 
@@ -136,7 +142,8 @@ SPLAT/
 │   │   ├── Enums.cs                                # System states, compliance frameworks, SIEM protocols
 │   │   ├── Interfaces.cs                           # Core contracts & zero-trust interfaces
 │   │   ├── Models.cs                               # Immutable records (SingleToolTemplate, RemediationAction, etc.)
-│   │   └── MissionExecutionEngine.cs               # 8-Layer orchestrator with DLP & semantic memory hooks
+│   │   ├── MissionExecutionEngine.cs               # 8-Layer orchestrator with DLP & semantic memory hooks
+│   │   └── ProjectExecutionEngine.cs               # Bounded ordered project-stage execution
 │   │
 │   ├── MissionController.Infrastructure.Windows/   # Win32 & OS kernel integration
 │   │   ├── Jails/NtAclJailManager.cs               # NT ACL jail directory manager (severed inheritance)
@@ -159,7 +166,9 @@ SPLAT/
 │   ├── MissionController.Infrastructure.Data/      # Storage & Compliance
 │   │   ├── SqliteStorageContext.cs                 # WAL-mode SQLite database context with schema migration
 │   │   ├── SqliteChainedAuditLedger.cs             # Cryptographic SHA-256 chained hash ledger
-│   │   ├── SqliteTemplateRegistry.cs               # 8 Governed Autonomous Agent Fleet catalog
+│   │   ├── SqliteTemplateRegistry.cs               # Expanded governed agent template catalog
+│   │   ├── SqliteProjectTemplateRegistry.cs         # Persisted project playbook registry
+│   │   └── Catalog/GovernedProjectCatalog.cs        # Built-in higher-level project playbooks
 │   │   ├── Vector/SqliteSemanticMemoryIndex.cs     # Layer 3 In-Process Vector Embedding Index
 │   │   └── Compliance/                             # Merkle Tree engine & ZIP compliance archive exporter
 │   │
@@ -167,16 +176,17 @@ SPLAT/
 │       ├── App.xaml / App.xaml.cs                  # Electric glowing styles & Dependency Injection container
 │       ├── MainWindow.xaml / MainWindow.xaml.cs    # Mica backdrop window shell with auto-centering
 │       ├── Views/
-│       │   ├── QuickDiagnosticianView.xaml         # 1-Click 8-Agent Squad & Self-Healing Dashboard
+│       │   ├── QuickDiagnosticianView.xaml         # 1-Click governed agent & Self-Healing Dashboard
 │       │   ├── WelcomeOnboardingView.xaml          # First-Run 3-Step Onboarding Wizard
 │       │   ├── LiveMissionMonitorView.xaml         # Real-time token streaming & Job Object gauges
 │       │   ├── TemplateCatalogView.xaml            # Parameter-guided template configuration form
+│       │   ├── ProjectStudioView.xaml               # Ordered project playbook builder and launcher
 │       │   ├── SecurityAuditView.xaml              # Cryptographic audit ledger & circuit breaker
 │       │   └── SemanticSearchView.xaml             # Local semantic incident search UI
 │       └── ViewModels/                             # Reactive MVVM ViewModels
 │
 ├── tests/
-│   └── MissionController.Tests/                    # 41 xUnit unit, integration, & security test suites
+│   └── MissionController.Tests/                    # xUnit unit, integration, & security test suites
 │       ├── RemediationEngineTests.cs               # Layer 8 Sandboxed Fix & Rollback verification
 │       ├── DlpSanitizerTests.cs                    # Layer 4 Password, Hash, Key, & PII masking tests
 │       ├── SemanticMemoryTests.cs                  # Layer 3 Vector embedding & Cosine similarity tests
@@ -198,7 +208,7 @@ SPLAT/
 Every subsystem is validated with comprehensive automated tests:
 
 ```text
-Passed!  - Failed: 0, Passed: 41, Skipped: 0, Total: 41, Duration: 5 s - MissionController.Tests.dll (net9.0)
+Passed!  - Failed: 0, Passed: 77, Skipped: 0, Total: 77, Duration: 6 s - MissionController.Tests.dll (net9.0)
   ✓ RemediationEngineTests.ExecuteFixAsync_RunsSafeFix_AndLogsToAuditLedger
   ✓ RemediationEngineTests.ExecuteRollbackAsync_RollsBackAction_WhenConfigured
   ✓ DlpSanitizerTests.Sanitize_MasksPasswordsAndSecretsInText
@@ -217,7 +227,7 @@ Passed!  - Failed: 0, Passed: 41, Skipped: 0, Total: 41, Duration: 5 s - Mission
   ✓ AuditAndSecurityTests.SingleToolTemplate_StrictRuleValidation_ThrowsOnInvalidConfig
   ✓ SecurityHubViewModelTests.IncidentRevocationManager_EmergencyRevocation_BlacklistsAndAppendsAudit
   ✓ SecurityHubViewModelTests.TokenLifecycleManager_ProactiveTokenRefresh_RenewsSuccessfully
-  ... (41 total automated test suites)
+  ... (77 total automated tests)
 ```
 
 ---

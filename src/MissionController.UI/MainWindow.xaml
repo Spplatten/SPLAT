@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:effects="using:MissionController.UI.Effects"
     Title="SPLAT — Autonomous AI Agent Fleet &amp; System Appliance"
     mc:Ignorable="d">
 
@@ -11,22 +12,50 @@
         <MicaBackdrop />
     </Window.SystemBackdrop>
 
-    <Grid>
+    <Grid Background="{ThemeResource SplatPageBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
+        <!-- The ambient layer is hosted by an empty visual so it cannot tint
+             text, intercept input, or change the XAML accessibility tree. -->
+        <Grid
+            Grid.RowSpan="3"
+            IsHitTestVisible="False"
+            effects:AmbientSurfaceShader.IsEnabled="True" />
+
         <!-- Custom App TitleBar -->
-        <Grid Grid.Row="0" Height="40" Padding="16,0" VerticalAlignment="Center">
-            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                <FontIcon Glyph="&#xE756;" FontSize="16" Foreground="{ThemeResource AccentAAFillColorDefaultBrush}" />
-                <TextBlock Text="SPLAT" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
-                <Border Background="#20808080" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
-                    <TextBlock Text="HARDENED ENTERPRISE" FontSize="10" FontWeight="SemiBold" Foreground="#4CC2FF" />
+        <Grid
+            Grid.Row="0"
+            Height="48"
+            Padding="18,0"
+            Background="{ThemeResource SplatSurfaceMutedBrush}"
+            BorderBrush="{ThemeResource SplatBorderBrush}"
+            BorderThickness="0,0,0,1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <Border Width="28" Height="28" Background="{ThemeResource SplatAccentSubtleBrush}" CornerRadius="7">
+                    <FontIcon Glyph="&#xE756;" FontSize="15" Foreground="{ThemeResource SplatAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Spacing="0" VerticalAlignment="Center">
+                    <TextBlock Text="SPLAT" FontWeight="Bold" FontSize="14" Foreground="{ThemeResource SplatTextPrimaryBrush}" />
+                    <TextBlock Text="MISSION CONTROL" FontSize="9" CharacterSpacing="120" Foreground="{ThemeResource SplatTextTertiaryBrush}" />
+                </StackPanel>
+                <Border Background="{ThemeResource SplatSurfaceElevatedBrush}" BorderBrush="{ThemeResource SplatBorderBrush}" BorderThickness="1" CornerRadius="4" Padding="7,3" Margin="6,0,0,0">
+                    <TextBlock Text="HARDENED ENTERPRISE" FontSize="9" CharacterSpacing="45" FontWeight="SemiBold" Foreground="{ThemeResource SplatAccentBrush}" />
                 </Border>
             </StackPanel>
+            <Border Grid.Column="1" Background="{ThemeResource SplatSurfaceElevatedBrush}" BorderBrush="{ThemeResource SplatBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="10,4" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <Ellipse Width="6" Height="6" Fill="{ThemeResource SplatSuccessBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="CONTROL PLANE ONLINE" FontSize="9" CharacterSpacing="40" FontWeight="SemiBold" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
+                </StackPanel>
+            </Border>
         </Grid>
 
         <!-- Main Navigation View -->
@@ -34,25 +63,38 @@
             x:Name="NavView"
             Grid.Row="1"
             PaneDisplayMode="Left"
+            OpenPaneLength="244"
+            CompactPaneLength="56"
+            Background="Transparent"
             IsBackButtonVisible="Collapsed"
             SelectionChanged="NavView_SelectionChanged"
             IsSettingsVisible="True">
+            <NavigationView.PaneHeader>
+                <TextBlock Text="OPERATIONS" Style="{StaticResource SplatPageSectionLabelStyle}" Margin="12,10,0,8" CharacterSpacing="80" />
+            </NavigationView.PaneHeader>
             <NavigationView.MenuItems>
-                <NavigationViewItem Content="AI Agent Squad (1-Click)" Tag="QuickSolve" Icon="Emoji2" IsSelected="True" />
-                <NavigationViewItem Content="Agent Setup &amp; Readiness" Tag="Onboarding" Icon="Help" />
-                <NavigationViewItem Content="Live Agent Mission Monitor" Tag="Monitor" Icon="Play" />
-                <NavigationViewItem Content="Governed Agent Fleet Catalog" Tag="Catalog" Icon="BrowsePhotos" />
-                <NavigationViewItem Content="Agent Cryptographic Audit" Tag="Audit" Icon="Permissions" />
-                <NavigationViewItem Content="Agent Semantic Memory" Tag="Memory" Icon="Find" />
-                <NavigationViewItem Content="Kernel Sandbox &amp; Jail Inspector" Tag="Jail" Icon="Folder" />
+                <NavigationViewItem Content="Agent Fleet" Tag="QuickSolve" Icon="Emoji2" IsSelected="True" />
+                <NavigationViewItem Content="Setup &amp; Readiness" Tag="Onboarding" Icon="Help" />
+                <NavigationViewItem Content="Live Missions" Tag="Monitor" Icon="Play" />
+                <NavigationViewItem Content="Fleet Catalog" Tag="Catalog" Icon="BrowsePhotos" />
+                <!-- Icon="..." resolves against the Symbol enum, which has no "TaskView" member, so
+                     the string form threw at XAML load. The glyph is addressed directly instead. -->
+                <NavigationViewItem Content="Project Studio" Tag="Projects">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE7C4;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="Cryptographic Audit" Tag="Audit" Icon="Permissions" />
+                <NavigationViewItem Content="Semantic Memory" Tag="Memory" Icon="Find" />
+                <NavigationViewItem Content="Sandbox Inspector" Tag="Jail" Icon="Folder" />
             </NavigationView.MenuItems>
 
-            <Frame x:Name="ContentFrame" Margin="16">
+            <Frame x:Name="ContentFrame" Margin="20,18,20,22">
                 <Frame.ContentTransitions>
                     <TransitionCollection>
                         <NavigationThemeTransition>
                             <NavigationThemeTransition.DefaultNavigationTransitionInfo>
-                                <EntranceNavigationTransitionInfo />
+                                <SlideNavigationTransitionInfo Effect="FromRight" />
                             </NavigationThemeTransition.DefaultNavigationTransitionInfo>
                         </NavigationThemeTransition>
                     </TransitionCollection>
@@ -61,17 +103,26 @@
         </NavigationView>
 
         <!-- Bottom Governance Status Bar -->
-        <Grid Grid.Row="2" Background="{ThemeResource LayerFillColorDefaultBrush}" Padding="16,6" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
+        <Grid Grid.Row="2" Style="{StaticResource SplatStatusBarStyle}" Padding="18,8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16">
-                <TextBlock Text="● Sandbox: Win32 Job Object (Strict Hard Caps)" FontSize="11" Foreground="#6CCB5F" />
-                <TextBlock Text="● NT ACL Jails: Parent Inheritance Stripped" FontSize="11" Foreground="#4CC2FF" />
-                <TextBlock Text="● Ledger: SHA-256 Chained WAL" FontSize="11" Foreground="#D29BFF" />
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="18">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Ellipse Width="6" Height="6" Fill="{ThemeResource SplatSuccessBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="JOB SANDBOX ENFORCED" FontSize="10" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Ellipse Width="6" Height="6" Fill="{ThemeResource SplatAccentBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="ACL JAILS ISOLATED" FontSize="10" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Ellipse Width="6" Height="6" Fill="{ThemeResource SplatVioletBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="SHA-256 LEDGER VERIFIED" FontSize="10" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
+                </StackPanel>
             </StackPanel>
-            <TextBlock Grid.Column="1" Text="SPLAT Governed 8-Layer Appliance | .NET 9 LTS" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock Grid.Column="1" Text="8-LAYER GOVERNED APPLIANCE  ·  .NET 9" FontSize="10" CharacterSpacing="35" Foreground="{ThemeResource SplatTextTertiaryBrush}" />
         </Grid>
     </Grid>
 </Window>

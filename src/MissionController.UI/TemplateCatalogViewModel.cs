@@ -1,7 +1,11 @@
 ﻿using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 
@@ -72,6 +76,76 @@ public partial class TemplateCatalogViewModel : ObservableObject
         return dict;
     }
 
+    public async Task<(bool Success, string Message)> CreateCustomTemplateAsync(
+        string templateId,
+        string name,
+        string description,
+        string category,
+        string systemPrompt,
+        TemplateKind kind,
+        string objective,
+        IEnumerable<string> deliverables,
+        IEnumerable<string> successCriteria,
+        SingleToolTemplate baseTemplate)
+    {
+        if (baseTemplate == null)
+            return (false, "Choose a governed base agent first.");
+
+        var normalizedId = NormalizeTemplateId(templateId);
+        if (!normalizedId.StartsWith("custom-", System.StringComparison.Ordinal))
+            normalizedId = $"custom-{normalizedId}";
+
+        if (normalizedId == "custom-")
+            return (false, "The template ID must contain letters or numbers.");
+
+        if (await _registry.GetTemplateByIdAsync(normalizedId) != null)
+            return (false, $"Template ID '{normalizedId}' already exists.");
+
+        var outputContract = new TemplateOutputContract(
+            objective.Trim(),
+            CleanLines(deliverables),
+            CleanLines(successCriteria));
+
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(description) ||
+            string.IsNullOrWhiteSpace(category) || string.IsNullOrWhiteSpace(systemPrompt) ||
+            string.IsNullOrWhiteSpace(outputContract.Objective) ||
+            outputContract.Deliverables.Count == 0 || outputContract.SuccessCriteria.Count == 0)
+        {
+            return (false, "Name, description, category, directive, objective, deliverables, and success criteria are required.");
+        }
+
+        var governedPrompt = BuildGovernedPrompt(systemPrompt, outputContract);
+        var template = new SingleToolTemplate(
+            normalizedId,
+            name.Trim(),
+            description.Trim(),
+            category.Trim(),
+            baseTemplate.TargetModel,
+            baseTemplate.Tool,
+            baseTemplate.EgressRule,
+            governedPrompt,
+            baseTemplate.ParameterFields,
+            baseTemplate.GetEffectiveDefaults(),
+            System.Array.Empty<RemediationAction>(),
+            kind,
+            outputContract,
+            baseTemplate.TemplateId,
+            true);
+
+        try
+        {
+            template.ValidateStrictRules();
+            await _registry.RegisterTemplateAsync(template);
+            await LoadTemplatesAsync();
+            SelectedTemplate = Templates.FirstOrDefault(item => item.TemplateId == normalizedId) ?? template;
+            return (true, $"Saved governed agent template '{template.Name}'.");
+        }
+        catch (System.Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     [RelayCommand]
     public async System.Threading.Tasks.Task LoadTemplatesAsync()
     {
@@ -94,4 +168,40 @@ public partial class TemplateCatalogViewModel : ObservableObject
             IsLoading = false;
         }
     }
+
+    private static string NormalizeTemplateId(string value)
+    {
+        var builder = new StringBuilder();
+        var separatorPending = false;
+
+        foreach (var character in value.Trim().ToLowerInvariant())
+        {
+            if (character is >= 'a' and <= 'z' or >= '0' and <= '9')
+            {
+                if (separatorPending && builder.Length > 0)
+                    builder.Append('-');
+                builder.Append(character);
+                separatorPending = false;
+            }
+            else
+            {
+                separatorPending = true;
+            }
+        }
+
+        return builder.ToString().Trim('-');
+    }
+
+    private static IReadOnlyList<string> CleanLines(IEnumerable<string> values) => values
+        .SelectMany(value => value.Split(new[] { '\r', '\n' }, System.StringSplitOptions.RemoveEmptyEntries))
+        .Select(value => value.Trim())
+        .Where(value => value.Length > 0)
+        .Distinct(System.StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    private static string BuildGovernedPrompt(string systemPrompt, TemplateOutputContract outputContract) =>
+        $"{systemPrompt.Trim()}\n\n[OUTPUT CONTRACT]\nObjective: {outputContract.Objective}\n" +
+        $"Deliverables: {string.Join("; ", outputContract.Deliverables)}\n" +
+        $"Success criteria: {string.Join("; ", outputContract.SuccessCriteria)}\n" +
+        "Use observed evidence, mark unknowns as unknown, and do not invent telemetry.";
 }

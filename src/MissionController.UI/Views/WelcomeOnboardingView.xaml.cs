@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using MissionController.UI.ViewModels;
@@ -30,6 +30,22 @@ public sealed partial class WelcomeOnboardingView : Page
             3 => "Enter Mission Control",
             _ => "Continue"
         };
+    }
+
+    private void PasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
+    {
+        if (sender is PasswordBox pb)
+        {
+            ViewModel.ApiKeyInput = pb.Password;
+        }
+    }
+
+    private async void PasswordBox_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter && !ViewModel.IsTestingKey)
+        {
+            await ViewModel.ValidateKeyAsync();
+        }
     }
 
     private void NextOrFinishButton_Click(object sender, RoutedEventArgs e)

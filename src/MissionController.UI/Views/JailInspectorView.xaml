@@ -1,13 +1,16 @@
-﻿<Page
+<Page
     x:Class="MissionController.UI.Views.JailInspectorView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:MissionController.UI.ViewModels"
+    Style="{StaticResource SplatPageStyle}"
     mc:Ignorable="d">
 
     <Grid RowSpacing="16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -15,12 +18,12 @@
 
         <!-- Header -->
         <StackPanel Grid.Row="0" Spacing="4">
-            <TextBlock Text="Win32 Subprocess Confinement &amp; Jail Inspector" FontSize="24" FontWeight="SemiBold" />
-            <TextBlock Text="Hardware &amp; filesystem isolation controls enforcing hard resource clamping and zero-zombie process termination" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock Text="Win32 Subprocess Confinement &amp; Jail Inspector" Style="{StaticResource SplatPageTitleStyle}" />
+            <TextBlock Text="Hardware &amp; filesystem isolation controls enforcing hard resource clamping and zero-zombie process termination" Style="{StaticResource SplatPageSubtitleStyle}" />
         </StackPanel>
 
         <!-- Jail Status & Actions Banner -->
-        <Border Grid.Row="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="16">
+        <Border Grid.Row="1" Style="{StaticResource SplatCardStyle}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -32,19 +35,55 @@
                     <TextBlock Text="{x:Bind ViewModel.JailStatusMessage, Mode=OneWay}" FontSize="15" FontWeight="SemiBold" Foreground="#4CC2FF" />
                 </StackPanel>
 
-                <Button Grid.Column="1" Content="Sweep Orphaned Jails" Style="{StaticResource LuminousAccentButtonStyle}" Click="SweepButton_Click" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button Content="Refresh" Style="{StaticResource LuminousSecondaryButtonStyle}" Click="RefreshButton_Click" />
+                    <Button Content="Sweep Orphaned Jails" Style="{StaticResource LuminousAccentButtonStyle}" Click="SweepButton_Click" />
+                </StackPanel>
             </Grid>
         </Border>
 
+        <!-- Active Jails Live List -->
+        <Border Grid.Row="2" Style="{StaticResource SplatCardStyle}" Padding="18">
+            <StackPanel Spacing="10">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE8B7;" FontSize="16" Foreground="#4CC2FF" />
+                    <TextBlock Text="Active / Quarantined Jail Directories (%LOCALAPPDATA%\MissionController\Jails\)" FontSize="14" FontWeight="Bold" />
+                </StackPanel>
+
+                <ListView ItemsSource="{x:Bind ViewModel.ActiveJails, Mode=OneWay}" SelectionMode="None" MaxHeight="220">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="vm:JailDirectoryInfoItem">
+                            <Border Style="{StaticResource SplatSubtleCardStyle}" Margin="0,3" Padding="10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock Text="{x:Bind DirectoryName, Mode=OneTime}" FontFamily="Consolas" FontWeight="SemiBold" FontSize="13" Foreground="#4CC2FF" />
+                                        <TextBlock Text="{x:Bind FullPath, Mode=OneTime}" FontFamily="Consolas" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" HorizontalAlignment="Right" Spacing="2">
+                                        <TextBlock Text="{x:Bind SecurityStatus, Mode=OneTime}" FontSize="11" FontWeight="SemiBold" Foreground="#6CCB5F" HorizontalAlignment="Right" />
+                                        <TextBlock Text="{x:Bind FormattedFileCount, Mode=OneTime}" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" HorizontalAlignment="Right" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </StackPanel>
+        </Border>
+
         <!-- Security Guardrails Grid -->
-        <Grid Grid.Row="2" ColumnSpacing="16" RowSpacing="16">
+        <Grid Grid.Row="3" ColumnSpacing="16" RowSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
             <!-- Card 1: Win32 Job Object Hard Limits -->
-            <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="18">
+            <Border Grid.Column="0" Style="{StaticResource SplatCardStyle}" Padding="18">
                 <StackPanel Spacing="12">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE7EF;" FontSize="16" Foreground="#4CC2FF" />
@@ -52,16 +91,16 @@
                     </StackPanel>
 
                     <StackPanel Spacing="8">
-                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                        <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                             <TextBlock Text="• JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: Enforced on all spawned workers." FontSize="12" />
                         </Border>
-                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                        <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                             <TextBlock Text="• JOB_OBJECT_LIMIT_JOB_MEMORY: Hard physical RAM cap per template." FontSize="12" />
                         </Border>
-                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                        <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                             <TextBlock Text="• JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK: Prevents nested PowerShell/CLI job errors." FontSize="12" />
                         </Border>
-                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                        <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                             <TextBlock Text="• Suspended Process Creation: CREATE_SUSPENDED binding before ResumeThread." FontSize="12" />
                         </Border>
                     </StackPanel>
@@ -69,7 +108,7 @@
             </Border>
 
             <!-- Card 2: NT ACL Directory Isolation -->
-            <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="18">
+            <Border Grid.Column="1" Style="{StaticResource SplatCardStyle}" Padding="18">
                 <StackPanel Spacing="12">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE8D7;" FontSize="16" Foreground="#6CCB5F" />
@@ -77,16 +116,16 @@
                     </StackPanel>
 
                     <StackPanel Spacing="8">
-                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                        <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                             <TextBlock Text="• Root Path: %LOCALAPPDATA%\MissionController\Jails\{MissionId}\" FontSize="12" FontFamily="Consolas" />
                         </Border>
-                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                        <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                             <TextBlock Text="• Parent Drive Inheritance: Stripped explicitly (SetAccessRuleProtection)." FontSize="12" />
                         </Border>
-                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                        <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                             <TextBlock Text="• Restricted Token: Medium/Low integrity token dropping S-1-5-32-544 (Admin)." FontSize="12" />
                         </Border>
-                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                        <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                             <TextBlock Text="• Handle Drain Cycle: Exponential backoff file cleanup retry loop." FontSize="12" />
                         </Border>
                     </StackPanel>

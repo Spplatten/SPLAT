@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -12,15 +13,27 @@ namespace MissionController.Infrastructure.Network.Identity;
 
 public sealed class ServiceAccountAuthService
 {
+    /// <summary>
+    /// The only host permitted to receive a signed service-account assertion. "token_uri" is read
+    /// out of an operator-supplied JSON key file, so an attacker who can plant or edit that file
+    /// could otherwise aim a validly-signed JWT at a host of their choosing and collect it.
+    /// </summary>
+    private const string GoogleTokenHost = "oauth2.googleapis.com";
+
     private readonly HttpClient _httpClient;
     private readonly ICredentialVault _vault;
+    private readonly Egress.EgressFirewallHandler? _firewallHandler;
 
     public const string SaTokenKey = "GoogleCloud.ServiceAccountToken";
 
-    public ServiceAccountAuthService(HttpClient httpClient, ICredentialVault vault)
+    public ServiceAccountAuthService(
+        HttpClient httpClient,
+        ICredentialVault vault,
+        Egress.EgressFirewallHandler? firewallHandler = null)
     {
         _httpClient = httpClient;
         _vault = vault;
+        _firewallHandler = firewallHandler;
     }
 
     public async Task<string> AuthenticateWithServiceAccountJsonAsync(string saJsonContent, CancellationToken cancellationToken = default)
@@ -32,7 +45,16 @@ public sealed class ServiceAccountAuthService
         string privateKeyPem = root.GetProperty("private_key").GetString()!;
         string tokenUri = root.TryGetProperty("token_uri", out var uri)
             ? uri.GetString()!
-            : "https://oauth2.googleapis.com/token";
+            : $"https://{GoogleTokenHost}/token";
+
+        if (!Uri.TryCreate(tokenUri, UriKind.Absolute, out var parsedTokenUri) ||
+            !parsedTokenUri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !parsedTokenUri.Host.Equals(GoogleTokenHost, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SecurityException(
+                $"Service account authentication blocked: 'token_uri' must be https on {GoogleTokenHost}. " +
+                "A key file pointing elsewhere would redirect a signed assertion to an untrusted host.");
+        }
 
         // Create JWT Assertion signed with RS256
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -67,6 +89,8 @@ public sealed class ServiceAccountAuthService
                 new KeyValuePair<string, string>("assertion", jwtAssertion)
             })
         };
+
+        using var scope = _firewallHandler?.BeginScope(GoogleTokenHost);
 
         var response = await _httpClient.SendAsync(tokenRequest, cancellationToken);
         response.EnsureSuccessStatusCode();

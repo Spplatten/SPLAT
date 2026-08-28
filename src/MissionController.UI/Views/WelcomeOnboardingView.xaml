@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Style="{StaticResource SplatPageStyle}"
     mc:Ignorable="d">
 
     <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
@@ -17,9 +18,9 @@
         <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,28,0,16" Spacing="6">
             <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
                 <FontIcon Glyph="&#xE756;" FontSize="28" Foreground="#00E5FF" />
-                <TextBlock Text="Welcome to SPLAT" FontSize="26" FontWeight="Bold" />
+                <TextBlock Text="Welcome to SPLAT" Style="{StaticResource SplatPageTitleStyle}" FontSize="26" FontWeight="Bold" />
             </StackPanel>
-            <TextBlock Text="Deploy autonomous, enterprise-governed AI agents to solve IT, Security, and System tasks safely." FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+            <TextBlock Text="Deploy autonomous, enterprise-governed AI agents to solve IT, Security, and System tasks safely." Style="{StaticResource SplatPageSubtitleStyle}" HorizontalAlignment="Center" />
         </StackPanel>
 
         <!-- Main Wizard Content (Cards by Step) -->
@@ -112,7 +113,7 @@
                 <StackPanel Spacing="18" Visibility="{x:Bind GetStep2Visibility(ViewModel.CurrentStep), Mode=OneWay}">
                     <StackPanel Spacing="4">
                         <TextBlock Text="Step 2 of 3: Connect Your Agents' Reasoning Brain" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock Text="Connect an Anthropic (sk-ant-…) or Google Gemini (AIza…) API key to give your agents real diagnostic intelligence — the key is routed to the right provider automatically. No key? Missions still run — the analysis is just clearly labeled as simulated." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        <TextBlock Text="Connect an Anthropic (sk-ant-…) or Google Gemini (AIza…) API key to give your agents real diagnostic intelligence — the key is verified live and routed to the right provider automatically." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                     </StackPanel>
 
                     <StackPanel Spacing="10" Margin="0,8,0,0">
@@ -124,19 +125,22 @@
                             </Grid.ColumnDefinitions>
                             <PasswordBox
                                 Grid.Column="0"
-                                PlaceholderText="sk-ant-..."
+                                PlaceholderText="Paste Anthropic (sk-ant-...) or Gemini (AIza...) key"
                                 Password="{x:Bind ViewModel.ApiKeyInput, Mode=TwoWay}"
+                                PasswordChanged="PasswordBox_PasswordChanged"
+                                KeyDown="PasswordBox_KeyDown"
                                 Height="36" />
                             <Button
                                 Grid.Column="1"
-                                Content="Save Key"
+                                Content="Verify &amp; Save Key"
                                 Style="{StaticResource AccentButtonStyle}"
+                                IsEnabled="{x:Bind ViewModel.IsTestingKey, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}"
                                 Command="{x:Bind ViewModel.ValidateKeyCommand}" />
                         </Grid>
 
                         <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
                             <ProgressRing IsActive="{x:Bind ViewModel.IsTestingKey, Mode=OneWay}" Width="14" Height="14" />
-                            <TextBlock Text="{x:Bind ViewModel.KeyStatusMessage, Mode=OneWay}" FontSize="12" Foreground="#4CC2FF" />
+                            <TextBlock Text="{x:Bind ViewModel.KeyStatusMessage, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource SplatAccentBrush}" TextWrapping="Wrap" />
                         </StackPanel>
                     </StackPanel>
 

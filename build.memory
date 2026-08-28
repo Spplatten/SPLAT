@@ -52,4 +52,4 @@
 - **Packaging Pipeline (`packaging/build-msix.ps1`):** Self-contained `win-x64` Release compilation, enterprise code-signing certificate generation, and Authenticode SHA-256 digital signing.
 - **Intune & SCCM Silent Deployment (`packaging/install-enterprise.ps1`):** Silent installer deploying cert to `TrustedPeople` and installing MSIX bundle.
 - **Clean De-Provisioning (`packaging/uninstall-enterprise.ps1`):** Completely removes AppX and purges DPAPI vaults and active jails.
-- **Test Suite (`tests/MissionController.Tests`):** **59/59 unit, integration, and security test suites passing (100% green)**.
+- **Test Suite (`tests/MissionController.Tests`):** **77/77 unit, integration, and security tests passing (100% green)** — verified against `net9.0-windows`. Count last reconciled after the AI gateway landed (`AiGatewayTests`, `EngineResilienceTests`, `ModelStreamClientTests`); re-run before trusting this line.

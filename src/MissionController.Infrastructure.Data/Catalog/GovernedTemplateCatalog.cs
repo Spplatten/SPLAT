@@ -28,8 +28,8 @@ public static partial class GovernedTemplateCatalog
     // (identity abuse, persistence, crypto posture). Flash handles high-volume structured
     // parsing where the analysis is largely tabular - this keeps per-mission cost proportional
     // to analytic difficulty rather than defaulting the whole fleet onto the expensive model.
-    private const string ModelPro = "gemini-2.5-pro";
-    private const string ModelFlash = "gemini-2.5-flash";
+    private const string ModelPro = "claude-3-5-sonnet-20241022";
+    private const string ModelFlash = "claude-3-5-haiku-20241022";
 
     // --- Egress governance ----------------------------------------------------------------
     // Single source of truth for the approved AI-gateway FQDN, declared centrally so a

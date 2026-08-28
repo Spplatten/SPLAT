@@ -13,17 +13,25 @@ namespace MissionController.Infrastructure.Network.Identity;
 
 public sealed class PkceLoopbackAuthService : IDisposable
 {
+    /// <summary>Google's OAuth token endpoint host - the only destination for a code exchange.</summary>
+    private const string GoogleTokenHost = "oauth2.googleapis.com";
+
     private readonly HttpClient _httpClient;
     private readonly ICredentialVault _vault;
+    private readonly Egress.EgressFirewallHandler? _firewallHandler;
     private Timer? _renewalTimer;
 
     public const string TokenSecretKey = "GoogleCloud.OAuthToken";
     public const string RefreshSecretKey = "GoogleCloud.RefreshToken";
 
-    public PkceLoopbackAuthService(HttpClient httpClient, ICredentialVault vault)
+    public PkceLoopbackAuthService(
+        HttpClient httpClient,
+        ICredentialVault vault,
+        Egress.EgressFirewallHandler? firewallHandler = null)
     {
         _httpClient = httpClient;
         _vault = vault;
+        _firewallHandler = firewallHandler;
     }
 
     public async Task<string> PerformInteractiveLoginAsync(
@@ -103,6 +111,8 @@ public sealed class PkceLoopbackAuthService : IDisposable
                 })
             };
 
+            using var tokenScope = _firewallHandler?.BeginScope(GoogleTokenHost);
+
             var tokenResponse = await _httpClient.SendAsync(tokenRequest, cancellationToken);
             tokenResponse.EnsureSuccessStatusCode();
 
@@ -163,6 +173,8 @@ public sealed class PkceLoopbackAuthService : IDisposable
                 new KeyValuePair<string, string>("grant_type", "refresh_token")
             })
         };
+
+        using var refreshScope = _firewallHandler?.BeginScope(GoogleTokenHost);
 
         var response = await _httpClient.SendAsync(tokenRequest, cancellationToken);
         if (!response.IsSuccessStatusCode)

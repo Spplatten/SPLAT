@@ -11,6 +11,18 @@ using Microsoft.UI.Xaml;
 
 namespace MissionController.UI.Effects.Win2D;
 
+public enum ShaderEffectMode
+{
+    Glow = 0,
+    Aurora = 1,
+    ScanSweep = 2,
+    GlassNoise = 3,
+    RadarScan = 4,
+    CyberGrid = 5,
+    ElectricShield = 6,
+    NeuralSynapse = 7
+}
+
 /// <summary>
 /// Owns a source-free Win2D PixelShaderEffect and attaches it to a CanvasControl.
 /// The project-level Win2D props file keeps this implementation behind an
@@ -65,27 +77,41 @@ public sealed class Win2DShaderCanvasRenderer : IDisposable
         var weights = suppliedWeights is { Length: 8 }
             ? suppliedWeights.ToArray()
             : ShaderFrame.Default.EffectiveWeights.ToArray();
+        for (var index = 0; index < weights.Length; index++)
+        {
+            weights[index] = ClampFinite(weights[index], -2.0f, 2.0f, 0.0f);
+        }
+
+        var primaryColor = ClampColor(frame.Color, ShaderFrame.DefaultColor);
+        var secondaryColor = ClampColor(frame.AccentColor, ShaderFrame.DefaultAccentColor);
 
         _frame = frame with
         {
-            Intensity = Math.Clamp(frame.Intensity, 0.0f, 1.0f),
-            Radius = Math.Max(frame.Radius, 0.001f),
-            Softness = Math.Max(frame.Softness, 0.001f),
-                Color = new Vector4(
-                    Math.Clamp(frame.Color.X, 0.0f, 1.0f),
-                    Math.Clamp(frame.Color.Y, 0.0f, 1.0f),
-                    Math.Clamp(frame.Color.Z, 0.0f, 1.0f),
-                    Math.Clamp(frame.Color.W, 0.0f, 1.0f)),
+            Time = NormalizeTime(frame.Time),
+            Mode = NormalizeMode(frame.Mode),
+            Intensity = ClampFinite(frame.Intensity, 0.0f, 1.0f, 0.0f),
+            Radius = ClampFinite(frame.Radius, 0.001f, 1.5f, 0.42f),
+            Softness = ClampFinite(frame.Softness, 0.001f, 1.5f, 0.34f),
+            PressOrigin = new Vector2(
+                ClampFinite(frame.PressOrigin.X, 0.0f, 1.0f, 0.5f),
+                ClampFinite(frame.PressOrigin.Y, 0.0f, 1.0f, 0.5f)),
+            Color = primaryColor,
+            AccentColor = secondaryColor,
             Weights = weights
         };
         _canvas.Invalidate();
+    }
+
+    public void SetMode(ShaderEffectMode mode)
+    {
+        SetFrame(_frame with { Mode = mode });
     }
 
     public void SetNeuralWeights(ReadOnlySpan<float> weights)
     {
         if (weights.Length != 8)
         {
-            throw new ArgumentException("The glow shader expects eight scalar style weights.", nameof(weights));
+            throw new ArgumentException("The appearance shader expects eight scalar style weights.", nameof(weights));
         }
 
         SetFrame(_frame with { Weights = weights.ToArray() });
@@ -149,7 +175,7 @@ public sealed class Win2DShaderCanvasRenderer : IDisposable
         {
             var effect = new PixelShaderEffect(_shaderCode)
             {
-                Name = "MissionControllerGlow",
+                Name = "MissionControllerAppearance",
                 CacheOutput = false
             };
 
@@ -189,8 +215,12 @@ public sealed class Win2DShaderCanvasRenderer : IDisposable
         _effect.Properties["intensity"] = _frame.Intensity;
         _effect.Properties["color"] = _frame.Color;
         _effect.Properties["pressOrigin"] = _frame.PressOrigin;
-        _effect.Properties["radius"] = _frame.Radius * pixelResolution.X;
-        _effect.Properties["softness"] = _frame.Softness * pixelResolution.X;
+        // The shader measures distance in normalized UV space, so radius and
+        // softness remain resolution-independent on mixed-DPI monitors.
+        _effect.Properties["radius"] = _frame.Radius;
+        _effect.Properties["softness"] = _frame.Softness;
+        _effect.Properties["mode"] = (int)_frame.Mode;
+        _effect.Properties["accentColor"] = _frame.AccentColor;
         _effect.Properties["weights"] = _frame.EffectiveWeights;
 
         // A source-free PixelShaderEffect derives its output bounds from the
@@ -236,6 +266,41 @@ public sealed class Win2DShaderCanvasRenderer : IDisposable
         _effect = null;
     }
 
+    private static float NormalizeTime(float time)
+    {
+        if (!float.IsFinite(time))
+        {
+            return 0.0f;
+        }
+
+        var wrappedTime = time % 3600.0f;
+        return wrappedTime < 0.0f ? wrappedTime + 3600.0f : wrappedTime;
+    }
+
+    private static Vector4 ClampColor(Vector4 color, Vector4 fallback)
+    {
+        if (!float.IsFinite(color.W) || color.W <= 0.0f)
+        {
+            color = fallback;
+        }
+
+        return new Vector4(
+            ClampFinite(color.X, 0.0f, 1.0f, fallback.X),
+            ClampFinite(color.Y, 0.0f, 1.0f, fallback.Y),
+            ClampFinite(color.Z, 0.0f, 1.0f, fallback.Z),
+            ClampFinite(color.W, 0.0f, 1.0f, fallback.W));
+    }
+
+    private static float ClampFinite(float value, float minimum, float maximum, float fallback)
+    {
+        return float.IsFinite(value) ? Math.Clamp(value, minimum, maximum) : fallback;
+    }
+
+    private static ShaderEffectMode NormalizeMode(ShaderEffectMode mode)
+    {
+        return Enum.IsDefined(typeof(ShaderEffectMode), mode) ? mode : ShaderEffectMode.Glow;
+    }
+
     private void VerifyUiThread()
     {
         if (!_canvas.DispatcherQueue.HasThreadAccess)
@@ -257,8 +322,14 @@ public readonly record struct ShaderFrame(
     Vector2 PressOrigin,
     float Radius,
     float Softness,
-    float[]? Weights = null)
+    float[]? Weights = null,
+    Vector4 AccentColor = default,
+    ShaderEffectMode Mode = ShaderEffectMode.Glow)
 {
+    public static readonly Vector4 DefaultColor = new(0.30f, 0.76f, 1.0f, 1.0f);
+
+    public static readonly Vector4 DefaultAccentColor = new(0.82f, 0.34f, 1.0f, 1.0f);
+
     public float[] EffectiveWeights => Weights ?? DefaultWeights;
 
     private static float[] DefaultWeights => new[]
@@ -269,14 +340,16 @@ public readonly record struct ShaderFrame(
     public static ShaderFrame Default => new(
         Time: 0.0f,
         Intensity: 0.0f,
-        Color: new Vector4(0.30f, 0.76f, 1.0f, 1.0f),
+        Color: DefaultColor,
         PressOrigin: new Vector2(0.5f, 0.5f),
         Radius: 0.42f,
         Softness: 0.34f,
         // Eight scalar weights leave a small constant-buffer seam for a
         // learned style/material profile without forcing a neural pass on
         // every frame when the compositor fallback is sufficient.
-        Weights: DefaultWeights);
+        Weights: DefaultWeights,
+        AccentColor: DefaultAccentColor,
+        Mode: ShaderEffectMode.Glow);
 }
 
 #endif
