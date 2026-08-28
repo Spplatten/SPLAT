@@ -454,7 +454,60 @@ public record ExecutiveDiagnosisResult(
     string StatusHeadline,
     IReadOnlyList<string> KeyFindings,
     IReadOnlyList<string>? RecommendedActions = null,
-    string? RawAnalysis = null);
+    string? RawAnalysis = null,
+    GroundingAttestation? Attestation = null);
+
+/// <summary>
+/// Whether a single finding's specifics could be located in the telemetry that produced it.
+/// Ordered by decreasing evidentiary strength.
+/// </summary>
+public enum GroundingState
+{
+    /// <summary>Every checkable claim appears in the raw sensor output.</summary>
+    Grounded,
+
+    /// <summary>Some claims anchored, at least one absent - treat the unanchored specifics with suspicion.</summary>
+    PartiallyGrounded,
+
+    /// <summary>Prose with no falsifiable specifics. Neither corroborated nor refuted.</summary>
+    Unattributed,
+
+    /// <summary>Specific claims were made and NONE appear in the telemetry. The fabrication signal.</summary>
+    Unsupported,
+
+    /// <summary>No telemetry was captured, so nothing could be checked at all.</summary>
+    NoTelemetry
+}
+
+/// <summary>One finding plus the evidence that does or does not stand behind it.</summary>
+public record FindingAttestation(
+    string Finding,
+    GroundingState State,
+    IReadOnlyList<string> AnchoredClaims,
+    IReadOnlyList<string> MissingClaims);
+
+/// <summary>
+/// Evidence summary for a whole verdict. Carried alongside the findings so the audit ledger records
+/// not just WHAT was concluded but how much of it the collected telemetry actually supported.
+/// </summary>
+public record GroundingAttestation(IReadOnlyList<FindingAttestation> Findings)
+{
+    public static GroundingAttestation Empty { get; } = new(Array.Empty<FindingAttestation>());
+
+    public int GroundedCount => Findings.Count(f => f.State == GroundingState.Grounded);
+    public int PartiallyGroundedCount => Findings.Count(f => f.State == GroundingState.PartiallyGrounded);
+    public int UnsupportedCount => Findings.Count(f => f.State == GroundingState.Unsupported);
+    public int UnattributedCount => Findings.Count(f => f.State == GroundingState.Unattributed);
+
+    /// <summary>True when at least one finding asserted specifics the telemetry never contained.</summary>
+    public bool HasUnsupportedFindings => UnsupportedCount > 0;
+
+    /// <summary>One-line summary for the audit trail and the operator-facing evidence chip.</summary>
+    public string Summary => Findings.Count == 0
+        ? "No findings to attest."
+        : $"Evidence: {GroundedCount} grounded, {PartiallyGroundedCount} partial, " +
+          $"{UnsupportedCount} unsupported, {UnattributedCount} unattributed.";
+}
 
 /// <summary>One completed Reason-Act-Observe cycle: a full 1:1:1 mission plus why it was chosen.</summary>
 public record InvestigationStep(

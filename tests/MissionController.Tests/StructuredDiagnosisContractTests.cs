@@ -176,7 +176,11 @@ public class StructuredDiagnosisContractTests
             modelReply, rawToolOutput: "C: 4.2 GB 250 GB", templateName: "Titan-SysOps");
 
         Assert.Equal(DiagnosticHealthStatus.Critical, result.OverallStatus);
-        Assert.Equal("Drive C: has 1.7% free space remaining", result.StatusHeadline);
+        // Contains, not Equal: TelemetryGrounder may prefix the headline with an UNVERIFIED marker
+        // when no finding is anchored in the captured telemetry. This fixture uses deliberately
+        // minimal stdout, so the marker is correct behaviour - what this test pins is that the
+        // model's own headline survives the round trip, not how grounding decorates it.
+        Assert.Contains("Drive C: has 1.7% free space remaining", result.StatusHeadline);
         Assert.Equal(2, result.KeyFindings.Count);
         Assert.Contains(result.KeyFindings, f => f.Contains("4.2 GB free of 250 GB"));
         Assert.Equal(2, result.RecommendedActions!.Count);

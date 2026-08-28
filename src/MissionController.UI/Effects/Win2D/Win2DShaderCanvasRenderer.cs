@@ -36,6 +36,7 @@ public sealed class Win2DShaderCanvasRenderer : IDisposable
     private readonly byte[] _shaderCode;
     private readonly Stopwatch _clock = new();
     private PixelShaderEffect? _effect;
+    private HashSet<string>? _declaredConstants;
     private DispatcherQueueTimer? _animationTimer;
     private ShaderFrame _frame = ShaderFrame.Default;
     private bool _disposed;
@@ -187,6 +188,23 @@ public sealed class Win2DShaderCanvasRenderer : IDisposable
             }
 
             _effect = effect;
+
+            // Snapshot the constant names this bytecode declares, once, so the per-frame draw does
+            // not pay for exception handling at 60fps just to discover the same thing.
+            _declaredConstants = new HashSet<string>(StringComparer.Ordinal);
+            try
+            {
+                foreach (var key in effect.Properties.Keys)
+                {
+                    _declaredConstants.Add(key);
+                }
+            }
+            catch
+            {
+                // If the names cannot be enumerated, fall back to attempting every write.
+                _declaredConstants = null;
+            }
+
             IsAvailable = true;
         }
         catch (Exception exception)
@@ -210,23 +228,52 @@ public sealed class Win2DShaderCanvasRenderer : IDisposable
         // Scene position is expressed in physical pixels while CanvasControl
         // layout and DrawImage bounds are expressed in DIPs; keep that contract
         // explicit so press feedback stays correct on mixed-DPI monitors.
-        _effect.Properties["resolution"] = pixelResolution;
-        _effect.Properties["time"] = _frame.Time;
-        _effect.Properties["intensity"] = _frame.Intensity;
-        _effect.Properties["color"] = _frame.Color;
-        _effect.Properties["pressOrigin"] = _frame.PressOrigin;
+        // Each shader declares only the constants it needs - the standalone effects (RadarScan,
+        // CyberGrid, ElectricShield, NeuralSynapse) have no pressOrigin/radius/softness/mode, which
+        // belong to the Glow mega-shader. Assigning a constant a shader does not declare throws, so
+        // every write is filtered through the names this bytecode actually exposes.
+        SetConstant("resolution", pixelResolution);
+        SetConstant("time", _frame.Time);
+        SetConstant("intensity", _frame.Intensity);
+        SetConstant("color", _frame.Color);
+        SetConstant("pressOrigin", _frame.PressOrigin);
         // The shader measures distance in normalized UV space, so radius and
         // softness remain resolution-independent on mixed-DPI monitors.
-        _effect.Properties["radius"] = _frame.Radius;
-        _effect.Properties["softness"] = _frame.Softness;
-        _effect.Properties["mode"] = (int)_frame.Mode;
-        _effect.Properties["accentColor"] = _frame.AccentColor;
-        _effect.Properties["weights"] = _frame.EffectiveWeights;
+        SetConstant("radius", _frame.Radius);
+        SetConstant("softness", _frame.Softness);
+        SetConstant("mode", (int)_frame.Mode);
+        SetConstant("accentColor", _frame.AccentColor);
+        SetConstant("weights", _frame.EffectiveWeights);
 
         // A source-free PixelShaderEffect derives its output bounds from the
         // current drawing session; this is the supported Win2D path for a
         // procedural image with D2D_INPUT_COUNT set to zero.
         args.DrawingSession.DrawImage(_effect);
+    }
+
+    /// <summary>
+    /// Writes one shader constant, skipping names the loaded bytecode does not declare.
+    /// </summary>
+    private void SetConstant(string name, object value)
+    {
+        if (_effect is null)
+        {
+            return;
+        }
+
+        if (_declaredConstants is not null && !_declaredConstants.Contains(name))
+        {
+            return;
+        }
+
+        try
+        {
+            _effect.Properties[name] = value;
+        }
+        catch
+        {
+            // A shader that rejects a constant must not take the frame down with it.
+        }
     }
 
     private void OnAnimationTick(DispatcherQueueTimer sender, object args)

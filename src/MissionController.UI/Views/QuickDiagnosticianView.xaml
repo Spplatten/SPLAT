@@ -7,6 +7,7 @@
     xmlns:vm="using:MissionController.UI.ViewModels"
     xmlns:models="using:MissionController.Core.Models"
     xmlns:effects="using:MissionController.UI.Effects"
+    xmlns:win2d="using:MissionController.UI.Effects.Win2D"
     Style="{StaticResource SplatPageStyle}"
     mc:Ignorable="d">
 
@@ -111,9 +112,20 @@
                             Height="36"
                             VerticalAlignment="Center" />
 
-                        <!-- Electric Energy Glowing Button with Lightning Glyph -->
+                        <!-- Hero action. The ElectricShield HLSL effect sits BEHIND the button and is
+                             inflated past its bounds by the negative margin, so the plasma aura reads
+                             as a halo around the button rather than a rectangle on top of it.
+                             IsHitTestVisible=False keeps the canvas from swallowing the click. -->
+                        <Grid Grid.Column="1" VerticalAlignment="Center">
+                            <win2d:ShaderCanvasControl
+                                Mode="ElectricShield"
+                                IsAnimated="True"
+                                Intensity="0.7"
+                                PrimaryColor="#00E5FF"
+                                Margin="-16"
+                                IsHitTestVisible="False" />
+
                         <Button
-                            Grid.Column="1"
                             Style="{StaticResource ElectricEnergyButtonStyle}"
                             Command="{x:Bind ViewModel.RunCustomAskCommand}"
                             IsEnabled="{x:Bind ViewModel.IsRunning, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}"
@@ -125,6 +137,7 @@
                                 <TextBlock Text="Dispatch Agent" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
+                        </Grid>
                     </Grid>
                 </StackPanel>
             </Border>

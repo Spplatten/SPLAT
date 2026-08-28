@@ -325,7 +325,10 @@ public class GovernedInvestigationLoopTests
         Assert.Equal(2, result.Steps.Count);
         Assert.Equal("Operator-selected starting diagnostic.", result.Steps[0].SelectionReason);
         Assert.Equal("Following the unexplained signal.", result.Steps[1].SelectionReason);
-        Assert.Equal("Port 443 handshake failed", result.Steps[1].Verdict.StatusHeadline);
+        // Contains, not Equal: the scripted engine emits placeholder stdout, so TelemetryGrounder
+        // correctly marks the verdict UNVERIFIED. This test is about chain mechanics - that step 2
+        // ran and its verdict was recorded - not about grounding decoration.
+        Assert.Contains("Port 443 handshake failed", result.Steps[1].Verdict.StatusHeadline);
         Assert.Equal(DiagnosticHealthStatus.Critical, result.OverallStatus);
 
         Assert.Contains(ledger.Entries, e => e.Action == "INVESTIGATION_STARTED");

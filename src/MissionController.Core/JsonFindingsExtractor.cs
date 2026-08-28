@@ -33,21 +33,25 @@ public sealed class JsonFindingsExtractor : IDiagnosticFindingsExtractor
             return CreateEmptyOrRawFallback(rawToolOutput, templateName);
         }
 
-        // 1. Try to extract and parse JSON code block or raw JSON object
+        // 1. Try to extract and parse JSON code block or raw JSON object.
+        //    Model-derived: every claim is attested against the telemetry before it becomes a verdict.
         if (TryExtractFromJson(aiOutput, out var jsonResult))
         {
-            return jsonResult!;
+            return TelemetryGrounder.Attest(jsonResult!, rawToolOutput);
         }
 
-        // 2. Check for simulated / offline notice or empty AI response
+        // 2. Check for simulated / offline notice or empty AI response.
+        //    Exempt from attestation: this path derives its findings BY READING the telemetry, so it
+        //    is grounded by construction and a second-guessing pass would only add false doubt.
         if (aiOutput.Contains("SIMULATED OUTPUT", StringComparison.OrdinalIgnoreCase) ||
             aiOutput.Contains("no AI model is connected", StringComparison.OrdinalIgnoreCase))
         {
             return AnalyzeRawTelemetryDeterministic(rawToolOutput, templateName, aiOutput);
         }
 
-        // 3. Fallback: Parse structured Markdown (headers, bullets, status cues)
-        return ParseMarkdownFallback(aiOutput, templateName);
+        // 3. Fallback: Parse structured Markdown (headers, bullets, status cues).
+        //    Model-derived, so it carries the same attestation requirement as the JSON path.
+        return TelemetryGrounder.Attest(ParseMarkdownFallback(aiOutput, templateName), rawToolOutput);
     }
 
     /// <summary>
