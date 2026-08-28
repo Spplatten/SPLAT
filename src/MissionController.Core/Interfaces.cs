@@ -174,6 +174,22 @@ public interface ITemplateRegistry
     Task RegisterTemplateAsync(SingleToolTemplate template, CancellationToken cancellationToken = default);
 }
 
+public interface IProjectTemplateRegistry
+{
+    Task<IReadOnlyList<ProjectTemplate>> GetAllProjectTemplatesAsync(CancellationToken cancellationToken = default);
+    Task<ProjectTemplate?> GetProjectTemplateByIdAsync(string projectId, CancellationToken cancellationToken = default);
+    Task RegisterProjectTemplateAsync(ProjectTemplate project, CancellationToken cancellationToken = default);
+}
+
+public interface IProjectExecutionEngine
+{
+    IAsyncEnumerable<MissionChunk> ExecuteProjectAsync(
+        ProjectTemplate project,
+        IReadOnlyDictionary<string, string> parameters,
+        string operatorIdentity,
+        CancellationToken cancellationToken = default);
+}
+
 public record SemanticSearchResult(
     Guid MissionId,
     string TemplateId,
@@ -206,5 +222,25 @@ public interface IMissionExecutionEngine
         SingleToolTemplate template,
         IReadOnlyDictionary<string, string> parameters,
         string operatorIdentity,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IDiagnosticFindingsExtractor
+{
+    ExecutiveDiagnosisResult ExtractFindings(string aiOutput, string? rawToolOutput = null, string? templateName = null);
+}
+
+/// <summary>
+/// Bounded multi-step investigation. Each step is a complete 1:1:1 mission in its own jail and job
+/// object; the loop only decides WHETHER there is a next step and WHICH governed template it uses.
+/// </summary>
+public interface IGovernedInvestigationLoop
+{
+    Task<InvestigationResult> InvestigateAsync(
+        SingleToolTemplate startingTemplate,
+        IReadOnlyDictionary<string, string> parameters,
+        string operatorIdentity,
+        int maxSteps = 3,
+        IProgress<MissionChunk>? progress = null,
         CancellationToken cancellationToken = default);
 }

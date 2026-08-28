@@ -39,6 +39,13 @@ public enum MissionChunkType
     Completed
 }
 
+public enum TemplateKind
+{
+    DiagnosticAgent,
+    TaskAgent,
+    ProjectAgent
+}
+
 public enum SiemProtocol
 {
     SyslogUdp,
@@ -59,6 +66,7 @@ public enum EdrProviderType
 {
     MicrosoftDefenderForEndpoint,
     CrowdStrikeFalcon,
+    SentinelOne,
     GenericLocal
 }
 

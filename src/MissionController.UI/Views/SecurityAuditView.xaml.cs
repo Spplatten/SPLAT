@@ -59,6 +59,35 @@ public sealed partial class SecurityAuditView : Page
 
     private async void TripCircuitBreaker_Click(object sender, RoutedEventArgs e)
     {
+        var target = ViewModel.RevocationTarget?.Trim();
+        if (string.IsNullOrEmpty(target))
+        {
+            var missingTargetDialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "Revocation target required",
+                Content = "Enter an operator ID or token fingerprint before using the circuit breaker.",
+                CloseButtonText = "Close"
+            };
+            await missingTargetDialog.ShowAsync();
+            return;
+        }
+
+        var confirmationDialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "Confirm emergency revocation",
+            Content = $"Immediately revoke access for '{target}' and append the action to the audit ledger?",
+            PrimaryButtonText = "Revoke access",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close
+        };
+
+        if (await confirmationDialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
         await ViewModel.TriggerEmergencyRevocationAsync();
     }
 

@@ -1,9 +1,11 @@
-﻿<Page
+<Page
     x:Class="MissionController.UI.Views.LiveMissionMonitorView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:effects="using:MissionController.UI.Effects"
+    Style="{StaticResource SplatPageStyle}"
     mc:Ignorable="d">
 
     <Grid RowSpacing="16">
@@ -21,8 +23,8 @@
             </Grid.ColumnDefinitions>
 
             <StackPanel Grid.Column="0" Spacing="4">
-                <TextBlock Text="Live Mission Monitor" FontSize="24" FontWeight="SemiBold" />
-                <TextBlock Text="Real-time subprocess telemetry streaming inside Win32 Job Object sandbox" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Text="Live Mission Monitor" Style="{StaticResource SplatPageTitleStyle}" />
+                <TextBlock Text="Real-time subprocess telemetry streaming inside Win32 Job Object sandbox" Style="{StaticResource SplatPageSubtitleStyle}" />
             </StackPanel>
 
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
@@ -30,8 +32,8 @@
                     Style="{StaticResource CompactActivityRingStyle}"
                     IsActive="{x:Bind ViewModel.IsRunning, Mode=OneWay}"
                     AutomationProperties.Name="Mission activity" />
-                <Button Content="Abort Mission" Click="CancelButton_Click" IsEnabled="{x:Bind ViewModel.IsRunning, Mode=OneWay}" />
-                <Button Content="Quick Run Netstat Audit" Style="{StaticResource LuminousAccentButtonStyle}" Click="QuickRunButton_Click" />
+                <Button Content="Abort Mission" Click="CancelButton_Click" IsEnabled="{x:Bind ViewModel.IsRunning, Mode=OneWay}" effects:ButtonPressShader.IsEnabled="True" />
+                <Button Content="Quick Run Netstat Audit" Style="{StaticResource LuminousAccentButtonStyle}" Click="QuickRunButton_Click" IsEnabled="{x:Bind ViewModel.IsRunning, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}" effects:ButtonPressShader.IsEnabled="True" />
             </StackPanel>
         </Grid>
 
@@ -45,43 +47,43 @@
             </Grid.ColumnDefinitions>
 
             <!-- Status Card -->
-            <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="14">
+            <Border Grid.Column="0" Style="{StaticResource SplatCardStyle}" Padding="14" effects:BorderGlowShader.IsEnabled="True">
                 <StackPanel Spacing="4">
-                    <TextBlock Text="STATUS" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                    <TextBlock Text="{x:Bind ViewModel.CurrentStatus, Mode=OneWay}" FontSize="15" FontWeight="Bold" Foreground="#4CC2FF" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="STATUS" Style="{StaticResource SplatPageSectionLabelStyle}" />
+                    <TextBlock Text="{x:Bind ViewModel.CurrentStatus, Mode=OneWay}" FontSize="15" FontWeight="Bold" Foreground="{ThemeResource SplatAccentBrush}" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
             </Border>
 
             <!-- CPU Gauge Card -->
-            <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="14">
+            <Border Grid.Column="1" Style="{StaticResource SplatCardStyle}" Padding="14" effects:BorderGlowShader.IsEnabled="True">
                 <StackPanel Spacing="4">
-                    <TextBlock Text="WIN32 JOB CPU USAGE" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    <TextBlock Text="WIN32 JOB CPU USAGE" Style="{StaticResource SplatPageSectionLabelStyle}" />
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <TextBlock Text="{x:Bind ViewModel.CpuUsagePercent, Mode=OneWay}" FontSize="16" FontWeight="Bold" />
-                        <TextBlock Text="%" FontSize="13" VerticalAlignment="Bottom" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="{x:Bind ViewModel.CpuUsagePercent, Mode=OneWay}" Style="{StaticResource SplatMetricValueStyle}" />
+                        <TextBlock Text="%" Style="{StaticResource SplatMetricUnitStyle}" />
                     </StackPanel>
                     <ProgressBar Value="{x:Bind ViewModel.CpuUsagePercent, Mode=OneWay}" Maximum="100" />
                 </StackPanel>
             </Border>
 
             <!-- Memory Gauge Card -->
-            <Border Grid.Column="2" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="14">
+            <Border Grid.Column="2" Style="{StaticResource SplatCardStyle}" Padding="14" effects:BorderGlowShader.IsEnabled="True">
                 <StackPanel Spacing="4">
-                    <TextBlock Text="JOB WORKING SET RAM" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    <TextBlock Text="JOB WORKING SET RAM" Style="{StaticResource SplatPageSectionLabelStyle}" />
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <TextBlock Text="{x:Bind ViewModel.MemoryUsageBytes, Mode=OneWay}" FontSize="16" FontWeight="Bold" />
-                        <TextBlock Text="Bytes" FontSize="13" VerticalAlignment="Bottom" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="{x:Bind ViewModel.MemoryUsageBytes, Mode=OneWay}" Style="{StaticResource SplatMetricValueStyle}" />
+                        <TextBlock Text="Bytes" Style="{StaticResource SplatMetricUnitStyle}" />
                     </StackPanel>
                     <ProgressBar IsIndeterminate="{x:Bind ViewModel.IsRunning, Mode=OneWay}" />
                 </StackPanel>
             </Border>
 
             <!-- Jail Isolation Card -->
-            <Border Grid.Column="3" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="14">
+            <Border Grid.Column="3" Style="{StaticResource SplatCardStyle}" Padding="14" effects:BorderGlowShader.IsEnabled="True">
                 <StackPanel Spacing="4">
-                    <TextBlock Text="NT ACL JAIL" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                    <TextBlock Text="Inheritance Severed" FontSize="14" FontWeight="Bold" Foreground="#6CCB5F" />
-                    <TextBlock Text="Medium/Low Integrity Token" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="NT ACL JAIL" Style="{StaticResource SplatPageSectionLabelStyle}" />
+                    <TextBlock Text="Inheritance Severed" FontSize="14" FontWeight="Bold" Foreground="{ThemeResource SplatSuccessBrush}" />
+                    <TextBlock Text="Medium/Low Integrity Token" FontSize="11" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
                 </StackPanel>
             </Border>
         </Grid>
@@ -94,7 +96,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- Left Pane: Sandboxed Tool Stdout -->
-            <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="16">
+            <Border Grid.Column="0" Style="{StaticResource SplatCardStyle}" Padding="16" effects:BorderGlowShader.IsEnabled="True">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -113,7 +115,7 @@
                             AcceptsReturn="True"
                             TextWrapping="Wrap"
                             FontFamily="Consolas, Cascadia Code"
-                            FontSize="12"
+                            Style="{StaticResource SplatCodeTextStyle}"
                             BorderThickness="0"
                             Background="Transparent" />
                     </ScrollViewer>
@@ -121,7 +123,7 @@
             </Border>
 
             <!-- Right Pane: AI Reasoning Streaming Engine -->
-            <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="16">
+            <Border Grid.Column="1" Style="{StaticResource SplatCardStyle}" Padding="16" effects:BorderGlowShader.IsEnabled="True">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -139,7 +141,7 @@
                             Background="#33FFB020" BorderBrush="#FFB020" BorderThickness="1" CornerRadius="6" Padding="10,6">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon Glyph="&#xE7BA;" FontSize="14" Foreground="#FFB020" VerticalAlignment="Center" />
-                            <TextBlock Text="SIMULATED — no live model connected. Add an API key in Settings for real analysis."
+                            <TextBlock Text="LOCAL OFFLINE ENGINE — Running local heuristic rule evaluation. Add an API key in Settings for cloud LLM synthesis."
                                        FontSize="12" FontWeight="SemiBold" Foreground="#FFD98A" TextWrapping="Wrap" VerticalAlignment="Center" />
                         </StackPanel>
                     </Border>
@@ -152,6 +154,7 @@
                             TextWrapping="Wrap"
                             FontFamily="Segoe UI"
                             FontSize="13"
+                            Foreground="{ThemeResource SplatTextPrimaryBrush}"
                             BorderThickness="0"
                             Background="Transparent" />
                     </ScrollViewer>

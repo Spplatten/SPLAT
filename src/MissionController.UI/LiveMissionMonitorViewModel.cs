@@ -19,6 +19,7 @@ public record LaunchMissionRequest(
 public partial class LiveMissionMonitorViewModel : ObservableObject
 {
     private readonly IMissionExecutionEngine _engine;
+    private readonly IProjectExecutionEngine _projectEngine;
     private CancellationTokenSource? _cts;
 
     [ObservableProperty]
@@ -54,9 +55,12 @@ public partial class LiveMissionMonitorViewModel : ObservableObject
     public Visibility SimulatedBannerVisibility =>
         IsSimulatedAnalysis ? Visibility.Visible : Visibility.Collapsed;
 
-    public LiveMissionMonitorViewModel(IMissionExecutionEngine engine)
+    public LiveMissionMonitorViewModel(
+        IMissionExecutionEngine engine,
+        IProjectExecutionEngine projectEngine)
     {
         _engine = engine;
+        _projectEngine = projectEngine;
     }
 
     [RelayCommand]
@@ -69,17 +73,41 @@ public partial class LiveMissionMonitorViewModel : ObservableObject
     {
         if (IsRunning) return;
 
+        PrepareRun("Starting Mission...");
+        await RunStreamAsync(_engine.ExecuteMissionAsync(template, parameters, operatorIdentity, _cts!.Token));
+    }
+
+    public async Task StartProjectAsync(ProjectTemplate project, Dictionary<string, string> parameters, string operatorIdentity)
+    {
+        if (IsRunning) return;
+
+        PrepareRun("Starting Project...");
+        await RunStreamAsync(_projectEngine.ExecuteProjectAsync(project, parameters, operatorIdentity, _cts!.Token));
+    }
+
+    [RelayCommand]
+    public void CancelMission()
+    {
+        _cts?.Cancel();
+    }
+
+    private void PrepareRun(string status)
+    {
         IsRunning = true;
-        CurrentStatus = "Starting Mission...";
+        CurrentStatus = status;
         MissionLog = string.Empty;
         StdoutStream = string.Empty;
         AiAnalysisStream = string.Empty;
         IsSimulatedAnalysis = false;
+        _cts?.Dispose();
         _cts = new CancellationTokenSource();
+    }
 
+    private async Task RunStreamAsync(IAsyncEnumerable<MissionChunk> stream)
+    {
         try
         {
-            await foreach (var chunk in _engine.ExecuteMissionAsync(template, parameters, operatorIdentity, _cts.Token))
+            await foreach (var chunk in stream)
             {
                 switch (chunk.ChunkType)
                 {
@@ -124,11 +152,5 @@ public partial class LiveMissionMonitorViewModel : ObservableObject
         {
             IsRunning = false;
         }
-    }
-
-    [RelayCommand]
-    public void CancelMission()
-    {
-        _cts?.Cancel();
     }
 }

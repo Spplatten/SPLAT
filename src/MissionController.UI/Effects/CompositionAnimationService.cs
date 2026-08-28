@@ -285,6 +285,85 @@ public sealed class CompositionAnimationService
     }
 
     /// <summary>
+    /// Starts a breathing scale/opacity animation for high-priority action buttons and indicators.
+    /// </summary>
+    public CompositionAnimationHandle? StartBreathing(
+        Visual visual,
+        float baseScale = 1.0f,
+        float scaleDelta = 0.03f,
+        TimeSpan? period = null)
+    {
+        ArgumentNullException.ThrowIfNull(visual);
+
+        if (!AnimationsEnabled)
+        {
+            visual.StopAnimation(nameof(Visual.Scale));
+            visual.Scale = new Vector3(baseScale, baseScale, 1.0f);
+            return null;
+        }
+
+        var breathingPeriod = period.GetValueOrDefault(TimeSpan.FromMilliseconds(1800));
+        var clock = _compositor.CreatePropertySet();
+        clock.InsertScalar("Phase", 0.0f);
+
+        var clockAnim = _compositor.CreateScalarKeyFrameAnimation();
+        clockAnim.Duration = breathingPeriod;
+        clockAnim.IterationBehavior = AnimationIterationBehavior.Forever;
+        clockAnim.InsertKeyFrame(0.0f, 0.0f);
+        clockAnim.InsertKeyFrame(1.0f, 1.0f);
+        clock.StartAnimation("Phase", clockAnim);
+
+        var expr = _compositor.CreateExpressionAnimation(
+            $"Vector3(baseScale + scaleDelta * Sin(clock.Phase * {TwoPi.ToString(System.Globalization.CultureInfo.InvariantCulture)}), baseScale + scaleDelta * Sin(clock.Phase * {TwoPi.ToString(System.Globalization.CultureInfo.InvariantCulture)}), 1.0)");
+        expr.SetReferenceParameter("clock", clock);
+        expr.SetScalarParameter("baseScale", baseScale);
+        expr.SetScalarParameter("scaleDelta", scaleDelta);
+
+        visual.StopAnimation(nameof(Visual.Scale));
+        visual.StartAnimation(nameof(Visual.Scale), expr);
+
+        return new CompositionAnimationHandle(visual, nameof(Visual.Scale), clock, "Phase");
+    }
+
+    /// <summary>
+    /// Starts a linear shimmer sweep across a visual surface.
+    /// </summary>
+    public CompositionAnimationHandle? StartShimmer(
+        CompositionLinearGradientBrush gradientBrush,
+        TimeSpan? period = null)
+    {
+        ArgumentNullException.ThrowIfNull(gradientBrush);
+
+        if (!AnimationsEnabled)
+        {
+            gradientBrush.StartPoint = new Vector2(0.0f, 0.0f);
+            gradientBrush.EndPoint = new Vector2(1.0f, 1.0f);
+            return null;
+        }
+
+        var shimmerPeriod = period.GetValueOrDefault(TimeSpan.FromMilliseconds(2000));
+        var clock = _compositor.CreatePropertySet();
+        clock.InsertScalar("Progress", 0.0f);
+
+        var clockAnim = _compositor.CreateScalarKeyFrameAnimation();
+        clockAnim.Duration = shimmerPeriod;
+        clockAnim.IterationBehavior = AnimationIterationBehavior.Forever;
+        clockAnim.InsertKeyFrame(0.0f, 0.0f);
+        clockAnim.InsertKeyFrame(1.0f, 1.0f);
+        clock.StartAnimation("Progress", clockAnim);
+
+        var startExpr = _compositor.CreateExpressionAnimation("Vector2(clock.Progress * 2.0 - 1.0, 0.0)");
+        startExpr.SetReferenceParameter("clock", clock);
+        var endExpr = _compositor.CreateExpressionAnimation("Vector2(clock.Progress * 2.0, 1.0)");
+        endExpr.SetReferenceParameter("clock", clock);
+
+        gradientBrush.StartAnimation(nameof(CompositionLinearGradientBrush.StartPoint), startExpr);
+        gradientBrush.StartAnimation(nameof(CompositionLinearGradientBrush.EndPoint), endExpr);
+
+        return new CompositionAnimationHandle(gradientBrush, nameof(CompositionLinearGradientBrush.StartPoint), clock, "Progress");
+    }
+
+    /// <summary>
     /// Produces an expression animation for a relation between composition
     /// objects. The returned animation is not started until the caller binds
     /// it to a target property, making parameter setup explicit and reusable.

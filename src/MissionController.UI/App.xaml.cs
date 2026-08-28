@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using MissionController.Core;
@@ -31,8 +31,93 @@ public partial class App : Application
 
     public App()
     {
+        this.UnhandledException += OnUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
         InitializeComponent();
         ConfigureServices();
+    }
+
+    /// <summary>
+    /// Debug.WriteLine alone is invisible to anyone not attached to a debugger, which is how a
+    /// startup exception presents as "the app does nothing when I open it" - the process dies with
+    /// the only explanation written somewhere nobody can read. Every fatal path also lands in
+    /// <see cref="FatalErrorLog"/> so a failed launch always leaves evidence on disk.
+    /// </summary>
+    private static void LogFatal(string source, object? detail)
+    {
+        System.Diagnostics.Debug.WriteLine($"[CRITICAL] {source}: {detail}");
+        FatalErrorLog.Write(source, detail);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
+    private const uint MbIconError = 0x00000010;
+    private const uint MbSystemModal = 0x00001000;
+
+    /// <summary>
+    /// Surfaces a fatal error to the person in front of the machine. A Win32 message box is used
+    /// deliberately instead of a ContentDialog: a dialog needs a XamlRoot, and the failures worth
+    /// reporting most are the ones that happen before any window exists.
+    /// </summary>
+    private static void ShowFatalDialog(string headline, object? detail)
+    {
+        try
+        {
+            string body =
+                $"{headline}\n\n{detail}\n\nFull detail was written to:\n{FatalErrorLog.DefaultPath}";
+
+            // Truncated because MessageBoxW silently fails to render very long strings, and a dialog
+            // that does not appear puts us right back at "the app does nothing".
+            if (body.Length > 1800)
+            {
+                body = body.Substring(0, 1800) + "\n…(truncated — see the log file)";
+            }
+
+            MessageBoxW(IntPtr.Zero, body, "SPLAT — Unrecoverable Error", MbIconError | MbSystemModal);
+        }
+        catch
+        {
+            // Never let the reporter become the failure.
+        }
+    }
+
+    private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        LogFatal("WinUI UnhandledException", e.Exception);
+
+        // Startup failures used to be swallowed here. Handled=true kept the process alive with no
+        // window, which is precisely how a XAML load error presented as "I double-click it and
+        // nothing happens" - the app was running, just permanently invisible. If the main window
+        // never came up there is nothing left to return to, so report and exit rather than idle
+        // forever as an invisible process the user can only find in Task Manager.
+        bool failedBeforeWindowExists = MainWindowInstance is null;
+
+        ShowFatalDialog(
+            failedBeforeWindowExists
+                ? "SPLAT could not start. The error below stopped it before its window opened."
+                : "SPLAT hit an unexpected error. The app will stay open, but this action did not complete.",
+            e.Exception);
+
+        e.Handled = true;
+
+        if (failedBeforeWindowExists)
+        {
+            Environment.Exit(1);
+        }
+    }
+
+    private void OnAppDomainUnhandledException(object sender, System.UnhandledExceptionEventArgs e)
+    {
+        LogFatal("AppDomain UnhandledException", e.ExceptionObject);
+    }
+
+    private void OnUnobservedTaskException(object? sender, System.Threading.Tasks.UnobservedTaskExceptionEventArgs e)
+    {
+        LogFatal("UnobservedTaskException", e.Exception);
+        e.SetObserved();
     }
 
     private static void ConfigureServices()
@@ -65,6 +150,7 @@ public partial class App : Application
         services.AddSingleton<SqliteStorageContext>();
         services.AddSingleton<IAuditLedger, SqliteChainedAuditLedger>();
         services.AddSingleton<ITemplateRegistry, SqliteTemplateRegistry>();
+        services.AddSingleton<IProjectTemplateRegistry, SqliteProjectTemplateRegistry>();
         services.AddSingleton<ISemanticMemoryIndex, SqliteSemanticMemoryIndex>();
         services.AddSingleton<IMerkleProofEngine, MerkleTreeEngine>();
         services.AddSingleton<IComplianceArchiveExporter, ComplianceArchiveExporter>();
@@ -77,13 +163,17 @@ public partial class App : Application
         services.AddSingleton<IIncidentRevocationManager, IncidentRevocationManager>();
 
         // Core Engine
+        services.AddSingleton<IDiagnosticFindingsExtractor, JsonFindingsExtractor>();
         services.AddSingleton<IMissionExecutionEngine, MissionExecutionEngine>();
+        services.AddSingleton<IGovernedInvestigationLoop, GovernedInvestigationLoop>();
+        services.AddSingleton<IProjectExecutionEngine, ProjectExecutionEngine>();
 
         // ViewModels
         services.AddSingleton<WelcomeOnboardingViewModel>();
         services.AddSingleton<QuickDiagnosticianViewModel>();
         services.AddSingleton<LiveMissionMonitorViewModel>();
         services.AddSingleton<TemplateCatalogViewModel>();
+        services.AddSingleton<ProjectStudioViewModel>();
         services.AddSingleton<SecurityAuditViewModel>();
         services.AddSingleton<SemanticSearchViewModel>();
         services.AddSingleton<JailInspectorViewModel>();

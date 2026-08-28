@@ -5,6 +5,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:core="using:MissionController.Core.Interfaces"
+    Style="{StaticResource SplatPageStyle}"
     mc:Ignorable="d">
 
     <Grid RowSpacing="16">
@@ -16,12 +17,12 @@
 
         <!-- Header -->
         <StackPanel Grid.Row="0" Spacing="4">
-            <TextBlock Text="Local Semantic Memory &amp; Incident Retrieval" FontSize="24" FontWeight="SemiBold" />
-            <TextBlock Text="In-process vector embedding index for sub-second semantic search across historical diagnostic missions" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock Text="Local Semantic Memory &amp; Incident Retrieval" Style="{StaticResource SplatPageTitleStyle}" />
+            <TextBlock Text="In-process vector embedding index for sub-second semantic search across historical diagnostic missions" Style="{StaticResource SplatPageSubtitleStyle}" />
         </StackPanel>
 
         <!-- Search Bar Card -->
-        <Border Grid.Row="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="16">
+        <Border Grid.Row="1" Style="{StaticResource SplatCardStyle}">
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -40,12 +41,13 @@
                     Content="Search Memory"
                     Style="{StaticResource AccentButtonStyle}"
                     Command="{x:Bind ViewModel.PerformSearchCommand}"
+                    IsEnabled="{x:Bind ViewModel.IsSearching, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}"
                     VerticalAlignment="Center" />
             </Grid>
         </Border>
 
         <!-- Results View -->
-        <Border Grid.Row="2" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="16">
+        <Border Grid.Row="2" Style="{StaticResource SplatCardStyle}">
             <Grid RowSpacing="12">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -74,14 +76,14 @@
                                     </Grid.ColumnDefinitions>
 
                                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                                        <Border Background="#20D29BFF" CornerRadius="4" Padding="6,2">
-                                            <TextBlock Text="{x:Bind TemplateId}" FontSize="10" FontWeight="Bold" Foreground="#D29BFF" />
+                                        <Border Background="{ThemeResource SplatAccentSubtleBrush}" CornerRadius="4" Padding="6,2">
+                                            <TextBlock Text="{x:Bind TemplateId}" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource SplatVioletBrush}" />
                                         </Border>
                                         <TextBlock Text="{x:Bind MissionId}" FontSize="11" FontFamily="Consolas" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
                                     </StackPanel>
 
-                                    <Border Grid.Column="1" Background="#206CCB5F" CornerRadius="4" Padding="6,2">
-                                        <TextBlock Text="{x:Bind SimilarityScore}" FontSize="11" FontWeight="Bold" Foreground="#6CCB5F" />
+                                    <Border Grid.Column="1" Background="{ThemeResource SplatAccentSubtleBrush}" CornerRadius="4" Padding="6,2">
+                                        <TextBlock Text="{x:Bind SimilarityScore}" FontSize="11" FontWeight="Bold" Foreground="{ThemeResource SplatSuccessBrush}" />
                                     </Border>
                                 </Grid>
 

@@ -1,9 +1,11 @@
 using System;
+using System.Linq;
 using System.Runtime.InteropServices;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media.Animation;
 using MissionController.UI.Views;
 using Windows.Graphics;
 
@@ -18,12 +20,13 @@ public sealed partial class MainWindow : Window
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     private const int SW_RESTORE = 9;
+    private bool _isNavigating;
 
     public MainWindow()
     {
         InitializeComponent();
         ConfigureWindow();
-        NavigateTo(typeof(QuickDiagnosticianView));
+        NavigateTo(typeof(QuickDiagnosticianView), SlideNavigationTransitionEffect.FromRight);
     }
 
     private void ConfigureWindow()
@@ -52,44 +55,84 @@ public sealed partial class MainWindow : Window
         SetForegroundWindow(hwnd);
     }
 
-    public void NavigateTo(System.Type pageType)
+    public void NavigateTo(System.Type pageType, SlideNavigationTransitionEffect effect = SlideNavigationTransitionEffect.FromRight)
     {
-        ContentFrame.Navigate(pageType);
+        if (_isNavigating) return;
+
+        try
+        {
+            _isNavigating = true;
+
+            // Synchronize NavigationView SelectedItem to match the target page
+            if (pageType == typeof(SettingsView))
+            {
+                NavView.SelectedItem = NavView.SettingsItem;
+            }
+            else
+            {
+                string? targetTag = GetTagForPage(pageType);
+                if (targetTag != null)
+                {
+                    var item = NavView.MenuItems
+                        .OfType<NavigationViewItem>()
+                        .FirstOrDefault(i => string.Equals(i.Tag?.ToString(), targetTag, StringComparison.OrdinalIgnoreCase));
+
+                    if (item != null)
+                    {
+                        NavView.SelectedItem = item;
+                    }
+                }
+            }
+
+            ContentFrame.Navigate(pageType, null, new SlideNavigationTransitionInfo { Effect = effect });
+        }
+        finally
+        {
+            _isNavigating = false;
+        }
+    }
+
+    private static string? GetTagForPage(System.Type pageType)
+    {
+        if (pageType == typeof(QuickDiagnosticianView)) return "QuickSolve";
+        if (pageType == typeof(WelcomeOnboardingView)) return "Onboarding";
+        if (pageType == typeof(LiveMissionMonitorView)) return "Monitor";
+        if (pageType == typeof(TemplateCatalogView)) return "Catalog";
+        if (pageType == typeof(ProjectStudioView)) return "Projects";
+        if (pageType == typeof(SecurityAuditView)) return "Audit";
+        if (pageType == typeof(SemanticSearchView)) return "Memory";
+        if (pageType == typeof(JailInspectorView)) return "Jail";
+        return null;
     }
 
     private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
+        if (_isNavigating) return;
+
         if (args.IsSettingsSelected)
         {
-            ContentFrame.Navigate(typeof(SettingsView));
+            ContentFrame.Navigate(typeof(SettingsView), null, new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromRight });
             return;
         }
 
         if (args.SelectedItemContainer is NavigationViewItem selectedItem)
         {
-            switch (selectedItem.Tag?.ToString())
+            System.Type? targetPage = selectedItem.Tag?.ToString() switch
             {
-                case "QuickSolve":
-                    ContentFrame.Navigate(typeof(QuickDiagnosticianView));
-                    break;
-                case "Onboarding":
-                    ContentFrame.Navigate(typeof(WelcomeOnboardingView));
-                    break;
-                case "Monitor":
-                    ContentFrame.Navigate(typeof(LiveMissionMonitorView));
-                    break;
-                case "Catalog":
-                    ContentFrame.Navigate(typeof(TemplateCatalogView));
-                    break;
-                case "Audit":
-                    ContentFrame.Navigate(typeof(SecurityAuditView));
-                    break;
-                case "Memory":
-                    ContentFrame.Navigate(typeof(SemanticSearchView));
-                    break;
-                case "Jail":
-                    ContentFrame.Navigate(typeof(JailInspectorView));
-                    break;
+                "QuickSolve" => typeof(QuickDiagnosticianView),
+                "Onboarding" => typeof(WelcomeOnboardingView),
+                "Monitor" => typeof(LiveMissionMonitorView),
+                "Catalog" => typeof(TemplateCatalogView),
+                "Projects" => typeof(ProjectStudioView),
+                "Audit" => typeof(SecurityAuditView),
+                "Memory" => typeof(SemanticSearchView),
+                "Jail" => typeof(JailInspectorView),
+                _ => null
+            };
+
+            if (targetPage != null)
+            {
+                ContentFrame.Navigate(targetPage, null, new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromRight });
             }
         }
     }

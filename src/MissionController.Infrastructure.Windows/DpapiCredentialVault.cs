@@ -78,10 +78,36 @@ public sealed class DpapiCredentialVault : ICredentialVault
     public Task DeleteSecretAsync(string key, CancellationToken cancellationToken = default)
     {
         string filePath = GetSecretPath(key);
-        if (File.Exists(filePath))
+        if (!File.Exists(filePath))
         {
-            File.Delete(filePath);
+            return Task.CompletedTask;
         }
+
+        // Overwrite before unlinking. A plain File.Delete only drops the directory entry, leaving the
+        // DPAPI ciphertext intact in free space where it remains recoverable by anyone who can later
+        // run as this user - which is exactly the threat the vault exists to bound. Best effort only:
+        // journaling filesystems and SSD wear-levelling can still retain the original blocks, so this
+        // raises the cost of recovery rather than guaranteeing erasure.
+        try
+        {
+            long length = new FileInfo(filePath).Length;
+            if (length > 0)
+            {
+                byte[] scratch = new byte[length];
+                RandomNumberGenerator.Fill(scratch);
+                File.WriteAllBytes(filePath, scratch);
+            }
+        }
+        catch (IOException)
+        {
+            // A locked or unwritable file must not block removal - deleting the entry is still
+            // strictly better for the user than leaving a live credential in place.
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        File.Delete(filePath);
         return Task.CompletedTask;
     }
 

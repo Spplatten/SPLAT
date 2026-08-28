@@ -6,6 +6,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:models="using:MissionController.Core.Models"
     xmlns:vm="using:MissionController.UI.ViewModels"
+    Style="{StaticResource SplatPageStyle}"
     mc:Ignorable="d">
 
     <Grid RowSpacing="16">
@@ -21,8 +22,9 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Spacing="4">
-                <TextBlock Text="1:1:1 Governed Template Catalog" FontSize="24" FontWeight="SemiBold" />
-                <TextBlock Text="Enterprise diagnostics with guided operator input fields &amp; 1:1:1 strict sandbox isolation" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Text="1:1:1 Governed Template Catalog" Style="{StaticResource SplatPageTitleStyle}" />
+                <TextBlock Text="Enterprise diagnostics with guided operator input fields &amp; 1:1:1 strict sandbox isolation" Style="{StaticResource SplatPageSubtitleStyle}" />
+                <Button Content="Build New Agent Template" HorizontalAlignment="Left" Margin="0,6,0,0" Click="CreateTemplate_Click" Style="{StaticResource LuminousAccentButtonStyle}" />
             </StackPanel>
             <ProgressRing
                 Grid.Column="1"
@@ -39,7 +41,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- Left: Template List -->
-            <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+            <Border Grid.Column="0" Style="{StaticResource SplatCardStyle}" Padding="12">
                 <ListView
                     ItemsSource="{x:Bind ViewModel.Templates, Mode=OneWay}"
                     SelectedItem="{x:Bind ViewModel.SelectedTemplate, Mode=TwoWay}"
@@ -54,8 +56,8 @@
                                 </Grid.RowDefinitions>
 
                                 <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
-                                    <Border Background="#204CC2FF" CornerRadius="4" Padding="6,2">
-                                        <TextBlock Text="{x:Bind Category}" FontSize="10" FontWeight="Bold" Foreground="#4CC2FF" />
+                                    <Border Background="{ThemeResource SplatAccentSubtleBrush}" CornerRadius="4" Padding="6,2">
+                                        <TextBlock Text="{x:Bind Category}" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource SplatAccentBrush}" />
                                     </Border>
                                     <TextBlock Text="{x:Bind Name}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
                                 </StackPanel>
@@ -74,7 +76,7 @@
             </Border>
 
             <!-- Right: Template Inspector & Dynamic Parameter Inputs -->
-            <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="20">
+            <Border Grid.Column="1" Style="{StaticResource SplatCardStyle}" Padding="20">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="16" Visibility="{x:Bind ViewModel.SelectedTemplate, Mode=OneWay, Converter={StaticResource NullToVisibilityConverter}}">
                         <!-- Template Title -->
@@ -89,33 +91,33 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
 
-                            <Border Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                            <Border Grid.Column="0" Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="1 TARGET MODEL" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                                    <TextBlock Text="{x:Bind ViewModel.SelectedTemplate.TargetModel, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" Foreground="#D29BFF" />
+                                    <TextBlock Text="{x:Bind ViewModel.SelectedTemplate.TargetModel, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource SplatVioletBrush}" />
                                 </StackPanel>
                             </Border>
 
-                            <Border Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                            <Border Grid.Column="1" Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="1 DEDICATED TOOL" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                                    <TextBlock Text="{x:Bind ViewModel.SelectedTemplate.Tool.Name, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" Foreground="#4CC2FF" />
+                                    <TextBlock Text="{x:Bind ViewModel.SelectedTemplate.Tool.Name, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource SplatAccentBrush}" />
                                 </StackPanel>
                             </Border>
 
-                            <Border Grid.Column="2" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                            <Border Grid.Column="2" Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="1 EGRESS FQDN" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                                    <TextBlock Text="{x:Bind ViewModel.SelectedTemplate.EgressRule.AllowedFqdn, Mode=OneWay}" FontSize="11" FontWeight="SemiBold" Foreground="#6CCB5F" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{x:Bind ViewModel.SelectedTemplate.EgressRule.AllowedFqdn, Mode=OneWay}" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource SplatSuccessBrush}" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                             </Border>
                         </Grid>
 
                         <!-- Guided Operator Input Fields Section -->
-                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="16">
+                        <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="16">
                             <StackPanel Spacing="14">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE70F;" FontSize="14" Foreground="#4CC2FF" />
+                                    <FontIcon Glyph="&#xE70F;" FontSize="14" Foreground="{ThemeResource SplatAccentBrush}" />
                                     <TextBlock Text="OPERATOR MISSION PARAMETERS &amp; DIRECTIVES" FontWeight="Bold" FontSize="12" />
                                 </StackPanel>
 
@@ -124,7 +126,16 @@
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="vm:ParameterInputItem">
                                             <StackPanel Spacing="6" Margin="0,0,0,12">
-                                                <TextBlock Text="{x:Bind Label}" FontSize="12" FontWeight="SemiBold" />
+                                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                                    <TextBlock Text="{x:Bind Label}" FontSize="12" FontWeight="SemiBold" />
+                                                    <Border
+                                                        Background="{ThemeResource SplatAccentSubtleBrush}"
+                                                        CornerRadius="4"
+                                                        Padding="5,1"
+                                                        Visibility="{x:Bind IsRequired, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                        <TextBlock Text="REQUIRED" FontSize="9" FontWeight="SemiBold" Foreground="{ThemeResource SplatAccentBrush}" />
+                                                    </Border>
+                                                </StackPanel>
                                                 <TextBlock Text="{x:Bind Description}" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                                                 <TextBox
                                                     Text="{x:Bind Value, Mode=TwoWay}"
@@ -141,7 +152,7 @@
                         <!-- System Prompt Overview -->
                         <StackPanel Spacing="6">
                             <TextBlock Text="GOVERNING SYSTEM PROMPT" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                            <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="6" Padding="12">
+                            <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="12">
                                 <TextBlock Text="{x:Bind ViewModel.SelectedTemplate.SystemPrompt, Mode=OneWay}" FontSize="12" TextWrapping="Wrap" />
                             </Border>
                         </StackPanel>

@@ -5,6 +5,7 @@ using System.IO;
 using System.Net.Http;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -13,16 +14,27 @@ using System.Threading.Tasks;
 using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
+using MissionController.Infrastructure.Network.Egress;
 
 namespace MissionController.Infrastructure.Network.Siem;
 
 public sealed class SiemForwarder : ISiemForwarder
 {
-    private readonly HttpClient _httpClient;
+    /// <summary>
+    /// Microsoft Sentinel's ingestion domain. The workspace id is operator-supplied and gets
+    /// interpolated into the hostname, so it is validated against this suffix before a request is
+    /// built - otherwise a workspace id containing path or host separators redirects the entire
+    /// audit ledger to an attacker-chosen domain.
+    /// </summary>
+    private const string SentinelIngestionSuffix = ".ods.opinsights.azure.com";
 
-    public SiemForwarder(HttpClient httpClient)
+    private readonly HttpClient _httpClient;
+    private readonly EgressFirewallHandler? _firewallHandler;
+
+    public SiemForwarder(HttpClient httpClient, EgressFirewallHandler? firewallHandler = null)
     {
         _httpClient = httpClient;
+        _firewallHandler = firewallHandler;
     }
 
     public async Task ForwardAuditEntryAsync(AuditLogEntry entry, SiemConfiguration config, CancellationToken cancellationToken = default)
@@ -245,7 +257,8 @@ public sealed class SiemForwarder : ISiemForwarder
         string dateString = DateTime.UtcNow.ToString("r", CultureInfo.InvariantCulture);
         string authSignature = BuildSentinelAuthSignature(config.WorkspaceId, config.SharedKey, jsonBytes.Length, dateString);
 
-        string endpoint = $"https://{config.WorkspaceId}.ods.opinsights.azure.com/api/logs?api-version=2016-04-01";
+        string sentinelHost = BuildSentinelHost(config.WorkspaceId);
+        string endpoint = $"https://{sentinelHost}/api/logs?api-version=2016-04-01";
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
         request.Headers.Add("Log-Type", config.LogType);
         request.Headers.Add("x-ms-date", dateString);
@@ -253,8 +266,35 @@ public sealed class SiemForwarder : ISiemForwarder
         request.Content = new ByteArrayContent(jsonBytes);
         request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
 
+        // Declare the destination so the Layer-4 firewall can enforce it. Without a scope the
+        // hardened client now refuses the send outright, which is the intended behaviour: audit
+        // records are the most sensitive payload this app transmits and must never leave on an
+        // undeclared route.
+        using var scope = _firewallHandler?.BeginScope(sentinelHost);
+
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// Builds and validates the Sentinel ingestion host from an operator-supplied workspace id.
+    ///
+    /// The id used to be interpolated straight into the URL, so a value carrying a '/', '@', ':' or
+    /// '.' - for example "x.attacker.example.com/api/logs?j=" - moved the request's real host off
+    /// Azure entirely and shipped the tamper-evident audit ledger to whoever owned that domain. A
+    /// GUID is the only shape Sentinel ever issues, so anything else is rejected here rather than
+    /// being handed to the URI parser to interpret.
+    /// </summary>
+    public static string BuildSentinelHost(string? workspaceId)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceId) || !Guid.TryParse(workspaceId, out _))
+        {
+            throw new SecurityException(
+                "Microsoft Sentinel forwarding blocked: WorkspaceId must be a GUID. " +
+                "A workspace id containing host or path separators would redirect audit records off Azure.");
+        }
+
+        return workspaceId + SentinelIngestionSuffix;
     }
 
     public static string BuildSentinelAuthSignature(string workspaceId, string sharedKey, int contentLength, string dateString)

@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MissionController.Core.Interfaces;
@@ -10,6 +10,7 @@ public partial class WelcomeOnboardingViewModel : ObservableObject
 {
     private readonly ICredentialVault _vault;
     private readonly GeminiStreamClient _geminiClient;
+    private readonly ClaudeStreamClient _claudeClient;
 
     [ObservableProperty]
     private int _currentStep = 1;
@@ -21,7 +22,7 @@ public partial class WelcomeOnboardingViewModel : ObservableObject
     private bool _isTestingKey;
 
     [ObservableProperty]
-    private string _keyStatusMessage = "Enter your Anthropic or Gemini API key to enable live AI analysis (optional — you can run missions without one).";
+    private string _keyStatusMessage = "Enter your Anthropic (sk-ant-...) or Gemini (AIza...) API key for immediate live verification.";
 
     [ObservableProperty]
     private bool _isKeyValid;
@@ -35,10 +36,63 @@ public partial class WelcomeOnboardingViewModel : ObservableObject
     [ObservableProperty]
     private bool _egressFirewallReady = true;
 
-    public WelcomeOnboardingViewModel(ICredentialVault vault, GeminiStreamClient geminiClient)
+    public WelcomeOnboardingViewModel(
+        ICredentialVault vault,
+        GeminiStreamClient geminiClient,
+        ClaudeStreamClient claudeClient)
     {
         _vault = vault;
         _geminiClient = geminiClient;
+        _claudeClient = claudeClient;
+    }
+
+    private System.Threading.CancellationTokenSource? _autoValidationCts;
+
+    partial void OnApiKeyInputChanged(string value)
+    {
+        _autoValidationCts?.Cancel();
+        _autoValidationCts?.Dispose();
+        _autoValidationCts = null;
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            KeyStatusMessage = "Enter your Anthropic (sk-ant-...) or Gemini (AIza...) API key for immediate live verification.";
+            IsKeyValid = false;
+            return;
+        }
+
+        string trimmed = value.Trim();
+        if (trimmed.Length < 10)
+        {
+            KeyStatusMessage = "Enter full API key...";
+            IsKeyValid = false;
+            return;
+        }
+
+        _autoValidationCts = new System.Threading.CancellationTokenSource();
+        var token = _autoValidationCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // If it starts with standard prefix and is complete length, validate immediately, else debounce 350ms
+                bool isFastCandidate = (trimmed.StartsWith("sk-ant-", System.StringComparison.Ordinal) && trimmed.Length >= 40)
+                                    || (trimmed.StartsWith("AIza", System.StringComparison.Ordinal) && trimmed.Length >= 30);
+                if (!isFastCandidate)
+                {
+                    await Task.Delay(350, token);
+                }
+
+                if (token.IsCancellationRequested) return;
+
+                await ValidateKeyInternalAsync(trimmed, token);
+            }
+            catch (System.OperationCanceledException)
+            {
+                // Expected when new characters are typed
+            }
+        }, token);
     }
 
     [RelayCommand]
@@ -51,42 +105,49 @@ public partial class WelcomeOnboardingViewModel : ObservableObject
             return;
         }
 
-        string key = ApiKeyInput.Trim();
-        // Route the key to the vault slot its provider client actually reads (the original
-        // shipped bug was a key stored under a name nothing read - the classifier is the fix).
+        await ValidateKeyInternalAsync(ApiKeyInput.Trim(), System.Threading.CancellationToken.None);
+    }
+
+    private async Task ValidateKeyInternalAsync(string key, System.Threading.CancellationToken cancellationToken)
+    {
         var (vaultKey, providerName) = ProviderKeyClassifier.Classify(key);
 
         IsTestingKey = true;
         try
         {
+            KeyStatusMessage = $"Validating {providerName} API key against live endpoint...";
+
+            Core.Models.AiGatewayValidationResult validation;
             if (vaultKey == GeminiStreamClient.ApiKeyVaultKey)
             {
-                // Gemini exposes a zero-cost authenticated probe, so verify BEFORE persisting -
-                // a stored-but-dead key would silently downgrade missions to the simulated path.
-                KeyStatusMessage = "Validating Google Gemini key against the live endpoint...";
-                var validation = await _geminiClient.ValidateApiKeyAsync(key);
-                if (!validation.IsValid)
-                {
-                    IsKeyValid = false;
-                    KeyStatusMessage = $"Key NOT saved — {validation.Message}";
-                    return;
-                }
-
-                await _vault.StoreSecretStringAsync(vaultKey, key);
-                IsKeyValid = true;
-                KeyStatusMessage = "⚡ Gemini key verified live and saved. Missions will use Google Gemini (Anthropic key, if added later, takes precedence).";
+                validation = await _geminiClient.ValidateApiKeyAsync(key, cancellationToken);
             }
             else
             {
-                await _vault.StoreSecretStringAsync(vaultKey, key);
-                IsKeyValid = true;
-                KeyStatusMessage = $"{providerName} key saved. Live analysis will use it on your next mission; an invalid key will show a clear error there rather than failing silently.";
+                validation = await _claudeClient.ValidateApiKeyAsync(key, cancellationToken);
             }
+
+            if (cancellationToken.IsCancellationRequested) return;
+
+            if (!validation.IsValid)
+            {
+                IsKeyValid = false;
+                KeyStatusMessage = $"🔴 Key rejected — {validation.Message}";
+                return;
+            }
+
+            await _vault.StoreSecretStringAsync(vaultKey, key, cancellationToken);
+            IsKeyValid = true;
+            KeyStatusMessage = $"⚡ {providerName} key verified live and secured in DPAPI vault.";
+        }
+        catch (System.OperationCanceledException)
+        {
+            // Ignored
         }
         catch (System.Exception ex)
         {
             IsKeyValid = false;
-            KeyStatusMessage = $"Could not save key: {ex.Message}";
+            KeyStatusMessage = $"🔴 Could not save key: {ex.Message}";
         }
         finally
         {

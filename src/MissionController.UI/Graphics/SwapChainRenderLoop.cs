@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 
 namespace MissionController.UI.Graphics;
 
@@ -31,7 +32,53 @@ public readonly record struct SwapChainRenderFrame(
     long FrameIndex,
     TimeSpan Elapsed,
     SwapChainSurfaceMetrics Surface,
-    SwapChainPresentationOptions Presentation);
+    SwapChainPresentationOptions Presentation,
+    SwapChainShaderParameters Shader);
+
+public enum DesktopShaderEffect
+{
+    SoftGlow = 0,
+    Aurora = 1,
+    ScanSweep = 2,
+    GlassNoise = 3
+}
+
+/// <summary>
+/// Small constant-buffer contract for the native renderer. Values are bounded
+/// before crossing the managed/native seam so a theme or live preview cannot
+/// accidentally create high-frequency flashes or unstable shader inputs.
+/// </summary>
+public readonly record struct SwapChainShaderParameters(
+    DesktopShaderEffect Effect,
+    float Intensity,
+    Vector4 PrimaryColor,
+    Vector4 SecondaryColor,
+    float Scale,
+    float Speed)
+{
+    public static SwapChainShaderParameters Default => new(
+        DesktopShaderEffect.SoftGlow,
+        0.55f,
+        new Vector4(0.30f, 0.76f, 1.0f, 1.0f),
+        new Vector4(0.64f, 0.42f, 1.0f, 1.0f),
+        1.0f,
+        0.55f);
+
+    public SwapChainShaderParameters Bounded() => this with
+    {
+        Intensity = Math.Clamp(Intensity, 0.0f, 1.0f),
+        PrimaryColor = ClampColor(PrimaryColor),
+        SecondaryColor = ClampColor(SecondaryColor),
+        Scale = Math.Clamp(Scale, 0.25f, 4.0f),
+        Speed = Math.Clamp(Speed, 0.0f, 2.0f)
+    };
+
+    private static Vector4 ClampColor(Vector4 color) => new(
+        Math.Clamp(color.X, 0.0f, 1.0f),
+        Math.Clamp(color.Y, 0.0f, 1.0f),
+        Math.Clamp(color.Z, 0.0f, 1.0f),
+        Math.Clamp(color.W, 0.0f, 1.0f));
+}
 
 /// <summary>
 /// Rendering work is deliberately supplied by the native backend. The loop
@@ -59,6 +106,7 @@ public sealed class SwapChainRenderLoop : ISwapChainRenderBackend, IDisposable
     private TimeSpan _frameInterval = TimeSpan.FromMilliseconds(16.6667);
     private ISwapChainRenderSurface? _surface;
     private SwapChainSurfaceMetrics _metrics;
+    private SwapChainShaderParameters _shaderParameters = SwapChainShaderParameters.Default;
     private CancellationTokenSource? _cancellation;
     private Task? _renderTask;
     private long _frameIndex;
@@ -104,6 +152,25 @@ public sealed class SwapChainRenderLoop : ISwapChainRenderBackend, IDisposable
     }
 
     public SwapChainPresentationOptions Presentation => _presentation;
+
+    public SwapChainShaderParameters ShaderParameters
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _shaderParameters;
+            }
+        }
+        set
+        {
+            lock (_gate)
+            {
+                ThrowIfDisposed();
+                _shaderParameters = value.Bounded();
+            }
+        }
+    }
 
     public void Attach(ISwapChainRenderSurface surface)
     {
@@ -194,6 +261,7 @@ public sealed class SwapChainRenderLoop : ISwapChainRenderBackend, IDisposable
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
                 SwapChainSurfaceMetrics metrics;
+                SwapChainShaderParameters shaderParameters;
                 lock (_gate)
                 {
                     if (_surface is null || _disposed)
@@ -202,13 +270,15 @@ public sealed class SwapChainRenderLoop : ISwapChainRenderBackend, IDisposable
                     }
 
                     metrics = _metrics;
+                    shaderParameters = _shaderParameters;
                 }
 
                 var frame = new SwapChainRenderFrame(
                     FrameIndex: Interlocked.Increment(ref _frameIndex),
                     Elapsed: _clock.Elapsed,
                     Surface: metrics,
-                    Presentation: _presentation);
+                    Presentation: _presentation,
+                    Shader: shaderParameters);
 
                 try
                 {

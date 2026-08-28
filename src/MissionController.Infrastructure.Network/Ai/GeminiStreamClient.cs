@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using MissionController.Core;
 using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Network.Egress;
 
@@ -27,7 +28,7 @@ public sealed class GeminiStreamClient : IModelStreamClient
 {
     private const string ProviderName = "Google Gemini";
     private const string GeminiHost = "generativelanguage.googleapis.com";
-    private const string DefaultModel = "gemini-2.5-pro";
+    private const string DefaultModel = "gemini-2.5-flash";
 
     /// <summary>
     /// Vault key for the user's Gemini API key. This is intentionally the exact string the
@@ -97,13 +98,13 @@ public sealed class GeminiStreamClient : IModelStreamClient
 
         string endpoint = $"https://{GeminiHost}/v1beta/models/{model}:streamGenerateContent?alt=sse";
         var (response, sendError) = await TrySendAsync(endpoint, payload, apiKey, cancellationToken);
-        if (sendError is not null)
+        if (sendError is not null || response is null)
         {
-            yield return sendError;
+            yield return sendError ?? "⚠ MODEL REQUEST FAILED: Transport returned empty response.";
             yield break;
         }
 
-        using (response!)
+        using (response)
         {
             if (!response.IsSuccessStatusCode)
             {
@@ -172,8 +173,6 @@ public sealed class GeminiStreamClient : IModelStreamClient
         }
     }
 
-    // Catalog templates already carry Gemini tier ids; pass them through. Anything else (e.g. a
-    // Claude id routed here by a future config change) resolves to the default rather than 404ing.
     private static string ResolveModel(string requestedModel) =>
         !string.IsNullOrWhiteSpace(requestedModel) &&
         requestedModel.StartsWith("gemini", StringComparison.OrdinalIgnoreCase)
@@ -250,10 +249,9 @@ public sealed class GeminiStreamClient : IModelStreamClient
         return new[]
         {
             "⚠ SIMULATED OUTPUT — no AI model is connected.\n\n",
-            "No Gemini API key is configured, so no real analysis was performed.\n",
-            "Add your API key in Settings to enable live diagnostics.\n\n",
-            $"What actually ran: the sandboxed diagnostic tool executed and produced {lines} line(s) of output, ",
-            "captured verbatim in the tamper-evident audit ledger. This placeholder is NOT an interpretation of that data.\n"
+            "No Gemini API key is configured in DPAPI vault or environment.\n",
+            $"The sandboxed diagnostic tool executed and produced {lines} line(s) of genuine OS telemetry.\n",
+            "This placeholder is NOT an interpretation from a remote LLM; raw telemetry is evaluated by the local governance engine.\n"
         };
     }
 

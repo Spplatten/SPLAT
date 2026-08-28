@@ -1,4 +1,4 @@
-﻿<Application
+<Application
     x:Class="MissionController.UI.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -7,6 +7,10 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+                <!-- ms-appx:/// resolves within THIS assembly. A leading "/AssemblyName/..." path is
+                     the cross-assembly form, so WinUI looked for a literal "MissionController.UI"
+                     subfolder, failed, and threw XamlParseException before any window existed. -->
+                <ResourceDictionary Source="ms-appx:///Styles/SplatDesignTokens.xaml" />
             </ResourceDictionary.MergedDictionaries>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Default">
@@ -28,7 +32,10 @@
             </ResourceDictionary.ThemeDictionaries>
 
             <converters:BoolNegationConverter x:Key="BoolNegationConverter" />
+            <converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+            <converters:BoolNegationToVisibilityConverter x:Key="BoolNegationToVisibilityConverter" />
             <converters:NullToVisibilityConverter x:Key="NullToVisibilityConverter" />
+            <converters:PositiveNumberToVisibilityConverter x:Key="PositiveNumberToVisibilityConverter" />
 
             <!-- Electric Energy Linear Gradient -->
             <LinearGradientBrush x:Key="ElectricBlueEnergyBrush" StartPoint="0,0" EndPoint="1,1">
@@ -46,10 +53,10 @@
             <!-- Electric Energy Button Style with Blue Lightning Glow -->
             <Style x:Key="ElectricEnergyButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="{StaticResource ElectricBlueEnergyBrush}" />
-                <Setter Property="Foreground" Value="#FFFFFFFF" />
+                <Setter Property="Foreground" Value="{ThemeResource SplatOnAccentBrush}" />
                 <Setter Property="BorderBrush" Value="{StaticResource ElectricBorderGlowBrush}" />
                 <Setter Property="BorderThickness" Value="2" />
-                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="CornerRadius" Value="{StaticResource SplatCornerRadiusMedium}" />
                 <Setter Property="Padding" Value="20,12" />
                 <Setter Property="FontWeight" Value="Bold" />
                 <Setter Property="FontSize" Value="14" />
@@ -58,8 +65,16 @@
             <Style x:Key="CompactActivityRingStyle" TargetType="ProgressRing">
                 <Setter Property="Width" Value="18" />
                 <Setter Property="Height" Value="18" />
-                <Setter Property="Foreground" Value="#4CC2FF" />
+                <Setter Property="Foreground" Value="{ThemeResource SplatAccentBrush}" />
                 <Setter Property="IsHitTestVisible" Value="False" />
+            </Style>
+
+            <!-- Luminous Accent Button Style -->
+            <Style x:Key="LuminousAccentButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+                <Setter Property="BorderBrush" Value="{StaticResource ElectricBorderGlowBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="FontWeight" Value="SemiBold" />
             </Style>
         </ResourceDictionary>
     </Application.Resources>

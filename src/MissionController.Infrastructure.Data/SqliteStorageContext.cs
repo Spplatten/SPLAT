@@ -90,6 +90,13 @@ public sealed class SqliteStorageContext
                     ExitCode INTEGER,
                     ErrorMessage TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS ProjectTemplates (
+                    ProjectId TEXT PRIMARY KEY,
+                    Name TEXT NOT NULL,
+                    Category TEXT NOT NULL,
+                    ProjectJson TEXT NOT NULL DEFAULT '{}'
+                );
             ";
             cmd.ExecuteNonQuery();
 

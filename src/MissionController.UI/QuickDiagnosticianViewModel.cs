@@ -1,10 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MissionController.Core;
 using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
@@ -24,6 +25,7 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
     private readonly IMissionExecutionEngine _engine;
     private readonly ITemplateRegistry _templateRegistry;
     private readonly IRemediationEngine _remediationEngine;
+    private readonly IDiagnosticFindingsExtractor _findingsExtractor;
 
     [ObservableProperty]
     private ObservableCollection<FriendlyDiagnosticTile> _tiles = new();
@@ -64,21 +66,23 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
     public QuickDiagnosticianViewModel(
         IMissionExecutionEngine engine,
         ITemplateRegistry templateRegistry,
-        IRemediationEngine remediationEngine)
+        IRemediationEngine remediationEngine,
+        IDiagnosticFindingsExtractor? findingsExtractor = null)
     {
         _engine = engine;
         _templateRegistry = templateRegistry;
         _remediationEngine = remediationEngine;
+        _findingsExtractor = findingsExtractor ?? new JsonFindingsExtractor();
 
-        // Populate 8 Governed Autonomous AI Agents
+        // Populate the frontline governed autonomous AI agents.
         Tiles.Add(new FriendlyDiagnosticTile("network", "net-dns-audit", "Atlas-Net", "Diagnoses connection drops, high latency, and listening sockets", "\uE774", "#00E5FF"));
-        Tiles.Add(new FriendlyDiagnosticTile("security", "secops-logon-bruteforce", "Sentinel-SecOps", "Hunts for unauthorized login attempts and brute-force attacks", "\uE72E", "#FF7043"));
+        Tiles.Add(new FriendlyDiagnosticTile("security", "secops-auth-inspector", "Sentinel-SecOps", "Hunts for unauthorized login attempts and brute-force attacks", "\uE72E", "#FF7043"));
         Tiles.Add(new FriendlyDiagnosticTile("disk", "sysops-disk-space", "Titan-SysOps", "Analyzes hard drive space exhaustion and suggests safe cleanup targets", "\uEDA2", "#AB47BC"));
-        Tiles.Add(new FriendlyDiagnosticTile("antivirus", "sysops-defender-status", "Aegis-Endpoint", "Verifies Microsoft Defender real-time shield and signature freshness", "\uE815", "#6CCB5F"));
-        Tiles.Add(new FriendlyDiagnosticTile("activedirectory", "secops-ad-hunter", "Vanguard-AD", "Audits Active Directory identity, Kerberos tickets, and privileged SIDs", "\uE716", "#FFD700"));
-        Tiles.Add(new FriendlyDiagnosticTile("azurecloud", "cloud-azure-health", "Zephyr-Azure", "Audits Microsoft Entra ID hybrid sync and cloud login latency", "\uE753", "#38B6FF"));
-        Tiles.Add(new FriendlyDiagnosticTile("patches", "sysops-patch-auditor", "Chronos-Patch", "Audits installed Windows Quality updates, CVEs, and missing hotfixes", "\uE895", "#FFA726"));
-        Tiles.Add(new FriendlyDiagnosticTile("registry", "secops-registry-persistence", "Cypher-Registry", "Audits startup Run/RunOnce persistence keys and malware hooks", "\uE72D", "#BA68C8"));
+        Tiles.Add(new FriendlyDiagnosticTile("antivirus", "secops-defender-status", "Aegis-Endpoint", "Verifies Microsoft Defender real-time shield and signature freshness", "\uE815", "#6CCB5F"));
+        Tiles.Add(new FriendlyDiagnosticTile("activedirectory", "identity-ad-group-hygiene", "Vanguard-AD", "Audits Active Directory identity, Kerberos tickets, and privileged SIDs", "\uE716", "#FFD700"));
+        Tiles.Add(new FriendlyDiagnosticTile("azurecloud", "identity-entra-hybrid-join", "Zephyr-Azure", "Audits Microsoft Entra ID hybrid sync and cloud login latency", "\uE753", "#38B6FF"));
+        Tiles.Add(new FriendlyDiagnosticTile("patches", "sysops-patch-compliance", "Chronos-Patch", "Audits installed Windows Quality updates, CVEs, and missing hotfixes", "\uE895", "#FFA726"));
+        Tiles.Add(new FriendlyDiagnosticTile("registry", "endpoint-persistence-audit", "Cypher-Registry", "Audits startup Run/RunOnce persistence keys and malware hooks", "\uE72D", "#BA68C8"));
     }
 
     [RelayCommand]
@@ -99,21 +103,33 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
 
         string lower = CustomAskText.ToLowerInvariant();
         if (lower.Contains("login") || lower.Contains("hack") || lower.Contains("attack") || lower.Contains("intrud"))
-            templateId = "secops-logon-bruteforce";
+            templateId = "secops-auth-inspector";
         else if (lower.Contains("disk") || lower.Contains("space") || lower.Contains("storage") || lower.Contains("clean"))
             templateId = "sysops-disk-space";
         else if (lower.Contains("virus") || lower.Contains("defender") || lower.Contains("malware"))
-            templateId = "sysops-defender-status";
+            templateId = "secops-defender-status";
         else if (lower.Contains("active directory") || lower.Contains("domain") || lower.Contains("kerberos") || lower.Contains("ad"))
-            templateId = "secops-ad-hunter";
+            templateId = "identity-ad-group-hygiene";
         else if (lower.Contains("azure") || lower.Contains("cloud") || lower.Contains("entra") || lower.Contains("sso"))
-            templateId = "cloud-azure-health";
+            templateId = "identity-entra-hybrid-join";
         else if (lower.Contains("patch") || lower.Contains("update") || lower.Contains("hotfix") || lower.Contains("cve"))
-            templateId = "sysops-patch-auditor";
+            templateId = "sysops-patch-compliance";
         else if (lower.Contains("registry") || lower.Contains("startup") || lower.Contains("autorun") || lower.Contains("persist"))
-            templateId = "secops-registry-persistence";
+            templateId = "endpoint-persistence-audit";
 
         await ExecuteQuickDiagnosticAsync(templateId, "Custom Agent Mission", CustomAskText);
+    }
+
+    [RelayCommand]
+    public void Reset()
+    {
+        HasResult = false;
+        IsRunning = false;
+        ExecutiveFindings.Clear();
+        AvailableFixes.Clear();
+        TechnicalRawLog = string.Empty;
+        ActiveDiagnosticTitle = string.Empty;
+        RemediationStatusMessage = string.Empty;
     }
 
     [RelayCommand]
@@ -228,58 +244,33 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
 
             TechnicalRawLog = $"{rawOutput}\n\n--- AI Agent Reasoning Stream ---\n{aiOutput}";
 
-            ExecutiveStatusTitle = "🟢 ALL CLEAR — Agent Mission Completed";
-            ExecutiveStatusColor = "#6CCB5F";
+            var diagnosisResult = _findingsExtractor.ExtractFindings(
+                aiOutput.ToString(),
+                rawOutput.ToString(),
+                template.Name);
 
-            if (templateId == "net-dns-audit")
+            ExecutiveStatusTitle = diagnosisResult.StatusHeadline;
+            ExecutiveStatusColor = diagnosisResult.OverallStatus switch
             {
-                ExecutiveFindings.Add("✓ Atlas-Net checked network ping latency: Fast response (Under 25ms).");
-                ExecutiveFindings.Add("✓ Zero packet loss detected to gateway and DNS servers.");
-                ExecutiveFindings.Add("✓ Safe network connection: No unauthorized listening ports found.");
-            }
-            else if (templateId == "secops-logon-bruteforce")
+                DiagnosticHealthStatus.Critical => "#E53935",
+                DiagnosticHealthStatus.Warning => "#FFB300",
+                // Unknown means the extractor got neither a model verdict nor usable telemetry.
+                // It must NOT share Healthy's green: painting an absence of evidence as a clean
+                // bill of health is the exact failure mode the structured-findings work removes.
+                DiagnosticHealthStatus.Unknown => "#FFB300",
+                _ => "#6CCB5F"
+            };
+
+            foreach (var finding in diagnosisResult.KeyFindings)
             {
-                ExecutiveFindings.Add("✓ Sentinel-SecOps audited the Security Event Log for the last 24 hours.");
-                ExecutiveFindings.Add("✓ Zero brute-force credential attacks or suspicious login spikes detected.");
-                ExecutiveFindings.Add("✓ User account security is verified and intact.");
-            }
-            else if (templateId == "sysops-disk-space")
-            {
-                ExecutiveFindings.Add("✓ Titan-SysOps verified drive volume health: Healthy free capacity.");
-                ExecutiveFindings.Add("✓ System drive (C:) is operating with plenty of performance headroom.");
-            }
-            else if (templateId == "sysops-defender-status")
-            {
-                ExecutiveFindings.Add("✓ Aegis-Endpoint verified Microsoft Defender real-time shield is active.");
-                ExecutiveFindings.Add("✓ Antivirus definitions and signatures are fully up to date.");
-            }
-            else if (templateId == "secops-ad-hunter")
-            {
-                ExecutiveFindings.Add("✓ Vanguard-AD audited domain group delegation and Kerberos tickets.");
-                ExecutiveFindings.Add("✓ No unauthorized administrative SID injections or shadow admins detected.");
-            }
-            else if (templateId == "cloud-azure-health")
-            {
-                ExecutiveFindings.Add("✓ Zephyr-Azure verified Microsoft Entra ID and cloud SSO endpoints.");
-                ExecutiveFindings.Add("✓ Cloud login latency is fast (Under 40ms) and TLS handshakes are valid.");
-            }
-            else if (templateId == "sysops-patch-auditor")
-            {
-                ExecutiveFindings.Add("✓ Chronos-Patch verified installed Windows Quality and Security Rollups.");
-                ExecutiveFindings.Add("✓ Windows kernel patch level is up-to-date against known critical CVEs.");
-            }
-            else
-            {
-                ExecutiveFindings.Add("✓ Cypher-Registry audited Windows Run/RunOnce persistence keys.");
-                ExecutiveFindings.Add("✓ Startup entries are clean with zero rogue or unquoted executable hooks.");
+                ExecutiveFindings.Add(finding);
             }
 
-            if (!string.IsNullOrWhiteSpace(aiOutput.ToString()))
+            if (diagnosisResult.RecommendedActions != null && diagnosisResult.RecommendedActions.Count > 0)
             {
-                string summaryLine = aiOutput.ToString().Split('\n')[0].Trim();
-                if (!string.IsNullOrEmpty(summaryLine) && summaryLine.Length < 160)
+                foreach (var action in diagnosisResult.RecommendedActions)
                 {
-                    ExecutiveFindings.Add($"AI Synthesis: {summaryLine}");
+                    ExecutiveFindings.Add($"⚡ Recommended Action: {action}");
                 }
             }
 

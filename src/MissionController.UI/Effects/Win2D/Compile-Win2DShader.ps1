@@ -82,7 +82,8 @@ function Resolve-IncludePath {
 $fxc = Resolve-Fxc
 $include = Resolve-IncludePath
 $outputDirectory = Split-Path -Parent $Output
-$library = Join-Path $outputDirectory 'MissionControllerGlow.fxlib'
+$shaderBaseName = [System.IO.Path]::GetFileNameWithoutExtension($Source)
+$library = Join-Path $outputDirectory "$shaderBaseName.fxlib"
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 
 $libraryArguments = @(

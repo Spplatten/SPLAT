@@ -1,27 +1,28 @@
 <Project>
   <PropertyGroup>
-    <Win2DShaderSource>$(MSBuildThisFileDirectory)MissionControllerGlow.hlsl</Win2DShaderSource>
-    <!-- fxc emits CSO bytes; Win2D's PixelShaderEffect convention is .bin. -->
-    <Win2DShaderBytecode>$(IntermediateOutputPath)Win2DShaders\MissionControllerGlow.bin</Win2DShaderBytecode>
     <Win2DShaderCompileScript>$(MSBuildThisFileDirectory)Compile-Win2DShader.ps1</Win2DShaderCompileScript>
     <Win2DFxcPath Condition="'$(Win2DFxcPath)' == ''"></Win2DFxcPath>
     <Win2DShaderIncludePath Condition="'$(Win2DShaderIncludePath)' == ''"></Win2DShaderIncludePath>
-    <Win2DShaderRuntimePath>Effects\Win2D\MissionControllerGlow.bin</Win2DShaderRuntimePath>
     <Win2DShaderRuntimeDirectory>$(OutDir)Effects\Win2D</Win2DShaderRuntimeDirectory>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Win2DShader Include="$(MSBuildThisFileDirectory)*.hlsl" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(EnableMissionControllerWin2DShaderBuild)' == 'true'">
-    <None Update="$(Win2DShaderSource)" />
-    <Content Include="$(Win2DShaderBytecode)" CopyToOutputDirectory="PreserveNewest" Link="$(Win2DShaderRuntimePath)" />
+    <Content Include="$(IntermediateOutputPath)Win2DShaders\%(Win2DShader.Filename).bin" CopyToOutputDirectory="PreserveNewest" Link="Effects\Win2D\%(Win2DShader.Filename).bin" />
   </ItemGroup>
 
   <Target
     Name="CompileMissionControllerWin2DShader"
     BeforeTargets="PrepareForBuild"
-    Condition="'$(EnableMissionControllerWin2DShaderBuild)' == 'true'">
+    Condition="'$(EnableMissionControllerWin2DShaderBuild)' == 'true'"
+    Inputs="@(Win2DShader)"
+    Outputs="@(Win2DShader->'$(IntermediateOutputPath)Win2DShaders\%(Filename).bin')">
     <MakeDir Directories="$(IntermediateOutputPath)Win2DShaders" />
-    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(Win2DShaderCompileScript)&quot; -Source &quot;$(Win2DShaderSource)&quot; -Output &quot;$(Win2DShaderBytecode)&quot; -FxcPath &quot;$(Win2DFxcPath)&quot; -IncludePath &quot;$(Win2DShaderIncludePath)&quot;" />
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(Win2DShaderCompileScript)&quot; -Source &quot;%(Win2DShader.FullPath)&quot; -Output &quot;$(IntermediateOutputPath)Win2DShaders\%(Win2DShader.Filename).bin&quot; -FxcPath &quot;$(Win2DFxcPath)&quot; -IncludePath &quot;$(Win2DShaderIncludePath)&quot;" />
     <MakeDir Directories="$(Win2DShaderRuntimeDirectory)" />
-    <Copy SourceFiles="$(Win2DShaderBytecode)" DestinationFiles="$(OutDir)$(Win2DShaderRuntimePath)" />
+    <Copy SourceFiles="@(Win2DShader->'$(IntermediateOutputPath)Win2DShaders\%(Filename).bin')" DestinationFolder="$(Win2DShaderRuntimeDirectory)" />
   </Target>
 </Project>

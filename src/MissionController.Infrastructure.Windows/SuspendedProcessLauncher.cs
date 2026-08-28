@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -65,14 +66,15 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
 
         var pi = new Win32Interop.PROCESS_INFORMATION();
 
+        string resolvedExecutable = ResolveExecutablePath(executable);
         string fullCommandLine = string.IsNullOrWhiteSpace(arguments)
-            ? $"\"{executable}\""
-            : $"\"{executable}\" {arguments}";
+            ? $"\"{resolvedExecutable}\""
+            : $"\"{resolvedExecutable}\" {arguments}";
 
         uint creationFlags = Win32Interop.CREATE_SUSPENDED | Win32Interop.CREATE_NO_WINDOW;
 
         IntPtr restrictedToken = IntPtr.Zero;
-        bool success;
+        bool success = false;
 
         try
         {
@@ -94,20 +96,27 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
                         ref si,
                         out pi);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Fallback to standard CreateProcessW if CreateProcessAsUserW encounters privilege boundaries
-                    success = Win32Interop.CreateProcessW(
-                        null,
-                        fullCommandLine,
-                        ref sa,
-                        ref sa,
-                        true,
-                        creationFlags,
-                        IntPtr.Zero,
-                        workingDirectory,
-                        ref si,
-                        out pi);
+                    // FAIL CLOSED - see below. Token creation blowing up is not a reason to run
+                    // the tool with more privilege than the template asked for.
+                    throw new SecurityException(
+                        "Privilege drop required by this template could not be applied, so the sensor tool was NOT launched. " +
+                        $"Restricted token creation failed: {ex.Message}", ex);
+                }
+
+                if (!success)
+                {
+                    // This previously fell back to CreateProcessW - a FULL-token launch - whenever the
+                    // restricted-token path failed. A template declaring RequiresRestrictedToken could
+                    // therefore run its tool with the operator's full (often administrative) privileges
+                    // while the mission still reported success and the ledger still recorded it as
+                    // governed. A sandbox that silently turns itself off is worse than no sandbox,
+                    // because everything downstream keeps trusting it. Refuse the launch instead: the
+                    // engine catches this and seals an honest MISSION_FAILED row.
+                    throw new SecurityException(
+                        "Privilege drop required by this template could not be applied, so the sensor tool was NOT launched. " +
+                        $"CreateProcessAsUserW failed with Win32 error {Marshal.GetLastWin32Error()}.");
                 }
             }
             else
@@ -127,7 +136,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
 
             if (!success)
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), $"Failed to create suspended process '{executable}'.");
+                throw new Win32Exception(Marshal.GetLastWin32Error(), $"Failed to create suspended process '{resolvedExecutable}'.");
             }
 
             // CRITICAL HARDENING FIX 1: Assign process to Job Object BEFORE resuming thread
@@ -223,5 +232,26 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
         }
 
         return sb.ToString();
+    }
+
+    private static string ResolveExecutablePath(string executable)
+    {
+        if (Path.IsPathRooted(executable) && File.Exists(executable))
+            return executable;
+
+        string systemDir = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        string systemCandidate = Path.Combine(systemDir, executable);
+        if (File.Exists(systemCandidate))
+            return systemCandidate;
+
+        string wbemCandidate = Path.Combine(systemDir, "wbem", executable);
+        if (File.Exists(wbemCandidate))
+            return wbemCandidate;
+
+        string psCandidate = Path.Combine(systemDir, "WindowsPowerShell", "v1.0", executable);
+        if (File.Exists(psCandidate))
+            return psCandidate;
+
+        return executable;
     }
 }
