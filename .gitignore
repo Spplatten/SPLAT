@@ -19,3 +19,6 @@ TestResults/
 *.pfx
 *.cer
 *.snk
+
+# Compiled Win2D shader bytecode — generated from the .hlsl sources at build time
+src/MissionController.UI/Effects/Win2D/*.bin
