@@ -192,6 +192,7 @@
             <Button
                 Grid.Column="2"
                 Style="{StaticResource ElectricEnergyButtonStyle}"
+                CornerRadius="24"
                 effects:AuroraEnergyShader.IsEnabled="True"
                 Click="NextOrFinishButton_Click">
                 <StackPanel Orientation="Horizontal" Spacing="8">

@@ -118,8 +118,8 @@
                             Command="{x:Bind ViewModel.RunCustomAskCommand}"
                             IsEnabled="{x:Bind ViewModel.IsRunning, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}"
                             VerticalAlignment="Center"
-                            effects:AuroraEnergyShader.IsEnabled="True"
-                            effects:ButtonPressShader.IsEnabled="True">
+                            CornerRadius="24"
+                            effects:AuroraEnergyShader.IsEnabled="True">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <TextBlock Text="⚡" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
                                 <TextBlock Text="Dispatch Agent" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
