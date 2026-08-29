@@ -256,4 +256,51 @@ public class TokenValidationAndLifecycleTests
             .Replace('+', '-')
             .Replace('/', '_');
     }
+
+    [Fact]
+    public async Task PurgeExpiredTokens_DeletesExpiredSecretsAndTheirRefreshCounterparts()
+    {
+        var vault = new InMemoryCredentialVault();
+        var manager = new TokenLifecycleManager(vault);
+
+        await vault.StoreSecretStringAsync("expired.key", "stale-access-token");
+        await vault.StoreSecretStringAsync("expired.key.RefreshToken", "stale-refresh-token");
+        manager.TrackTokenExpiry("expired.key", DateTimeOffset.UtcNow.AddHours(-2));
+
+        int purged = await manager.PurgeExpiredTokensAsync();
+
+        Assert.Equal(1, purged);
+        Assert.Null(await vault.RetrieveSecretStringAsync("expired.key"));
+        Assert.Null(await vault.RetrieveSecretStringAsync("expired.key.RefreshToken"));
+    }
+
+    [Fact]
+    public async Task PurgeExpiredTokens_LeavesLiveTokensAlone()
+    {
+        var vault = new InMemoryCredentialVault();
+        var manager = new TokenLifecycleManager(vault);
+
+        await vault.StoreSecretStringAsync("live.key", "good-token");
+        manager.TrackTokenExpiry("live.key", DateTimeOffset.UtcNow.AddHours(2));
+
+        Assert.Equal(0, await manager.PurgeExpiredTokensAsync());
+        Assert.Equal("good-token", await vault.RetrieveSecretStringAsync("live.key"));
+    }
+
+    [Fact]
+    public async Task PurgeExpiredTokens_SparesExpiredKeysThatStillHaveARefreshHandler()
+    {
+        var vault = new InMemoryCredentialVault();
+        var manager = new TokenLifecycleManager(vault);
+
+        await vault.StoreSecretStringAsync("renewable.key", "expired-but-renewable");
+        manager.TrackTokenExpiry("renewable.key", DateTimeOffset.UtcNow.AddHours(-1));
+        manager.RegisterRefreshHandler("renewable.key", _ =>
+            Task.FromResult<TokenDescriptor?>(new TokenDescriptor("fresh", "Bearer", DateTimeOffset.UtcNow.AddHours(1))));
+
+        // An expired token with a working refresh handler is a live credential slot; deleting it
+        // would fail a renewal that was about to succeed.
+        Assert.Equal(0, await manager.PurgeExpiredTokensAsync());
+        Assert.Equal("expired-but-renewable", await vault.RetrieveSecretStringAsync("renewable.key"));
+    }
 }

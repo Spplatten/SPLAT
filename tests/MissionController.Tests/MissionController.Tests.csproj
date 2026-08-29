@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\src\MissionController.Infrastructure.Windows\MissionController.Infrastructure.Windows.csproj" />
     <ProjectReference Include="..\..\src\MissionController.Infrastructure.Network\MissionController.Infrastructure.Network.csproj" />
     <ProjectReference Include="..\..\src\MissionController.Infrastructure.Data\MissionController.Infrastructure.Data.csproj" />
+    <ProjectReference Include="..\..\src\MissionController.Infrastructure.Linux\MissionController.Infrastructure.Linux.csproj" />
   </ItemGroup>
 
 </Project>

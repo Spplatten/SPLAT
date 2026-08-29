@@ -133,6 +133,48 @@ public sealed class TokenLifecycleManager : ITokenLifecycleManager
         }
     }
 
+    /// <summary>
+    /// Deletes vault secrets whose tracked expiry has passed and evicts their bookkeeping.
+    ///
+    /// Two leaks close here. The obvious one is the ciphertext: an access token that expired weeks
+    /// ago is still a credential on disk, and keeping it buys nothing because it can no longer be
+    /// refreshed into anything useful. The quieter one is the tracking dictionaries themselves -
+    /// they are keyed per secret and never pruned, so a long-running session accumulates an
+    /// in-memory map of every key the process has ever touched.
+    ///
+    /// A key with a registered refresh handler is skipped even when expired: an expired token whose
+    /// handler can still renew it is a live credential slot, and deleting it mid-flight would fail a
+    /// refresh that was about to succeed. Callers wanting those gone should unregister first.
+    /// </summary>
+    public async Task<int> PurgeExpiredTokensAsync(
+        DateTimeOffset? asOfUtc = null,
+        CancellationToken cancellationToken = default)
+    {
+        var now = asOfUtc ?? DateTimeOffset.UtcNow;
+        int purged = 0;
+
+        foreach (var (secretKey, expiresAt) in _tokenExpirations.ToArray())
+        {
+            if (now < expiresAt || _refreshHandlers.ContainsKey(secretKey))
+            {
+                continue;
+            }
+
+            await _vault.DeleteSecretAsync(secretKey, cancellationToken);
+            await _vault.DeleteSecretAsync($"{secretKey}.RefreshToken", cancellationToken);
+
+            _tokenExpirations.TryRemove(secretKey, out _);
+            if (_refreshLocks.TryRemove(secretKey, out var staleLock))
+            {
+                staleLock.Dispose();
+            }
+
+            purged++;
+        }
+
+        return purged;
+    }
+
     private static DateTimeOffset? TryExtractJwtExpiration(string token)
     {
         try

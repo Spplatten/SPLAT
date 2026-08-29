@@ -1,0 +1,115 @@
+﻿syntax = "proto3";
+
+package splat.sandbox;
+
+option csharp_namespace = "MissionController.Infrastructure.Linux.Grpc";
+
+// Service hosted by the Linux guest daemon (splat-agent) over AF_VSOCK / TCP
+service SandboxService {
+  // Execute a command inside an ephemeral cgroup under a BPF-LSM capability lease
+  rpc ExecuteTool (ToolRequest) returns (stream ToolOutputChunk);
+  
+  // Query daemon readiness and in-kernel BPF-LSM / LSM state
+  rpc HealthCheck (HealthRequest) returns (HealthResponse);
+
+  // Explicitly revoke a running lease and terminate its cgroup
+  rpc RevokeLease (RevokeLeaseRequest) returns (RevokeLeaseResponse);
+}
+
+message InodeIdentifier {
+  uint64 inode_number = 1;
+  uint32 device_id = 2;
+  string source_path = 3;
+}
+
+message ResourceLimits {
+  uint64 max_memory_bytes = 1;
+  uint32 max_cpu_percent = 2;
+  uint32 max_pids = 3;
+}
+
+message OverlayFsConfig {
+  bool enable_cow = 1;
+  string lower_dir = 2;
+  string scratch_dir = 3;
+}
+
+message ToolRequest {
+  string mission_id = 1;
+  string command = 2;
+  repeated string args = 3;
+  string working_directory = 4;
+  map<string, string> environment_variables = 5;
+
+  // Kernel capability lease specifications
+  bool allow_network = 6;
+  repeated string allowed_egress_ips = 7;      // IPv4 dotted quad (e.g. "127.0.0.1", "140.82.121.4")
+  repeated uint32 allowed_egress_ports = 8;
+  
+  bool read_only_fs = 9;
+  repeated InodeIdentifier protected_inodes = 10;
+  repeated InodeIdentifier allowed_exec_inodes = 11;
+
+  // Single-use, seconds-scale lease duration (e.g., 5s to 300s)
+  uint32 lease_duration_seconds = 12;
+  
+  // Resource clamps
+  ResourceLimits limits = 13;
+
+  // Ephemeral CoW OverlayFS configuration
+  OverlayFsConfig overlay_fs = 14;
+}
+
+enum ChunkType {
+  CHUNK_TYPE_UNSPECIFIED = 0;
+  CHUNK_TYPE_STDOUT = 1;
+  CHUNK_TYPE_STDERR = 2;
+  CHUNK_TYPE_VIOLATION = 3; // Kernel -EPERM hook violation event
+  CHUNK_TYPE_EXIT = 4;
+}
+
+enum ViolationHook {
+  HOOK_UNSPECIFIED = 0;
+  HOOK_EXEC = 1;    // bprm_check_security
+  HOOK_OPEN = 2;    // file_open
+  HOOK_CONNECT = 3; // socket_connect
+}
+
+message ViolationEvent {
+  uint64 cgroup_id = 1;
+  uint32 process_id = 2;
+  ViolationHook hook = 3;
+  uint64 detail = 4; // Inode number or IPv4 integer
+  string detail_text = 5;
+  string process_comm = 6;
+  uint64 timestamp_ns = 7;
+}
+
+message ToolOutputChunk {
+  ChunkType type = 1;
+  bytes data = 2;
+  int32 exit_code = 3;
+  ViolationEvent violation = 4;
+  bool timed_out = 5;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool ready = 1;
+  bool bpf_lsm_active = 2;
+  bool cgroup_v2_active = 3;
+  bool overlayfs_supported = 4;
+  string kernel_version = 5;
+  uint32 active_lease_count = 6;
+}
+
+message RevokeLeaseRequest {
+  string mission_id = 1;
+  string reason = 2;
+}
+
+message RevokeLeaseResponse {
+  bool revoked = 1;
+  string message = 2;
+}

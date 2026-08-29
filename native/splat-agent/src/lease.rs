@@ -1,0 +1,165 @@
+﻿// Multi-lease manager for BPF-LSM capability policies.
+// Manages concurrent per-cgroup leases with deterministic second-scale lifecycles.
+
+use std::collections::HashMap;
+use std::fs;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+
+use crate::violation::ipv4_to_be_u32;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct InodeKey {
+    pub ino: u64,
+    pub dev: u32,
+    pub _pad: u32,
+}
+
+pub fn inode_key_for_path(path: &Path) -> Result<InodeKey> {
+    let md = fs::metadata(path).with_context(|| format!("stat path {}", path.display()))?;
+    Ok(InodeKey {
+        ino: md.ino(),
+        dev: md.dev() as u32,
+        _pad: 0,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeaseLimits {
+    pub max_memory_bytes: u64,
+    pub max_cpu_percent: u32,
+    pub max_pids: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeaseConfig {
+    pub mission_id: String,
+    pub working_directory: String,
+    pub allow_network: bool,
+    pub allowed_egress_ips: Vec<String>,
+    pub allowed_egress_ports: Vec<u32>,
+    pub read_only_fs: bool,
+    pub protected_paths: Vec<String>,
+    pub allowed_exec_paths: Vec<String>,
+    pub lease_duration_seconds: u32,
+    pub limits: LeaseLimits,
+}
+
+pub struct ActiveLease {
+    pub mission_id: String,
+    pub cgroup_id: u64,
+    pub created_at: Instant,
+    pub expires_at: Instant,
+    pub protected_inodes: Vec<InodeKey>,
+    pub allowed_exec_inodes: Vec<InodeKey>,
+    pub allowed_ips: Vec<u32>,
+}
+
+#[derive(Clone)]
+pub struct LeaseManager {
+    leases: Arc<Mutex<HashMap<u64, ActiveLease>>>,
+}
+
+impl LeaseManager {
+    pub fn new() -> Self {
+        Self {
+            leases: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub fn register_lease(
+        &self,
+        cgroup_id: u64,
+        config: &LeaseConfig,
+    ) -> Result<ActiveLease> {
+        let duration = Duration::from_secs(config.lease_duration_seconds.clamp(5, 300) as u64);
+        let now = Instant::now();
+
+        let mut protected_inodes = Vec::new();
+        for p in &config.protected_paths {
+            if let Ok(key) = inode_key_for_path(Path::new(p)) {
+                protected_inodes.push(key);
+            }
+        }
+
+        let mut allowed_exec_inodes = Vec::new();
+        for p in &config.allowed_exec_paths {
+            if let Ok(key) = inode_key_for_path(Path::new(p)) {
+                allowed_exec_inodes.push(key);
+            }
+        }
+
+        let mut allowed_ips = Vec::new();
+        if config.allow_network {
+            for ip in &config.allowed_egress_ips {
+                if let Ok(val) = ipv4_to_be_u32(ip) {
+                    allowed_ips.push(val);
+                }
+            }
+        }
+
+        let lease = ActiveLease {
+            mission_id: config.mission_id.clone(),
+            cgroup_id,
+            created_at: now,
+            expires_at: now + duration,
+            protected_inodes,
+            allowed_exec_inodes,
+            allowed_ips,
+        };
+
+        let mut lock = self.leases.lock().unwrap();
+        lock.insert(cgroup_id, ActiveLease {
+            mission_id: lease.mission_id.clone(),
+            cgroup_id: lease.cgroup_id,
+            created_at: lease.created_at,
+            expires_at: lease.expires_at,
+            protected_inodes: lease.protected_inodes.clone(),
+            allowed_exec_inodes: lease.allowed_exec_inodes.clone(),
+            allowed_ips: lease.allowed_ips.clone(),
+        });
+
+        Ok(lease)
+    }
+
+    pub fn revoke_lease(&self, cgroup_id: u64) -> Option<ActiveLease> {
+        let mut lock = self.leases.lock().unwrap();
+        lock.remove(&cgroup_id)
+    }
+
+    pub fn get_active_count(&self) -> usize {
+        let lock = self.leases.lock().unwrap();
+        lock.len()
+    }
+
+    pub fn prune_expired(&self) -> Vec<ActiveLease> {
+        let mut lock = self.leases.lock().unwrap();
+        let now = Instant::now();
+        let mut expired = Vec::new();
+        lock.retain(|_, v| {
+            if now >= v.expires_at {
+                expired.push(ActiveLease {
+                    mission_id: v.mission_id.clone(),
+                    cgroup_id: v.cgroup_id,
+                    created_at: v.created_at,
+                    expires_at: v.expires_at,
+                    protected_inodes: v.protected_inodes.clone(),
+                    allowed_exec_inodes: v.allowed_exec_inodes.clone(),
+                    allowed_ips: v.allowed_ips.clone(),
+                });
+                false
+            } else {
+                true
+            }
+        });
+        expired
+    }
+}

@@ -241,16 +241,18 @@ public static class TelemetryGrounder
             return false;
         }
 
-        foreach (var numerator in telemetryNumbers)
+        // Index-based so "the same reading twice" is excluded by position rather than by value: two
+        // distinct sensor readings that happen to be equal are still a legitimate ratio.
+        for (int i = 0; i < telemetryNumbers.Count; i++)
         {
-            foreach (var denominator in telemetryNumbers)
+            for (int j = 0; j < telemetryNumbers.Count; j++)
             {
-                if (denominator == 0d || ReferenceEquals(numerator, denominator))
+                if (i == j || telemetryNumbers[j] == 0d)
                 {
                     continue;
                 }
 
-                if (Math.Abs((numerator / denominator * 100d) - claimed) <= 0.15d)
+                if (Math.Abs((telemetryNumbers[i] / telemetryNumbers[j] * 100d) - claimed) <= 0.15d)
                 {
                     return true;
                 }

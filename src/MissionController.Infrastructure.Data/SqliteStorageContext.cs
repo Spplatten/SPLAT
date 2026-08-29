@@ -32,17 +32,32 @@ public sealed class SqliteStorageContext
         };
 
         _connectionString = builder.ToString();
+        DatabasePath = path;
         InitializeDatabase();
     }
+
+    /// <summary>
+    /// On-disk location of the database. Exposed so the retention sweep can checkpoint the WAL and
+    /// VACUUM the file - purged bytes survive in the -wal sidecar and in free pages until both happen.
+    /// </summary>
+    public string DatabasePath { get; }
 
     public SqliteConnection CreateConnection()
     {
         var conn = new SqliteConnection(_connectionString);
         conn.Open();
 
-        // Enable WAL mode and NORMAL synchronous for maximum concurrency and durability
+        // Enable WAL mode and NORMAL synchronous for maximum concurrency and durability.
+        //
+        // secure_delete is a RETENTION prerequisite, not a performance setting: without it SQLite
+        // leaves deleted row bytes intact in free pages, so purged mission telemetry (event log
+        // dumps, local account enumerations, registry reads) stays recoverable from the .db file
+        // with a hex editor long after the retention job claims to have erased it. It is set per
+        // connection because a pragma applied only at init would not cover the pooled connections
+        // the retention sweep actually deletes through.
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;";
+        cmd.CommandText =
+            "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;";
         cmd.ExecuteNonQuery();
 
         return conn;
@@ -64,7 +79,11 @@ public sealed class SqliteStorageContext
                     Details TEXT NOT NULL,
                     OperatorIdentity TEXT NOT NULL,
                     PreviousHash TEXT NOT NULL,
-                    EntryHash TEXT NOT NULL
+                    EntryHash TEXT NOT NULL,
+                    DetailsSalt TEXT,
+                    DetailsCommitment TEXT,
+                    HashVersion INTEGER NOT NULL DEFAULT 1,
+                    RedactedAtUtc TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS Templates (
@@ -110,6 +129,29 @@ public sealed class SqliteStorageContext
             catch
             {
                 // Column already exists
+            }
+
+            // Migration: redaction columns on the audit ledger. Existing rows stay HashVersion 1
+            // (their EntryHash covers plaintext Details, so erasing Details would break the chain);
+            // new rows are written as version 2 and are redactable. See SqliteChainedAuditLedger.
+            foreach (var columnDdl in new[]
+            {
+                "ALTER TABLE AuditLedger ADD COLUMN DetailsSalt TEXT;",
+                "ALTER TABLE AuditLedger ADD COLUMN DetailsCommitment TEXT;",
+                "ALTER TABLE AuditLedger ADD COLUMN HashVersion INTEGER NOT NULL DEFAULT 1;",
+                "ALTER TABLE AuditLedger ADD COLUMN RedactedAtUtc TEXT;"
+            })
+            {
+                try
+                {
+                    using var alterCmd = conn.CreateCommand();
+                    alterCmd.CommandText = columnDdl;
+                    alterCmd.ExecuteNonQuery();
+                }
+                catch
+                {
+                    // Column already exists
+                }
             }
         }
     }

@@ -1,8 +1,10 @@
-# Build output
+﻿# Build output
 [Bb]in/
 [Oo]bj/
 dist/
 .win2d-check/
+target/
+**/target/
 
 # Test & tooling artifacts
 TestResults/

@@ -22,16 +22,32 @@
 
 ---
 
-## The 8-Layer Enterprise Governed AI Agent Stack
+## Architectural Positioning & Substrate Roadmap
+- **Production Implementation (v1.0 — Windows Native):** Today's codebase is Windows-native end to end (`MissionExecutionEngine.cs`, `NtAclJailManager.cs`, `Win32JobSandbox.cs`, `SuspendedProcessLauncher.cs`, `RestrictedTokenProvider.cs`, `DpapiCredentialVault.cs`, `SqliteChainedAuditLedger.cs`). It enforces a strict **1:1:1 Governance Invariant** ($\text{1 Template} \rightarrow \text{1 Model} \rightarrow \text{1 Dedicated Native Tool} \rightarrow \text{1 Approved Egress FQDN}$) over an approved catalog.
+- **Additive Interface Seams:** All process creation, sandboxing, and directory isolation are cleanly abstracted behind `IJailManager`, `IProcessLauncher`, and `IJobSandbox`. The upcoming Linux/eBPF runtime slots directly behind these seams as additive implementations without rewriting orchestration, DLP, or audit subsystems.
+- **Roadmap Substrate (v2.0 — WSL2 / eBPF):** In-kernel BPF-LSM policy enforcement inside Hyper-V isolated WSL2 guest VMs. This in-kernel blast-radius containment is what **earns the right** to safely loosen the 1:1:1 invariant into multi-step agent tool chaining.
+- **Stock Microsoft WSL2 Kernel (Verified):** The stock Microsoft WSL2 kernel (`6.18.33.2-2` / `6.6+`) includes all required configurations out of the box (`CONFIG_BPF=y`, `CONFIG_BPF_SYSCALL=y`, `CONFIG_BPF_JIT=y`, `CONFIG_BPF_LSM=y`, `CONFIG_HYPERV_VSOCKETS=y`, `CONFIG_OVERLAY_FS=y`, `CONFIG_DEBUG_INFO_BTF=y`). Activating BPF-LSM requires only adding `kernelCommandLine = ...lsm=...,bpf` in `%USERPROFILE%\.wslconfig`. No custom kernel fork or CVE maintenance burden is required.
+- **Security Position:**
+  - *Boundary Definition:* In-kernel LSM software enforcement inside a hardware-isolated Hyper-V micro-VM guest.
+  - *Threat Model:* Blast-radius containment, not magic semantic prompt-injection detection. Compromised agents cannot escape assigned cgroup capabilities, filesystem boundaries, or network leases.
+  - *Lease Design:* Tool contracts compiled down to cgroup-scoped kernel policy with deterministic, seconds-scale single-use leases.
+
+---
+
+## The 10-Layer Enterprise Governed AI Agent Stack
 
 1. **Layer 1: Intent & Interaction:** 1-Click Agent Squad Dashboard, First-Run Welcome Wizard, and Electric Blue glowing action buttons (`⚡`).
 2. **Layer 2: Cognitive Brain:** Anthropic Claude Opus 5 (default) with Google Gemini as key-routed alternate provider; honest SIMULATED labeling when no key is configured.
 3. **Layer 3: Local Semantic Memory:** In-process 128-dimensional vector embedding engine with cosine similarity search over past incidents.
 4. **Layer 4: Zero-Trust Egress Firewall & DLP:** In-memory `DelegatingHandler` socket whitelist + regex engine scrubbing passwords, NTLM hashes, private keys, and emails before cloud transmission.
-5. **Layer 5: Kernel Confinement & Hardware Sandbox:** Suspended `CreateProcessW` (0x00000004) + Win32 Job Object RAM/CPU clamps + Restricted Token Admin SID stripping + Per-mission NT ACL Jails with severed inheritance.
+5. **Layer 5: Kernel Confinement & Hardware Sandbox (Windows Native / WSL2 Substrate Ready):** 
+   - *Windows Native (v1.0):* Suspended `CreateProcessW` (`CREATE_SUSPENDED` `0x00000004`) + Win32 Job Object RAM/CPU clamps + Restricted Token Admin SID stripping (`S-1-5-32-544`) + Per-mission NT ACL Jails with severed inheritance (`SetAccessRuleProtection`).
+   - *WSL2 Substrate (v2.0):* Stock Microsoft WSL2 kernel guest with BPF-LSM syscall policy, cgroup resource clamps, and vsock communication.
 6. **Layer 6: Native Confined Sensors:** Hardened non-interactive tool subprocesses (`wevtutil`, `wmic`, `ping`, `sc`, `whoami`, `reg`).
 7. **Layer 7: Cryptographic Audit Ledger:** SQLite WAL mode with SHA-256 sequential chained hashing and Merkle tree root verification.
 8. **Layer 8: Governed Self-Healing Remediations:** 1-click safe fix scripts (DNS flush, WinSock reset, temp cache purge, Defender start, Kerberos purge) with automatic undo/rollback support.
+9. **Layer 9: Evidence Attestation (`TelemetryGrounder`):** Deterministic grounding of every model-derived finding against the raw sensor text that produced it. Checkable claims (addresses, counts, registry/file paths, binaries, percentages) must appear in the telemetry or the finding is marked `[UNSUPPORTED]`; percentages are reconciled as ratios so correct arithmetic is not flagged as fabrication. Findings are never dropped and `OverallStatus` is never downgraded — a Critical verdict with zero anchored findings is flagged in the headline instead. Closes the gap where Layers 4–7 would cryptographically notarize a hallucination.
+10. **Layer 10: Retention & Cryptographic Erasure (`DataRetentionService`):** Per-COLUMN retention windows (raw telemetry 7d, operator parameters 7d, model analysis 30d, RAG index 30d, audit payloads 90d) with the mission metadata skeleton retained. Audit `Details` is cryptographically erased, never deleted: the chain commits to a salted digest (`HashVersion` 2), so destroying the plaintext AND its 256-bit salt leaves `VerifyLedgerIntegrityAsync` passing while making the surviving commitment non-invertible. `PRAGMA secure_delete=ON` + `wal_checkpoint(TRUNCATE)` + `VACUUM` ensure purged bytes leave the file rather than lingering in free pages and the -wal sidecar. Legacy v1 rows are reported as non-redactable rather than silently broken.
 
 ---
 
@@ -52,4 +68,4 @@
 - **Packaging Pipeline (`packaging/build-msix.ps1`):** Self-contained `win-x64` Release compilation, enterprise code-signing certificate generation, and Authenticode SHA-256 digital signing.
 - **Intune & SCCM Silent Deployment (`packaging/install-enterprise.ps1`):** Silent installer deploying cert to `TrustedPeople` and installing MSIX bundle.
 - **Clean De-Provisioning (`packaging/uninstall-enterprise.ps1`):** Completely removes AppX and purges DPAPI vaults and active jails.
-- **Test Suite (`tests/MissionController.Tests`):** **121/121 passing** across 27 files (101 `[Fact]` + 4 `[Theory]` x 20 `[InlineData]`), `net9.0-windows`. VERIFY BY STATIC COUNT, NOT BY `dotnet test` ALONE — an incremental run against a stale `bin/` DLL silently reported 77 on this same commit. Cross-check: `grep -rhoF "[Fact]" tests/ | wc -l` plus the InlineData rows.
+- **Test Suite (`tests/MissionController.Tests`):** **161/161 passing** across 30 files, `net9.0-windows`, warning-clean. Includes dedicated test fixtures for `TemplatePolicyCompiler`, `LeaseSpec`, `WslSubstrateHealthChecker`, and in-kernel BPF-LSM violation telemetry.

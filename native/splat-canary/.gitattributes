@@ -1,0 +1,4 @@
+# These run inside Linux — force LF so a Windows checkout doesn't hand bash CRLF (`\r`) scripts.
+*.sh   text eol=lf
+*.c    text eol=lf
+*.rs   text eol=lf

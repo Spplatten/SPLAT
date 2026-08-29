@@ -13,7 +13,20 @@ Enterprises, MSPs, and campus IT organizations are actively looking to deploy au
 2. **Data & Credential Leakage:** Sensitive corporate data (hashes, passwords, PII) leaking into public LLM clouds.
 3. **Audit Non-Compliance:** Inability to prove non-repudiation or review exact execution logs for regulatory bodies (HIPAA, SOC 2, NIST 800-207).
 
-**SPLAT's Commercial Moat:** It is the only appliance providing **hardware-isolated execution (Win32 Job Objects)**, **in-memory DLP redactors**, and **tamper-evident SHA-256 Merkle audit chains**, turning AI from a security hazard into an approved enterprise operational tool.
+**SPLAT's Commercial Moat:** It provides **in-kernel enforcement inside a hardware-isolated Hyper-V guest** alongside native **Win32 Job Objects / NTFS ACL directory jails**, **in-memory DLP redactors**, and **tamper-evident SHA-256 Merkle audit chains**, turning AI from a security hazard into an approved enterprise operational tool.
+
+### 🏛️ The Architecture Arc: Earning the Right to Autonomy
+* **Today (v1.0 Windows-Native Production):** SPLAT strictly enforces a **1:1:1 Governance Invariant** ($\text{1 Template} \rightarrow \text{1 Model} \rightarrow \text{1 Dedicated Native Tool} \rightarrow \text{1 Approved Egress FQDN}$) over an approved catalog with Win32 Job Object resource clamps, stripped Admin SIDs (`S-1-5-32-544`), severed NTFS inheritance, pre-egress DLP scrubbing, and SHA-256 Merkle ledger notarization.
+* **Structural Design Seams:** The core engine interfaces (`IJailManager`, `IProcessLauncher`, `IJobSandbox`) were architected so that guest VM and kernel substrates slot in additively behind existing interfaces without rewriting the orchestration, DLP, or audit layers.
+* **Tomorrow (v2.0 eBPF Substrate Roadmap):** The Linux/eBPF substrate provides in-kernel BPF-LSM policy enforcement inside stock Microsoft WSL2 guests. This in-kernel blast-radius containment is what **earns the right** to safely loosen the 1:1:1 invariant into multi-step autonomous tool execution without sacrificing determinism or risk posture.
+
+### 🛡️ Technical Precision & Security Tenets
+* **In-Kernel Enforcement, Hardware Guest Isolation:** BPF-LSM provides software policy enforcement directly in kernel space; the Hyper-V micro-VM around WSL2 provides the hardware isolation boundary.
+* **Zero-Fork Stock Microsoft Kernel:** Operates on the stock Microsoft WSL2 kernel (6.6+/6.18+) with `CONFIG_BPF_LSM=y`, `CONFIG_HYPERV_VSOCKETS=y`, `CONFIG_OVERLAY_FS=y`, and `CONFIG_DEBUG_INFO_BTF=y`. Activating BPF-LSM requires only a single `kernelCommandLine = ...lsm=...,bpf` entry in `.wslconfig`—eliminating custom kernel fork maintenance, CVE tracking burdens, and global Docker Desktop conflicts.
+* **Blast-Radius Containment (Not Magic Detection):** Kernel policy contains the blast radius of compromised or injected agents; it does not claim semantic detection of prompt injection. If an allowed endpoint or path is leased, an injected agent's actions are constrained strictly to that lease's boundaries.
+* **Compiled Tool Contracts & Leased Tokens:** Tool contracts compile down to cgroup-scoped kernel capabilities with deterministic, seconds-scale single-use leases (robust against scheduler jitter).
+* **Enforcement Performance:** Near-zero overhead on the kernel enforcement path.
+* **Market Comps:** Anchored against verified priced rounds (e.g., n8n's \$2.5B valuation from their \$180M Series C in October 2025).
 
 ---
 

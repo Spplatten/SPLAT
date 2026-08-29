@@ -5,7 +5,7 @@
 [![.NET 9](https://img.shields.io/badge/.NET-9.0%20LTS-512BD4?style=flat&logo=dotnet)](https://dotnet.microsoft.com/)
 [![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D6?style=flat&logo=windows)](https://microsoft.com/windows)
 [![Zero-Trust](https://img.shields.io/badge/Architecture-8--Layer%20Governed%20Stack-brightgreen)](https://csrc.nist.gov/publications/detail/sp/800-207/final)
-[![Tests](https://img.shields.io/badge/Tests-77%2F77%20Passing%20(100%25)-success)](https://github.com/Platten-Industries/SPLAT/tree/main/tests/MissionController.Tests)
+[![Tests](https://img.shields.io/badge/Tests-161%2F161%20Passing%20(100%25)-success)](https://github.com/Platten-Industries/SPLAT/tree/main/tests/MissionController.Tests)
 [![GitHub](https://img.shields.io/badge/GitHub-Platten--Industries%2FSPLAT-blue?logo=github)](https://github.com/Platten-Industries/SPLAT)
 
 ---
@@ -14,11 +14,12 @@
 
 **SPLAT** (internal codename: *Mission Controller* — the name carried by the solution and project files) is an enterprise-grade AI-native operational appliance engineered for Windows enterprise and campus workstations. Developed by **Platten Industries**, it empowers everyone—from senior SecOps threat hunters down to everyday staff and Tier-1 helpdesk technicians—to dispatch **autonomous, specialized AI agents** that safely investigate, diagnose, and self-heal system issues.
 
-Unlike unmonitored consumer AI chatbots or dangerous unrestricted script engines, every agent in SPLAT is confined by an **8-Layer Governed Architecture**:
-* **Zero Kernel Risk:** Native sensor tools execute inside suspended Win32 Job Objects with Admin privileges stripped (`S-1-5-32-544`) and parent directory inheritance severed.
-* **Zero Data Leakage:** In-memory DLP filters automatically redact passwords, NTLM hashes, private keys, and personal emails before cloud transmission.
-* **Ground-Truth Telemetry:** Agents reason over real kernel telemetry rather than guesses, and synthesize plain-English executive answers alongside signed 1-click self-healing fixes.
-* **Tamper-Evident Non-Repudiation:** Every action, argument, token, and fix is cryptographically sealed in a SHA-256 chained hash ledger with Merkle root verification.
+Unlike unmonitored consumer AI chatbots or dangerous unrestricted script engines, every agent in SPLAT is confined by an **Enterprise Governed Architecture**:
+* **Deterministic Blast-Radius Containment:** Sensor tools execute inside suspended Win32 Job Objects with Admin privileges stripped (`S-1-5-32-544`) and parent directory inheritance severed (`SetAccessRuleProtection`).
+* **Zero Data Leakage:** Pre-egress in-memory DLP filters automatically redact passwords, NTLM hashes, private keys, and personal emails before cloud transmission.
+* **Ground-Truth Telemetry:** Agents reason over real kernel telemetry rather than guesses, with deterministic evidence grounding (`TelemetryGrounder`) to prevent hallucinations from being notarized.
+* **Tamper-Evident Non-Repudiation:** Every action, argument, token, and fix is cryptographically sealed in a SHA-256 chained hash ledger with Merkle root verification and cryptographic column erasure (`DataRetentionService`).
+* **Additive Substrate Architecture:** Today's production engine enforces a strict **1:1:1 Governance Invariant** ($\text{1 Template} \rightarrow \text{1 Model} \rightarrow \text{1 Dedicated Native Tool} \rightarrow \text{1 Approved Egress FQDN}$) on Windows. Process execution and sandboxing are cleanly abstracted behind `IJailManager`, `IProcessLauncher`, and `IJobSandbox`, allowing the upcoming Linux/BPF-LSM guest substrate on stock Microsoft WSL2 kernels to slot in additively to earn the right to multi-step tool autonomy.
 
 ---
 

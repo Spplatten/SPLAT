@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using MissionController.Core.Interfaces;
@@ -21,26 +21,16 @@ public sealed class RestrictedTokenProvider : IRestrictedTokenProvider
 
         try
         {
-            // LUA_TOKEN / DISABLE_MAX_PRIVILEGE strips administrator SID and privileges
+            // DISABLE_MAX_PRIVILEGE disables all administrative privileges and drops token to standard integrity
             if (!Win32Interop.CreateRestrictedToken(
                 currentToken,
-                Win32Interop.DISABLE_MAX_PRIVILEGE | Win32Interop.LUA_TOKEN,
+                Win32Interop.DISABLE_MAX_PRIVILEGE,
                 0, IntPtr.Zero,
                 0, IntPtr.Zero,
                 0, IntPtr.Zero,
                 out IntPtr restrictedToken))
             {
-                // If already non-elevated or LUA_TOKEN cannot be created, fallback to standard restricted token
-                if (!Win32Interop.CreateRestrictedToken(
-                    currentToken,
-                    Win32Interop.DISABLE_MAX_PRIVILEGE,
-                    0, IntPtr.Zero,
-                    0, IntPtr.Zero,
-                    0, IntPtr.Zero,
-                    out restrictedToken))
-                {
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to create restricted token.");
-                }
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to create restricted token.");
             }
 
             var sa = new Win32Interop.SECURITY_ATTRIBUTES

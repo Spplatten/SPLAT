@@ -244,3 +244,82 @@ public interface IGovernedInvestigationLoop
         IProgress<MissionChunk>? progress = null,
         CancellationToken cancellationToken = default);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Layer 2/3 Linux Substrate: BPF-LSM Leased Execution Seams (Phase 3 & 6)
+// ─────────────────────────────────────────────────────────────────────────────
+
+public record InodeIdentifierModel(
+    ulong InodeNumber,
+    uint DeviceId,
+    string SourcePath);
+
+public record LeaseResourceLimits(
+    ulong MaxMemoryBytes = 256 * 1024 * 1024,
+    uint MaxCpuPercent = 50,
+    uint MaxPids = 100);
+
+public record OverlayFsSpec(
+    bool EnableCow,
+    string LowerDir,
+    string ScratchDir);
+
+public enum KernelViolationHook
+{
+    Unspecified = 0,
+    Exec = 1,    // bprm_check_security
+    Open = 2,    // file_open
+    Connect = 3  // socket_connect
+}
+
+public record LeaseViolationEvent(
+    ulong CgroupId,
+    uint ProcessId,
+    KernelViolationHook Hook,
+    ulong Detail,
+    string DetailText,
+    string ProcessComm,
+    DateTime TimestampUtc);
+
+public record LeaseSpec(
+    Guid MissionId,
+    string WorkingDirectory,
+    bool AllowNetwork,
+    IReadOnlyList<string> AllowedEgressIps,
+    IReadOnlyList<uint> AllowedEgressPorts,
+    bool ReadOnlyFs,
+    IReadOnlyList<InodeIdentifierModel> ProtectedInodes,
+    IReadOnlyList<InodeIdentifierModel> AllowedExecInodes,
+    uint LeaseDurationSeconds,
+    LeaseResourceLimits Limits,
+    OverlayFsSpec? OverlayFs = null,
+    IReadOnlyDictionary<string, string>? EnvironmentVariables = null);
+
+/// <summary>
+/// Executes a tool command inside a hardware-isolated WSL2 guest VM under an in-kernel BPF-LSM capability lease.
+/// Do NOT overload IProcessLauncher (which is intrinsically Win32 job-object shaped).
+/// </summary>
+public interface ILeasedExecutor
+{
+    Task<ProcessExecutionResult> ExecuteLeasedAsync(
+        LeaseSpec lease,
+        string command,
+        string arguments,
+        IProgress<string>? stdout = null,
+        IProgress<string>? stderr = null,
+        IProgress<LeaseViolationEvent>? violations = null,
+        CancellationToken ct = default);
+}
+
+/// <summary>
+/// Compiles a governed SingleToolTemplate into a deterministic in-kernel LeaseSpec capability envelope.
+/// </summary>
+public interface ITemplatePolicyCompiler
+{
+    LeaseSpec CompileTemplatePolicy(
+        SingleToolTemplate template,
+        Guid missionId,
+        string workingDirectory,
+        uint leaseDurationSeconds = 30);
+}
+

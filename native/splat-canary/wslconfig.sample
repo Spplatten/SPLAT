@@ -1,0 +1,28 @@
+# ============================================================================
+# FALLBACK CONFIG — only needed if preflight.sh prints a [FIX] for the LSM list
+# or for cgroup v2. Do NOT apply blindly; apply the specific fix preflight asks for.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# (A) Windows side:  %USERPROFILE%\.wslconfig
+# Adds `bpf` to the guest kernel's ACTIVE LSM list. `lsm=` REPLACES the whole
+# order, so this is the shipped kernel's built-in CONFIG_LSM list (verified on
+# WSL 2.7.12.0, kernel 6.18.33.2-2) with `bpf` appended. Dropping any of the
+# others would silently DISABLE that LSM. CONFIG_BPF_LSM=y is confirmed, so no
+# custom kernel is needed — this one line is the entire fix.
+#
+#   [wsl2]
+#   kernelCommandLine = lsm=landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,apparmor,tomoyo,bpf
+#
+# Apply with:   wsl --shutdown   (then restart the distro). Verify with preflight.sh.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# (B) Guest side:  /etc/wsl.conf  (inside the distro)
+# Enables systemd, which brings up the unified cgroup v2 hierarchy the lease keying needs.
+#
+#   [boot]
+#   systemd=true
+#
+# Apply with:   wsl --shutdown   (then restart). Verify: stat -fc %T /sys/fs/cgroup == cgroup2fs
+# ---------------------------------------------------------------------------
