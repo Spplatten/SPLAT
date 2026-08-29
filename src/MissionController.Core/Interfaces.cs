@@ -323,3 +323,36 @@ public interface ITemplatePolicyCompiler
         uint leaseDurationSeconds = 30);
 }
 
+/// <summary>
+/// Policy engine that evaluates Copilot / Semantic Kernel tool calls against enterprise CISO rules.
+/// </summary>
+public interface ICopilotSafetyPolicyEngine
+{
+    CopilotPolicyEvaluationResult EvaluatePolicy(CopilotToolCallContext context, CopilotSafetyPolicy policy);
+}
+
+public record CopilotPolicyEvaluationResult(
+    bool IsPermitted,
+    string? DenialReason,
+    IReadOnlyList<CopilotSecurityViolation> Violations);
+
+/// <summary>
+/// Native Windows Safety Substrate for Microsoft Copilot, Copilot Studio, and Semantic Kernel.
+/// Provides pre-execution policy evaluation, kernel sandboxing (Win32 Job Objects / BPF-LSM),
+/// tamper-evident Merkle auditing, and real-time streaming to Microsoft Sentinel.
+/// </summary>
+public interface ICopilotSafetySubstrate
+{
+    Task<CopilotExecutionResult> ExecuteSafeToolAsync(
+        CopilotToolCallContext context,
+        CopilotSafetyPolicy? policy = null,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> StreamAlertToSentinelAsync(
+        CopilotToolCallContext context,
+        CopilotExecutionResult result,
+        SiemConfiguration sentinelConfig,
+        CancellationToken cancellationToken = default);
+}
+
+

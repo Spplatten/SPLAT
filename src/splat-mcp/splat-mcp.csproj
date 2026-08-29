@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <RootNamespace>SplatMcp</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MissionController.Core\MissionController.Core.csproj" />
+    <ProjectReference Include="..\MissionController.Infrastructure.Linux\MissionController.Infrastructure.Linux.csproj" />
+    <ProjectReference Include="..\MissionController.Infrastructure.Data\MissionController.Infrastructure.Data.csproj" />
+    <ProjectReference Include="..\MissionController.Infrastructure.Network\MissionController.Infrastructure.Network.csproj" />
+    <ProjectReference Include="..\MissionController.Infrastructure.Windows\MissionController.Infrastructure.Windows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="9.0.2" />
+  </ItemGroup>
+
+</Project>

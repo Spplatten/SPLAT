@@ -57,6 +57,7 @@ public static partial class GovernedTemplateCatalog
     private const string CatSysOps = "SysOps & Fleet Health";
     private const string CatCompliance = "Compliance & Audit";
     private const string CatCampus = "Campus & Branch Operations";
+    private const string CatAutonomous = "Autonomous Operations & Marketing";
 
     // --- Exit code policies -----------------------------------------------------------------
     private static readonly int[] ExitOk = { 0 };
@@ -122,6 +123,7 @@ public static partial class GovernedTemplateCatalog
         all.AddRange(SysOpsTemplates());
         all.AddRange(ComplianceTemplates());
         all.AddRange(CampusOperationsTemplates());
+        all.AddRange(AutonomousOperationsTemplates());
 
         // A duplicate TemplateId would not error at the storage layer - the registry upserts on
         // conflict, so the second definition would silently overwrite the first and the operator

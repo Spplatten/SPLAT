@@ -38,6 +38,12 @@ internal static class Win32Interop
     public const uint TOKEN_ADJUST_DEFAULT = 0x0080;
     public const uint TOKEN_ALL_ACCESS = 0xF01FF;
 
+    // Mandatory-integrity control. CreateRestrictedToken strips privileges but NEVER lowers the
+    // integrity level or neuters group SIDs on its own, so the drop to Medium is applied
+    // separately via SetTokenInformation(TokenIntegrityLevel).
+    public const int TokenIntegrityLevel = 25;         // TOKEN_INFORMATION_CLASS.TokenIntegrityLevel
+    public const uint SE_GROUP_INTEGRITY = 0x00000020; // marks a SID_AND_ATTRIBUTES as a mandatory label
+
     // Job Object Info Classes
     public enum JobObjectInfoClass
     {

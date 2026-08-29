@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\MissionController.Infrastructure.Network\MissionController.Infrastructure.Network.csproj" />
     <ProjectReference Include="..\..\src\MissionController.Infrastructure.Data\MissionController.Infrastructure.Data.csproj" />
     <ProjectReference Include="..\..\src\MissionController.Infrastructure.Linux\MissionController.Infrastructure.Linux.csproj" />
+    <ProjectReference Include="..\..\src\splat-mcp\splat-mcp.csproj" />
   </ItemGroup>
 
 </Project>

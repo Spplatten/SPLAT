@@ -53,6 +53,8 @@ public class WslLeasedExecutor : ILeasedExecutor
 
         try
         {
+            await EnsureDaemonRunningAsync(cts.Token);
+
             using var client = new TcpClient();
             
             // Connect to guest daemon (AF_VSOCK port mapped or loopback mirrored)
@@ -195,5 +197,43 @@ public class WslLeasedExecutor : ILeasedExecutor
                 TotalCpuKernelTimeMs: stopwatch.ElapsedMilliseconds / 2,
                 TotalCpuUserTimeMs: stopwatch.ElapsedMilliseconds / 2,
                 ActiveProcessCount: 0));
+    }
+
+    private async Task EnsureDaemonRunningAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var probe = new TcpClient();
+            var connectTask = probe.ConnectAsync(_host, _port, ct).AsTask();
+            if (await Task.WhenAny(connectTask, Task.Delay(200, ct)) == connectTask && probe.Connected)
+            {
+                return;
+            }
+        }
+        catch
+        {
+            // Daemon is not responding; attempt to bootstrap it in WSL2
+        }
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "wsl.exe",
+                Arguments = "-u root -e /bin/bash -l -c \"export PATH=/root/.cargo/bin:$PATH; if ! pgrep -x splat-agent >/dev/null; then /mnt/c/C_AGENT_BUILDER/native/splat-agent/target/release/splat-agent --listen 0.0.0.0:50051 >/tmp/splat-agent.log 2>&1 & fi\"",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = Process.Start(psi);
+            if (proc != null)
+            {
+                await proc.WaitForExitAsync(ct);
+                await Task.Delay(400, ct);
+            }
+        }
+        catch
+        {
+            // Best-effort daemon bootstrap
+        }
     }
 }
