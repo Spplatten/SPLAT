@@ -39,7 +39,12 @@ use violation::ViolationEvent;
 #[derive(Parser, Debug)]
 #[command(author, version, about = "SPLAT Layer-2 Resident eBPF Daemon")]
 struct Args {
-    #[arg(long, default_value = "0.0.0.0:50051")]
+    // Loopback by default: this RPC executes leased processes, so it must never be reachable
+    // beyond the host<->guest channel. WSL2 localhost-forwarding still reaches a guest 127.0.0.1
+    // bind from the Windows host, whereas 0.0.0.0 exposes the containment control plane on the
+    // guest's network interfaces - and on the LAN under mirrored-networking mode - as an
+    // unauthenticated way to run commands inside the sandbox.
+    #[arg(long, default_value = "127.0.0.1:50051")]
     listen: String,
 
     #[arg(long, default_value = "false")]
