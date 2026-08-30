@@ -16,9 +16,13 @@ internal static class Win32Interop
     public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
     public const uint JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200;
     public const uint JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x00000100;
+    // Retained as named constants for documentation value only. Neither may be set on a containment
+    // job: SILENT_BREAKAWAY_OK detaches every child a job member creates WITHOUT the child asking,
+    // so the memory cap, the CPU hard cap and TerminateJobObject all stop at the first process.
     public const uint JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800;
     public const uint JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK = 0x00001000;
     public const uint JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008;
+    public const uint JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION = 0x00000400;
 
     // CPU Rate Control Flags
     public const uint JOB_OBJECT_CPU_RATE_CONTROL_ENABLE = 0x1;
@@ -164,6 +168,20 @@ internal static class Win32Interop
         public int bInheritHandle;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SID_AND_ATTRIBUTES
+    {
+        public IntPtr Sid;
+        public uint Attributes;
+    }
+
+    // Passed to SetTokenInformation(TokenIntegrityLevel); Label.Sid points at a mandatory-level SID.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TOKEN_MANDATORY_LABEL
+    {
+        public SID_AND_ATTRIBUTES Label;
+    }
+
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string? lpName);
 
@@ -269,4 +287,12 @@ internal static class Win32Interop
         int ImpersonationLevel,
         int TokenType,
         out IntPtr phNewToken);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetTokenInformation(
+        IntPtr TokenHandle,
+        int TokenInformationClass,
+        IntPtr TokenInformation,
+        uint TokenInformationLength);
 }

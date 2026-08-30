@@ -169,4 +169,38 @@ public class EgressAndPrivilegeHardeningTests
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("sandboxed", result.StandardOutput);
     }
+
+    /// <summary>
+    /// Proves the restricted token actually REDUCES authority, not merely that a process launches.
+    /// The launch test above passes for ANY token - including a full-privilege one - so on its own it
+    /// cannot catch a sandbox that silently stopped stripping privilege (the exact failure mode the
+    /// fail-closed guard exists for). This runs `whoami /priv` inside the sandbox and asserts the
+    /// privilege set was genuinely cut down.
+    /// </summary>
+    [Fact]
+    public async Task RestrictedTokenLaunch_ActuallyStripsPrivileges_NotJustLaunches()
+    {
+        var launcher = new SuspendedProcessLauncher(new RestrictedTokenProvider());
+        using var job = new Win32JobSandbox("privdrop-proof-test");
+
+        var result = await launcher.LaunchSuspendedInJobAsync(
+            @"C:\Windows\System32\cmd.exe",
+            "/c whoami /priv",
+            Environment.CurrentDirectory,
+            job,
+            dropAdminPrivileges: true,
+            timeoutSeconds: 20);
+
+        Assert.Equal(0, result.ExitCode);
+
+        // SeChangeNotifyPrivilege is the one privilege DISABLE_MAX_PRIVILEGE preserves; its presence
+        // confirms whoami actually enumerated this token's privileges.
+        Assert.Contains("SeChangeNotifyPrivilege", result.StandardOutput);
+
+        // SeTimeZonePrivilege and SeShutdownPrivilege exist in every baseline user token - elevated
+        // or not - but are removed by the privilege strip. Their absence is what a full-token launch
+        // (the old silent-fallback bug, or a token that quietly stopped restricting) would fail.
+        Assert.DoesNotContain("SeTimeZonePrivilege", result.StandardOutput);
+        Assert.DoesNotContain("SeShutdownPrivilege", result.StandardOutput);
+    }
 }
