@@ -7,6 +7,7 @@ using Microsoft.Data.Sqlite;
 using MissionController.Core.Enums;
 using MissionController.Core.Models;
 using MissionController.Infrastructure.Data;
+using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Data.Templates;
 using Xunit;
 
@@ -58,7 +59,12 @@ public class TemplateRegistryExpansionTests
 
             var projectRegistry = new SqliteProjectTemplateRegistry(context);
             var projects = await projectRegistry.GetAllProjectTemplatesAsync();
-            Assert.Equal(2, projects.Count);
+
+            // Asserted against the shipped catalog rather than a literal count: the property under
+            // test is that seeding persists every built-in project, and a magic number only pins how
+            // many happened to exist the day it was written - it fails on the next addition without
+            // anything actually being broken.
+            Assert.Equal(GovernedProjectCatalog.All.Count, projects.Count);
             Assert.Contains(projects, project => project.ProjectId == "project-workstation-incident-review");
         }
         finally

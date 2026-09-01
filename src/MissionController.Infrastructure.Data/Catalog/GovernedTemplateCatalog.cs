@@ -21,7 +21,7 @@ public static partial class GovernedTemplateCatalog
     /// Bumped whenever the seeded set changes. The registry stores this so startup can skip a
     /// redundant full-catalog upsert when the on-disk set already matches the shipped build.
     /// </summary>
-    public const string CatalogVersion = "2.2.0";
+    public const string CatalogVersion = "2.3.0";
 
     // --- Model governance -----------------------------------------------------------------
     // Pro is reserved for templates whose output requires correlation or adversarial reasoning
@@ -44,6 +44,24 @@ public static partial class GovernedTemplateCatalog
         443,
         true,
         "Anthropic Claude API (default governed AI gateway; egress pinned by provider client)");
+
+    // The first non-gateway destination in the catalog: a template whose SENSOR reaches the network
+    // rather than reading the local machine. Declaring it here is what makes the reach governable -
+    // TemplatePolicyCompiler resolves this FQDN and pins the /32s into the mission's BPF-LSM
+    // LeaseSpec, so on the Linux substrate the tool can open exactly this host on 443 and nothing
+    // else. On Windows the Win32 job object clamps memory, CPU, privilege and filesystem but does
+    // NOT filter sockets, so there the declaration is an audited governance claim rather than an
+    // enforced boundary. Templates using it must therefore stay read-only and credential-free: the
+    // containment that makes a fetch safe is not switched on yet on the platform SPLAT ships on.
+    // Declaring a tool egress does not widen the AI call - the provider client opens its own scope
+    // for the synthesis leg, so that request stays pinned to the gateway regardless of this rule.
+    private const string GrantsGovFqdn = "api.grants.gov";
+
+    private static readonly EgressRule GrantsGovEgress = new(
+        GrantsGovFqdn,
+        443,
+        true,
+        "Grants.gov public Search2 API (read-only opportunity discovery; no credential presented)");
 
     // --- Tool host binaries ----------------------------------------------------------------
     private const string CmdExe = @"C:\Windows\System32\cmd.exe";
@@ -86,6 +104,11 @@ public static partial class GovernedTemplateCatalog
     /// <summary>
     /// Builds a template already bound to the single approved egress rule, enforcing the
     /// 1 Template -> 1 Model -> 1 Tool -> 1 Egress FQDN contract at construction time.
+    ///
+    /// <paramref name="egress"/> overrides the default gateway rule for the rare template whose
+    /// SENSOR itself needs a destination. It stays an explicit per-call opt-in so the whole set of
+    /// network-reaching templates is greppable: every omission of the argument is a template whose
+    /// tool touches nothing but the local machine.
     /// </summary>
     private static SingleToolTemplate Template(
         string templateId,
@@ -95,14 +118,15 @@ public static partial class GovernedTemplateCatalog
         string model,
         SingleToolDefinition tool,
         string systemPrompt,
-        Dictionary<string, string>? parameters = null) =>
+        Dictionary<string, string>? parameters = null,
+        EgressRule? egress = null) =>
         new(templateId,
             name,
             description,
             category,
             model,
             tool,
-            AiGatewayEgress,
+            egress ?? AiGatewayEgress,
             systemPrompt,
             parameters ?? new Dictionary<string, string>());
 
