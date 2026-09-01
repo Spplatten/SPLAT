@@ -100,6 +100,8 @@ SPLAT's documentation makes a point of never blurring the line between built and
 - 🔶 **Being built** — The Linux-side deep containment: a guard that lives inside the Linux kernel itself (BPF-LSM) and vetoes forbidden actions before they happen. The code is written and the kernel it needs has been verified ready; what remains is the recorded proof run showing a forbidden action being denied. Until that run is on record, SPLAT claims it's *built*, not *operating*.
 - ⬜ **Planned** — Faster host-to-sandbox plumbing (VSOCK), fully automatic setup of the Linux sandbox, and deeper multi-step autonomy — which agents only earn in places where kernel-level enforcement is switched on.
 
+One consequence of that gap is worth stating plainly, because it's new. The grant-discovery agent is the first specialist whose tool reaches the internet rather than only reading your own machine. Its one approved destination is declared in the template, written into the ledger, and compiled into the Linux kernel guard described above — but on Windows today, the locks that clamp memory, strip privileges and fence folders do **not** filter network sockets. So on Windows that destination is an audited promise rather than an enforced wall. That agent is therefore built to be harmless if the promise were ever broken: it presents no password or key, it only reads public funding notices, and it files nothing. Every grant agent stops at a draft for you to review — none of them can submit an application.
+
 ## Part 8 — Your first five minutes
 
 SPLAT runs on Windows 11. On first launch, the Welcome wizard walks you through three steps: meet the agent squad, connect one AI key, go.
