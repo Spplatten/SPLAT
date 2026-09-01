@@ -40,44 +40,45 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
             lpSecurityDescriptor = IntPtr.Zero
         };
 
-        // Create anonymous pipes for STDOUT and STDERR redirection
-        if (!Win32Interop.CreatePipe(out IntPtr hStdOutRead, out IntPtr hStdOutWrite, ref sa, 0))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to create stdout pipe.");
-        }
-        Win32Interop.SetHandleInformation(hStdOutRead, Win32Interop.HANDLE_FLAG_INHERIT, 0); // Read handle non-inheritable
-
-        if (!Win32Interop.CreatePipe(out IntPtr hStdErrRead, out IntPtr hStdErrWrite, ref sa, 0))
-        {
-            Win32Interop.CloseHandle(hStdOutRead);
-            Win32Interop.CloseHandle(hStdOutWrite);
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to create stderr pipe.");
-        }
-        Win32Interop.SetHandleInformation(hStdErrRead, Win32Interop.HANDLE_FLAG_INHERIT, 0);
-
-        var si = new Win32Interop.STARTUPINFO
-        {
-            cb = Marshal.SizeOf(typeof(Win32Interop.STARTUPINFO)),
-            dwFlags = (int)Win32Interop.STARTF_USESTDHANDLES,
-            hStdOutput = hStdOutWrite,
-            hStdError = hStdErrWrite,
-            hStdInput = IntPtr.Zero
-        };
-
-        var pi = new Win32Interop.PROCESS_INFORMATION();
-
-        string resolvedExecutable = ResolveExecutablePath(executable);
-        string fullCommandLine = string.IsNullOrWhiteSpace(arguments)
-            ? $"\"{resolvedExecutable}\""
-            : $"\"{resolvedExecutable}\" {arguments}";
-
-        uint creationFlags = Win32Interop.CREATE_SUSPENDED | Win32Interop.CREATE_NO_WINDOW;
-
+        IntPtr hStdOutRead = IntPtr.Zero;
+        IntPtr hStdOutWrite = IntPtr.Zero;
+        IntPtr hStdErrRead = IntPtr.Zero;
+        IntPtr hStdErrWrite = IntPtr.Zero;
         IntPtr restrictedToken = IntPtr.Zero;
-        bool success = false;
+        var pi = new Win32Interop.PROCESS_INFORMATION();
 
         try
         {
+            // Create anonymous pipes for STDOUT and STDERR redirection
+            if (!Win32Interop.CreatePipe(out hStdOutRead, out hStdOutWrite, ref sa, 0))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to create stdout pipe.");
+            }
+            Win32Interop.SetHandleInformation(hStdOutRead, Win32Interop.HANDLE_FLAG_INHERIT, 0); // Read handle non-inheritable
+
+            if (!Win32Interop.CreatePipe(out hStdErrRead, out hStdErrWrite, ref sa, 0))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to create stderr pipe.");
+            }
+            Win32Interop.SetHandleInformation(hStdErrRead, Win32Interop.HANDLE_FLAG_INHERIT, 0);
+
+            var si = new Win32Interop.STARTUPINFO
+            {
+                cb = Marshal.SizeOf(typeof(Win32Interop.STARTUPINFO)),
+                dwFlags = (int)Win32Interop.STARTF_USESTDHANDLES,
+                hStdOutput = hStdOutWrite,
+                hStdError = hStdErrWrite,
+                hStdInput = IntPtr.Zero
+            };
+
+            string resolvedExecutable = ResolveExecutablePath(executable);
+            string fullCommandLine = string.IsNullOrWhiteSpace(arguments)
+                ? $"\"{resolvedExecutable}\""
+                : $"\"{resolvedExecutable}\" {arguments}";
+
+            uint creationFlags = Win32Interop.CREATE_SUSPENDED | Win32Interop.CREATE_NO_WINDOW;
+            bool success = false;
+
             if (dropAdminPrivileges)
             {
                 try
@@ -107,13 +108,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
 
                 if (!success)
                 {
-                    // This previously fell back to CreateProcessW - a FULL-token launch - whenever the
-                    // restricted-token path failed. A template declaring RequiresRestrictedToken could
-                    // therefore run its tool with the operator's full (often administrative) privileges
-                    // while the mission still reported success and the ledger still recorded it as
-                    // governed. A sandbox that silently turns itself off is worse than no sandbox,
-                    // because everything downstream keeps trusting it. Refuse the launch instead: the
-                    // engine catches this and seals an honest MISSION_FAILED row.
+                    // Refuse the launch instead: the engine catches this and seals an honest MISSION_FAILED row.
                     throw new SecurityException(
                         "Privilege drop required by this template could not be applied, so the sensor tool was NOT launched. " +
                         $"CreateProcessAsUserW failed with Win32 error {Marshal.GetLastWin32Error()}.");
@@ -139,7 +134,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
                 throw new Win32Exception(Marshal.GetLastWin32Error(), $"Failed to create suspended process '{resolvedExecutable}'.");
             }
 
-            // CRITICAL HARDENING FIX 1: Assign process to Job Object BEFORE resuming thread
+            // Assign process to Job Object BEFORE resuming thread
             jobSandbox.AssignProcess(pi.hProcess);
 
             // Close write ends in parent process so EOF can be detected on read
@@ -155,9 +150,15 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to resume process thread.");
             }
 
+            // Transfer handle ownership to SafeFileHandle
+            using var safeStdOut = new SafeFileHandle(hStdOutRead, ownsHandle: true);
+            hStdOutRead = IntPtr.Zero;
+            using var safeStdErr = new SafeFileHandle(hStdErrRead, ownsHandle: true);
+            hStdErrRead = IntPtr.Zero;
+
             // Setup stream readers for synchronous pipes
-            using var stdoutStream = new FileStream(new SafeFileHandle(hStdOutRead, true), FileAccess.Read, 4096, isAsync: false);
-            using var stderrStream = new FileStream(new SafeFileHandle(hStdErrRead, true), FileAccess.Read, 4096, isAsync: false);
+            using var stdoutStream = new FileStream(safeStdOut, FileAccess.Read, 4096, isAsync: false);
+            using var stderrStream = new FileStream(safeStdErr, FileAccess.Read, 4096, isAsync: false);
 
             var stdoutTask = ReadStreamAsync(stdoutStream, stdoutProgress, cancellationToken);
             var stderrTask = ReadStreamAsync(stderrStream, stderrProgress, cancellationToken);
@@ -204,7 +205,9 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
         }
         finally
         {
+            if (hStdOutRead != IntPtr.Zero) Win32Interop.CloseHandle(hStdOutRead);
             if (hStdOutWrite != IntPtr.Zero) Win32Interop.CloseHandle(hStdOutWrite);
+            if (hStdErrRead != IntPtr.Zero) Win32Interop.CloseHandle(hStdErrRead);
             if (hStdErrWrite != IntPtr.Zero) Win32Interop.CloseHandle(hStdErrWrite);
             if (pi.hThread != IntPtr.Zero) Win32Interop.CloseHandle(pi.hThread);
             if (pi.hProcess != IntPtr.Zero) Win32Interop.CloseHandle(pi.hProcess);

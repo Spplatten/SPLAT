@@ -1,4 +1,4 @@
-﻿// Multi-lease manager for BPF-LSM capability policies.
+// Multi-lease manager for BPF-LSM capability policies.
 // Manages concurrent per-cgroup leases with deterministic second-scale lifecycles.
 
 use std::collections::HashMap;
@@ -63,15 +63,26 @@ pub struct ActiveLease {
     pub allowed_ips: Vec<u32>,
 }
 
+pub fn bytes_of<T: Copy>(v: &T) -> &[u8] {
+    unsafe { std::slice::from_raw_parts((v as *const T) as *const u8, std::mem::size_of::<T>()) }
+}
+
+pub trait BpfMapSync: Send + Sync {
+    fn add_lease(&self, lease: &ActiveLease) -> Result<()>;
+    fn remove_lease(&self, lease: &ActiveLease) -> Result<()>;
+}
+
 #[derive(Clone)]
 pub struct LeaseManager {
     leases: Arc<Mutex<HashMap<u64, ActiveLease>>>,
+    bpf_sync: Option<Arc<dyn BpfMapSync>>,
 }
 
 impl LeaseManager {
-    pub fn new() -> Self {
+    pub fn new(bpf_sync: Option<Arc<dyn BpfMapSync>>) -> Self {
         Self {
             leases: Arc::new(Mutex::new(HashMap::new())),
+            bpf_sync,
         }
     }
 
@@ -116,6 +127,12 @@ impl LeaseManager {
             allowed_ips,
         };
 
+        if let Some(ref sync) = self.bpf_sync {
+            if let Err(e) = sync.add_lease(&lease) {
+                tracing::warn!("Failed to synchronize BPF capability maps for lease {}: {e}", lease.mission_id);
+            }
+        }
+
         let mut lock = self.leases.lock().unwrap();
         lock.insert(cgroup_id, ActiveLease {
             mission_id: lease.mission_id.clone(),
@@ -132,7 +149,16 @@ impl LeaseManager {
 
     pub fn revoke_lease(&self, cgroup_id: u64) -> Option<ActiveLease> {
         let mut lock = self.leases.lock().unwrap();
-        lock.remove(&cgroup_id)
+        if let Some(removed) = lock.remove(&cgroup_id) {
+            if let Some(ref sync) = self.bpf_sync {
+                if let Err(e) = sync.remove_lease(&removed) {
+                    tracing::warn!("Failed to remove BPF capability maps for lease {}: {e}", removed.mission_id);
+                }
+            }
+            Some(removed)
+        } else {
+            None
+        }
     }
 
     pub fn get_active_count(&self) -> usize {
@@ -144,9 +170,10 @@ impl LeaseManager {
         let mut lock = self.leases.lock().unwrap();
         let now = Instant::now();
         let mut expired = Vec::new();
+        let sync_opt = self.bpf_sync.clone();
         lock.retain(|_, v| {
             if now >= v.expires_at {
-                expired.push(ActiveLease {
+                let lease = ActiveLease {
                     mission_id: v.mission_id.clone(),
                     cgroup_id: v.cgroup_id,
                     created_at: v.created_at,
@@ -154,7 +181,11 @@ impl LeaseManager {
                     protected_inodes: v.protected_inodes.clone(),
                     allowed_exec_inodes: v.allowed_exec_inodes.clone(),
                     allowed_ips: v.allowed_ips.clone(),
-                });
+                };
+                if let Some(ref sync) = sync_opt {
+                    let _ = sync.remove_lease(&lease);
+                }
+                expired.push(lease);
                 false
             } else {
                 true

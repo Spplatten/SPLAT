@@ -131,4 +131,89 @@ public class ModelStreamClientTests
         // It must state plainly that no interpretation happened - never invent findings.
         Assert.Contains("NOT an interpretation", output);
     }
+
+    [Fact]
+    public async Task StreamAnalysis_Claude_WithFirewallInPipeline_RestoresScopeAfterCompletion()
+    {
+        var stub = new StubHandler(SseBody);
+        var firewall = new EgressFirewallHandler { InnerHandler = stub };
+        var httpClient = new HttpClient(firewall);
+        var vault = new InMemoryVault();
+        await vault.StoreSecretStringAsync(ClaudeStreamClient.ApiKeyVaultKey, "sk-ant-test-key");
+
+        var client = new ClaudeStreamClient(httpClient, firewall, vault);
+
+        var sb = new StringBuilder();
+        await foreach (var chunk in client.StreamAnalysisAsync("claude-3-5-sonnet-20241022", "system", "user"))
+        {
+            sb.Append(chunk);
+        }
+
+        Assert.Equal("Hello world", sb.ToString());
+
+        // After stream completion, the scope must be disposed so un-scoped calls fail closed
+        await Assert.ThrowsAsync<System.Security.SecurityException>(
+            () => httpClient.GetAsync("https://api.anthropic.com/v1/messages"));
+    }
+
+    [Fact]
+    public async Task ValidateApiKey_Claude_WithFirewallInPipeline_RestoresScopeAfterCompletion()
+    {
+        var stub = new StubHandler("{\"data\":[]}");
+        var firewall = new EgressFirewallHandler { InnerHandler = stub };
+        var httpClient = new HttpClient(firewall);
+        var vault = new InMemoryVault();
+
+        var client = new ClaudeStreamClient(httpClient, firewall, vault);
+        var result = await client.ValidateApiKeyAsync("sk-ant-test-key");
+
+        Assert.True(result.IsValid);
+
+        // After validation completion, the scope must be disposed
+        await Assert.ThrowsAsync<System.Security.SecurityException>(
+            () => httpClient.GetAsync("https://api.anthropic.com/v1/models"));
+    }
+
+    [Fact]
+    public async Task StreamAnalysis_Gemini_WithFirewallInPipeline_RestoresScopeAfterCompletion()
+    {
+        const string geminiSse = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Gemini says hello\"}]}}]}\n\ndata: [DONE]\n";
+        var stub = new StubHandler(geminiSse);
+        var firewall = new EgressFirewallHandler { InnerHandler = stub };
+        var httpClient = new HttpClient(firewall);
+        var vault = new InMemoryVault();
+        await vault.StoreSecretStringAsync(GeminiStreamClient.ApiKeyVaultKey, "AIzaSyTestKey");
+
+        var client = new GeminiStreamClient(httpClient, firewall, vault);
+
+        var sb = new StringBuilder();
+        await foreach (var chunk in client.StreamAnalysisAsync("gemini-2.5-flash", "system", "user"))
+        {
+            sb.Append(chunk);
+        }
+
+        Assert.Equal("Gemini says hello", sb.ToString());
+
+        // After stream completion, the scope must be disposed so un-scoped calls fail closed
+        await Assert.ThrowsAsync<System.Security.SecurityException>(
+            () => httpClient.GetAsync("https://generativelanguage.googleapis.com/v1beta/models"));
+    }
+
+    [Fact]
+    public async Task ValidateApiKey_Gemini_WithFirewallInPipeline_RestoresScopeAfterCompletion()
+    {
+        var stub = new StubHandler("{\"models\":[]}");
+        var firewall = new EgressFirewallHandler { InnerHandler = stub };
+        var httpClient = new HttpClient(firewall);
+        var vault = new InMemoryVault();
+
+        var client = new GeminiStreamClient(httpClient, firewall, vault);
+        var result = await client.ValidateApiKeyAsync("AIzaSyTestKey");
+
+        Assert.True(result.IsValid);
+
+        // After validation completion, the scope must be disposed
+        await Assert.ThrowsAsync<System.Security.SecurityException>(
+            () => httpClient.GetAsync("https://generativelanguage.googleapis.com/v1beta/models"));
+    }
 }

@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
+using MissionController.Core.QualityIsland;
+using MissionController.Core.QualityIsland.Contracts;
 
 namespace MissionController.Core;
 
@@ -23,6 +25,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
     private readonly ICredentialSanitizer? _credentialSanitizer;
     private readonly IIncidentRevocationManager? _revocationManager;
     private readonly IDiagnosticFindingsExtractor? _findingsExtractor;
+    private readonly IIsolatedQualityIsland _qualityIsland;
 
     // Recall tuning. topK stays small because the system prompt is the scarcest resource in a
     // mission - three verdict-led snippets ground the model without crowding out the template's own
@@ -44,7 +47,8 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         IDataLossPreventionSanitizer? dlpSanitizer = null,
         ICredentialSanitizer? credentialSanitizer = null,
         IIncidentRevocationManager? revocationManager = null,
-        IDiagnosticFindingsExtractor? findingsExtractor = null)
+        IDiagnosticFindingsExtractor? findingsExtractor = null,
+        IIsolatedQualityIsland? qualityIsland = null)
     {
         _findingsExtractor = findingsExtractor;
         _jailManager = jailManager;
@@ -56,6 +60,12 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         _dlpSanitizer = dlpSanitizer;
         _credentialSanitizer = credentialSanitizer;
         _revocationManager = revocationManager;
+        _qualityIsland = qualityIsland ?? new QualityIslandEngine(
+            modelClient,
+            auditLedger,
+            dlpSanitizer: dlpSanitizer,
+            credentialSanitizer: credentialSanitizer,
+            findingsExtractor: findingsExtractor);
     }
 
     public async IAsyncEnumerable<MissionChunk> ExecuteMissionAsync(
@@ -98,6 +108,53 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             $"Initiating Mission [{missionId}] using agent template '{template.Name}' (Strict 1:1:1 Governed Flow)",
             DateTime.UtcNow);
 
+
+        // 1.2 Bind the sensor command line BEFORE anything is provisioned.
+        //
+        // This runs ahead of the jail and the job object on purpose: a refused parameter must cost
+        // nothing and leave nothing behind. Binding is also where the mission's single most
+        // dangerous input is handled - values reaching this point come from an operator's text box
+        // or, through splat-mcp, from an agent that may itself have been prompt-injected, and they
+        // land inside `cmd.exe /c` and `powershell.exe -Command` strings.
+        // Captured rather than handled in the catch: C# forbids yield inside a catch clause, and the
+        // refusal has to reach the operator's stream. Same shape as the launch-failure path below.
+        string resolvedArguments = string.Empty;
+        TemplateParameterRejectedException? rejection = null;
+        try
+        {
+            resolvedArguments = GovernedArgumentBinder.Bind(template, parameters);
+        }
+        catch (TemplateParameterRejectedException ex)
+        {
+            rejection = ex;
+        }
+
+        if (rejection is not null)
+        {
+            // FAIL CLOSED, and loudly. There is no sanitised-and-continue path here: a value that
+            // cannot be placed safely means the caller asked for something this template cannot
+            // express, and quietly repairing it would run a command nobody authored.
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.Stderr,
+                $"⛔ MISSION REFUSED: {rejection.Message} No sensor tool was launched.",
+                DateTime.UtcNow);
+
+            await _auditLedger.AppendLogAsync(
+                missionId,
+                template.TemplateId,
+                "MISSION_BLOCKED_PARAMETER_REJECTED",
+                $"Parameter: {rejection.ParameterKey} | {rejection.Message}",
+                operatorIdentity,
+                cancellationToken);
+
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.StatusChange,
+                "Mission refused before provisioning. Refusal sealed in the audit ledger.",
+                DateTime.UtcNow);
+            yield break;
+        }
 
         // 2. Audit Start
         await _auditLedger.AppendLogAsync(
@@ -142,22 +199,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             $"Win32 Job Object configured with {template.Tool.MaxMemoryBytes / (1024 * 1024)}MB RAM cap and {template.Tool.MaxCpuPercent}% CPU limit.",
             DateTime.UtcNow);
 
-        // Construct command line arguments
-        string resolvedArguments = template.Tool.ArgumentsTemplate;
-        var effectiveDefaults = template.GetEffectiveDefaults();
-
-        foreach (var (key, val) in effectiveDefaults)
-        {
-            resolvedArguments = resolvedArguments.Replace($"{{{key}}}", val);
-        }
-
-        foreach (var (key, val) in parameters)
-        {
-            if (!string.IsNullOrWhiteSpace(val))
-            {
-                resolvedArguments = resolvedArguments.Replace($"{{{key}}}", val);
-            }
-        }
+        // resolvedArguments was bound and validated at step 1.2, before any resource was acquired.
 
         yield return new MissionChunk(
             missionId,
@@ -248,7 +290,9 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         yield return new MissionChunk(
             missionId,
             MissionChunkType.Metric,
-            $"Process exited with code {execResult.ExitCode}. Kernel CPU: {execResult.FinalMetrics.TotalCpuKernelTimeMs}ms, User CPU: {execResult.FinalMetrics.TotalCpuUserTimeMs}ms",
+            $"Process exited with code {execResult.ExitCode}. " +
+            $"Kernel CPU: {JobResourceMetrics.Describe(execResult.FinalMetrics.TotalCpuKernelTimeMs, "ms")}, " +
+            $"User CPU: {JobResourceMetrics.Describe(execResult.FinalMetrics.TotalCpuUserTimeMs, "ms")}",
             DateTime.UtcNow);
 
         // 5. Audit Process Completion
@@ -445,19 +489,26 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
                 cancellationToken);
         }
 
-        await foreach (var aiChunk in _modelClient.StreamAnalysisAsync(
-            template.TargetModel,
-            effectiveSystemPrompt,
-            sanitizedPayload,
-            cancellationToken))
-        {
-            fullAiAnalysis.Append(aiChunk);
-            yield return new MissionChunk(
-                missionId,
-                MissionChunkType.AiToken,
-                aiChunk,
-                DateTime.UtcNow);
-        }
+        var islandRequest = new QualityIslandRequest(
+            MissionId: missionId,
+            TemplateId: template.TemplateId,
+            TargetModel: template.TargetModel,
+            SystemPrompt: effectiveSystemPrompt,
+            UserPayload: sanitizedPayload,
+            OperatorIdentity: operatorIdentity,
+            RequiredSchema: SchemaContractType.StructuredDiagnosis,
+            ExpectedTelemetryHaystack: sanitizedPayload);
+
+        var islandResult = await _qualityIsland.ExecuteIslandAsync(
+            islandRequest,
+            cancellationToken: cancellationToken);
+
+        fullAiAnalysis.Append(islandResult.OutputContent);
+        yield return new MissionChunk(
+            missionId,
+            MissionChunkType.AiToken,
+            islandResult.OutputContent,
+            DateTime.UtcNow);
 
         // 8. Audit AI Completion
         await _auditLedger.AppendLogAsync(

@@ -86,6 +86,44 @@ public static partial class GovernedTemplateCatalog
                 { "CallbackUrl", "https://api.platten.io/auth/callback" },
                 { "WebhookUrl", "https://api.platten.io/webhooks/agent-events" },
                 { "AllowedScopes", "read:telemetry,write:leases" }
+            }),
+
+        // --- Autonomous Grant Discovery & Proposal Engine ---------------------------------------
+        // Draft-only by design: grant portals (Grants.gov, state NOFA systems) demand credentials
+        // and perform irreversible filings, both outside SPLAT's containment contract. Egress stays
+        // pinned to the AI gateway; the tool materialises the applicant/program profile as evidence
+        // and the model performs the eligibility gate BEFORE any narrative is generated, so an
+        // ineligible profile fails fast instead of producing a polished but unfileable proposal.
+        Template(
+            "grants-eligibility-proposal-engine",
+            "Autonomous Grant Discovery & Proposal Engine",
+            "Audits applicant eligibility against federal, state, and municipal grant gates (SBIR/STTR, LaunchTN match, municipal micro-grants), then drafts the five-section proposal narrative under draft-only governance with no submission egress.",
+            CatAutonomous,
+            ModelPro,
+            new SingleToolDefinition(
+                "grant_profile_auditor",
+                "Grant Applicant Profile & Program Evidence Collector",
+                PowerShellExe,
+                Ps(@"Write-Output '=== SPLAT AUTONOMOUS GRANT DISCOVERY & PROPOSAL ENGINE ==='; Write-Output 'Applicant: {ApplicantLegalName} [{EntityType}]'; Write-Output 'Headquarters: {HeadquartersLocation}'; Write-Output 'Headcount: {TotalEmployees} FTE | Sector: {IndustrySector}'; Write-Output 'Technology Readiness: TRL {TechnologyReadinessLevel}'; Write-Output 'Core IP: {CoreIntellectualProperty}'; Write-Output 'Academic Partner: {AcademicPartner}'; Write-Output 'Target Program: {TargetProgram}'; Write-Output 'Request: {RequestAmount} USD over {ProjectDurationMonths} months'; Write-Output 'Scoring Focus: {PrimaryScoringCriteria}'; Write-Output '--- GOVERNANCE POSTURE ---'; Write-Output 'Draft-only mission: no submission egress; portal credentials never enter this sandbox.'; Write-Output 'Output is a reviewable draft requiring operator sign-off before any filing.'"),
+                ExitOkOrPartial,
+                TimeoutSeconds: 90,
+                MaxMemoryBytes: Mb(256),
+                MaxCpuPercent: 50),
+            "You are a Senior Federal & State Grant Strategist and Grants Compliance Counsel. Execute a two-stage workflow against the applicant profile evidence. STAGE 1 - ELIGIBILITY AUDIT: compare the applicant against the target program's published gates - entity status (pre-IPO for-profit vs 501c3), SBA headcount ceilings (under 500 for SBIR/state match, under 100 for municipal micro-grants), residency covenants (e.g. the 24-month Tennessee HQ rule for LaunchTN matching funds), and institutional IP alignment for maturation programs - and output an explicit Audit Status of PASS, FAIL, or CAUTION with per-gate rationale. On FAIL, stop and recommend the nearest program the profile does qualify for. STAGE 2 - PROPOSAL DRAFT (PASS or CAUTION only): generate the five governed sections: 1) Executive Summary & Strategic Alignment; 2) Statement of Need & Empirical Baseline; 3) Technical Work Plan with work breakdown structure and TRL milestone gates; 4) Commercialization Plan & Regional Economic Impact including net new job commitments; 5) Budget Justification & Allowable Cost Analysis consistent with 2 CFR 200 Uniform Guidance. INTEGRITY RULES: every quantitative claim must trace to the supplied profile or be tagged [OPERATOR-VERIFY]; never invent baselines, citations, letters of support, or partner commitments - false statements in federal grant applications carry False Claims Act exposure; award ceilings, match percentages, and deadlines age quickly, so flag every program figure for verification against the current solicitation. The deliverable is a reviewable draft, never a submission.",
+            new Dictionary<string, string>
+            {
+                { "ApplicantLegalName", "Platten Industries LLC" },
+                { "EntityType", "LLC - Pre-IPO For-Profit" },
+                { "HeadquartersLocation", "Chattanooga, Hamilton County, TN" },
+                { "TotalEmployees", "4" },
+                { "IndustrySector", "AI Agent Containment / Cybersecurity Software" },
+                { "TechnologyReadinessLevel", "5" },
+                { "CoreIntellectualProperty", "SPLAT kernel-enforced agent containment (BPF-LSM egress leases, chained audit ledger)" },
+                { "AcademicPartner", "None - UTC/ORNL TTAC partnership eligible" },
+                { "TargetProgram", "NSF SBIR Phase I + LaunchTN SBIR/STTR Matching Fund" },
+                { "RequestAmount", "275000" },
+                { "ProjectDurationMonths", "12" },
+                { "PrimaryScoringCriteria", "TRL advancement, commercialization viability, TN economic impact" }
             })
     };
 }

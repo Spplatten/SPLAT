@@ -108,7 +108,9 @@ public static class ReActDecisionContract
                 }
 
                 string? action = ReadString(root, "action");
-                string? templateId = ReadString(root, "templateId", "template_id", "template");
+                // "taskId" alias: the governed crew manager reuses this contract to pick tasks
+                // from a closed pending set, keeping one whitelist gate for both loops.
+                string? templateId = ReadString(root, "templateId", "template_id", "template", "taskId");
                 string reason = ReadString(root, "reason", "rationale", "why")
                                 ?? "No rationale supplied by the model.";
 

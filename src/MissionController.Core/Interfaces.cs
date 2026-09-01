@@ -355,4 +355,64 @@ public interface ICopilotSafetySubstrate
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Decomposes complex user directives into structured, governed candidate templates and sub-goals,
+/// and dynamically re-plans diagnostic next steps as grounded telemetry is observed during multi-step reasoning.
+/// </summary>
+public interface ICognitiveGoalDecomposer
+{
+    Task<Brain.GoalDecompositionResult> DecomposeGoalAsync(
+        string userGoal,
+        IReadOnlyList<SingleToolTemplate> availableTemplates,
+        CancellationToken cancellationToken = default);
+
+    Task<Brain.NextStepPlanResult> DecomposeNextStepAsync(
+        string userGoal,
+        IReadOnlyList<SingleToolTemplate> availableTemplates,
+        Brain.BrainWorkingMemory workingMemory,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Layer 2 Cognitive Planning & Autonomous Reasoning Engine ("The Brain").
+/// Orchestrates goal decomposition, working memory synthesis, multi-step ReAct hypotheses evaluation,
+/// evidence grounding, and root-cause self-healing formulation.
+/// </summary>
+public interface IAgentBrain
+{
+    Task<Brain.BrainExecutionResult> ProcessGoalAsync(
+        string userGoal,
+        string operatorIdentity,
+        int maxReasoningSteps = 3,
+        IProgress<MissionChunk>? progress = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Brain.GoalDecompositionResult> DecomposeGoalAsync(
+        string userGoal,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Governed Multi-Agent Crew Orchestration Engine.
+/// Executes sequential and hierarchical multi-agent teams under strict SPLAT kernel sandboxing,
+/// in-memory DLP sanitization, anti-deadlock cycle detection, and cryptographic audit ledgers.
+/// </summary>
+public interface IGovernedCrewEngine
+{
+    IAsyncEnumerable<MissionChunk> ExecuteCrewAsync(
+        Crew.GovernedCrewDefinition crew,
+        IReadOnlyDictionary<string, string> parameters,
+        string operatorIdentity,
+        CancellationToken cancellationToken = default);
+
+    Task<Crew.CrewExecutionResult> RunCrewAsync(
+        Crew.GovernedCrewDefinition crew,
+        IReadOnlyDictionary<string, string> parameters,
+        string operatorIdentity,
+        IProgress<MissionChunk>? progress = null,
+        CancellationToken cancellationToken = default);
+}
+
+
+
 

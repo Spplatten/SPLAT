@@ -82,7 +82,7 @@ public sealed class GeminiStreamClient : IModelStreamClient
         }
 
         // Governed egress: pin the request to the provider host so the Layer-4 firewall validates it.
-        _firewallHandler.SetActiveAllowedFqdn(GeminiHost);
+        using var egressScope = _firewallHandler.BeginScope(GeminiHost);
 
         // systemInstruction is the API's first-class system-prompt channel; concatenating it into
         // the user turn (the old Vertex client's approach) weakens instruction/data separation.
@@ -119,8 +119,25 @@ public sealed class GeminiStreamClient : IModelStreamClient
             using var reader = new StreamReader(stream, Encoding.UTF8);
 
             string? line;
-            while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
+            bool timedOut = false;
+            while (true)
             {
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                readCts.CancelAfter(TimeSpan.FromSeconds(30));
+
+                try
+                {
+                    line = await reader.ReadLineAsync(readCts.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    timedOut = true;
+                    line = null;
+                }
+
+                if (timedOut) break;
+                if (line is null) break;
+
                 if (!line.StartsWith("data:", StringComparison.Ordinal))
                     continue;
 
@@ -131,6 +148,11 @@ public sealed class GeminiStreamClient : IModelStreamClient
                 string? text = ExtractCandidateText(data);
                 if (!string.IsNullOrEmpty(text))
                     yield return text;
+            }
+
+            if (timedOut)
+            {
+                yield return "\n⚠ MODEL STREAM TIMEOUT: Remote AI provider stream stalled after 30s of inactivity.";
             }
         }
     }
@@ -148,7 +170,7 @@ public sealed class GeminiStreamClient : IModelStreamClient
         if (string.IsNullOrWhiteSpace(apiKey))
             return new Core.Models.AiGatewayValidationResult(false, "No API key supplied.");
 
-        _firewallHandler.SetActiveAllowedFqdn(GeminiHost);
+        using var egressScope = _firewallHandler.BeginScope(GeminiHost);
         try
         {
             var request = new HttpRequestMessage(

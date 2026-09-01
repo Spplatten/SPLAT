@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MissionController.Core;
 using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
@@ -22,6 +23,15 @@ public partial class SecurityAuditViewModel : ObservableObject
     private readonly IIncidentRevocationManager _revocationManager;
     private readonly ITokenLifecycleManager _tokenLifecycleManager;
     private readonly ICredentialVault _vault;
+    private readonly IOperatorIdentityProvider _identityProvider;
+
+    /// <summary>
+    /// The actor recorded against a compliance export or an emergency revocation. These used to pass
+    /// Environment.UserName, which is a display string with no provenance behind it - and the
+    /// compliance package SIGNS over this value, so it is the one place attribution matters most.
+    /// </summary>
+    private async Task<string> ResolveActorAsync() =>
+        (await _identityProvider.ResolveAsync()).ToLedgerIdentity();
 
     [ObservableProperty]
     private ObservableCollection<AuditLogEntry> _auditLogs = new();
@@ -91,7 +101,8 @@ public partial class SecurityAuditViewModel : ObservableObject
         IEdrIngestionBridge edrBridge,
         IIncidentRevocationManager revocationManager,
         ITokenLifecycleManager tokenLifecycleManager,
-        ICredentialVault vault)
+        ICredentialVault vault,
+        IOperatorIdentityProvider? identityProvider = null)
     {
         _auditLedger = auditLedger;
         _merkleEngine = merkleEngine;
@@ -101,6 +112,8 @@ public partial class SecurityAuditViewModel : ObservableObject
         _revocationManager = revocationManager;
         _tokenLifecycleManager = tokenLifecycleManager;
         _vault = vault;
+        _identityProvider = identityProvider
+            ?? new StaticOperatorIdentityProvider(OperatorIdentity.Unknown("winui-console"));
     }
 
 
@@ -224,7 +237,7 @@ public partial class SecurityAuditViewModel : ObservableObject
         try
         {
             var entries = AuditLogs.Count > 0 ? AuditLogs.ToList() : (await _auditLedger.GetAuditLogsAsync(null, 500)).ToList();
-            string zipPath = await _archiveExporter.ExportCompliancePackageAsync(framework, "", entries, Environment.UserName);
+            string zipPath = await _archiveExporter.ExportCompliancePackageAsync(framework, "", entries, await ResolveActorAsync());
             LastExportedPackagePath = zipPath;
             ComplianceExportStatus = $"SUCCESS: Exported {framework} bundle to {System.IO.Path.GetFileName(zipPath)}";
         }
@@ -279,7 +292,7 @@ public partial class SecurityAuditViewModel : ObservableObject
         try
         {
             var auditEntry = AuditLogs.FirstOrDefault() ?? new AuditLogEntry(
-                1, DateTime.UtcNow, Guid.NewGuid(), "SIEM_PROBE", "SYS_HEALTH", "System health probe verified", Environment.UserName, "0000000000000000000000000000000000000000000000000000000000000000", "0000000000000000000000000000000000000000000000000000000000000000");
+                1, DateTime.UtcNow, Guid.NewGuid(), "SIEM_PROBE", "SYS_HEALTH", "System health probe verified", await ResolveActorAsync(), "0000000000000000000000000000000000000000000000000000000000000000", "0000000000000000000000000000000000000000000000000000000000000000");
             
             var syslog = new SyslogMessage(
                 1, 6, DateTimeOffset.UtcNow, Environment.MachineName.ToLowerInvariant(), "MissionController", Environment.ProcessId.ToString(), "AUDIT_EVENT", auditEntry.Details);
@@ -319,7 +332,7 @@ public partial class SecurityAuditViewModel : ObservableObject
         {
             string target = RevocationTarget.Trim();
             string reason = string.IsNullOrWhiteSpace(RevocationReason) ? "Immediate security revocation" : RevocationReason.Trim();
-            string revBy = Environment.UserName;
+            string revBy = await ResolveActorAsync();
 
             await _revocationManager.RevokeAsync(target, RevocationType, reason, revBy);
 

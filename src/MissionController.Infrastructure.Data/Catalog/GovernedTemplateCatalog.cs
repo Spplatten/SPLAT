@@ -21,7 +21,7 @@ public static partial class GovernedTemplateCatalog
     /// Bumped whenever the seeded set changes. The registry stores this so startup can skip a
     /// redundant full-catalog upsert when the on-disk set already matches the shipped build.
     /// </summary>
-    public const string CatalogVersion = "2.1.0";
+    public const string CatalogVersion = "2.2.0";
 
     // --- Model governance -----------------------------------------------------------------
     // Pro is reserved for templates whose output requires correlation or adversarial reasoning

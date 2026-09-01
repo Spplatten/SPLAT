@@ -14,6 +14,18 @@ public sealed class RegexDataLossPreventionSanitizer : IDataLossPreventionSaniti
 
     private readonly IReadOnlyList<DlpRule> _rules;
 
+    /// <summary>
+    /// Per-rule ceiling on matching time. These patterns run over sandboxed tool output, which is
+    /// attacker-influenceable through file names, registry values and process names, and several use
+    /// unbounded classes (<c>[\s\S]*?</c>) that can backtrack catastrophically on a crafted input.
+    /// Without this, the default is <see cref="Regex.InfiniteMatchTimeout"/> and a single crafted
+    /// filename wedges the mission pipeline.
+    /// </summary>
+    private static readonly TimeSpan PatternTimeout = TimeSpan.FromMilliseconds(750);
+
+    /// <summary>Category suffix recorded when a rule could not finish scanning within the budget.</summary>
+    private const string TimeoutCategorySuffix = ":ScanTimeout";
+
     public RegexDataLossPreventionSanitizer()
     {
         _rules = new List<DlpRule>
@@ -21,54 +33,54 @@ public sealed class RegexDataLossPreventionSanitizer : IDataLossPreventionSaniti
             // 1. Private Keys (RSA, EC, PKCS8)
             new(
                 "PrivateKey",
-                new Regex(@"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----", RegexOptions.Compiled),
+                new Regex(@"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----", RegexOptions.Compiled, PatternTimeout),
                 "[REDACTED_PRIVATE_KEY_BLOCK]"
             ),
 
             // 2. NTLM Hash Pairs (LM:NTLM or User:RID:LM:NTLM)
             new(
                 "NtlmHashPair",
-                new Regex(@"\b([a-fA-F0-9]{32}:[a-fA-F0-9]{32})\b", RegexOptions.Compiled),
+                new Regex(@"\b([a-fA-F0-9]{32}:[a-fA-F0-9]{32})\b", RegexOptions.Compiled, PatternTimeout),
                 "[REDACTED_NTLM_HASH]"
             ),
 
             // 3. Password & API Key Key-Value Assignments
             new(
                 "CredentialAssignment",
-                new Regex(@"(?i)(password|passwd|pwd|secret|apikey|api_key|access_token|bearer)\s*([:=])\s*([^\s;,""']+)", RegexOptions.Compiled),
+                new Regex(@"(?i)(password|passwd|pwd|secret|apikey|api_key|access_token|bearer)\s*([:=])\s*([^\s;,""']+)", RegexOptions.Compiled, PatternTimeout),
                 "$1$2[REDACTED_SECRET]"
             ),
 
             // 4. CLI Password Arguments (-p <pass>, /p:<pass>, -password <pass>)
             new(
                 "CliPasswordArgument",
-                new Regex(@"(?i)(\s-(?:p|password|pwd)\s+)([^\s]+)", RegexOptions.Compiled),
+                new Regex(@"(?i)(\s-(?:p|password|pwd)\s+)([^\s]+)", RegexOptions.Compiled, PatternTimeout),
                 "$1[REDACTED_PASSWORD]"
             ),
             new(
                 "CliSlashPasswordArgument",
-                new Regex(@"(?i)(\/(?:p|password|pwd):)([^\s]+)", RegexOptions.Compiled),
+                new Regex(@"(?i)(\/(?:p|password|pwd):)([^\s]+)", RegexOptions.Compiled, PatternTimeout),
                 "$1[REDACTED_PASSWORD]"
             ),
 
             // 5. Personal & Corporate Email Addresses
             new(
                 "EmailAddress",
-                new Regex(@"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.Compiled),
+                new Regex(@"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.Compiled, PatternTimeout),
                 "[REDACTED_EMAIL]"
             ),
 
             // 6. Credit Card Numbers (13-16 digits with hyphens/spaces)
             new(
                 "CreditCard",
-                new Regex(@"\b(?:\d{4}[-\s]?){3}\d{4}\b", RegexOptions.Compiled),
+                new Regex(@"\b(?:\d{4}[-\s]?){3}\d{4}\b", RegexOptions.Compiled, PatternTimeout),
                 "[REDACTED_CARD_NUMBER]"
             ),
 
             // 7. US Social Security Numbers (SSN)
             new(
                 "SSN",
-                new Regex(@"\b\d{3}-\d{2}-\d{4}\b", RegexOptions.Compiled),
+                new Regex(@"\b\d{3}-\d{2}-\d{4}\b", RegexOptions.Compiled, PatternTimeout),
                 "[REDACTED_SSN]"
             )
         };
@@ -85,12 +97,37 @@ public sealed class RegexDataLossPreventionSanitizer : IDataLossPreventionSaniti
 
         foreach (var rule in _rules)
         {
-            var matches = rule.Pattern.Matches(result);
-            if (matches.Count > 0)
+            try
             {
-                totalRedactions += matches.Count;
-                categoriesFound.Add(rule.Category);
-                result = rule.Pattern.Replace(result, rule.Replacement);
+                // Counting inside the MatchEvaluator replaces the old Matches()-then-Replace()
+                // pair, which ran every pattern over the whole payload twice. One pass now.
+                int ruleHits = 0;
+                string replaced = rule.Pattern.Replace(result, match =>
+                {
+                    ruleHits++;
+                    return match.Result(rule.Replacement);
+                });
+
+                if (ruleHits > 0)
+                {
+                    totalRedactions += ruleHits;
+                    categoriesFound.Add(rule.Category);
+                    result = replaced;
+                }
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                // FAIL CLOSED. This rule did not finish, so the payload cannot be described as
+                // scanned for this category - and returning it as "sanitized" is exactly the kind of
+                // claim-without-basis this pipeline exists to prevent. Discard the content rather
+                // than forward text of unknown safety to a model provider. The operator sees the
+                // category and knows a scan, not the diagnostic, is what failed.
+                categoriesFound.Add(rule.Category + TimeoutCategorySuffix);
+                totalRedactions++;
+                result =
+                    $"[REDACTED — DLP scan for {rule.Category} exceeded {PatternTimeout.TotalMilliseconds:F0}ms " +
+                    "and this payload was withheld rather than transmitted unscanned]";
+                break;
             }
         }
 

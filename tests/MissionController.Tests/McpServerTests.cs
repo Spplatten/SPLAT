@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MissionController.Core;
+using MissionController.Core.Brain;
 using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
@@ -97,6 +99,8 @@ public class McpServerTests
             string operatorIdentity,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            // Mock yields synchronously; the await satisfies the async-iterator contract without CS1998.
+            await Task.CompletedTask;
             var missionId = Guid.NewGuid();
             yield return new MissionChunk(missionId, MissionChunkType.StatusChange, "Running diagnostic...", DateTime.UtcNow);
             yield return new MissionChunk(missionId, MissionChunkType.Stdout, "Adapter Name: Ethernet0\nStatus: Up\nDNS: 1.1.1.1", DateTime.UtcNow);
@@ -217,6 +221,9 @@ public class McpServerTests
         Assert.Contains("diagnose_system", toolNames);
         Assert.Contains("investigate_system", toolNames);
         Assert.Contains("search_incident_memory", toolNames);
+        Assert.Contains("run_agent_brain", toolNames);
+        Assert.Contains("list_governed_crews", toolNames);
+        Assert.Contains("run_governed_crew", toolNames);
     }
 
     [Fact]
@@ -302,77 +309,119 @@ public class McpServerTests
         Assert.Contains("-EPERM", outputText);
     }
 
-    [Fact]
-    public async Task FsRead_BlocksProtectedInodesWithEperm()
+    /// <summary>
+    /// Creates a handler whose fs_* tools are rooted in a throwaway workspace, so a test can prove
+    /// containment against a real directory instead of the caller's LocalAppData.
+    /// </summary>
+    private static (McpServerHandler Handler, MockAuditLedger Ledger, string Root) CreateFsHandler()
     {
-        var executor = new MockLeasedExecutor();
-        var compiler = new TemplatePolicyCompiler();
+        string root = Path.Combine(Path.GetTempPath(), "splat-fs-tests", Guid.NewGuid().ToString("N"));
         var ledger = new MockAuditLedger();
-        var handler = new McpServerHandler(executor, compiler, ledger);
-
-        var request = new McpJsonRpcMessage
-        {
-            JsonRpc = "2.0",
-            Id = JsonSerializer.SerializeToElement(5),
-            Method = "tools/call",
-            Params = JsonSerializer.SerializeToElement(new
-            {
-                name = "fs_read",
-                arguments = new
-                {
-                    path = "/etc/shadow"
-                }
-            })
-        };
-
-        var response = await handler.ProcessMessageAsync(request);
-
-        Assert.NotNull(response.Result);
-        var doc = JsonDocument.Parse(response.Result.Value.GetRawText());
-        Assert.True(doc.RootElement.GetProperty("isError").GetBoolean());
-
-        string outputText = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString()!;
-        Assert.Contains("[KERNEL -EPERM BLOCK]", outputText);
-
-        Assert.Single(ledger.Logs);
-        Assert.Equal("BLOCKED_FILE_READ", ledger.Logs[0].action);
+        var handler = new McpServerHandler(
+            new MockLeasedExecutor(),
+            new TemplatePolicyCompiler(),
+            ledger,
+            workspaceRoot: root);
+        return (handler, ledger, root);
     }
 
-    [Fact]
-    public async Task FsWrite_BlocksProtectedSystemPaths()
+    private static McpJsonRpcMessage FsCall(int id, string tool, object arguments) => new()
     {
-        var executor = new MockLeasedExecutor();
-        var compiler = new TemplatePolicyCompiler();
-        var ledger = new MockAuditLedger();
-        var handler = new McpServerHandler(executor, compiler, ledger);
+        JsonRpc = "2.0",
+        Id = JsonSerializer.SerializeToElement(id),
+        Method = "tools/call",
+        Params = JsonSerializer.SerializeToElement(new { name = tool, arguments })
+    };
 
-        var request = new McpJsonRpcMessage
-        {
-            JsonRpc = "2.0",
-            Id = JsonSerializer.SerializeToElement(6),
-            Method = "tools/call",
-            Params = JsonSerializer.SerializeToElement(new
-            {
-                name = "fs_write",
-                arguments = new
-                {
-                    path = "/etc/malicious.conf",
-                    content = "evil_config=true"
-                }
-            })
-        };
+    /// <summary>
+    /// These previously asserted the literal string "[KERNEL -EPERM BLOCK]" against a
+    /// <c>string.Contains("/etc/shadow")</c> check, which pinned the defect in place: the tools read
+    /// and wrote anywhere on the Windows host, and the only thing under test was that they said
+    /// otherwise. What is asserted now is the property that actually matters - a path outside the
+    /// workspace is refused - plus the negative assertion that the refusal does not claim kernel
+    /// enforcement it never performed.
+    /// </summary>
+    [Theory]
+    [InlineData("/etc/shadow")]
+    [InlineData(@"C:\Windows\System32\drivers\etc\hosts")]
+    [InlineData("../../../../Windows/System32/config/SAM")]
+    [InlineData(@"..\..\escape.txt")]
+    public async Task FsRead_RefusesPathsOutsideTheWorkspace(string path)
+    {
+        var (handler, ledger, _) = CreateFsHandler();
 
-        var response = await handler.ProcessMessageAsync(request);
+        var response = await handler.ProcessMessageAsync(FsCall(5, "fs_read", new { path }));
 
         Assert.NotNull(response.Result);
         var doc = JsonDocument.Parse(response.Result.Value.GetRawText());
         Assert.True(doc.RootElement.GetProperty("isError").GetBoolean());
 
         string outputText = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString()!;
-        Assert.Contains("[KERNEL -EPERM BLOCK]", outputText);
+        Assert.Contains("[SPLAT POLICY]", outputText);
+        // The refusal must not dress a user-space check up as kernel enforcement. It may still say
+        // the words "not a kernel denial" - disclaiming the mechanism is the point.
+        Assert.DoesNotContain("[KERNEL -EPERM BLOCK]", outputText);
+        Assert.DoesNotContain("-EPERM", outputText);
 
         Assert.Single(ledger.Logs);
-        Assert.Equal("BLOCKED_SYSTEM_WRITE", ledger.Logs[0].action);
+        Assert.Equal("REFUSED_FILE_READ_OUT_OF_WORKSPACE", ledger.Logs[0].action);
+    }
+
+    [Theory]
+    [InlineData("/etc/malicious.conf")]
+    [InlineData(@"C:\Windows\System32\evil.dll")]
+    [InlineData("../../../escaped.conf")]
+    public async Task FsWrite_RefusesPathsOutsideTheWorkspace(string path)
+    {
+        var (handler, ledger, root) = CreateFsHandler();
+
+        var response = await handler.ProcessMessageAsync(
+            FsCall(6, "fs_write", new { path, content = "evil_config=true" }));
+
+        Assert.NotNull(response.Result);
+        var doc = JsonDocument.Parse(response.Result.Value.GetRawText());
+        Assert.True(doc.RootElement.GetProperty("isError").GetBoolean());
+
+        string outputText = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString()!;
+        Assert.Contains("[SPLAT POLICY]", outputText);
+        // The refusal must not dress a user-space check up as kernel enforcement. It may still say
+        // the words "not a kernel denial" - disclaiming the mechanism is the point.
+        Assert.DoesNotContain("[KERNEL -EPERM BLOCK]", outputText);
+        Assert.DoesNotContain("-EPERM", outputText);
+
+        Assert.Single(ledger.Logs);
+        Assert.Equal("REFUSED_FILE_WRITE_OUT_OF_WORKSPACE", ledger.Logs[0].action);
+
+        // The refusal must be a refusal, not a message: nothing may have reached the disk.
+        Assert.Empty(Directory.GetFiles(root, "*", SearchOption.AllDirectories));
+    }
+
+    /// <summary>
+    /// The containment must not have been bought by breaking the tools. A relative path stays inside
+    /// the workspace and round-trips, which is the legitimate use these tools exist for.
+    /// </summary>
+    [Fact]
+    public async Task FsWriteThenRead_RoundTripsInsideTheWorkspace()
+    {
+        var (handler, ledger, root) = CreateFsHandler();
+
+        var writeResponse = await handler.ProcessMessageAsync(
+            FsCall(7, "fs_write", new { path = "notes/finding.txt", content = "sandbox holds" }));
+
+        var writeDoc = JsonDocument.Parse(writeResponse.Result!.Value.GetRawText());
+        Assert.False(writeDoc.RootElement.GetProperty("isError").GetBoolean());
+        Assert.True(File.Exists(Path.Combine(root, "notes", "finding.txt")));
+
+        var readResponse = await handler.ProcessMessageAsync(
+            FsCall(8, "fs_read", new { path = "notes/finding.txt" }));
+
+        var readDoc = JsonDocument.Parse(readResponse.Result!.Value.GetRawText());
+        Assert.False(readDoc.RootElement.GetProperty("isError").GetBoolean());
+        Assert.Equal(
+            "sandbox holds",
+            readDoc.RootElement.GetProperty("content")[0].GetProperty("text").GetString());
+
+        Assert.Equal(new[] { "AUDITED_FILE_WRITE", "AUDITED_FILE_READ" }, ledger.Logs.Select(l => l.action));
     }
 
     [Fact]
@@ -463,5 +512,226 @@ public class McpServerTests
         string outputText = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString()!;
         Assert.Contains("SPLAT INVESTIGATION REPORT", outputText);
         Assert.Contains("All gateways reachable", outputText);
+    }
+
+    private class MockAgentBrain : IAgentBrain
+    {
+        public Task<GoalDecompositionResult> DecomposeGoalAsync(
+            string userGoal,
+            CancellationToken cancellationToken = default)
+        {
+            var result = new GoalDecompositionResult(
+                UserGoal: userGoal,
+                SubGoals: new[] { "Check DNS" },
+                RecommendedTemplateIds: new[] { "net-dns-audit" },
+                ConfidenceScore: 0.95,
+                ReasoningRationale: "DNS test");
+            return Task.FromResult(result);
+        }
+
+        public Task<BrainExecutionResult> ProcessGoalAsync(
+            string userGoal,
+            string operatorIdentity,
+            int maxReasoningSteps = 3,
+            IProgress<MissionChunk>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            var result = new BrainExecutionResult(
+                SessionId: Guid.NewGuid(),
+                UserGoal: userGoal,
+                OverallStatus: DiagnosticHealthStatus.Healthy,
+                ExecutiveHeadline: "Autonomous Brain: All Systems Healthy",
+                RootCauseAnalysis: "No network or security anomalies detected during cognitive decomposition.",
+                GroundedKeyFindings: new[] { "🟢 Latency under 15ms", "🟢 DNS resolved 0.0.0.0 correctly" },
+                EvaluatedHypotheses: new[]
+                {
+                    new BrainHypothesis("HYP-1", "Hypothesis 1: DNS degraded", "net-dns-audit", HypothesisStatus.Refuted, "DNS responded in 4ms", 0.9),
+                    new BrainHypothesis("HYP-2", "Hypothesis 2: Packet loss", "net-dns-audit", HypothesisStatus.Refuted, "0% packet loss observed", 0.9)
+                },
+                ExecutedSteps: new[]
+                {
+                    new InvestigationStep(1, "net-dns-audit", "Network Diagnostics", "Initial", new ExecutiveDiagnosisResult(
+                        DiagnosticHealthStatus.Healthy, "DNS operational", new[] { "All healthy" }, Array.Empty<string>()))
+                },
+                AvailableRemediations: new[]
+                {
+                    new RemediationAction("flush-dns", "net-dns-audit", "Flush DNS Cache", "Flushes the local resolver cache", RemediationRiskLevel.Safe, false, "ipconfig.exe", "/flushdns")
+                },
+                AuditLedgerEntryHash: "sha256:abc123merkleproof",
+                TimestampUtc: DateTime.UtcNow);
+
+            return Task.FromResult(result);
+        }
+    }
+
+    [Fact]
+    public async Task RunAgentBrain_ExecutesGoalThroughAgentBrainEngine()
+    {
+        var executor = new MockLeasedExecutor();
+        var compiler = new TemplatePolicyCompiler();
+        var ledger = new MockAuditLedger();
+        var brain = new MockAgentBrain();
+
+        var handler = new McpServerHandler(
+            executor,
+            compiler,
+            ledger,
+            agentBrain: brain);
+
+        var request = new McpJsonRpcMessage
+        {
+            JsonRpc = "2.0",
+            Id = JsonSerializer.SerializeToElement(9),
+            Method = "tools/call",
+            Params = JsonSerializer.SerializeToElement(new
+            {
+                name = "run_agent_brain",
+                arguments = new
+                {
+                    userGoal = "Diagnose slow network requests",
+                    maxReasoningSteps = 3
+                }
+            })
+        };
+
+        var response = await handler.ProcessMessageAsync(request);
+
+        Assert.NotNull(response.Result);
+        var doc = JsonDocument.Parse(response.Result.Value.GetRawText());
+        Assert.False(doc.RootElement.GetProperty("isError").GetBoolean());
+
+        string outputText = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString()!;
+        Assert.Contains("SPLAT AUTONOMOUS AGENT BRAIN REPORT", outputText);
+        Assert.Contains("Autonomous Brain: All Systems Healthy", outputText);
+        Assert.Contains("Flush DNS Cache", outputText);
+        Assert.Contains("sha256:abc123merkleproof", outputText);
+    }
+
+    [Fact]
+    public async Task RunCommand_RejectsEmptyCommand()
+    {
+        var executor = new MockLeasedExecutor();
+        var compiler = new TemplatePolicyCompiler();
+        var ledger = new MockAuditLedger();
+        var handler = new McpServerHandler(executor, compiler, ledger);
+
+        var request = new McpJsonRpcMessage
+        {
+            JsonRpc = "2.0",
+            Id = JsonSerializer.SerializeToElement(10),
+            Method = "tools/call",
+            Params = JsonSerializer.SerializeToElement(new
+            {
+                name = "run_command",
+                arguments = new
+                {
+                    command = "   "
+                }
+            })
+        };
+
+        var response = await handler.ProcessMessageAsync(request);
+        Assert.NotNull(response.Result);
+        var doc = JsonDocument.Parse(response.Result.Value.GetRawText());
+        Assert.True(doc.RootElement.GetProperty("isError").GetBoolean());
+        string text = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString()!;
+        Assert.Contains("command", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("cannot be empty", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RunCode_EscapesSingleQuotesSafely()
+    {
+        var executor = new MockLeasedExecutor();
+        var compiler = new TemplatePolicyCompiler();
+        var ledger = new MockAuditLedger();
+        var handler = new McpServerHandler(executor, compiler, ledger);
+
+        var request = new McpJsonRpcMessage
+        {
+            JsonRpc = "2.0",
+            Id = JsonSerializer.SerializeToElement(11),
+            Method = "tools/call",
+            Params = JsonSerializer.SerializeToElement(new
+            {
+                name = "run_code",
+                arguments = new
+                {
+                    language = "bash",
+                    code = "echo 'hello world' && echo \"nested quotes\""
+                }
+            })
+        };
+
+        var response = await handler.ProcessMessageAsync(request);
+        Assert.NotNull(response.Result);
+        Assert.NotNull(executor.LastArguments);
+        // Asserts POSIX single-quote escaping format: -c 'echo '\''hello world'\'' && echo "nested quotes"'
+        Assert.Contains("-c 'echo '\\''hello world'\\'' && echo \"nested quotes\"'", executor.LastArguments);
+    }
+
+    [Fact]
+    public async Task RunCode_RejectsEmptyCode()
+    {
+        var executor = new MockLeasedExecutor();
+        var compiler = new TemplatePolicyCompiler();
+        var ledger = new MockAuditLedger();
+        var handler = new McpServerHandler(executor, compiler, ledger);
+
+        var request = new McpJsonRpcMessage
+        {
+            JsonRpc = "2.0",
+            Id = JsonSerializer.SerializeToElement(12),
+            Method = "tools/call",
+            Params = JsonSerializer.SerializeToElement(new
+            {
+                name = "run_code",
+                arguments = new
+                {
+                    language = "bash",
+                    code = ""
+                }
+            })
+        };
+
+        var response = await handler.ProcessMessageAsync(request);
+        Assert.NotNull(response.Result);
+        var doc = JsonDocument.Parse(response.Result.Value.GetRawText());
+        Assert.True(doc.RootElement.GetProperty("isError").GetBoolean());
+        string text = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString()!;
+        Assert.Contains("code", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ToolsCall_ToleratesStringAndNumberTypeRepresentations()
+    {
+        var executor = new MockLeasedExecutor();
+        var compiler = new TemplatePolicyCompiler();
+        var ledger = new MockAuditLedger();
+        var handler = new McpServerHandler(executor, compiler, ledger);
+
+        // Send timeoutSeconds as string "45" and allowNetwork as string "true"
+        var request = new McpJsonRpcMessage
+        {
+            JsonRpc = "2.0",
+            Id = JsonSerializer.SerializeToElement(13),
+            Method = "tools/call",
+            Params = JsonSerializer.SerializeToElement(new
+            {
+                name = "run_command",
+                arguments = new
+                {
+                    command = "/bin/ls",
+                    timeoutSeconds = "45",
+                    allowNetwork = "true"
+                }
+            })
+        };
+
+        var response = await handler.ProcessMessageAsync(request);
+        Assert.NotNull(response.Result);
+        Assert.NotNull(executor.LastLease);
+        Assert.Equal(45u, executor.LastLease.LeaseDurationSeconds);
+        Assert.True(executor.LastLease.AllowNetwork);
     }
 }

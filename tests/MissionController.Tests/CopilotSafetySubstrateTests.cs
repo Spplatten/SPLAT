@@ -325,6 +325,90 @@ public class CopilotSafetySubstrateTests
         Assert.Contains("jobObjectLimitsEnforced", statusJson);
     }
 
+    [Fact]
+    public async Task SplatCopilotPlugin_ReadAndWrite_WithinWorkspace_Succeeds()
+    {
+        string tempWorkspace = Path.Combine(Path.GetTempPath(), "SplatCopilotTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempWorkspace);
+
+        try
+        {
+            var mockLauncher = new MockProcessLauncher(exitCode: 0, stdout: "", stderr: "");
+            var mockTokenProvider = new MockTokenProvider();
+            var mockJailManager = new MockJailManager();
+            var mockLedger = new MockAuditLedger();
+
+            var substrate = new CopilotSafetySubstrate(
+                processLauncher: mockLauncher,
+                tokenProvider: mockTokenProvider,
+                jailManager: mockJailManager,
+                auditLedger: mockLedger);
+
+            var plugin = new SplatCopilotPlugin(substrate, _defaultPolicy, workspaceRoot: tempWorkspace);
+
+            // 1. Write file inside workspace
+            string writeResultJson = await plugin.WriteSandboxedFileAsync("notes/report.txt", "Test report payload");
+            var writeDoc = JsonDocument.Parse(writeResultJson);
+            Assert.True(writeDoc.RootElement.GetProperty("success").GetBoolean());
+            Assert.Equal("Test report payload".Length, writeDoc.RootElement.GetProperty("bytesWritten").GetInt32());
+
+            // 2. Read file back
+            string readResultJson = await plugin.ReadSandboxedFileAsync("notes/report.txt");
+            var readDoc = JsonDocument.Parse(readResultJson);
+            Assert.True(readDoc.RootElement.GetProperty("success").GetBoolean());
+            Assert.Equal("Test report payload", readDoc.RootElement.GetProperty("content").GetString());
+        }
+        finally
+        {
+            if (Directory.Exists(tempWorkspace))
+            {
+                try { Directory.Delete(tempWorkspace, true); } catch { }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SplatCopilotPlugin_ReadAndWrite_OutsideWorkspace_IsRefused()
+    {
+        string tempWorkspace = Path.Combine(Path.GetTempPath(), "SplatCopilotTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempWorkspace);
+
+        try
+        {
+            var mockLauncher = new MockProcessLauncher(exitCode: 0, stdout: "", stderr: "");
+            var mockTokenProvider = new MockTokenProvider();
+            var mockJailManager = new MockJailManager();
+            var mockLedger = new MockAuditLedger();
+
+            var substrate = new CopilotSafetySubstrate(
+                processLauncher: mockLauncher,
+                tokenProvider: mockTokenProvider,
+                jailManager: mockJailManager,
+                auditLedger: mockLedger);
+
+            var plugin = new SplatCopilotPlugin(substrate, _defaultPolicy, workspaceRoot: tempWorkspace);
+
+            // Attempt to write outside workspace via directory traversal
+            string writeResultJson = await plugin.WriteSandboxedFileAsync(@"..\evil.txt", "unauthorized");
+            var writeDoc = JsonDocument.Parse(writeResultJson);
+            Assert.False(writeDoc.RootElement.GetProperty("success").GetBoolean());
+            Assert.Contains("[SPLAT POLICY]", writeDoc.RootElement.GetProperty("error").GetString());
+
+            // Attempt to read outside workspace via absolute path
+            string readResultJson = await plugin.ReadSandboxedFileAsync(@"C:\Windows\System32\drivers\etc\hosts");
+            var readDoc = JsonDocument.Parse(readResultJson);
+            Assert.False(readDoc.RootElement.GetProperty("success").GetBoolean());
+            Assert.Contains("[SPLAT POLICY]", readDoc.RootElement.GetProperty("error").GetString());
+        }
+        finally
+        {
+            if (Directory.Exists(tempWorkspace))
+            {
+                try { Directory.Delete(tempWorkspace, true); } catch { }
+            }
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // Test Mocks & Doubles
     // ─────────────────────────────────────────────────────────────────────────────

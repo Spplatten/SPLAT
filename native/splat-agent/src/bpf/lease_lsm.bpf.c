@@ -27,9 +27,11 @@ char LICENSE[] SEC("license") = "GPL"; // BPF-LSM + ringbuf helpers require a GP
 #define AF_INET 2
 #define EPERM 1
 
-// Inode identity key. In a single rootfs/mount, inode number is invariant.
+// Inode identity key. (dev, ino) pair is unique across all mounts/filesystems.
 struct inode_key {
     __u64 ino;
+    __u32 dev;
+    __u32 _pad;
 };
 
 enum splat_hook {
@@ -105,6 +107,8 @@ static __always_inline struct inode_key inode_key_of(struct inode *inode)
 {
     struct inode_key k = {};
     k.ino = BPF_CORE_READ(inode, i_ino);
+    k.dev = BPF_CORE_READ(inode, i_sb, s_dev);
+    k._pad = 0;
     return k;
 }
 

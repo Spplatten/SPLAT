@@ -63,14 +63,27 @@ public sealed class SentinelCopilotTelemetryBridge
                     : $"Copilot tool '{context.ToolName}' executed. ExitCode={result.ExitCode} Violations={result.Violations.Count}"
             };
 
+            // A CEF custom-number field is emitted only when the substrate actually measured it.
+            // An absent key reads as "not reported" in the SIEM; an empty or zero-valued cn1 reads
+            // as a measurement of zero, which would put a fabricated data point in the analyst's
+            // dashboard under the same schema as a real one.
             if (result.ResourceMetrics != null)
             {
-                extensions["cn1"] = result.ResourceMetrics.TotalCpuKernelTimeMs.ToString();
-                extensions["cn1Label"] = "KernelTimeMs";
-                extensions["cn2"] = result.ResourceMetrics.TotalCpuUserTimeMs.ToString();
-                extensions["cn2Label"] = "UserTimeMs";
-                extensions["cn3"] = result.ResourceMetrics.PeakMemoryBytes.ToString();
-                extensions["cn3Label"] = "PeakMemoryBytes";
+                if (result.ResourceMetrics.TotalCpuKernelTimeMs is { } kernelMs)
+                {
+                    extensions["cn1"] = kernelMs.ToString();
+                    extensions["cn1Label"] = "KernelTimeMs";
+                }
+                if (result.ResourceMetrics.TotalCpuUserTimeMs is { } userMs)
+                {
+                    extensions["cn2"] = userMs.ToString();
+                    extensions["cn2Label"] = "UserTimeMs";
+                }
+                if (result.ResourceMetrics.PeakMemoryBytes is { } peakBytes)
+                {
+                    extensions["cn3"] = peakBytes.ToString();
+                    extensions["cn3Label"] = "PeakMemoryBytes";
+                }
             }
 
             if (result.Violations.Count > 0)

@@ -85,7 +85,10 @@ public sealed class PkceLoopbackAuthService : IDisposable
             {
                 responseBytes = "<html><body style='font-family:Segoe UI,sans-serif;padding:40px;text-align:center;'><h2>Authentication Successful</h2><p>You can close this tab and return to Mission Controller.</p></body></html>"u8.ToArray();
             }
+            else
+            {
                 responseBytes = Encoding.UTF8.GetBytes($"<html><body style='font-family:Segoe UI,sans-serif;padding:40px;text-align:center;color:red;'><h2>Authentication Failed</h2><p>{WebUtility.HtmlEncode(error ?? "Unknown error")}</p></body></html>");
+            }
 
             context.Response.ContentType = "text/html";
             context.Response.ContentLength64 = responseBytes.Length;

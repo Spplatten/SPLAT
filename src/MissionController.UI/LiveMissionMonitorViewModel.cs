@@ -1,10 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
+using MissionController.Core;
+using MissionController.Core.Crew;
 using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
@@ -55,34 +57,56 @@ public partial class LiveMissionMonitorViewModel : ObservableObject
     public Visibility SimulatedBannerVisibility =>
         IsSimulatedAnalysis ? Visibility.Visible : Visibility.Collapsed;
 
+    private readonly IOperatorIdentityProvider _identityProvider;
+    private readonly IGovernedCrewEngine? _crewEngine;
+
     public LiveMissionMonitorViewModel(
         IMissionExecutionEngine engine,
-        IProjectExecutionEngine projectEngine)
+        IProjectExecutionEngine projectEngine,
+        IOperatorIdentityProvider identityProvider,
+        IGovernedCrewEngine? crewEngine = null)
     {
         _engine = engine;
         _projectEngine = projectEngine;
+        _identityProvider = identityProvider;
+        _crewEngine = crewEngine;
     }
 
     [RelayCommand]
     public async Task LaunchAsync(LaunchMissionRequest request)
     {
-        await StartMissionAsync(request.Template, request.Parameters, request.OperatorIdentity);
+        await StartMissionAsync(request.Template, request.Parameters);
     }
 
-    public async Task StartMissionAsync(SingleToolTemplate template, Dictionary<string, string> parameters, string operatorIdentity)
+    // The operatorIdentity parameter these two used to take was supplied by the caller as a string
+    // literal - "Operator_SecOpsTier1", "Operator_ProjectLead" - so the ledger's actor column was
+    // decided by whichever view happened to dispatch. Resolving it here removes the opportunity.
+    public async Task StartMissionAsync(SingleToolTemplate template, Dictionary<string, string> parameters)
     {
         if (IsRunning) return;
 
+        var actor = await _identityProvider.ResolveAsync();
         PrepareRun("Starting Mission...");
-        await RunStreamAsync(_engine.ExecuteMissionAsync(template, parameters, operatorIdentity, _cts!.Token));
+        await RunStreamAsync(_engine.ExecuteMissionAsync(template, parameters, actor.ToLedgerIdentity(), _cts!.Token));
     }
 
-    public async Task StartProjectAsync(ProjectTemplate project, Dictionary<string, string> parameters, string operatorIdentity)
+    public async Task StartProjectAsync(ProjectTemplate project, Dictionary<string, string> parameters)
     {
         if (IsRunning) return;
 
+        var actor = await _identityProvider.ResolveAsync();
         PrepareRun("Starting Project...");
-        await RunStreamAsync(_projectEngine.ExecuteProjectAsync(project, parameters, operatorIdentity, _cts!.Token));
+        await RunStreamAsync(_projectEngine.ExecuteProjectAsync(project, parameters, actor.ToLedgerIdentity(), _cts!.Token));
+    }
+
+    public async Task StartCrewAsync(GovernedCrewDefinition crew, Dictionary<string, string> parameters)
+    {
+        if (IsRunning) return;
+        if (_crewEngine == null) return;
+
+        var actor = await _identityProvider.ResolveAsync();
+        PrepareRun($"Starting Governed Crew '{crew.Name}'...");
+        await RunStreamAsync(_crewEngine.ExecuteCrewAsync(crew, parameters, actor.ToLedgerIdentity(), _cts!.Token));
     }
 
     [RelayCommand]
