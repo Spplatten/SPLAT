@@ -26,7 +26,7 @@ This is **blast-radius containment, not detection**. SPLAT does not claim to kno
 | Component | State |
 | :--- | :--- |
 | Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
-| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 297/297 automated tests passing |
+| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 342/342 automated tests passing |
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 9 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining seven run on the Windows control plane today |
 | Linux kernel substrate (`splat-agent`, BPF-LSM lease enforcement) | **In bring-up** — BPF program and Rust daemon authored; kernel feasibility verified GREEN on stock WSL2 (see below); canary `-EPERM` run is the next gate |
 | VSOCK low-latency RPC transport | **Roadmap** — design notes in internal docs |

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -131,6 +132,111 @@ public class DocumentationDriftTests
         Assert.Contains("In bring-up", readme, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("canary", readme, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// The advertised test count is the claim in these documents that goes stale fastest - it moves
+    /// on almost every commit - and nothing was checking it. This class's own summary cited a drifted
+    /// test count as a reason it exists, while the README sat at 297/297 against a suite that had
+    /// grown past 340 and the tutorial had been updated separately to a third number.
+    ///
+    /// Reflection reproduces exactly what the runner reports: one case per <c>[Fact]</c>, one per
+    /// <c>[InlineData]</c> row on a <c>[Theory]</c>. That equivalence holds only while the suite uses
+    /// no data source the runner expands but reflection cannot enumerate, so
+    /// <see cref="NoDataSourceEscapesTheTestCounter"/> fails the moment one is introduced.
+    /// </summary>
+    [Fact]
+    public void TheAdvertisedTestCount_MatchesTheSuite()
+    {
+        int actual = CountTestCases();
+        var claims = FindTestCountClaims();
+
+        // A claim that has simply been deleted must not read as agreement.
+        Assert.NotEmpty(claims);
+
+        var wrong = claims
+            .Where(claim => claim.Claimed != actual)
+            .Select(claim => $"{claim.File} claims {claim.Claimed}")
+            .ToList();
+
+        Assert.True(
+            wrong.Count == 0,
+            $"The suite contains {actual} test cases, but {string.Join("; ", wrong)}. " +
+            "Update the documented count in those files to match.");
+    }
+
+    /// <summary>
+    /// Guards the assumption <see cref="CountTestCases"/> rests on. xUnit expands
+    /// <c>[MemberData]</c> and <c>[ClassData]</c> at run time from sources reflection here does not
+    /// evaluate, so a test using one would be counted as zero cases and would silently deflate the
+    /// number the documents are held to - turning the count check into a rubber stamp.
+    /// </summary>
+    [Fact]
+    public void NoDataSourceEscapesTheTestCounter()
+    {
+        var unsupported = TestMethods()
+            .Where(method => method.GetCustomAttributes()
+                .Any(attribute => attribute is MemberDataAttribute or ClassDataAttribute))
+            .Select(method => $"{method.DeclaringType?.Name}.{method.Name}")
+            .ToList();
+
+        Assert.True(
+            unsupported.Count == 0,
+            "These tests use a data source the documentation test counter cannot enumerate, so the " +
+            $"advertised test count would silently under-report: {string.Join(", ", unsupported)}. " +
+            "Teach CountTestCases to expand it, or use [InlineData].");
+    }
+
+    private static readonly Regex TestCountClaimRegex = new(
+        @"(?<first>\d+)(?:/(?<second>\d+))?\s+automated tests",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Every documented test count, from both spellings in use: "297/297 automated tests" in the
+    /// README's status table and "340 automated tests" in the tutorial's prose. In the paired form
+    /// both halves are held to the real number, since a passing suite means run and passed are equal.
+    /// </summary>
+    private static List<(string File, int Claimed)> FindTestCountClaims()
+    {
+        string root = RepositoryRoot();
+        var claims = new List<(string, int)>();
+
+        foreach (string relative in new[] { "README.md", Path.Combine("docs", "TUTORIAL.md") })
+        {
+            string full = Path.Combine(root, relative);
+            if (!File.Exists(full))
+            {
+                continue;
+            }
+
+            foreach (Match match in TestCountClaimRegex.Matches(File.ReadAllText(full)))
+            {
+                claims.Add((relative, int.Parse(match.Groups["first"].Value)));
+                if (match.Groups["second"].Success)
+                {
+                    claims.Add((relative, int.Parse(match.Groups["second"].Value)));
+                }
+            }
+        }
+
+        return claims;
+    }
+
+    private static int CountTestCases() => TestMethods().Sum(method =>
+        // TheoryAttribute derives from FactAttribute, so theories are matched first - checking Fact
+        // first would count a theory once instead of once per data row.
+        method.GetCustomAttribute<TheoryAttribute>() is not null
+            ? method.GetCustomAttributes<InlineDataAttribute>().Count()
+            : 1);
+
+    private static IEnumerable<MethodInfo> TestMethods() =>
+        typeof(DocumentationDriftTests).Assembly
+            .GetTypes()
+            .SelectMany(type => type.GetMethods(
+                BindingFlags.Public | BindingFlags.NonPublic |
+                BindingFlags.Instance | BindingFlags.Static |
+                // Inherited methods would otherwise be counted once per derived class.
+                BindingFlags.DeclaredOnly))
+            .Where(method => method.GetCustomAttribute<FactAttribute>() is not null);
 
     // ---------------------------------------------------------------- minimal stubs
 
