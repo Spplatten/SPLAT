@@ -42,6 +42,30 @@ public static class GovernedProjectCatalog
                 "Blocking evidence and owners",
                 "Ordered pre-change actions"
             },
+            true),
+        new ProjectTemplate(
+            "project-grant-capture-pipeline",
+            "Grant Capture Pipeline",
+            "Discovers open federal funding opportunities, audits the applicant against each program's eligibility gates, drafts the proposal narrative, and independently reconciles the budget. Draft-only: no stage presents a credential or files an application.",
+            "Projects",
+            new[]
+            {
+                // Discovery is the one stage allowed to fail without stopping the run: it reaches the
+                // network, and a DNS blip must not block a drafting session against a program the
+                // operator already named. Its directive therefore has to keep an empty result from
+                // being read downstream as an eligibility finding.
+                new ProjectStage("ingest", "Discover open funding opportunities", "grants-opportunity-ingestion", "Retrieve currently open opportunities matching the applicant's sector and rank them by fit. Report each opportunity number, agency, and close date. If retrieval failed, state that the opportunity set is UNKNOWN and do not conclude that no programs match.", true),
+                new ProjectStage("qualify", "Audit eligibility and draft the proposal narrative", "grants-eligibility-proposal-engine", "Screen the applicant profile against the eligibility gates of the shortlisted opportunities carried in the upstream evidence, and against the operator's named target program. Emit the PASS/FAIL/CAUTION audit first with per-gate rationale, then draft the five proposal sections only for programs that cleared. Tag every unsupported figure [OPERATOR-VERIFY]."),
+                new ProjectStage("budget", "Reconcile the budget and audit allowable costs", "grants-budget-compliance-auditor", "Reconcile the budget behind the drafted narrative. Report the variance, the allowability of each cost line under 2 CFR 200 Subpart E, and the basis claimed for the indirect rate. Close with the blocking items that must be resolved before this draft could be filed.")
+            },
+            new[]
+            {
+                "Ranked shortlist of open opportunities with close dates",
+                "Per-program eligibility audit with PASS/FAIL/CAUTION rationale",
+                "Five-section proposal draft for qualifying programs",
+                "Reconciled budget with allowable-cost findings",
+                "Blocking items requiring operator verification before filing"
+            },
             true)
     };
 }
