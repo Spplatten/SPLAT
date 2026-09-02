@@ -1,3 +1,6 @@
+<!-- DERIVED FILE. The source of truth is docs/SPLAT-Field-Guide.html; edit that first, then mirror
+     the wording here and republish the artifact it names. See that file's header for why. -->
+
 # The SPLAT Field Guide
 
 *A plain-English guide to SPLAT — no jargon required. Engineers wanted: the [README](../README.md) has the full technical story.*
