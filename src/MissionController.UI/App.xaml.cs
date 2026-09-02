@@ -2,6 +2,8 @@ using System;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using MissionController.Core;
+using MissionController.Core.Brain;
+using MissionController.Core.Crew;
 using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
@@ -14,6 +16,7 @@ using MissionController.Infrastructure.Network.Http;
 using MissionController.Infrastructure.Network.Identity;
 using MissionController.Infrastructure.Network.Siem;
 using MissionController.Infrastructure.Network.Ai;
+using MissionController.Infrastructure.Windows.Copilot;
 using MissionController.Infrastructure.Windows.Jails;
 using MissionController.Infrastructure.Windows.JobObjects;
 using MissionController.Infrastructure.Windows.Process;
@@ -125,12 +128,20 @@ public partial class App : Application
         var services = new ServiceCollection();
 
         // Infrastructure - Windows & Kernel Sandboxing
+        // Ledger attribution. The Windows logon session is the operator: the OS has already
+        // authenticated this principal, and a desktop console has no separate authority it could
+        // add on top. This replaces the string literals each view model used to pass.
+        services.AddSingleton<IOperatorIdentityProvider>(
+            _ => new WindowsOperatorIdentityProvider("winui-console"));
+
         services.AddSingleton<IRestrictedTokenProvider, RestrictedTokenProvider>();
         services.AddSingleton<IJailManager, NtAclJailManager>();
         services.AddSingleton<IProcessLauncher, SuspendedProcessLauncher>();
         services.AddSingleton<ICredentialVault, DpapiCredentialVault>();
         services.AddSingleton<Func<string, IJobSandbox>>(_ => name => new Win32JobSandbox(name));
         services.AddSingleton<IRemediationEngine, SandboxedRemediationEngine>();
+        services.AddSingleton<ICopilotSafetyPolicyEngine, CopilotSafetyPolicyEngine>();
+        services.AddSingleton<ICopilotSafetySubstrate, CopilotSafetySubstrate>();
 
         // Infrastructure - Network & AI & DLP & SIEM & EDR
         var (httpClient, firewall) = HardenedHttpClientFactory.CreateHardenedClient();
@@ -162,11 +173,14 @@ public partial class App : Application
         services.AddSingleton<ICredentialSanitizer, PromptCredentialSanitizer>();
         services.AddSingleton<IIncidentRevocationManager, IncidentRevocationManager>();
 
-        // Core Engine
+        // Core Engine & Cognitive Brain
         services.AddSingleton<IDiagnosticFindingsExtractor, JsonFindingsExtractor>();
+        services.AddSingleton<ICognitiveGoalDecomposer, CognitiveGoalDecomposer>();
+        services.AddSingleton<IAgentBrain, AgentBrainEngine>();
         services.AddSingleton<IMissionExecutionEngine, MissionExecutionEngine>();
         services.AddSingleton<IGovernedInvestigationLoop, GovernedInvestigationLoop>();
         services.AddSingleton<IProjectExecutionEngine, ProjectExecutionEngine>();
+        services.AddSingleton<IGovernedCrewEngine, GovernedCrewEngine>();
 
         // ViewModels
         services.AddSingleton<WelcomeOnboardingViewModel>();

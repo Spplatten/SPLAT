@@ -11,7 +11,8 @@ public sealed class RestrictedTokenProvider : IRestrictedTokenProvider
 {
     public IntPtr CreateLowPrivilegeToken()
     {
-        IntPtr currentProcess = global::System.Diagnostics.Process.GetCurrentProcess().Handle;
+        using var self = global::System.Diagnostics.Process.GetCurrentProcess();
+        IntPtr currentProcess = self.Handle;
         if (!Win32Interop.OpenProcessToken(
             currentProcess,
             Win32Interop.TOKEN_DUPLICATE | Win32Interop.TOKEN_ASSIGN_PRIMARY | Win32Interop.TOKEN_QUERY | Win32Interop.TOKEN_ADJUST_DEFAULT,
@@ -55,10 +56,15 @@ public sealed class RestrictedTokenProvider : IRestrictedTokenProvider
                 // token (and the process launched from it) inherits Medium integrity.
                 LowerIntegrityToMedium(restrictedToken);
 
+                // bInheritHandle = 0, deliberately. CreateProcessAsUserW consumes this handle in the
+                // PARENT, so nothing needs it to be inheritable - and the launcher passes
+                // bInheritHandles: true, which means an inheritable token handle would be handed to
+                // the sandboxed child itself. Giving a confined process a TOKEN_ALL_ACCESS handle to
+                // its own token is authority the sandbox never intended to grant.
                 var sa = new Win32Interop.SECURITY_ATTRIBUTES
                 {
                     nLength = Marshal.SizeOf(typeof(Win32Interop.SECURITY_ATTRIBUTES)),
-                    bInheritHandle = 1
+                    bInheritHandle = 0
                 };
 
                 // Duplicate as a primary token for CreateProcessAsUser

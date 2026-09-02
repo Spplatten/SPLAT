@@ -9,6 +9,29 @@ namespace MissionController.Infrastructure.Windows.JobObjects;
 
 public sealed class Win32JobSandbox : IJobSandbox
 {
+    /// <summary>
+    /// The containment flag set applied to every job, with or without explicit resource limits.
+    ///
+    /// BREAKAWAY_OK and SILENT_BREAKAWAY_OK were previously included here and are deliberately
+    /// absent: SILENT_BREAKAWAY_OK detaches a job member's children from the job automatically, with
+    /// no opt-in from the child, so `powershell.exe -c "Start-Process x"` left the sandbox entirely -
+    /// unclamped, and surviving TerminateJobObject. A job a process can walk out of is not a
+    /// boundary. DIE_ON_UNHANDLED_EXCEPTION suppresses the hard-error dialog that would otherwise
+    /// leave a crashed sensor tool parked forever waiting for a click nobody is there to give.
+    /// </summary>
+    private const uint ContainmentLimitFlags =
+        Win32Interop.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
+        Win32Interop.JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION |
+        Win32Interop.JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+
+    /// <summary>
+    /// Ceiling on live processes inside one mission's job. Governed sensor templates are shell
+    /// pipelines (cmd → ping → netstat, powershell → helpers), which sit comfortably under this;
+    /// the cap exists so a fork bomb inside the sandbox is refused by the kernel at CreateProcess
+    /// rather than absorbed by the host.
+    /// </summary>
+    private const uint MaxActiveProcesses = 32;
+
     private IntPtr _jobHandle;
     private bool _disposed;
     public string JobName { get; }
@@ -22,17 +45,16 @@ public sealed class Win32JobSandbox : IJobSandbox
             throw new Win32Exception(Marshal.GetLastWin32Error(), $"Failed to create Win32 Job Object '{JobName}'");
         }
 
-        // Configure default hardened limits: Kill on Close, Silent Breakaway OK, Breakaway OK
+        // Containment is armed at construction so a job is never briefly escapable between
+        // CreateJobObject and the caller's first ConfigureExtendedLimits.
         ConfigureDefaultHardenedLimits();
     }
 
     private void ConfigureDefaultHardenedLimits()
     {
         var extendedLimits = new Win32Interop.JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
-        extendedLimits.BasicLimitInformation.LimitFlags =
-            Win32Interop.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
-            Win32Interop.JOB_OBJECT_LIMIT_BREAKAWAY_OK |
-            Win32Interop.JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+        extendedLimits.BasicLimitInformation.LimitFlags = ContainmentLimitFlags;
+        extendedLimits.BasicLimitInformation.ActiveProcessLimit = MaxActiveProcesses;
 
         int length = Marshal.SizeOf(typeof(Win32Interop.JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
         IntPtr pLimits = Marshal.AllocHGlobal(length);
@@ -58,11 +80,11 @@ public sealed class Win32JobSandbox : IJobSandbox
     {
         ThrowIfDisposed();
 
+        // SetInformationJobObject REPLACES LimitFlags rather than merging, so the containment set
+        // must be re-stated here or applying a memory cap would silently disarm the boundary.
         var extendedLimits = new Win32Interop.JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
-        extendedLimits.BasicLimitInformation.LimitFlags =
-            Win32Interop.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
-            Win32Interop.JOB_OBJECT_LIMIT_BREAKAWAY_OK |
-            Win32Interop.JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+        extendedLimits.BasicLimitInformation.LimitFlags = ContainmentLimitFlags;
+        extendedLimits.BasicLimitInformation.ActiveProcessLimit = MaxActiveProcesses;
 
         if (maxMemoryBytes > 0)
         {
@@ -144,12 +166,19 @@ public sealed class Win32JobSandbox : IJobSandbox
                 out _))
             {
                 var accounting = Marshal.PtrToStructure<Win32Interop.JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION>(pInfo);
+
+                // Named arguments are mandatory here. The previous positional call was misaligned
+                // against the record: ActiveProcesses was landing in PeakMemoryBytes, kernel time in
+                // CurrentMemoryBytes, user time in TotalCpuKernelTimeMs, and the two real tail fields
+                // were hardcoded 0 - so every Windows mission reported a process count as its peak
+                // memory figure. Memory is left null because BasicAndIoAccounting does not carry it;
+                // reading it needs a separate JobObjectExtendedLimitInformation query.
                 return new JobResourceMetrics(
-                    accounting.BasicInfo.ActiveProcesses,
-                    accounting.BasicInfo.TotalKernelTime / 10000, // 100-ns ticks to ms
-                    accounting.BasicInfo.TotalUserTime / 10000,
-                    0,
-                    0);
+                    PeakMemoryBytes: null,
+                    CurrentMemoryBytes: null,
+                    TotalCpuKernelTimeMs: accounting.BasicInfo.TotalKernelTime / 10000, // 100-ns ticks to ms
+                    TotalCpuUserTimeMs: accounting.BasicInfo.TotalUserTime / 10000,
+                    ActiveProcessCount: accounting.BasicInfo.ActiveProcesses);
             }
         }
         finally
@@ -157,7 +186,9 @@ public sealed class Win32JobSandbox : IJobSandbox
             Marshal.FreeHGlobal(pInfo);
         }
 
-        return new JobResourceMetrics(0, 0, 0, 0, 0);
+        // The query failed. Reporting zeros here would claim the job burned no CPU and ran no
+        // processes, which is a measurement the caller never made.
+        return JobResourceMetrics.Unavailable;
     }
 
     public void TerminateAllProcesses(uint exitCode = 1)

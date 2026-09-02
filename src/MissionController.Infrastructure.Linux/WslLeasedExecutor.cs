@@ -159,12 +159,14 @@ public class WslLeasedExecutor : ILeasedExecutor
                                 StandardOutput: stdoutBuilder.ToString(),
                                 StandardError: stderrBuilder.ToString(),
                                 TimedOut: false,
-                                FinalMetrics: new JobResourceMetrics(
-                                    PeakMemoryBytes: (long)lease.Limits.MaxMemoryBytes / 4,
-                                    CurrentMemoryBytes: 0,
-                                    TotalCpuKernelTimeMs: stopwatch.ElapsedMilliseconds / 2,
-                                    TotalCpuUserTimeMs: stopwatch.ElapsedMilliseconds / 2,
-                                    ActiveProcessCount: 0));
+                                // The guest daemon's EXIT frame carries no cgroup accounting, so
+                                // nothing here was measured. This previously returned
+                                // MaxMemoryBytes/4 as peak memory and half the wall clock as each
+                                // CPU figure - arithmetic on constants, surfaced through
+                                // MissionChunkType.Metric as observed values and sealed into the
+                                // ledger as evidence. Report the absence instead; when the daemon
+                                // starts reporting cgroup counters, populate these from the frame.
+                                FinalMetrics: JobResourceMetrics.Unavailable);
                     }
                 }
                 catch (JsonException)
@@ -191,12 +193,9 @@ public class WslLeasedExecutor : ILeasedExecutor
             StandardOutput: stdoutBuilder.ToString(),
             StandardError: stderrBuilder.ToString(),
             TimedOut: timedOut,
-            FinalMetrics: new JobResourceMetrics(
-                PeakMemoryBytes: (long)lease.Limits.MaxMemoryBytes / 4,
-                CurrentMemoryBytes: 0,
-                TotalCpuKernelTimeMs: stopwatch.ElapsedMilliseconds / 2,
-                TotalCpuUserTimeMs: stopwatch.ElapsedMilliseconds / 2,
-                ActiveProcessCount: 0));
+            // Timeout / transport-failure path: the run was cut short, so there is even less to
+            // report than on the EXIT path. Nothing measured, nothing claimed.
+            FinalMetrics: JobResourceMetrics.Unavailable);
     }
 
     private async Task EnsureDaemonRunningAsync(CancellationToken ct)

@@ -24,10 +24,15 @@ public sealed class CopilotSafetyPolicyEngine : ICopilotSafetyPolicyEngine
 
         var violations = new List<CopilotSecurityViolation>();
 
-        // 1. Validate Executable
-        string executableName = Path.GetFileName(context.ExecutableOrCommand).Trim().ToLowerInvariant();
-        if (policy.AllowedExecutables != null && policy.AllowedExecutables.Count > 0)
+        // 1. Validate Executable (skip for internal virtual tools like fs_read/fs_write)
+        bool isFileTool = string.Equals(context.ExecutableOrCommand, "fs_read", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(context.ExecutableOrCommand, "fs_write", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(context.ToolName, "ReadSandboxedFile", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(context.ToolName, "WriteSandboxedFile", StringComparison.OrdinalIgnoreCase);
+
+        if (!isFileTool && policy.AllowedExecutables != null && policy.AllowedExecutables.Count > 0)
         {
+            string executableName = Path.GetFileName(context.ExecutableOrCommand).Trim().ToLowerInvariant();
             bool isAllowed = false;
             foreach (var allowed in policy.AllowedExecutables)
             {

@@ -5,6 +5,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MissionController.Core;
+using MissionController.Core.Brain;
+using MissionController.Core.Crew;
 using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
@@ -79,6 +81,24 @@ public static class Program
             auditLedger,
             findingsExtractor);
 
+        var agentBrain = new AgentBrainEngine(
+            missionEngine,
+            templateRegistry,
+            auditLedger,
+            new CognitiveGoalDecomposer(modelRouter, semanticMemory),
+            semanticMemory,
+            findingsExtractor,
+            modelRouter);
+
+        var crewEngine = new GovernedCrewEngine(
+            missionEngine,
+            templateRegistry,
+            auditLedger,
+            dlpSanitizer,
+            semanticMemory,
+            findingsExtractor,
+            modelRouter);
+
         // 5. Linux / WSL2 Substrate
         var leasedExecutor = new WslLeasedExecutor();
         var policyCompiler = new TemplatePolicyCompiler();
@@ -95,7 +115,15 @@ public static class Program
             templateRegistry,
             semanticMemory,
             modelRouter,
-            operatorIdentity: "splat-mcp-stdio");
+            agentBrain,
+            crewEngine,
+            // Ledger attribution. The Windows logon session this server runs under is the real
+            // principal for a stdio transport; a configured SPLAT_MCP_CLIENT_CREDENTIAL overrides it
+            // with a validated one and a bad credential refuses the call outright.
+            identityProvider: new McpOperatorIdentityProvider(
+                new WindowsOperatorIdentityProvider(),
+                new JwtTokenValidator(),
+                new ApiKeyValidator()));
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (s, e) =>

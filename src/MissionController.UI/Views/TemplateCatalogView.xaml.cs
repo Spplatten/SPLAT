@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using MissionController.Core.Enums;
@@ -43,10 +43,7 @@ public sealed partial class TemplateCatalogView : Page
             if (App.MainWindowInstance is MainWindow mainWin)
             {
                 mainWin.NavigateTo(typeof(LiveMissionMonitorView));
-                await _monitorViewModel.StartMissionAsync(
-                    ViewModel.SelectedTemplate,
-                    parameters,
-                    "Operator_SecOpsTier1");
+                await _monitorViewModel.StartMissionAsync(ViewModel.SelectedTemplate, parameters);
             }
         }
     }

@@ -14,6 +14,12 @@ public static class HardenedHttpClientFactory
         // CRITICAL HARDENING FIX 3: SocketsHttpHandler configured for Windows SChannel, Online CRL & Proxy
         var socketsHandler = new SocketsHttpHandler
         {
+            // Auto-redirect is handled INSIDE this handler, which sits below the egress firewall in
+            // the pipeline - so a 302 from an approved FQDN to any other host was fetched without
+            // ever re-entering EgressFirewallHandler.SendAsync. The strict allow-list held for the
+            // first request only. Redirects must surface to the caller as a 3xx response instead,
+            // so that following one means issuing a new request the firewall gets to validate.
+            AllowAutoRedirect = false,
             UseProxy = true,
             DefaultProxyCredentials = CredentialCache.DefaultNetworkCredentials,
             SslOptions = new SslClientAuthenticationOptions

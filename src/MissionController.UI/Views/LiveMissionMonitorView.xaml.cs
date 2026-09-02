@@ -27,7 +27,7 @@ public sealed partial class LiveMissionMonitorView : Page
             var template = await _templateRegistry.GetTemplateByIdAsync("net-dns-audit");
             if (template != null)
             {
-                await ViewModel.StartMissionAsync(template, new Dictionary<string, string>(), "Operator_SecOpsTier1");
+                await ViewModel.StartMissionAsync(template, new Dictionary<string, string>());
             }
         }
         catch (System.Exception ex)

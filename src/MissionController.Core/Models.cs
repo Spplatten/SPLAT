@@ -262,7 +262,8 @@ public record MissionChunk(
     string Content,
     DateTime TimestampUtc,
     string? AssociatedHash = null,
-    long MemoryBytesUsed = 0);
+    // Null, not 0, when the substrate did not measure memory - see JobResourceMetrics.
+    long? MemoryBytesUsed = null);
 
 public record AuditLogEntry(
     long Id,
@@ -374,12 +375,29 @@ public record CefEvent(
 }
 
 
+/// <summary>
+/// Resource accounting for one sandboxed execution.
+///
+/// Every field is nullable and null means EXACTLY ONE thing: this substrate did not measure it.
+/// Null is never a stand-in for zero, and a substrate that cannot measure a quantity must leave it
+/// null rather than deriving a plausible-looking number - a fabricated metric is indistinguishable
+/// from a real one once it reaches the ledger, and this product's entire claim is that its telemetry
+/// is evidence. Render null as "unavailable", never as 0.
+/// </summary>
 public record JobResourceMetrics(
-    long PeakMemoryBytes,
-    long CurrentMemoryBytes,
-    long TotalCpuKernelTimeMs,
-    long TotalCpuUserTimeMs,
-    uint ActiveProcessCount);
+    long? PeakMemoryBytes,
+    long? CurrentMemoryBytes,
+    long? TotalCpuKernelTimeMs,
+    long? TotalCpuUserTimeMs,
+    uint? ActiveProcessCount)
+{
+    /// <summary>Nothing was measured. Use where accounting failed or the substrate exposes none.</summary>
+    public static JobResourceMetrics Unavailable { get; } = new(null, null, null, null, null);
+
+    /// <summary>Formats a metric for operator-facing text, distinguishing "none" from "unknown".</summary>
+    public static string Describe(long? value, string unit) =>
+        value.HasValue ? $"{value.Value}{unit}" : "unavailable";
+}
 
 public record SecurityIdentityContext(
     string OperatorIdentity,

@@ -19,15 +19,48 @@ public sealed class SplatCopilotPlugin
     private readonly ICopilotSafetySubstrate _substrate;
     private readonly CopilotSafetyPolicy _policy;
     private readonly string _operatorIdentity;
+    private readonly string _workspaceRoot;
 
     public SplatCopilotPlugin(
         ICopilotSafetySubstrate substrate,
         CopilotSafetyPolicy? policy = null,
-        string operatorIdentity = "copilot-agent-user")
+        string operatorIdentity = "copilot-agent-user",
+        string? workspaceRoot = null)
     {
         _substrate = substrate ?? throw new ArgumentNullException(nameof(substrate));
         _policy = policy ?? CopilotSafetyPolicy.CreateEnterpriseDefault();
         _operatorIdentity = operatorIdentity;
+        _workspaceRoot = Path.GetFullPath(workspaceRoot ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SPLAT",
+            "copilot-workspace"));
+        Directory.CreateDirectory(_workspaceRoot);
+    }
+
+    private string? ResolveWithinWorkspace(string requestedPath)
+    {
+        if (string.IsNullOrWhiteSpace(requestedPath))
+            return null;
+
+        string candidate;
+        try
+        {
+            candidate = Path.GetFullPath(Path.IsPathRooted(requestedPath)
+                ? requestedPath
+                : Path.Combine(_workspaceRoot, requestedPath));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        string rootWithSeparator = _workspaceRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? _workspaceRoot
+            : _workspaceRoot + Path.DirectorySeparatorChar;
+
+        return candidate.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase)
+            ? candidate
+            : null;
     }
 
     [Description("Executes an approved CLI command inside a Win32 Job Object sandbox with CPU/Memory limits and low-privilege token.")]
@@ -84,39 +117,49 @@ public sealed class SplatCopilotPlugin
         [Description("Absolute or relative file path to read")] string filePath,
         CancellationToken cancellationToken = default)
     {
-        // First check policy
+        string? resolvedPath = ResolveWithinWorkspace(filePath);
+        if (resolvedPath is null)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"[SPLAT POLICY] File access is confined to governed workspace '{_workspaceRoot}'. The path '{filePath}' resolves outside it and was refused."
+            });
+        }
+
         var context = new CopilotToolCallContext(
             SessionId: Guid.NewGuid(),
             AgentId: "copilot-agent",
             ToolName: "ReadSandboxedFile",
             ExecutableOrCommand: "fs_read",
-            Arguments: filePath,
-            WorkingDirectory: null,
+            Arguments: resolvedPath,
+            WorkingDirectory: _workspaceRoot,
             OperatorIdentity: _operatorIdentity);
 
-        var result = await _substrate.ExecuteSafeToolAsync(context, _policy, cancellationToken);
-        if (result.PolicyBlocked)
+        var policyEngine = new CopilotSafetyPolicyEngine();
+        var eval = policyEngine.EvaluatePolicy(context, _policy);
+        if (!eval.IsPermitted)
         {
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = result.StandardError,
-                merkleHash = result.MerkleEntryHash
+                error = eval.DenialReason ?? "Blocked by CISO Copilot policy.",
+                violations = eval.Violations
             });
         }
 
-        if (!File.Exists(filePath))
+        if (!File.Exists(resolvedPath))
         {
-            return JsonSerializer.Serialize(new { success = false, error = $"File not found: {filePath}" });
+            return JsonSerializer.Serialize(new { success = false, error = $"File not found in workspace: {resolvedPath}" });
         }
 
         try
         {
-            string content = await File.ReadAllTextAsync(filePath, cancellationToken);
+            string content = await File.ReadAllTextAsync(resolvedPath, cancellationToken);
             return JsonSerializer.Serialize(new
             {
                 success = true,
-                filePath,
+                filePath = resolvedPath,
                 bytes = content.Length,
                 content
             });
@@ -133,41 +176,51 @@ public sealed class SplatCopilotPlugin
         [Description("Content to write")] string content,
         CancellationToken cancellationToken = default)
     {
+        string? resolvedPath = ResolveWithinWorkspace(filePath);
+        if (resolvedPath is null)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"[SPLAT POLICY] File access is confined to governed workspace '{_workspaceRoot}'. The path '{filePath}' resolves outside it and was refused."
+            });
+        }
+
         var context = new CopilotToolCallContext(
             SessionId: Guid.NewGuid(),
             AgentId: "copilot-agent",
             ToolName: "WriteSandboxedFile",
             ExecutableOrCommand: "fs_write",
-            Arguments: filePath,
-            WorkingDirectory: null,
+            Arguments: resolvedPath,
+            WorkingDirectory: _workspaceRoot,
             OperatorIdentity: _operatorIdentity);
 
-        var result = await _substrate.ExecuteSafeToolAsync(context, _policy, cancellationToken);
-        if (result.PolicyBlocked)
+        var policyEngine = new CopilotSafetyPolicyEngine();
+        var eval = policyEngine.EvaluatePolicy(context, _policy);
+        if (!eval.IsPermitted)
         {
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = result.StandardError,
-                merkleHash = result.MerkleEntryHash
+                error = eval.DenialReason ?? "Blocked by CISO Copilot policy.",
+                violations = eval.Violations
             });
         }
 
         try
         {
-            string? dir = Path.GetDirectoryName(filePath);
+            string? dir = Path.GetDirectoryName(resolvedPath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             {
                 Directory.CreateDirectory(dir);
             }
 
-            await File.WriteAllTextAsync(filePath, content, cancellationToken);
+            await File.WriteAllTextAsync(resolvedPath, content, cancellationToken);
             return JsonSerializer.Serialize(new
             {
                 success = true,
-                filePath,
-                bytesWritten = content.Length,
-                merkleHash = result.MerkleEntryHash
+                filePath = resolvedPath,
+                bytesWritten = content.Length
             });
         }
         catch (Exception ex)

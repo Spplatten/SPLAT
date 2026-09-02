@@ -60,11 +60,17 @@ struct Args {
 #[derive(Clone, Copy)]
 struct InodeKey {
     ino: u64,
+    dev: u32,
+    _pad: u32,
 }
 
 fn inode_key_for(path: &Path) -> Result<InodeKey> {
     let md = fs::metadata(path).with_context(|| format!("stat {}", path.display()))?;
-    Ok(InodeKey { ino: md.ino() })
+    Ok(InodeKey {
+        ino: md.ino(),
+        dev: md.dev() as u32,
+        _pad: 0,
+    })
 }
 
 fn bytes_of<T: Copy>(v: &T) -> &[u8] {

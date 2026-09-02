@@ -13,11 +13,41 @@ namespace MissionController.Infrastructure.Data.Audit;
 public sealed class SqliteChainedAuditLedger : IAuditLedger
 {
     private readonly SqliteStorageContext _context;
+    private readonly ICredentialVault? _vault;
+    private readonly byte[]? _explicitHmacKey;
     private const string GenesisHash = "0000000000000000000000000000000000000000000000000000000000000000";
+    public const string HmacKeyVaultSecretName = "audit-ledger-hmac-key";
 
-    public SqliteChainedAuditLedger(SqliteStorageContext context)
+    public SqliteChainedAuditLedger(
+        SqliteStorageContext context,
+        ICredentialVault? vault = null,
+        byte[]? explicitHmacKey = null)
     {
-        _context = context;
+        _context = context ?? throw new ArgumentNullException(nameof(context));
+        _vault = vault;
+        _explicitHmacKey = explicitHmacKey;
+    }
+
+    private async Task<byte[]?> GetHmacKeyAsync(CancellationToken ct)
+    {
+        if (_explicitHmacKey != null && _explicitHmacKey.Length > 0)
+            return _explicitHmacKey;
+
+        if (_vault != null)
+        {
+            try
+            {
+                var storedKey = await _vault.RetrieveSecretAsync(HmacKeyVaultSecretName, ct);
+                if (storedKey != null && storedKey.Length > 0)
+                    return storedKey;
+            }
+            catch
+            {
+                // Non-blocking fallback if vault is locked
+            }
+        }
+
+        return null;
     }
 
     public async Task AppendLogAsync(
@@ -51,8 +81,10 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         // while EntryHash still recomputes, so a purge does not forge a tamper signal.
         string detailsSalt = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         string detailsCommitment = ComputeDetailsCommitment(detailsSalt, details);
+
+        byte[]? hmacKey = await GetHmacKeyAsync(cancellationToken);
         string entryHash = ComputeEntryHashV2(
-            previousHash, timestampUtc, missionId.ToString("D"), templateId, action, detailsCommitment, operatorIdentity);
+            previousHash, timestampUtc, missionId.ToString("D"), templateId, action, detailsCommitment, operatorIdentity, hmacKey);
 
         await using (var insertCmd = conn.CreateCommand())
         {
@@ -118,6 +150,8 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
 
     public async Task<bool> VerifyLedgerIntegrityAsync(CancellationToken cancellationToken = default)
     {
+        byte[]? hmacKey = await GetHmacKeyAsync(cancellationToken);
+
         await using var conn = _context.CreateConnection();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT Id, TimestampUtc, MissionId, TemplateId, Action, Details, OperatorIdentity, PreviousHash, EntryHash, DetailsCommitment, HashVersion FROM AuditLedger ORDER BY Id ASC;";
@@ -144,12 +178,21 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
                 return false;
             }
 
-            // 2. Verify recalculated hash matches entry hash. Version 2 rows recompute from the
-            //    stored commitment, which is exactly why a redacted row still verifies: erasing
-            //    Details removes the plaintext, not the value the chain was built over.
-            string calculatedHash = hashVersion >= 2 && commitment is not null
-                ? ComputeEntryHashV2(prev, ts, mid, tid, act, commitment, op)
-                : ComputeEntryHash(prev, ts, mid, tid, act, det, op);
+            // 2. Verify recalculated hash matches entry hash
+            string calculatedHash;
+            if (hashVersion >= 2 && commitment is not null)
+            {
+                calculatedHash = ComputeEntryHashV2(prev, ts, mid, tid, act, commitment, op, hmacKey);
+                // If keyed check fails and hmacKey was active, try unkeyed for backward compatibility
+                if (!string.Equals(entry, calculatedHash, StringComparison.OrdinalIgnoreCase) && hmacKey != null)
+                {
+                    calculatedHash = ComputeEntryHashV2(prev, ts, mid, tid, act, commitment, op, null);
+                }
+            }
+            else
+            {
+                calculatedHash = ComputeEntryHash(prev, ts, mid, tid, act, det, op);
+            }
 
             if (!string.Equals(entry, calculatedHash, StringComparison.OrdinalIgnoreCase))
             {
@@ -162,20 +205,6 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         return true;
     }
 
-    /// <summary>
-    /// Erases the payload of ledger entries older than <paramref name="olderThanUtc"/> while leaving
-    /// the chain provably intact.
-    ///
-    /// Only version 2 rows are touched. A version 1 row's EntryHash was computed over its plaintext
-    /// Details, so erasing it would make the chain fail verification - the record would look
-    /// TAMPERED rather than RETAINED, which is a worse compliance outcome than keeping the text.
-    /// Legacy rows are counted and reported rather than silently skipped or silently broken.
-    ///
-    /// The salt is destroyed with the plaintext, and that is the security property that matters:
-    /// audit details are low-entropy ("DNS flush executed on WS-04 by jsmith"), so an unsalted
-    /// digest plus the template catalog would let an attacker confirm the original text by
-    /// enumeration. Discarding a 256-bit salt makes the surviving commitment non-invertible.
-    /// </summary>
     public async Task<LedgerRedactionResult> RedactDetailsOlderThanAsync(
         DateTime olderThanUtc,
         string redactionMarker = "[REDACTED — retention policy]",
@@ -213,7 +242,7 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
-    /// <summary>Version 2 chain hash: commits to the details COMMITMENT, never the plaintext.</summary>
+    /// <summary>Version 2 chain hash: commits to the details COMMITMENT, with optional HMAC key.</summary>
     public static string ComputeEntryHashV2(
         string previousHash,
         string timestampUtc,
@@ -221,11 +250,17 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         string templateId,
         string action,
         string detailsCommitment,
-        string operatorIdentity)
+        string operatorIdentity,
+        byte[]? hmacKey = null)
     {
         string raw = $"{previousHash}|{timestampUtc}|{missionId}|{templateId}|{action}|{detailsCommitment}|{operatorIdentity}";
-        byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
+        byte[] rawBytes = Encoding.UTF8.GetBytes(raw);
+
+        byte[] hashBytes = (hmacKey != null && hmacKey.Length > 0)
+            ? HMACSHA256.HashData(hmacKey, rawBytes)
+            : SHA256.HashData(rawBytes);
+
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
     /// <summary>

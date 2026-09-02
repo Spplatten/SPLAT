@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
@@ -115,6 +115,13 @@ public sealed class SqliteStorageContext
                     Name TEXT NOT NULL,
                     Category TEXT NOT NULL,
                     ProjectJson TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE TABLE IF NOT EXISTS GovernedCrews (
+                    CrewId TEXT PRIMARY KEY,
+                    Name TEXT NOT NULL,
+                    ProcessType TEXT NOT NULL,
+                    CrewJson TEXT NOT NULL DEFAULT '{}'
                 );
             ";
             cmd.ExecuteNonQuery();

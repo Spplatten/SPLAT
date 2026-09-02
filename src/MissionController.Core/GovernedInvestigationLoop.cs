@@ -271,16 +271,24 @@ public sealed class GovernedInvestigationLoop : IGovernedInvestigationLoop
             allowedIds.Add(candidate.TemplateId);
         }
 
+        using var decisionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        decisionCts.CancelAfter(TimeSpan.FromSeconds(45));
+
         try
         {
             var response = new StringBuilder();
             await foreach (var token in _modelClient.StreamAnalysisAsync(
-                completedTemplate.TargetModel, systemPrompt, observation.ToString(), cancellationToken))
+                completedTemplate.TargetModel, systemPrompt, observation.ToString(), decisionCts.Token))
             {
                 response.Append(token);
             }
 
             return ReActDecisionContract.Parse(response.ToString(), allowedIds);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new NextStepDecision(false, null,
+                "Cognitive decision step timed out after 45 seconds; investigation stopped.");
         }
         catch (OperationCanceledException)
         {

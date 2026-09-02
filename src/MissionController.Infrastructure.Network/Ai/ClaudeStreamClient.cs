@@ -85,7 +85,7 @@ public sealed class ClaudeStreamClient : IModelStreamClient
         }
 
         // Governed egress: pin the request to the provider host so the Layer-4 firewall validates it.
-        _firewallHandler.SetActiveAllowedFqdn(AnthropicHost);
+        using var egressScope = _firewallHandler.BeginScope(AnthropicHost);
 
         var payload = new
         {
@@ -118,8 +118,25 @@ public sealed class ClaudeStreamClient : IModelStreamClient
             using var reader = new StreamReader(stream, Encoding.UTF8);
 
             string? line;
-            while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
+            bool timedOut = false;
+            while (true)
             {
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                readCts.CancelAfter(TimeSpan.FromSeconds(30));
+
+                try
+                {
+                    line = await reader.ReadLineAsync(readCts.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    timedOut = true;
+                    line = null;
+                }
+
+                if (timedOut) break;
+                if (line is null) break;
+
                 if (!line.StartsWith("data:", StringComparison.Ordinal))
                     continue;
 
@@ -130,6 +147,11 @@ public sealed class ClaudeStreamClient : IModelStreamClient
                 string? text = ExtractTextDelta(data);
                 if (!string.IsNullOrEmpty(text))
                     yield return text;
+            }
+
+            if (timedOut)
+            {
+                yield return "\n⚠ MODEL STREAM TIMEOUT: Remote AI provider stream stalled after 30s of inactivity.";
             }
         }
     }
@@ -145,7 +167,7 @@ public sealed class ClaudeStreamClient : IModelStreamClient
         if (string.IsNullOrWhiteSpace(apiKey))
             return new Core.Models.AiGatewayValidationResult(false, "No API key supplied.");
 
-        _firewallHandler.SetActiveAllowedFqdn(AnthropicHost);
+        using var egressScope = _firewallHandler.BeginScope(AnthropicHost);
         try
         {
             var request = new HttpRequestMessage(

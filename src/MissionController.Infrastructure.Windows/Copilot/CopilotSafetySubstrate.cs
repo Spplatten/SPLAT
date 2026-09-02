@@ -134,7 +134,9 @@ public sealed class CopilotSafetySubstrate : ICopilotSafetySubstrate
                 context.SessionId,
                 $"copilot-tool-{context.ToolName}",
                 isSuccess ? "COPILOT_TOOL_SUCCESS" : "COPILOT_TOOL_FAILED",
-                $"AgentId={context.AgentId} Exec='{context.ExecutableOrCommand}' ExitCode={procResult.ExitCode} TimedOut={procResult.TimedOut} KernelMs={procResult.FinalMetrics.TotalCpuKernelTimeMs} UserMs={procResult.FinalMetrics.TotalCpuUserTimeMs}",
+                $"AgentId={context.AgentId} Exec='{context.ExecutableOrCommand}' ExitCode={procResult.ExitCode} TimedOut={procResult.TimedOut} " +
+                $"KernelMs={JobResourceMetrics.Describe(procResult.FinalMetrics.TotalCpuKernelTimeMs, string.Empty)} " +
+                $"UserMs={JobResourceMetrics.Describe(procResult.FinalMetrics.TotalCpuUserTimeMs, string.Empty)}",
                 context.OperatorIdentity,
                 cancellationToken);
 

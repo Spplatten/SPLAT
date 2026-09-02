@@ -45,7 +45,7 @@ public sealed partial class ProjectStudioView : Page
         if (App.MainWindowInstance is MainWindow mainWindow)
         {
             mainWindow.NavigateTo(typeof(LiveMissionMonitorView));
-            await _monitorViewModel.StartProjectAsync(project, ViewModel.GetLaunchParameters(), "Operator_ProjectLead");
+            await _monitorViewModel.StartProjectAsync(project, ViewModel.GetLaunchParameters());
         }
     }
 }

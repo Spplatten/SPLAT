@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "splat-langgraph"
+version = "0.1.0"
+description = "LangGraph/LangChain tools that execute inside SPLAT's kernel-contained substrate over MCP, inheriting Win32 job objects, WSL2 eBPF-LSM leases, DLP sanitization, and the SHA-256 chained audit ledger."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "mcp>=1.0.0",
+    "langchain-core>=0.3.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+langgraph = ["langgraph>=0.2.0"]
+
+[tool.setuptools.packages.find]
+include = ["splat_langgraph*"]

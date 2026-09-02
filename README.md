@@ -1,303 +1,170 @@
-# SPLAT 🛡️⚡
+# SPLAT — Sandboxed Process Lease & Agent Telemetry
 
-> **Security & Performance Live Autonomous Toolkit — Autonomous AI Agent Fleet, Zero-Trust Execution Runtime, & Self-Healing Kernel Appliance by Platten Industries**
+> **A zero-trust execution substrate for autonomous AI agents, by Platten Industries.** Agents don't get trust — they get a *lease*: a time-boxed, resource-clamped, kernel-enforced capability grant, with every action sealed in a tamper-evident cryptographic ledger.
 
-[![.NET 9](https://img.shields.io/badge/.NET-9.0%20LTS-512BD4?style=flat&logo=dotnet)](https://dotnet.microsoft.com/)
-[![Windows](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D6?style=flat&logo=windows)](https://microsoft.com/windows)
-[![Zero-Trust](https://img.shields.io/badge/Architecture-8--Layer%20Governed%20Stack-brightgreen)](https://csrc.nist.gov/publications/detail/sp/800-207/final)
-[![Tests](https://img.shields.io/badge/Tests-161%2F161%20Passing%20(100%25)-success)](https://github.com/Platten-Industries/SPLAT/tree/main/tests/MissionController.Tests)
-[![GitHub](https://img.shields.io/badge/GitHub-Platten--Industries%2FSPLAT-blue?logo=github)](https://github.com/Platten-Industries/SPLAT)
+[![.NET 9](https://img.shields.io/badge/.NET-9.0-512BD4?logo=dotnet&logoColor=white)](src/)
+[![Rust](https://img.shields.io/badge/Rust-libbpf--rs%20%2B%20eBPF-CE412B?logo=rust&logoColor=white)](native/splat-agent/)
+[![WinUI 3](https://img.shields.io/badge/UI-WinUI%203%20%2F%20Windows%20App%20SDK-0078D6?logo=windows&logoColor=white)](src/MissionController.UI/)
+[![Tests](https://img.shields.io/badge/Tests-297%2F297%20passing-success)](tests/MissionController.Tests/)
+[![Build](https://img.shields.io/badge/Build-0%20errors-success)](src/)
 
----
-
-## 🌟 Executive Overview
-
-**SPLAT** (internal codename: *Mission Controller* — the name carried by the solution and project files) is an enterprise-grade AI-native operational appliance engineered for Windows enterprise and campus workstations. Developed by **Platten Industries**, it empowers everyone—from senior SecOps threat hunters down to everyday staff and Tier-1 helpdesk technicians—to dispatch **autonomous, specialized AI agents** that safely investigate, diagnose, and self-heal system issues.
-
-Unlike unmonitored consumer AI chatbots or dangerous unrestricted script engines, every agent in SPLAT is confined by an **Enterprise Governed Architecture**:
-* **Deterministic Blast-Radius Containment:** Sensor tools execute inside suspended Win32 Job Objects with Admin privileges stripped (`S-1-5-32-544`) and parent directory inheritance severed (`SetAccessRuleProtection`).
-* **Zero Data Leakage:** Pre-egress in-memory DLP filters automatically redact passwords, NTLM hashes, private keys, and personal emails before cloud transmission.
-* **Ground-Truth Telemetry:** Agents reason over real kernel telemetry rather than guesses, with deterministic evidence grounding (`TelemetryGrounder`) to prevent hallucinations from being notarized.
-* **Tamper-Evident Non-Repudiation:** Every action, argument, token, and fix is cryptographically sealed in a SHA-256 chained hash ledger with Merkle root verification and cryptographic column erasure (`DataRetentionService`).
-* **Additive Substrate Architecture:** Today's production engine enforces a strict **1:1:1 Governance Invariant** ($\text{1 Template} \rightarrow \text{1 Model} \rightarrow \text{1 Dedicated Native Tool} \rightarrow \text{1 Approved Egress FQDN}$) on Windows. Process execution and sandboxing are cleanly abstracted behind `IJailManager`, `IProcessLauncher`, and `IJobSandbox`, allowing the upcoming Linux/BPF-LSM guest substrate on stock Microsoft WSL2 kernels to slot in additively to earn the right to multi-step tool autonomy.
+**New here, or allergic to jargon?** Start with **[The SPLAT Field Guide](docs/TUTORIAL.md)** — the whole system explained in plain English.
 
 ---
 
-## 🏛️ The 8-Layer Enterprise Governed AI Stack
+## The thesis
+
+Every mainstream approach to "safe" AI agent execution filters in user space — regex guards, prompt rules, wrapper APIs. All of it runs *beside* the agent, at the same privilege, where a hijacked agent can route around it. SPLAT's position is that containment belongs **below** the agent:
+
+- On **Windows**, tool processes execute inside suspended-spawn Job Objects under a restricted token whose privileges are stripped, whose Administrators SID is marked deny-only, and whose integrity level is dropped to Medium — inside NTFS ACL jails with inheritance severed. The OS object manager enforces the boundary.
+- On **Linux**, a BPF-LSM program is written to enforce a per-cgroup *capability lease* inside the kernel itself, so that an exec, file-open, or connect outside the lease dies with `-EPERM` before it happens. This half is **authored and feasibility-verified, not yet proven in operation** — see the status table and the substrate section below before relying on it.
+
+This is **blast-radius containment, not detection**. SPLAT does not claim to know when an agent has been prompt-injected; it guarantees that whatever the agent has become, it cannot act outside the lease it was granted.
+
+## Status at a glance
+
+| Component | State |
+| :--- | :--- |
+| Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
+| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 342/342 automated tests passing |
+| `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 9 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining seven run on the Windows control plane today |
+| Linux kernel substrate (`splat-agent`, BPF-LSM lease enforcement) | **In bring-up** — BPF program and Rust daemon authored; kernel feasibility verified GREEN on stock WSL2 (see below); canary `-EPERM` run is the next gate |
+| VSOCK low-latency RPC transport | **Roadmap** — design notes in internal docs |
+
+That table is the contract: nothing above it is aspirational, and nothing below it is hidden.
+
+## Architecture
 
 ```mermaid
 flowchart TD
-    subgraph L1 ["Layer 1: Intent & Interaction (WinUI 3)"]
-        SquadHUD["🤖 1-Click AI Agent Squad Dashboard"]
-        Wizard["🚀 First-Run Welcome & Onboarding Wizard"]
-        ElectricBtn["⚡ Electric Glowing Action Controls"]
+    subgraph CP ["Control plane — Windows (.NET 9)"]
+        UI["WinUI 3 operator console"] --> ENG["MissionExecutionEngine<br/>1:1:1 governed templates"]
+        MCP["splat-mcp (MCP server)<br/>9 governed tools"] --> ENG
+        ENG --> DLP["In-memory DLP sanitizer"]
+        DLP --> FW["Egress firewall<br/>strict FQDN allow-list"]
+        FW --> AI["Streaming reasoning cores<br/>Claude / Gemini, key-routed"]
+        ENG --> LED["SHA-256 chained audit ledger<br/>Merkle root verification"]
     end
-
-    subgraph L2 ["Layer 2: Cognitive Planning & Reasoning (Brain)"]
-        ClaudeOpus["🧠 Anthropic Claude Opus 5 (Default Reasoning Core)"]
-        GeminiAlt["⚡ Google Gemini 2.5 (Alternate Provider via Key Routing)"]
+    subgraph WIN ["Windows substrate — shipped"]
+        JO["Win32 Job Objects<br/>hard CPU / RAM clamps, no breakaway"] --> RT["Restricted token<br/>privileges stripped · admin SID deny-only<br/>Medium integrity"] --> JAIL["NTFS ACL jails<br/>inheritance severed"]
     end
-
-    subgraph L3 ["Layer 3: Local Ephemeral & Long-Term Semantic Memory"]
-        VecIndex["📊 In-Process 128-Dim Vector Embedding Generator"]
-        CosineSearch["🔍 Sub-Second Cosine Similarity Incident Search"]
+    subgraph LNX ["Linux substrate — in bring-up (WSL2)"]
+        AGENT["splat-agent<br/>Rust / libbpf-rs / tokio"] --> LSM["lease_lsm.bpf.c (BPF-LSM)<br/>bprm_check_security · file_open · socket_connect"]
+        LSM --> EPERM["out-of-lease operation<br/>→ -EPERM, in-kernel"]
     end
-
-    subgraph L4 ["Layer 4: Zero-Trust Egress Firewall & DLP Sanitizer"]
-        EgressWall["🛡️ In-Memory HTTP DelegatingHandler (Strict FQDN Whitelist)"]
-        DlpFilter["🔏 Pre-Compiled Regex DLP (Pass, Hashes, Keys, PII Redactor)"]
-    end
-
-    subgraph L5 ["Layer 5: Kernel Confinement & Hardware Sandbox (Safety Armor)"]
-        SuspendedSpawn["🔒 Native CreateProcessW (CREATE_SUSPENDED 0x00000004)"]
-        JobObject["⚙️ Win32 Job Object (Hard RAM & CPU Clamps)"]
-        RestrictedToken["🚫 Restricted Security Token (Admin SIDs S-1-5-32-544 Stripped)"]
-        NtJail["📁 NT ACL File Jails (SetAccessRuleProtection Inheritance Severed)"]
-    end
-
-    subgraph L6 ["Layer 6: Native Confined Sensors (The Hands)"]
-        SensorTools["🔧 Hardened Subprocess Workers (wevtutil, wmic, ping, sc, reg, whoami)"]
-    end
-
-    subgraph L7 ["Layer 7: Cryptographic Tamper-Evident Audit Ledger"]
-        HashChain["⛓️ SQLite WAL SHA-256 Chained Hash Ledger"]
-        MerkleProofs["🌲 Mathematical Merkle Tree Root Verification"]
-        SiemExport["📡 SIEM Streaming (Sentinel HMAC, CEF, RFC 5424 Syslog)"]
-    end
-
-    subgraph L8 ["Layer 8: Governed Self-Healing Remediation Engine"]
-        ExecSummary["🟢 Plain-English Executive Summary Engine"]
-        OneClickFix["⚡ 1-Click Sandboxed Fixes (DNS Reset, Temp Purge, Shield Start)"]
-        Rollback["↩️ 1-Click State Undo & Safety Rollback Support"]
-    end
-
-    L1 --> L2
-    L2 --> L3
-    L2 --> L4
-    L4 --> L5
-    L5 --> L6
-    L6 --> L7
-    L7 --> L8
+    ENG --> WIN
+    ENG -. "WslLeasedExecutor +<br/>TemplatePolicyCompiler" .-> LNX
 ```
 
----
+## Windows containment substrate (shipped)
 
-## 🤖 Governed Autonomous AI Agent Template Fleet
+Sensor tools never run as trusted children of the app. Each execution passes through:
 
-The platform ships a 40+ template governed catalog bound to the **Strict 1:1:1 Governance Invariant** ($\text{1 Template} \rightarrow \text{1 Model} \rightarrow \text{1 Dedicated Native Tool} \rightarrow \text{1 Allowed Egress FQDN}$). The table below highlights the original frontline agents; the Fleet Catalog contains the expanded identity, endpoint, network, SysOps, compliance, and campus runbooks.
+| Stage | Implementation |
+| :--- | :--- |
+| Suspended spawn | [`SuspendedProcessLauncher.cs`](src/MissionController.Infrastructure.Windows/SuspendedProcessLauncher.cs) — native `CreateProcessW` with `CREATE_SUSPENDED`, so clamps attach before the first instruction runs |
+| Resource clamps | [`Win32JobSandbox.cs`](src/MissionController.Infrastructure.Windows/Win32JobSandbox.cs) — Job Object hard RAM/CPU limits |
+| Privilege strip | [`RestrictedTokenProvider.cs`](src/MissionController.Infrastructure.Windows/RestrictedTokenProvider.cs) — `DISABLE_MAX_PRIVILEGE` leaves only `SeChangeNotifyPrivilege`; Administrators (`S-1-5-32-544`) is marked `USE_FOR_DENY_ONLY`, so the SID can no longer grant access; integrity is lowered to Medium (`S-1-16-8192`) via `SetTokenInformation`. Asserted end-to-end against `whoami /priv` and `/groups` running inside the sandbox |
+| Filesystem jail | [`NtAclJailManager.cs`](src/MissionController.Infrastructure.Windows/NtAclJailManager.cs) — per-mission NTFS ACL jail with `SetAccessRuleProtection` inheritance severed |
+| Governed remediation | [`SandboxedRemediationEngine.cs`](src/MissionController.Infrastructure.Windows/Remediation/SandboxedRemediationEngine.cs) — 1-click fixes run in their own sandbox, with rollback support for state-mutating actions |
+| Secrets at rest | [`DpapiCredentialVault.cs`](src/MissionController.Infrastructure.Windows/DpapiCredentialVault.cs) — Windows DPAPI CurrentUser vault |
 
-| # | Agent Identity | Specialization | Confined Sensor Tool | Governed 1-Click Fix |
-| :---: | :--- | :--- | :--- | :--- |
-| **1** | 🌐 **Atlas-Net** | Network Intelligence | `ping.exe` / DNS Latency Probe | ⚡ **Flush DNS Cache & Reset WinSock Sockets** |
-| **2** | 🛡️ **Sentinel-SecOps** | Security Incident Hunter | `wevtutil.exe` (Event 4624/4625) | ⚡ **Enforce Account Lockout Threshold** *(Rollback enabled)* |
-| **3** | 💾 **Titan-SysOps** | Storage Optimization | `wmic.exe` Volume Headroom Sensor | ⚡ **Purge Temporary User & System Caches** |
-| **4** | 🔒 **Aegis-Endpoint** | Compliance & Antivirus | `sc.exe` Service Controller (WinDefend) | ⚡ **Start & Enable Defender Real-Time Shield** |
-| **5** | 🏛️ **Vanguard-AD** | Active Directory / Identity | `cmd.exe /c "whoami /all & net accounts"` | ⚡ **Purge Stale Kerberos Tickets & Reset SIDs** |
-| **6** | ☁️ **Zephyr-Azure** | Cloud Health & Hybrid Sync | `powershell.exe` Entra ID SSO Probe | ⚡ **Flush Cloud SSO Endpoints & DNS Cache** |
-| **7** | 🛡️ **Chronos-Patch** | Patch & CVE Compliance | `powershell.exe` HotFix & Rollup Sensor | ⚡ **Trigger Windows Update Detection Scan** |
-| **8** | 🧹 **Cypher-Registry** | Forensics & Persistence | `cmd.exe /c "reg query ...\Run"` | ⚡ **Clear Stale RunOnce Keys** *(Rollback enabled)* |
+## Linux kernel substrate (in bring-up)
 
-### Agent Template Builder & Project Studio
+The Linux side is a per-cgroup **capability lease** enforced by a BPF-LSM program ([`native/splat-agent/src/bpf/lease_lsm.bpf.c`](native/splat-agent/src/bpf/lease_lsm.bpf.c)), loaded by a resident Rust daemon ([`native/splat-agent`](native/splat-agent), libbpf-rs 0.24 + tokio, CO-RE via `vmlinux.h`):
 
-Operators can create a `custom-` agent template by selecting a governed base sensor and authoring its role, objective, deliverables, and success criteria. The sensor executable, sandbox limits, remediation surface, and approved egress remain inherited from the base template.
+| Hook | Policy for a leased cgroup | Out-of-lease result |
+| :--- | :--- | :--- |
+| `lsm/bprm_check_security` | exec only allow-listed inodes | `-EPERM` |
+| `lsm/file_open` | protected inodes never open | `-EPERM` |
+| `lsm/socket_connect` | egress only to allow-listed IPv4 | `-EPERM` |
 
-Project Studio stores finite `project-custom-` playbooks containing up to six ordered agent stages. Each stage runs through the existing mission engine, and only a bounded, DLP-protected evidence context is forwarded to the next stage. There is no recursive routing, parallel swarm, or open-ended loop.
+Policy matches on inode identity, not path strings — full-path resolution in BPF is racy (TOCTOU) and slow. Only cgroups present in the lease map are policed; the host and every other workload are untouched. Violations stream to user space over a BPF ring buffer.
 
----
+**Known gap in the current key.** `struct inode_key` holds the inode number alone, with no device field, so a policy entry matches that inode number on *every* mounted filesystem. Under WSL2 — overlayfs, procfs, tmpfs, 9p — collisions are the normal case rather than the edge case, and inode 2 is the root directory on most ext4 volumes. Widening the key to `(dev, ino)` is a prerequisite for the canary run, not a refinement after it. The user-space side has a matching gap: `splat-mcp` currently compiles leases with placeholder inode numbers rather than `stat`-ing the paths, and with an empty exec allow-list, which the BPF program treats as deny-everything.
 
-## ⚡ Layer 8: Governed 1-Click Self-Healing Remediations
+**Feasibility is verified, execution proof is pending.** The kernel gate was confirmed GREEN on the live stock WSL2 kernel (2026-08-29): `6.18.33.2-microsoft-standard-WSL2` with `bpf` in the active LSM list, native BTF at `/sys/kernel/btf/vmlinux`, unified cgroup v2, and `CONFIG_BPF_LSM=y` — no custom kernel, no fork. The [`native/splat-canary`](native/splat-canary) harness (`preflight.sh` → `run-canary.sh`) exists to produce the observable `-EPERM` proof, and until that run is recorded, this README deliberately claims authorship and feasibility — not operation. The Windows-side bridge ([`WslLeasedExecutor.cs`](src/MissionController.Infrastructure.Linux/WslLeasedExecutor.cs), [`TemplatePolicyCompiler.cs`](src/MissionController.Infrastructure.Linux/TemplatePolicyCompiler.cs), [`WslSubstrateHealthChecker.cs`](src/MissionController.Infrastructure.Linux/WslSubstrateHealthChecker.cs)) compiles governed templates into leases and health-checks the substrate.
 
-When an agent identifies a system bottleneck or misconfiguration, it presents a **Governed Self-Healing Action Card**:
-1. **Isolated Execution:** The remediation script runs inside a dedicated Win32 Job Object sandbox (`SandboxedRemediationEngine.cs`).
-2. **Audit Hash Sealing:** Every executed fix (`REMEDIATION_FIX_COMPLETED`) and rollback (`REMEDIATION_ROLLBACK_COMPLETED`) is permanently committed to the SHA-256 chained audit ledger.
-3. **Safety Rollbacks:** State-mutating fixes (such as account lockout thresholds or registry keys) feature a dedicated **`↩️ Rollback`** button to immediately restore the prior system state.
+## `splat-mcp` — governed execution for agent clients
 
----
+[`src/splat-mcp`](src/splat-mcp) is a Model Context Protocol server that exposes SPLAT's governance to any MCP-speaking agent (Claude Code, IDE agents, orchestrators). Twelve tools, and they do not all sit at the same depth — the distinction matters, because an agent decides what is safe to attempt from the description it is given:
 
-## 🔏 Layer 4: In-Memory Data Loss Prevention (DLP) Sanitizer
+| Tool | Enforced by |
+| :--- | :--- |
+| `run_command`, `run_code` | The Linux lease daemon. **Gated on the kernel substrate below** — until the canary run is recorded, treat these as unproven, not as kernel-contained |
+| `fs_read`, `fs_write` | Windows control plane. Confined by canonical-path containment to a governed workspace root — a user-space boundary, not a kernel one |
+| `diagnose_system`, `investigate_system`, `run_agent_brain`, `run_governed_crew` | The full 1:1:1 mission pipeline: validated argument binding, Job Object clamps, restricted token, ACL jail, DLP, audit ledger, Layer-2 cognitive planning, and multi-agent crew execution |
+| `get_substrate_health`, `list_diagnostic_templates`, `search_incident_memory`, `list_governed_crews` | Read-only queries against the local host, catalog, memory, and crew registry |
 
-The built-in DLP engine (`RegexDataLossPreventionSanitizer.cs`) automatically scans all command-line arguments, process outputs, and system logs **before** they egress to Vertex AI:
-* **Private Keys:** Masks `-----BEGIN RSA/EC PRIVATE KEY-----` blocks $\rightarrow$ `[REDACTED_PRIVATE_KEY_BLOCK]`.
-* **NTLM Hashes:** Identifies LM:NTLM 32-byte hex hash pairs $\rightarrow$ `[REDACTED_NTLM_HASH]`.
-* **Passwords & API Keys:** Scrubs `password=...`, `apikey=...`, `bearer ...` $\rightarrow$ `[REDACTED_SECRET]`.
-* **CLI Password Parameters:** Scrubs `-p <pass>`, `-password <pass>`, `/p:<pass>` $\rightarrow$ `[REDACTED_PASSWORD]`.
-* **Personal & Corporate Emails:** RFC 5322 regex $\rightarrow$ `[REDACTED_EMAIL]`.
-* **Credit Cards & SSNs:** Scrubs 13–16 digit numbers and `###-##-####` SSNs.
+Every call lands in the audit ledger attributed to a resolved principal — the Windows logon session, or a validated credential where `SPLAT_MCP_CLIENT_CREDENTIAL` is configured. A credential that fails to validate refuses the call rather than falling back to an anonymous row.
 
----
+## Telemetry, audit & data-loss prevention
 
-## 🧠 Layer 3: Local In-Process Semantic Vector Memory
+- **Tamper-evident ledger** — [`SqliteChainedAuditLedger.cs`](src/MissionController.Infrastructure.Data/SqliteChainedAuditLedger.cs): every action, argument, token, and fix is committed to a SHA-256 chained hash ledger (WAL-mode SQLite) with Merkle-root verification. The chain commits to a *salted digest* of the payload rather than the plaintext, which is what makes retention erasure possible without forging a tamper signal — a purged row still recomputes. Each row is attributed to a resolved principal (the Windows logon session, or a validated credential) with its provenance recorded inline, never to a caller-supplied name.
 
-The local semantic memory index (`SqliteSemanticMemoryIndex.cs`) allows operators to perform sub-second similarity search over historical incidents:
-* **128-Dimensional Embedding Engine:** Generates normalized term frequency and character trigram hashing vectors directly in-process without cloud API calls.
-* **Sub-Second Cosine Similarity:** Computes vector dot products in sub-millisecond time to rank and recall past incident remediations.
+  **What this detects, and what it does not.** Editing any historical row in place breaks the chain verifiably. It does **not** detect a rewrite: the chain is unkeyed and `ComputeEntryHashV2` is public, so anyone who can write the database file can delete the tail and re-append, or recompute the whole chain from genesis, undetectably. Closing that needs a key the rewriter does not hold — an HMAC under the DPAPI vault, or periodic anchoring to append-only external storage. Until then this is integrity against accident and casual editing, not against a determined local administrator.
+- **SIEM streaming** — [`SiemForwarder.cs`](src/MissionController.Infrastructure.Network/Siem/SiemForwarder.cs): Microsoft Sentinel (HMAC), CEF, and RFC 5424 syslog export; [`EdrIngestionBridge.cs`](src/MissionController.Infrastructure.Network/Edr/EdrIngestionBridge.cs) bridges Defender / CrowdStrike endpoint posture.
+- **Pre-egress DLP** — [`RegexDataLossPreventionSanitizer.cs`](src/MissionController.Infrastructure.Network/Dlp/RegexDataLossPreventionSanitizer.cs) masks private-key blocks, NTLM hash pairs, passwords/API keys/bearer tokens, CLI password parameters, emails, card and SSN patterns — in memory, before anything reaches a model provider.
+- **Local semantic memory** — [`SqliteSemanticMemoryIndex.cs`](src/MissionController.Infrastructure.Data/Vector/SqliteSemanticMemoryIndex.cs): in-process 128-dim embeddings with sub-second cosine similarity over incident history; no cloud embedding calls.
 
----
+## Governance model
 
-## 📁 Repository Structure
+- **The 1:1:1 invariant.** Every governed template binds **1 template → 1 model → 1 dedicated native tool → 1 approved egress FQDN**, enforced by strict validation and an in-memory egress firewall ([`EgressFirewallHandler.cs`](src/MissionController.Infrastructure.Network/EgressFirewallHandler.cs)). A 40+ template catalog covers network, identity, endpoint, SysOps, and compliance runbooks.
+- **Bounded composition, not swarms.** Project Studio chains at most six ordered agent stages with a bounded, DLP-filtered evidence hand-off between them. No recursive routing, no parallel swarm, no open-ended loops — multi-step autonomy is *earned* as the kernel substrate lands, not assumed.
+- **Reasoning cores are pluggable** — streaming Anthropic Claude and Google Gemini clients behind [`ModelClientRouter.cs`](src/MissionController.Infrastructure.Network/Ai/ModelClientRouter.cs), routed by available key.
+
+## Verification
+
+```text
+$ dotnet test tests/MissionController.Tests/MissionController.Tests.csproj
+Passed!  - Failed: 0, Passed: 297, Skipped: 0, Total: 297, Duration: 4 s - MissionController.Tests.dll (net9.0)
+```
+
+297 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
+
+**On the warning count.** An incremental `dotnet build` reports zero warnings, but that is an artifact of caching rather than a property of the source: a cold `--no-incremental` build re-runs the CommunityToolkit source generators and emits **186 `MVVMTK0045` warnings**, one per `[ObservableProperty]` field that should be declared as a partial property for WinRT marshalling. They are cosmetic and confined to the view models, but a "zero warnings" claim would only have been true on the build nobody runs from clean. Converting the fields is tracked work; the badge above claims zero *errors*, which holds either way.
+
+## Repository map
 
 ```
 SPLAT/
 ├── src/
-│   ├── MissionController.Core/                     # Domain models, strict contracts, & engine orchestration
-│   │   ├── Enums.cs                                # System states, compliance frameworks, SIEM protocols
-│   │   ├── Interfaces.cs                           # Core contracts & zero-trust interfaces
-│   │   ├── Models.cs                               # Immutable records (SingleToolTemplate, RemediationAction, etc.)
-│   │   ├── MissionExecutionEngine.cs               # 8-Layer orchestrator with DLP & semantic memory hooks
-│   │   └── ProjectExecutionEngine.cs               # Bounded ordered project-stage execution
-│   │
-│   ├── MissionController.Infrastructure.Windows/   # Win32 & OS kernel integration
-│   │   ├── Jails/NtAclJailManager.cs               # NT ACL jail directory manager (severed inheritance)
-│   │   ├── JobObjects/Win32JobSandbox.cs           # Win32 Job Object resource governor (RAM/CPU clamps)
-│   │   ├── Process/SuspendedProcessLauncher.cs     # CREATE_SUSPENDED execution coordinator
-│   │   ├── Remediation/SandboxedRemediationEngine.cs # Layer 8 Sandboxed Self-Healing & Rollback Engine
-│   │   ├── Security/RestrictedTokenProvider.cs     # Drops Admin SIDs (S-1-5-32-544)
-│   │   └── Vault/DpapiCredentialVault.cs           # Windows DPAPI CurrentUser credential vault
-│   │
-│   ├── MissionController.Infrastructure.Network/   # Network security & identity
-│   │   ├── Dlp/RegexDataLossPreventionSanitizer.cs  # Layer 4 In-Memory DLP Sanitizer
-│   │   ├── Http/EgressFirewallHandler.cs           # SocketsHttpHandler with 1:1:1 FQDN whitelist
-│   │   ├── Identity/                               # JWT, API Key, Token Lifecycle, & Circuit Breaker
-│   │   ├── Ai/ClaudeStreamClient.cs                # Anthropic Claude streaming client (default)
-│   │   ├── Ai/GeminiStreamClient.cs                # Google Gemini streaming client (key-routed)
-│   │   ├── Ai/ModelClientRouter.cs                 # Provider-by-available-key router
-│   │   ├── Siem/SiemForwarder.cs                   # Sentinel HMAC, CEF, & RFC 5424 Syslog streaming
-│   │   └── Edr/EdrIngestionBridge.cs               # Defender & CrowdStrike endpoint posture bridge
-│   │
-│   ├── MissionController.Infrastructure.Data/      # Storage & Compliance
-│   │   ├── SqliteStorageContext.cs                 # WAL-mode SQLite database context with schema migration
-│   │   ├── SqliteChainedAuditLedger.cs             # Cryptographic SHA-256 chained hash ledger
-│   │   ├── SqliteTemplateRegistry.cs               # Expanded governed agent template catalog
-│   │   ├── SqliteProjectTemplateRegistry.cs         # Persisted project playbook registry
-│   │   └── Catalog/GovernedProjectCatalog.cs        # Built-in higher-level project playbooks
-│   │   ├── Vector/SqliteSemanticMemoryIndex.cs     # Layer 3 In-Process Vector Embedding Index
-│   │   └── Compliance/                             # Merkle Tree engine & ZIP compliance archive exporter
-│   │
-│   └── MissionController.UI/                       # WinUI 3 / Windows App SDK Desktop Application
-│       ├── App.xaml / App.xaml.cs                  # Electric glowing styles & Dependency Injection container
-│       ├── MainWindow.xaml / MainWindow.xaml.cs    # Mica backdrop window shell with auto-centering
-│       ├── Views/
-│       │   ├── QuickDiagnosticianView.xaml         # 1-Click governed agent & Self-Healing Dashboard
-│       │   ├── WelcomeOnboardingView.xaml          # First-Run 3-Step Onboarding Wizard
-│       │   ├── LiveMissionMonitorView.xaml         # Real-time token streaming & Job Object gauges
-│       │   ├── TemplateCatalogView.xaml            # Parameter-guided template configuration form
-│       │   ├── ProjectStudioView.xaml               # Ordered project playbook builder and launcher
-│       │   ├── SecurityAuditView.xaml              # Cryptographic audit ledger & circuit breaker
-│       │   └── SemanticSearchView.xaml             # Local semantic incident search UI
-│       └── ViewModels/                             # Reactive MVVM ViewModels
-│
-├── tests/
-│   └── MissionController.Tests/                    # xUnit unit, integration, & security test suites
-│       ├── RemediationEngineTests.cs               # Layer 8 Sandboxed Fix & Rollback verification
-│       ├── DlpSanitizerTests.cs                    # Layer 4 Password, Hash, Key, & PII masking tests
-│       ├── SemanticMemoryTests.cs                  # Layer 3 Vector embedding & Cosine similarity tests
-│       ├── HardeningSubsystemTests.cs              # NT ACL inheritance & Job Object clamp tests
-│       ├── TokenValidationAndLifecycleTests.cs      # JWT validation, API keys, & token renewal tests
-│       ├── SanitizationAndRevocationTests.cs        # Circuit breaker emergency trip tests
-│       └── EndToEndVerificationTests.cs            # Full multi-layer integration verification
-│
-└── packaging/                                      # Enterprise Deployment Tooling
-    ├── build-msix.ps1                              # Automated Release build, cert gen, & signed MSIX packaging
-    ├── install-enterprise.ps1                      # Silent installer for Intune & SCCM Group Policy
-    └── uninstall-enterprise.ps1                    # Clean de-provisioning script (purges DPAPI & jails)
+│   ├── MissionController.Core/                  # Domain contracts, mission & project execution engines
+│   ├── MissionController.Infrastructure.Windows/# Job Objects, restricted tokens, ACL jails, remediation, DPAPI vault
+│   ├── MissionController.Infrastructure.Linux/  # WSL substrate bridge: leased executor, policy compiler, health checks
+│   ├── MissionController.Infrastructure.Network/# DLP, egress firewall, identity/JWT, AI clients, SIEM/EDR
+│   ├── MissionController.Infrastructure.Data/   # SQLite storage, chained audit ledger, Merkle engine, vector memory
+│   ├── MissionController.UI/                    # WinUI 3 operator console (MVVM)
+│   └── splat-mcp/                               # MCP server — governed execution for agent clients
+├── native/
+│   ├── splat-agent/                             # Rust eBPF daemon: lease_lsm.bpf.c + libbpf-rs loader
+│   └── splat-canary/                            # Minimal -EPERM proof harness (preflight → canary)
+├── tests/MissionController.Tests/               # 297 xUnit unit / integration / security tests
+├── packaging/                                   # Signed MSIX build + Intune/SCCM silent install scripts
+└── docs/                                        # Architecture notes & briefs
 ```
 
----
+## Compliance alignment
 
-## 🧪 Verification & Automated Test Suite
+| Framework | Mapping |
+| :--- | :--- |
+| SOC 2 Type II | CC6.1 restricted tokens & privilege separation · CC6.8 egress allow-listing · CC7.2 continuous audit |
+| HIPAA Security Rule | § 164.312(b) cryptographic chained audit controls · § 164.312(e)(1) transmission security & DLP masking |
+| NIST SP 800-171 / CMMC 2.0 | AU.2.041–042 attributed, chained audit logs · SC.3.177 strict egress isolation |
 
-Every subsystem is validated with comprehensive automated tests:
+These are the controls the architecture is *built against*; they are not an attestation, and SPLAT has not been assessed by an auditor. One qualification worth stating rather than burying: AU.2.041 non-repudiation has two halves, and only one is complete. Actions are now attributed to a principal the OS or a validator established, but the chain protecting that attribution is unkeyed (see the ledger note above), so a local administrator can still rewrite history including their own name in it. Read the mapping as design intent with a known gap, not as a passed control.
 
-```text
-Passed!  - Failed: 0, Passed: 77, Skipped: 0, Total: 77, Duration: 6 s - MissionController.Tests.dll (net9.0)
-  ✓ RemediationEngineTests.ExecuteFixAsync_RunsSafeFix_AndLogsToAuditLedger
-  ✓ RemediationEngineTests.ExecuteRollbackAsync_RollsBackAction_WhenConfigured
-  ✓ DlpSanitizerTests.Sanitize_MasksPasswordsAndSecretsInText
-  ✓ DlpSanitizerTests.Sanitize_MasksCliPasswordArguments
-  ✓ DlpSanitizerTests.Sanitize_MasksNtlmHashes
-  ✓ DlpSanitizerTests.Sanitize_MasksEmailAddresses
-  ✓ DlpSanitizerTests.Sanitize_MasksPrivateKeys
-  ✓ SemanticMemoryTests.GenerateEmbeddingVector_ReturnsNormalizedVector
-  ✓ SemanticMemoryTests.SemanticMemoryIndex_IndexesAndRetrievesSimilarIncidents
-  ✓ HardeningSubsystemTests.NtAclJailManager_InheritanceStripped_Successfully
-  ✓ HardeningSubsystemTests.Win32JobSandbox_CreationAndLimits_Succeeds
-  ✓ ProcessLauncherTests.SuspendedProcessLauncher_SpawnsAndCapturesOutput
-  ✓ AuditAndSecurityTests.ChainedAuditLedger_DetectsTampering_AndValidatesIntegrity
-  ✓ AuditAndSecurityTests.EgressFirewall_EnforcesWhitelist_ThrowsOnMismatch
-  ✓ AuditAndSecurityTests.DpapiVault_EncryptAndDecrypt_RoundtripsSuccessfully
-  ✓ AuditAndSecurityTests.SingleToolTemplate_StrictRuleValidation_ThrowsOnInvalidConfig
-  ✓ SecurityHubViewModelTests.IncidentRevocationManager_EmergencyRevocation_BlacklistsAndAppendsAudit
-  ✓ SecurityHubViewModelTests.TokenLifecycleManager_ProactiveTokenRefresh_RenewsSuccessfully
-  ... (77 total automated tests)
-```
+## Roadmap
+
+1. **Canary `-EPERM` run** — record the observable kernel-enforcement proof on the verified WSL2 substrate.
+2. **VSOCK RPC transport** — low-latency host↔guest streaming path.
+3. **Auto-provisioned WSL substrate** — zero-touch guest lifecycle from the Windows control plane.
+4. **Substrate-gated autonomy** — expand multi-step investigation depth only where kernel-lease enforcement is active.
+
+## License
+
+**Proprietary — © Platten Industries. All rights reserved.** Published for technical evaluation. Third-party components (.NET Runtime, Windows App SDK, Win2D, Microsoft.Data.Sqlite, CommunityToolkit, SQLite, the libbpf ecosystem) remain under their respective licenses.
 
 ---
 
-## 🚀 Running & Deploying
-
-### Quick Launch on Desktop
-Double-click the **`SPLAT`** shortcut on your Windows Desktop, or from the repository root run:
-```powershell
-.\dist\App\MissionController.UI.exe
-```
-
-### Running All Automated Tests
-```powershell
-dotnet test .\tests\MissionController.Tests\MissionController.Tests.csproj
-```
-
-### Enterprise MSIX Silent Distribution (Intune / SCCM)
-```powershell
-# Build signed enterprise bundle
-powershell.exe -ExecutionPolicy Bypass -File .\packaging\build-msix.ps1
-
-# Silent deployment
-powershell.exe -ExecutionPolicy Bypass -File .\packaging\install-enterprise.ps1
-```
-
----
-
-## 📜 Licensure, Open Source & Compliance Standards
-
-### Proprietary License
-**Internal Enterprise License — Confidential & Proprietary.**  
-Copyright © Platten Industries. All rights reserved. Licensed solely for internal enterprise evaluation, deployment, and IT operations across authorized enterprise workstations and managed endpoints.
-
----
-
-### Third-Party & Open Source Software (OSS) Licenses
-SPLAT / Mission Controller incorporates the following open-source libraries and frameworks:
-
-| Component / Library | Version | License | Licensure & Attribution Notes |
-| :--- | :--- | :--- | :--- |
-| **[.NET 9 Runtime](https://github.com/dotnet/runtime)** | 9.0 LTS | **MIT** | Copyright © .NET Foundation and Contributors. |
-| **[Microsoft.WindowsAppSDK](https://github.com/microsoft/WindowsAppSDK)** | `1.6.250108002` | **Microsoft Software License** | Governed by Microsoft Software License Terms for Windows App SDK. |
-| **[Microsoft.Graphics.Win2D](https://github.com/microsoft/Win2D)** | `1.3.2` | **MIT** | Copyright © Microsoft Corporation. |
-| **[Microsoft.Data.Sqlite](https://github.com/dotnet/efcore)** | `9.0.2` | **MIT** | Copyright © .NET Foundation and Contributors. |
-| **SQLite Native Core** | Embedded | **Public Domain** | SQLite is dedicated to the public domain. |
-| **[CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet)** | `8.4.0` | **MIT** | Copyright © .NET Foundation and Contributors. |
-| **[CommunityToolkit.WinUI.Controls.Primitives](https://github.com/CommunityToolkit/Windows)** | `8.1.240916` | **MIT** | Copyright © Windows Community Toolkit Contributors. |
-| **[Microsoft.Extensions.DependencyInjection](https://github.com/dotnet/runtime)** | `9.0.2` | **MIT** | Copyright © .NET Foundation and Contributors. |
-| **[System.Security.Cryptography.ProtectedData](https://github.com/dotnet/runtime)** | `9.0.2` | **MIT** | Copyright © .NET Foundation and Contributors. |
-| **[System.IO.FileSystem.AccessControl](https://github.com/dotnet/runtime)** | `5.0.0` | **MIT** | Copyright © .NET Foundation and Contributors. |
-
----
-
-### Cloud Provider & AI Model Licensing (Google Vertex AI)
-* **Google Cloud Master Services Agreement (MSA) & Cloud AI Terms:**
-  * Requires active Google Cloud Platform (GCP) enterprise tenant credentials and quota allocation for `gemini-2.5-flash` and `gemini-2.5-pro` streaming models.
-  * **Enterprise Data Governance & Privacy:** Configured with zero public data ingestion; in-memory DLP filtering pre-sanitizes credentials and PII prior to cloud transmission.
-  * **Business Associate Agreement (BAA):** Must be executed under GCP for healthcare environments processing Protected Health Information (PHI).
-
----
-
-### Operating System & Enterprise Code Signing Requirements
-* **OS Platform:** Windows 10/11 Enterprise or Pro (x64) with active enterprise licensing for Group Policy, Intune/SCCM, and native Win32 Job Object isolation.
-* **MSIX Code Signing Certificate:** Distribution of the `runFullTrust` MSIX bundle requires signing with a valid **Enterprise PKI / Trusted Root CA Certificate** (or commercial EV Code Signing Certificate) trusted by endpoint security policies.
-
----
-
-### Regulatory Compliance & Security Standards
-* **SOC 2 Type II:** CC6.1 (Restricted Tokens & Privilege Separation), CC6.8 (In-Memory Egress Whitelisting), CC7.2 (Continuous Security Auditing).
-* **HIPAA Security Rule:** 45 CFR § 164.312(b) (Cryptographic Chained Audit Controls) & 45 CFR § 164.312(e)(1) (Transmission Security & DLP Masking).
-* **CMMC 2.0 / NIST SP 800-171:** AU.2.041 & AU.2.042 (Tamper-Evident SHA-256 Non-Repudiation Audit Logs), SC.3.177 (Strict 1:1:1 FQDN Isolation).
+**Built by Sean Platten** ([GitHub](https://github.com/Spplatten) · [LinkedIn](https://www.linkedin.com/in/sean-platten-916686376/)) — systems engineer applying a decade of high-throughput line discipline to kernel-level agent containment: *mise en place before execution, no black boxes, zero wasted motion, and boundaries the hardware enforces.*

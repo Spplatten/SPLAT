@@ -26,6 +26,16 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
     private readonly ITemplateRegistry _templateRegistry;
     private readonly IRemediationEngine _remediationEngine;
     private readonly IDiagnosticFindingsExtractor _findingsExtractor;
+    private readonly IAgentBrain? _agentBrain;
+    private readonly IOperatorIdentityProvider _identityProvider;
+
+    /// <summary>
+    /// The ledger actor for whatever this view model dispatches. Every call site below used to pass
+    /// a string literal - "Operator_AuntMaryTier1" for missions, "Operator_1Click" for remediation -
+    /// so the audit trail's actor column recorded a name nobody had established.
+    /// </summary>
+    private async Task<string> ResolveActorAsync() =>
+        (await _identityProvider.ResolveAsync()).ToLedgerIdentity();
 
     [ObservableProperty]
     private ObservableCollection<FriendlyDiagnosticTile> _tiles = new();
@@ -67,12 +77,17 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
         IMissionExecutionEngine engine,
         ITemplateRegistry templateRegistry,
         IRemediationEngine remediationEngine,
-        IDiagnosticFindingsExtractor? findingsExtractor = null)
+        IDiagnosticFindingsExtractor? findingsExtractor = null,
+        IAgentBrain? agentBrain = null,
+        IOperatorIdentityProvider? identityProvider = null)
     {
         _engine = engine;
         _templateRegistry = templateRegistry;
         _remediationEngine = remediationEngine;
         _findingsExtractor = findingsExtractor ?? new JsonFindingsExtractor();
+        _agentBrain = agentBrain;
+        _identityProvider = identityProvider
+            ?? new StaticOperatorIdentityProvider(OperatorIdentity.Unknown("winui-console"));
 
         // Populate the frontline governed autonomous AI agents.
         Tiles.Add(new FriendlyDiagnosticTile("network", "net-dns-audit", "Atlas-Net", "Diagnoses connection drops, high latency, and listening sockets", "\uE774", "#00E5FF"));
@@ -98,26 +113,87 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(CustomAskText))
             return;
 
-        ActiveDiagnosticTitle = $"Custom Agent Mission: \"{CustomAskText}\"";
-        string templateId = "net-dns-audit";
+        ActiveDiagnosticTitle = $"🧠 Autonomous Agent Brain: \"{CustomAskText}\"";
 
-        string lower = CustomAskText.ToLowerInvariant();
-        if (lower.Contains("login") || lower.Contains("hack") || lower.Contains("attack") || lower.Contains("intrud"))
-            templateId = "secops-auth-inspector";
-        else if (lower.Contains("disk") || lower.Contains("space") || lower.Contains("storage") || lower.Contains("clean"))
-            templateId = "sysops-disk-space";
-        else if (lower.Contains("virus") || lower.Contains("defender") || lower.Contains("malware"))
-            templateId = "secops-defender-status";
-        else if (lower.Contains("active directory") || lower.Contains("domain") || lower.Contains("kerberos") || lower.Contains("ad"))
-            templateId = "identity-ad-group-hygiene";
-        else if (lower.Contains("azure") || lower.Contains("cloud") || lower.Contains("entra") || lower.Contains("sso"))
-            templateId = "identity-entra-hybrid-join";
-        else if (lower.Contains("patch") || lower.Contains("update") || lower.Contains("hotfix") || lower.Contains("cve"))
-            templateId = "sysops-patch-compliance";
-        else if (lower.Contains("registry") || lower.Contains("startup") || lower.Contains("autorun") || lower.Contains("persist"))
-            templateId = "endpoint-persistence-audit";
+        if (_agentBrain != null)
+        {
+            await ExecuteAutonomousBrainAsync(CustomAskText);
+            return;
+        }
 
-        await ExecuteQuickDiagnosticAsync(templateId, "Custom Agent Mission", CustomAskText);
+        // Fallback if brain is not registered
+        await ExecuteQuickDiagnosticAsync("net-dns-audit", "Custom Agent Mission", CustomAskText);
+    }
+
+    private async Task ExecuteAutonomousBrainAsync(string userGoal)
+    {
+        IsRunning = true;
+        HasResult = false;
+        ExecutiveFindings.Clear();
+        AvailableFixes.Clear();
+        RemediationStatusMessage = string.Empty;
+        TechnicalRawLog = string.Empty;
+
+        var rawLogSb = new System.Text.StringBuilder();
+        var progress = new Progress<MissionChunk>(chunk =>
+        {
+            if (chunk.ChunkType == MissionChunkType.StatusChange || chunk.ChunkType == MissionChunkType.Completed)
+            {
+                rawLogSb.AppendLine($"[{chunk.TimestampUtc:HH:mm:ss}] {chunk.Content}");
+                TechnicalRawLog = rawLogSb.ToString();
+            }
+            else if (chunk.ChunkType == MissionChunkType.Stdout || chunk.ChunkType == MissionChunkType.AiToken)
+            {
+                rawLogSb.Append(chunk.Content);
+                TechnicalRawLog = rawLogSb.ToString();
+            }
+        });
+
+        try
+        {
+            var result = await _agentBrain!.ProcessGoalAsync(
+                userGoal: userGoal,
+                operatorIdentity: await ResolveActorAsync(),
+                maxReasoningSteps: 3,
+                progress: progress);
+
+            ExecutiveStatusTitle = result.ExecutiveHeadline;
+            ExecutiveStatusColor = result.OverallStatus switch
+            {
+                DiagnosticHealthStatus.Critical => "#E53935",
+                DiagnosticHealthStatus.Warning => "#FFB300",
+                DiagnosticHealthStatus.Unknown => "#FFB300",
+                _ => "#6CCB5F"
+            };
+
+            foreach (var finding in result.GroundedKeyFindings)
+            {
+                ExecutiveFindings.Add(finding);
+            }
+
+            if (!string.IsNullOrWhiteSpace(result.RootCauseAnalysis))
+            {
+                ExecutiveFindings.Add($"🔬 {result.RootCauseAnalysis}");
+            }
+
+            foreach (var fix in result.AvailableRemediations)
+            {
+                AvailableFixes.Add(fix);
+            }
+
+            HasResult = true;
+        }
+        catch (Exception ex)
+        {
+            ExecutiveStatusTitle = "🔴 Agent Brain Alert";
+            ExecutiveStatusColor = "#E53935";
+            ExecutiveFindings.Add($"Autonomous reasoning encountered an error: {ex.Message}");
+            HasResult = true;
+        }
+        finally
+        {
+            IsRunning = false;
+        }
     }
 
     [RelayCommand]
@@ -142,7 +218,7 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
 
         try
         {
-            var result = await _remediationEngine.ExecuteFixAsync(fix, "Operator_1Click");
+            var result = await _remediationEngine.ExecuteFixAsync(fix, await ResolveActorAsync());
             if (result.Success)
             {
                 RemediationStatusMessage = $"⚡ Fix Applied Successfully: {fix.Title}";
@@ -173,7 +249,7 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
 
         try
         {
-            var result = await _remediationEngine.ExecuteRollbackAsync(fix, "Operator_1Click");
+            var result = await _remediationEngine.ExecuteRollbackAsync(fix, await ResolveActorAsync());
             if (result.Success)
             {
                 RemediationStatusMessage = $"↩️ Rollback Completed: {fix.Title} restored.";
@@ -230,7 +306,7 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
             var rawOutput = new System.Text.StringBuilder();
             var aiOutput = new System.Text.StringBuilder();
 
-            await foreach (var chunk in _engine.ExecuteMissionAsync(template, parameters, "Operator_AuntMaryTier1"))
+            await foreach (var chunk in _engine.ExecuteMissionAsync(template, parameters, await ResolveActorAsync()))
             {
                 if (chunk.ChunkType == MissionChunkType.Stdout)
                 {

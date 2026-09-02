@@ -1,14 +1,9 @@
-// SPLAT Layer-2 Resident eBPF Daemon & Kernel Containment Substrate
-//
-// Accepts leased execution requests over AF_VSOCK / TCP, provisions ephemeral
-// cgroups, synchronizes BPF-LSM kernel capability leases, mounts CoW OverlayFS workspaces,
-// and streams stdout, stderr, and in-kernel -EPERM violation events.
-
 use std::mem::MaybeUninit;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -18,7 +13,7 @@ use libbpf_rs::{MapCore, MapFlags, RingBufferBuilder};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
 mod cgroup;
@@ -33,8 +28,8 @@ use lease_lsm::*;
 
 use cgroup::EphemeralCgroup;
 use cow::OverlayWorkspace;
-use lease::{LeaseConfig, LeaseManager};
-use violation::ViolationEvent;
+use lease::{bytes_of, BpfMapSync, LeaseConfig, LeaseManager};
+use violation::{RawViolationEvent, ViolationEvent};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "SPLAT Layer-2 Resident eBPF Daemon")]
@@ -51,6 +46,64 @@ struct Args {
     mock_bpf: bool,
 }
 
+struct LiveBpfSync {
+    leased_cgroups: Arc<Mutex<libbpf_rs::Map>>,
+    protected_inodes: Arc<Mutex<libbpf_rs::Map>>,
+    allowed_exec_inodes: Arc<Mutex<libbpf_rs::Map>>,
+    allowed_connect_ipv4: Arc<Mutex<libbpf_rs::Map>>,
+}
+
+impl BpfMapSync for LiveBpfSync {
+    fn add_lease(&self, lease: &lease::ActiveLease) -> Result<()> {
+        let one: u8 = 1;
+        self.leased_cgroups
+            .lock()
+            .unwrap()
+            .update(&lease.cgroup_id.to_ne_bytes(), &[one], MapFlags::ANY)
+            .context("update leased_cgroups")?;
+
+        for key in &lease.protected_inodes {
+            self.protected_inodes
+                .lock()
+                .unwrap()
+                .update(bytes_of(key), &[one], MapFlags::ANY)
+                .context("update protected_inodes")?;
+        }
+
+        for key in &lease.allowed_exec_inodes {
+            self.allowed_exec_inodes
+                .lock()
+                .unwrap()
+                .update(bytes_of(key), &[one], MapFlags::ANY)
+                .context("update allowed_exec_inodes")?;
+        }
+
+        for ip in &lease.allowed_ips {
+            self.allowed_connect_ipv4
+                .lock()
+                .unwrap()
+                .update(&ip.to_ne_bytes(), &[one], MapFlags::ANY)
+                .context("update allowed_connect_ipv4")?;
+        }
+
+        Ok(())
+    }
+
+    fn remove_lease(&self, lease: &lease::ActiveLease) -> Result<()> {
+        let _ = self.leased_cgroups.lock().unwrap().delete(&lease.cgroup_id.to_ne_bytes());
+        for key in &lease.protected_inodes {
+            let _ = self.protected_inodes.lock().unwrap().delete(bytes_of(key));
+        }
+        for key in &lease.allowed_exec_inodes {
+            let _ = self.allowed_exec_inodes.lock().unwrap().delete(bytes_of(key));
+        }
+        for ip in &lease.allowed_ips {
+            let _ = self.allowed_connect_ipv4.lock().unwrap().delete(&ip.to_ne_bytes());
+        }
+        Ok(())
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -58,12 +111,61 @@ async fn main() -> Result<()> {
 
     info!("Starting SPLAT Resident eBPF Containment Daemon on {}", args.listen);
 
+    let (viol_tx, _viol_rx) = broadcast::channel::<ViolationEvent>(128);
+    let mut bpf_sync: Option<Arc<dyn BpfMapSync>> = None;
+
     let is_root = unsafe { libc::geteuid() } == 0;
     if !is_root {
         warn!("Running unprivileged. In-kernel BPF-LSM hooks require CAP_BPF / CAP_SYS_ADMIN.");
+    } else if !args.mock_bpf {
+        info!("Initializing in-kernel BPF-LSM capability lease skeleton...");
+        let open_object = Box::leak(Box::new(MaybeUninit::uninit()));
+        let skel_builder = LeaseLsmSkelBuilder::default();
+        match skel_builder.open(open_object) {
+            Ok(open_skel) => match open_skel.load() {
+                Ok(mut skel) => match skel.attach() {
+                    Ok(_) => {
+                        info!("BPF-LSM programs attached successfully.");
+                        let skel = Box::leak(Box::new(skel));
+
+                        // Spawn background ringbuffer drain thread
+                        let ringbuf_viol_tx = viol_tx.clone();
+                        let violations_map = &skel.maps.violations;
+                        let mut rb = RingBufferBuilder::new();
+                        if let Ok(_) = rb.add(violations_map, move |data: &[u8]| {
+                            if data.len() >= std::mem::size_of::<RawViolationEvent>() {
+                                let raw = unsafe { &*(data.as_ptr() as *const RawViolationEvent) };
+                                let event = ViolationEvent::from_raw(raw);
+                                info!("Kernel -EPERM violation: {}", event.detail_text);
+                                let _ = ringbuf_viol_tx.send(event);
+                            }
+                            0
+                        }) {
+                            if let Ok(built_rb) = rb.build() {
+                                std::thread::spawn(move || {
+                                    while let Ok(_) = built_rb.poll(Duration::from_millis(100)) {}
+                                });
+                                info!("BPF ringbuffer violation monitor active.");
+                            }
+                        }
+
+                        let sync_driver = LiveBpfSync {
+                            leased_cgroups: Arc::new(Mutex::new(skel.maps.leased_cgroups)),
+                            protected_inodes: Arc::new(Mutex::new(skel.maps.protected_inodes)),
+                            allowed_exec_inodes: Arc::new(Mutex::new(skel.maps.allowed_exec_inodes)),
+                            allowed_connect_ipv4: Arc::new(Mutex::new(skel.maps.allowed_connect_ipv4)),
+                        };
+                        bpf_sync = Some(Arc::new(sync_driver));
+                    }
+                    Err(e) => warn!("Failed to attach BPF-LSM programs: {e}"),
+                },
+                Err(e) => warn!("Failed to load BPF-LSM skeleton: {e}"),
+            },
+            Err(e) => warn!("Failed to open BPF-LSM skeleton: {e}"),
+        }
     }
 
-    let lease_manager = LeaseManager::new();
+    let lease_manager = LeaseManager::new(bpf_sync);
 
     // Background expiration reaper
     let reaper_mgr = lease_manager.clone();
@@ -87,8 +189,9 @@ async fn main() -> Result<()> {
             Ok((socket, peer)) => {
                 info!("Accepted connection from {peer}");
                 let mgr = lease_manager.clone();
+                let viol_tx_clone = viol_tx.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_client(socket, mgr).await {
+                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone).await {
                         error!("Client session error: {e:#}");
                     }
                 });
@@ -100,7 +203,11 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn handle_client(socket: TcpStream, lease_mgr: LeaseManager) -> Result<()> {
+async fn handle_client(
+    socket: TcpStream,
+    lease_mgr: LeaseManager,
+    viol_tx: broadcast::Sender<ViolationEvent>,
+) -> Result<()> {
     let (reader, mut writer) = socket.into_split();
     let mut buf_reader = BufReader::new(reader);
     let mut line = String::new();
@@ -217,6 +324,26 @@ async fn handle_client(socket: TcpStream, lease_mgr: LeaseManager) -> Result<()>
                 let stderr = child.stderr.take();
 
                 let (tx, mut rx) = mpsc::channel::<serde_json::Value>(64);
+
+                let target_cgid = cg.cgroup_id;
+                let tx_viol = tx.clone();
+                let mut viol_rx = viol_tx.subscribe();
+                tokio::spawn(async move {
+                    while let Ok(v) = viol_rx.recv().await {
+                        if v.cgroup_id == target_cgid {
+                            let chunk = serde_json::json!({
+                                "type": "VIOLATION",
+                                "cgroupId": v.cgroup_id,
+                                "pid": v.pid,
+                                "hook": v.hook,
+                                "detail": v.detail,
+                                "detailText": v.detail_text,
+                                "comm": v.comm
+                            });
+                            let _ = tx_viol.send(chunk).await;
+                        }
+                    }
+                });
 
                 if let Some(out) = stdout {
                     let tx_out = tx.clone();
