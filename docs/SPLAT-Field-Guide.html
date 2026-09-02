@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>The SPLAT Field Guide</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders:opsz,wght@10..72,500;10..72,700;10..72,800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    /* SPLAT dark token set (from SplatDesignTokens.xaml) — dark-first by design */
+    --ground: #0B1220;
+    --surface: #111B2E;
+    --surface-2: #17243A;
+    --surface-deep: #0F192A;
+    --line: #263853;
+    --line-strong: #375271;
+    --ink: #F4F7FB;
+    --muted: #A9B7CA;
+    --faint: #71839D;
+    --accent: #4CC2FF;
+    --accent-soft: rgba(76, 194, 255, 0.10);
+    --good: #6CCB5F;
+    --warn: #FFB020;
+    --bad: #FF6B7A;
+    --violet: #D29BFF;
+    --net: #4CC2FF;
+    --sec: #FF7043;
+    --sto: #D29BFF;
+    --cmp: #6CCB5F;
+    --shadow: 0 18px 50px rgba(3, 8, 18, 0.55);
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --ground: #F3F6FA;
+      --surface: #FFFFFF;
+      --surface-2: #F8FAFD;
+      --surface-deep: #EAF0F7;
+      --line: #D5DFEA;
+      --line-strong: #A9BBD0;
+      --ink: #182337;
+      --muted: #526174;
+      --faint: #718096;
+      --accent: #087DAA;
+      --accent-soft: rgba(8, 125, 170, 0.09);
+      --good: #2A7D27;
+      --warn: #9A5F00;
+      --bad: #B3263B;
+      --violet: #7142A5;
+      --net: #087DAA;
+      --sec: #B34A22;
+      --sto: #7142A5;
+      --cmp: #2A7D27;
+      --shadow: 0 14px 40px rgba(24, 35, 55, 0.12);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #F3F6FA;
+    --surface: #FFFFFF;
+    --surface-2: #F8FAFD;
+    --surface-deep: #EAF0F7;
+    --line: #D5DFEA;
+    --line-strong: #A9BBD0;
+    --ink: #182337;
+    --muted: #526174;
+    --faint: #718096;
+    --accent: #087DAA;
+    --accent-soft: rgba(8, 125, 170, 0.09);
+    --good: #2A7D27;
+    --warn: #9A5F00;
+    --bad: #B3263B;
+    --violet: #7142A5;
+    --net: #087DAA;
+    --sec: #B34A22;
+    --sto: #7142A5;
+    --cmp: #2A7D27;
+    --shadow: 0 14px 40px rgba(24, 35, 55, 0.12);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.72;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 46rem;
+    margin: 0 auto;
+    padding: clamp(1.1rem, 4vw, 2.5rem);
+  }
+
+  /* ---------- Hero placard ---------- */
+  .hero {
+    position: relative;
+    background: var(--surface-deep);
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    padding: clamp(1.6rem, 5vw, 3rem);
+    margin: clamp(0.5rem, 3vw, 2rem) 0 3.5rem;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .hero::before {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  .hero-edge {
+    position: absolute;
+    top: 50%;
+    right: -0.35em;
+    transform: translateY(-50%) rotate(180deg);
+    writing-mode: vertical-rl;
+    font-family: "Big Shoulders", "Arial Narrow", sans-serif;
+    font-weight: 800;
+    font-size: clamp(3rem, 9vw, 5.4rem);
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    opacity: 0.12;
+    user-select: none;
+    pointer-events: none;
+  }
+  .eyebrow {
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1rem;
+  }
+  .hero h1 {
+    font-family: "Big Shoulders", "Arial Narrow", sans-serif;
+    font-weight: 800;
+    font-size: clamp(3.2rem, 10vw, 5.6rem);
+    line-height: 0.95;
+    letter-spacing: 0.01em;
+    margin: 0 0 0.6rem;
+    text-wrap: balance;
+  }
+  .hero .expansion {
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 1.6rem;
+  }
+  .hero .stand {
+    font-size: 1.16rem;
+    line-height: 1.65;
+    max-width: 33rem;
+    margin: 0;
+  }
+  .hero .stand strong { color: var(--accent); font-weight: 600; }
+  .hero-meta {
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    color: var(--faint);
+    margin-top: 1.8rem;
+  }
+
+  /* ---------- Sections ---------- */
+  section { margin: 0 0 3.6rem; }
+  .part {
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 0.4rem;
+  }
+  h2 {
+    font-family: "Big Shoulders", "Arial Narrow", sans-serif;
+    font-weight: 700;
+    font-size: clamp(1.9rem, 5vw, 2.5rem);
+    line-height: 1.05;
+    letter-spacing: 0.01em;
+    margin: 0 0 1.1rem;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: "Big Shoulders", "Arial Narrow", sans-serif;
+    font-weight: 700;
+    font-size: 1.35rem;
+    letter-spacing: 0.02em;
+    margin: 2rem 0 0.5rem;
+  }
+  p { margin: 0 0 1.1rem; }
+  p:last-child { margin-bottom: 0; }
+  em { font-style: italic; }
+  strong { font-weight: 600; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .pull {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 0.9rem 1.2rem;
+    border-radius: 0 4px 4px 0;
+    margin: 1.6rem 0;
+    font-size: 1.05rem;
+  }
+  .pull p { margin: 0; }
+
+  /* ---------- Containment rings ---------- */
+  .rings { margin: 2rem 0 0.6rem; }
+  .ring {
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    padding: clamp(0.55rem, 2.2vw, 1.1rem);
+    background: color-mix(in srgb, var(--surface) 55%, transparent);
+  }
+  .ring + * { margin-top: 0; }
+  .ring-label {
+    display: block;
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 0.5rem 0.15rem;
+  }
+  .ring-core {
+    border: 1px dashed var(--accent);
+    border-radius: 6px;
+    background: var(--accent-soft);
+    text-align: center;
+    padding: 0.9rem 0.6rem;
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--ink);
+  }
+  .ring-core small {
+    display: block;
+    font-weight: 400;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+    margin-top: 0.25rem;
+  }
+  .rings-caption {
+    font-size: 0.85rem;
+    color: var(--faint);
+    font-style: italic;
+    margin-top: 0.9rem;
+  }
+
+  /* ---------- Squad cards ---------- */
+  .squad {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 0.9rem;
+    margin: 1.6rem 0;
+  }
+  .agent {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1rem 1.1rem;
+  }
+  .agent-head { display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; margin-bottom: 0.45rem; }
+  .agent-name {
+    font-family: "Big Shoulders", "Arial Narrow", sans-serif;
+    font-weight: 700;
+    font-size: 1.25rem;
+    letter-spacing: 0.03em;
+  }
+  .chip {
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 0.15rem 0.4rem;
+  }
+  .agent p { font-size: 0.92rem; color: var(--muted); margin: 0; }
+  .c-net { color: var(--net); }
+  .c-sec { color: var(--sec); }
+  .c-sto { color: var(--sto); }
+  .c-cmp { color: var(--cmp); }
+
+  /* ---------- Pipeline ---------- */
+  .pipeline { list-style: none; margin: 1.8rem 0; padding: 0; }
+  .pipeline li {
+    position: relative;
+    padding: 0 0 1.5rem 3.1rem;
+  }
+  .pipeline li::before {
+    content: attr(data-step);
+    position: absolute;
+    left: 0;
+    top: 0.1rem;
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+  }
+  .pipeline li::after {
+    content: "";
+    position: absolute;
+    left: calc(1rem - 0.5px);
+    top: 2.4rem;
+    bottom: 0.3rem;
+    width: 1px;
+    background: var(--line);
+  }
+  .pipeline li:last-child { padding-bottom: 0; }
+  .pipeline li:last-child::after { display: none; }
+  .pipeline .step-title {
+    font-family: "Big Shoulders", "Arial Narrow", sans-serif;
+    font-weight: 700;
+    font-size: 1.2rem;
+    letter-spacing: 0.02em;
+    display: block;
+    margin-bottom: 0.2rem;
+  }
+  .pipeline p { font-size: 0.98rem; color: var(--muted); margin: 0; }
+
+  /* ---------- Screens table ---------- */
+  .table-scroll { overflow-x: auto; margin: 1.6rem 0; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; min-width: 34rem; font-size: 0.95rem; }
+  th {
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    text-align: left;
+    color: var(--faint);
+    background: var(--surface-2);
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--line-strong);
+  }
+  td { padding: 0.65rem 1rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.screen {
+    font-family: "Big Shoulders", "Arial Narrow", sans-serif;
+    font-weight: 700;
+    font-size: 1.05rem;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+  td.what { color: var(--muted); }
+
+  /* ---------- Status ---------- */
+  .status { display: grid; gap: 0.9rem; margin: 1.6rem 0; }
+  .status-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+  }
+  .status-card .chip { margin-bottom: 0.55rem; display: inline-block; }
+  .st-good { color: var(--good); }
+  .st-warn { color: var(--warn); }
+  .st-plan { color: var(--faint); }
+  .status-card p { font-size: 0.95rem; color: var(--muted); margin: 0; }
+  .status-card p strong { color: var(--ink); }
+
+  /* ---------- Glossary ---------- */
+  dl { margin: 1.6rem 0 0; display: grid; gap: 0.85rem; }
+  .term { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 0.75rem 1rem; }
+  dt {
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 0.15rem;
+  }
+  dd { margin: 0; font-size: 0.95rem; color: var(--muted); }
+
+  footer {
+    border-top: 1px solid var(--line);
+    margin-top: 4rem;
+    padding: 1.4rem 0 2.5rem;
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    color: var(--faint);
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  @media (max-width: 640px) {
+    .hero-edge { display: none; }
+    body { font-size: 16px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .hero::before { animation: breathe 6s ease-in-out infinite; }
+    @keyframes breathe { 0%, 100% { opacity: 0.5; } 50% { opacity: 0.2; } }
+  }
+
+  /* Shipped as a file, so it may well be printed. The screen design is dark-first, which would
+     otherwise lay down a full-bleed dark background across every page. Every theme selector is
+     repeated here because the light-mode block outranks a bare :root on specificity. */
+  @media print {
+    :root,
+    :root:not([data-theme="dark"]),
+    :root[data-theme="dark"],
+    :root[data-theme="light"] {
+      --ground: #FFFFFF;
+      --surface: #FFFFFF;
+      --surface-2: #FFFFFF;
+      --surface-deep: #FFFFFF;
+      --line: #CCCCCC;
+      --line-strong: #8A8A8A;
+      --ink: #000000;
+      --muted: #2E2E2E;
+      --faint: #4A4A4A;
+      --accent: #00506F;
+      --accent-soft: transparent;
+      --shadow: none;
+    }
+    .hero-edge { display: none; }
+    .hero::before { display: none; }
+    .wrap { max-width: none; }
+    section { break-inside: avoid-page; }
+    .agent, .status-card, .term, .pipeline li { break-inside: avoid; }
+  }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="hero-edge" aria-hidden="true">FIELD GUIDE</span>
+    <p class="eyebrow">A plain-English guide</p>
+    <h1>The SPLAT<br>Field Guide</h1>
+    <p class="expansion">Sandboxed Process Lease &amp; Agent Telemetry</p>
+    <p class="stand">SPLAT is a Windows app that puts AI helpers to work on your computer — inside <strong>locked rooms the operating system enforces</strong>, so even a misbehaving AI can't touch what you didn't hand it. This guide explains everything, no jargon required.</p>
+    <p class="hero-meta">Platten Industries · reflects the app as of August 2026</p>
+  </header>
+
+  <section>
+    <p class="part">Part 1 — The problem</p>
+    <h2>Why "just trust the AI" doesn't work</h2>
+    <p>AI assistants have become good enough to actually <em>do</em> things: run diagnostics, dig through logs, fix settings, build and publish things. That's genuinely useful — and genuinely dangerous, because to do work on your computer, an AI needs the same thing any worker needs: access.</p>
+    <p>Think of it like hiring a contractor to fix your kitchen sink. Today's common approach to AI safety amounts to a sticky note on the bedroom door that says <em>"please don't go in here."</em> The contractor is polite, so it usually works. But "usually" is carrying a lot of weight — because AI agents can be tricked.</p>
+    <p>The trick has a name: <strong>prompt injection</strong>. If your AI helper reads a web page, an email, or a file that contains hidden instructions — like someone slipping your contractor a forged note that says <em>"the homeowner said to also grab the jewelry"</em> — the AI can be talked into doing things you never asked for. Every safety approach that relies on the AI's good behavior fails at exactly this moment, because the AI's behavior is the thing that got hijacked.</p>
+    <div class="pull">
+      <p>SPLAT's answer: stop trying to keep the AI polite. <strong>Lock the doors.</strong> It doesn't claim to know when an AI has gone wrong — it makes sure that whatever the AI has become, it physically cannot act outside the small, fenced job it was given.</p>
+    </div>
+    <p>Engineers call this <em>blast-radius containment</em>. You don't prevent every spark; you make sure a spark can't burn down more than one small, fireproof room. And crucially, the locks aren't run by the AI or even by SPLAT's own front end — they're enforced by Windows itself, at a level the AI can't reach, let alone argue with.</p>
+  </section>
+
+  <section>
+    <p class="part">Part 2 — The big idea</p>
+    <h2>Agents don't get trust. They get a lease.</h2>
+    <p>The core concept in SPLAT is the <strong>lease</strong>. When an AI agent gets a job, it doesn't receive the keys to your computer — it receives something more like a visitor badge at a secure facility: valid for one task, for a limited time, opening exactly one workshop door, with a hard cap on how much power and material it can use. When the task ends, the badge dies.</p>
+    <p>Every job in SPLAT follows a strict rule the project calls <strong>1:1:1</strong> — one task template gets exactly <em>one</em> AI model, <em>one</em> pre-approved tool it may run, and <em>one</em> internet address it may talk to. Not "a browser." Not "the internet." One tool, one destination, spelled out in advance. Anything else is refused automatically — not by policy, but by plumbing.</p>
+    <p>Here's what one leased job looks like from the outside in:</p>
+
+    <div class="rings">
+      <div class="ring">
+        <span class="ring-label">Ring 5 · The ledger — every action inside is written to a tamper-evident logbook</span>
+        <div class="ring">
+          <span class="ring-label">Ring 4 · One phone line — outbound traffic allowed to exactly one approved address</span>
+          <div class="ring">
+            <span class="ring-label">Ring 3 · The censor — outgoing text is scrubbed of passwords &amp; secrets first</span>
+            <div class="ring">
+              <span class="ring-label">Ring 2 · The visitor badge — admin rights stripped before the work starts</span>
+              <div class="ring">
+                <span class="ring-label">Ring 1 · The room — its own fenced folder, with hard caps on memory &amp; CPU</span>
+                <div class="ring-core">
+                  THE AGENT'S TOOL
+                  <small>started frozen — the locks attach before it runs its first instruction</small>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="rings-caption">The rings aren't SPLAT asking nicely — rings 1, 2 and 5 are enforced by the Windows kernel's own object system, and the tool is spawned <em>suspended</em> (frozen) so every ring is locked in place before it ever wakes up.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="part">Part 3 — The cast</p>
+    <h2>Meet your agent squad</h2>
+    <p>SPLAT ships with a squad of specialist agents — each one a bundle of a reasoning AI, one dedicated tool, and one approved destination, pre-configured for a specific kind of problem. The four you'll meet first:</p>
+
+    <div class="squad">
+      <div class="agent">
+        <div class="agent-head c-net"><span class="agent-name">Atlas-Net</span><span class="chip">Network</span></div>
+        <p>Chases down Wi-Fi drops, slow internet, DNS delays, and strange programs listening on your network.</p>
+      </div>
+      <div class="agent">
+        <div class="agent-head c-sec"><span class="agent-name">Sentinel-SecOps</span><span class="chip">Security</span></div>
+        <p>Hunts brute-force login attacks and surges of failed sign-ins that suggest someone's trying to get in.</p>
+      </div>
+      <div class="agent">
+        <div class="agent-head c-sto"><span class="agent-name">Titan-SysOps</span><span class="chip">Storage</span></div>
+        <p>Watches disk space, finds bloated caches and clutter, and points at what's safe to clean up.</p>
+      </div>
+      <div class="agent">
+        <div class="agent-head c-cmp"><span class="agent-name">Aegis-Endpoint</span><span class="chip">Compliance</span></div>
+        <p>Checks that Microsoft Defender is on, virus signatures are fresh, and secure connections are configured right.</p>
+      </div>
+    </div>
+
+    <p>Behind them sits a catalog of <strong>40+ specialists</strong> covering networking, identity, endpoint security, system operations, and compliance — plus a newer <em>Autonomous Operations</em> wing with agents that build and deploy websites, draft multi-platform marketing campaigns, and vet grant eligibility before drafting the application paperwork — all under the same leash as everyone else. For bigger jobs, <strong>Project Studio</strong> chains up to six agents in a fixed order, and even the notes they pass to each other are filtered for secrets first. No free-for-all swarms, no infinite loops — by design.</p>
+  </section>
+
+  <section>
+    <p class="part">Part 4 — The mission</p>
+    <h2>What actually happens when you press the button</h2>
+    <p>Say you open SPLAT and type: <em>"My internet keeps cutting out during video calls."</em> Here's the whole journey, in order:</p>
+
+    <ol class="pipeline">
+      <li data-step="01"><span class="step-title">The Brain reads your goal</span>
+        <p>SPLAT's reasoning layer — the Agent Brain — takes your plain-English sentence and breaks it into concrete, testable questions: is it Wi-Fi? DNS? Something hogging the connection?</p></li>
+      <li data-step="02"><span class="step-title">It checks its memory</span>
+        <p>A local memory index (stored on your machine, not in the cloud) recalls similar past incidents — "this looks like the DNS problem from March" — to aim the investigation.</p></li>
+      <li data-step="03"><span class="step-title">It forms hypotheses and picks specialists</span>
+        <p>Each suspicion becomes a hypothesis assigned to a matching specialist template — likely Atlas-Net here. Each hypothesis will be confirmed or refuted with real evidence, never vibes.</p></li>
+      <li data-step="04"><span class="step-title">The tool starts frozen</span>
+        <p>The specialist's one allowed tool is launched <em>suspended</em> — created but not yet running — while the sandbox clamps on: memory and CPU caps, admin rights stripped, folder jail sealed. Only then is it thawed.</p></li>
+      <li data-step="05"><span class="step-title">Evidence is gathered inside the rings</span>
+        <p>The tool runs its diagnostic and produces raw output. It can't wander the filesystem, can't gulp your RAM, and can't call anywhere except its one approved address.</p></li>
+      <li data-step="06"><span class="step-title">The censor scrubs the output</span>
+        <p>Before one byte leaves your machine, a data-loss-prevention filter masks passwords, keys, tokens, email addresses, card and social-security patterns — in memory, before transmission.</p></li>
+      <li data-step="07"><span class="step-title">The AI reasons over clean evidence</span>
+        <p>The scrubbed evidence travels down the single approved line to the reasoning model (Claude or Gemini — whichever key you connected), which interprets it and streams its thinking back live.</p></li>
+      <li data-step="08"><span class="step-title">You get a verdict in plain English</span>
+        <p>A clear status — healthy, warning, or critical — with findings that cite the actual evidence, plus suggested one-click fixes. Risky fixes come with a rollback: an undo button, not just an apology.</p></li>
+      <li data-step="09"><span class="step-title">Everything lands in the ledger</span>
+        <p>Every step — every command, argument, and result — is sealed into a cryptographic logbook. More on why that matters below.</p></li>
+    </ol>
+  </section>
+
+  <section>
+    <p class="part">Part 5 — The tour</p>
+    <h2>A map of the app, screen by screen</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Screen</th><th scope="col">What you use it for</th></tr></thead>
+        <tbody>
+          <tr><td class="screen">Quick Diagnostician</td><td class="what">The home screen. Big friendly tiles for one-click checkups, plus a box where you type any problem in your own words and let the Brain run with it.</td></tr>
+          <tr><td class="screen">Welcome</td><td class="what">The three-step setup wizard: meet the squad, paste one AI key, launch. Takes about two minutes.</td></tr>
+          <tr><td class="screen">Live Mission Monitor</td><td class="what">Watch missions run in real time — the agent's reasoning streams in as it works.</td></tr>
+          <tr><td class="screen">Template Catalog</td><td class="what">Browse all 40+ specialists, see exactly what tool and destination each one is allowed, and launch them directly.</td></tr>
+          <tr><td class="screen">Project Studio</td><td class="what">Chain up to six agents into a staged project — investigate, then verify, then summarize — with filtered hand-offs between stages.</td></tr>
+          <tr><td class="screen">Security Audit</td><td class="what">Read the tamper-evident ledger: every action ever taken, verifiable, in one place.</td></tr>
+          <tr><td class="screen">Memory</td><td class="what">Search past incidents by meaning, not keywords — "that time the printer broke" finds the right mission.</td></tr>
+          <tr><td class="screen">Jail Inspector</td><td class="what">Look inside the sandboxes themselves: see the fenced folders and locks each mission ran under.</td></tr>
+          <tr><td class="screen">Settings</td><td class="what">Manage your AI keys (encrypted by Windows), providers, and app preferences.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <p class="part">Part 6 — The receipts</p>
+    <h2>A logbook nobody can quietly edit</h2>
+    <p>Every action in SPLAT — every command an agent ran, every argument it used, every fix it applied — is written to an audit ledger. But it's not an ordinary log file, because ordinary log files can be edited after the fact.</p>
+    <p>SPLAT's ledger works like a logbook where every page's ink is chemically bonded to the page before it. Each entry includes a cryptographic fingerprint of the previous entry, forming a chain. Change any historical record — even one character — and every fingerprint after it stops matching. The tampering doesn't just fail; it <em>announces itself</em>, mathematically, to anyone who checks.</p>
+    <p>That's the difference between "we log everything" and "we can <strong>prove</strong> nobody rewrote history." If you ever need to answer <em>what exactly did the AI do to my machine?</em> — the answer is in the ledger, and the ledger can't lie to you.</p>
+  </section>
+
+  <section>
+    <p class="part">Part 7 — Straight talk</p>
+    <h2>What's real today, and what isn't yet</h2>
+    <p>SPLAT's documentation makes a point of never blurring the line between built and planned. This guide keeps that promise:</p>
+    <div class="status">
+      <div class="status-card"><span class="chip st-good">Working today</span>
+        <p><strong>The Windows containment system</strong> — frozen starts, resource clamps, stripped privileges, folder jails. <strong>The governance layer</strong> — the 1:1:1 rule, the secret-scrubbing censor, the one-line-out firewall, the tamper-evident ledger, local memory. <strong>The full app</strong>, the 40+ agent catalog, and a connector that lets other AI tools (like Claude Code or Python LangGraph agents) borrow SPLAT's locked rooms. Backed by 342 automated tests, all passing.</p></div>
+      <div class="status-card"><span class="chip st-warn">Being built</span>
+        <p><strong>The Linux-side deep containment</strong> — a guard that lives inside the Linux kernel itself and vetoes forbidden actions before they happen. The code is written and the kernel it needs has been verified ready on this machine; what remains is the recorded proof run showing a forbidden action being denied. Until that run is on record, SPLAT claims it's <em>built</em>, not <em>operating</em>.</p></div>
+      <div class="status-card"><span class="chip st-plan">Planned</span>
+        <p><strong>Faster host-to-sandbox plumbing</strong>, fully automatic setup of the Linux sandbox, and deeper multi-step autonomy — which agents only earn in places where kernel-level enforcement is switched on.</p></div>
+    </div>
+    <div class="pull">
+      <p>One consequence of that gap is worth stating plainly, because it's new. The grant-discovery agent is the first specialist whose tool reaches the internet rather than only reading your own machine. Its one approved destination is declared in the template, written into the ledger, and compiled into the Linux kernel guard — but on Windows today the locks that clamp memory, strip privileges and fence folders do <strong>not</strong> filter network sockets, so there that destination is an audited promise rather than an enforced wall. The agent is built to be harmless if the promise were ever broken: it presents no password or key, it only reads public funding notices, and it files nothing. Every grant agent stops at a draft for you to review — none of them can submit an application.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="part">Part 8 — Getting started</p>
+    <h2>Your first five minutes</h2>
+    <p>SPLAT runs on Windows 11. On first launch, the Welcome wizard walks you through three steps: meet the agent squad, connect one AI key, go.</p>
+    <p>The one thing you need is an API key from Anthropic (starts with <em>sk-ant-</em>) or Google Gemini (starts with <em>AIza</em>) — that's the reasoning brain your agents will think with. Paste it once; SPLAT verifies it live, figures out which provider it belongs to, and locks it in Windows' own encrypted vault. It never sits on disk in readable form.</p>
+    <p>Then head to the Quick Diagnostician: tap a tile for a one-click checkup, or type what's bothering you — <em>"my laptop fan won't stop"</em>, <em>"is someone trying to log into my PC?"</em> — and watch the squad go to work. Every finding comes back in plain English, every suggested fix has a clearly labeled risk level, and anything risky ships with an undo.</p>
+    <p>And if you're the type who wants to see the machinery: the Live Mission Monitor shows the reasoning as it streams, the Jail Inspector shows the locked rooms, and the Security Audit screen shows the receipts. Nothing in SPLAT is a black box — that's rather the point.</p>
+  </section>
+
+  <section>
+    <p class="part">Part 9 &mdash; The guest wing</p>
+    <h2>Plugging other AIs into the same cage</h2>
+    <p>SPLAT's locked rooms aren't just for SPLAT's own agents. Any AI framework that speaks MCP &mdash; Claude Code, Microsoft Copilot, or a Python agent built with LangGraph &mdash; can send its work through the <em>splat-mcp</em> connector. The outside AI keeps its own brain and its own plan; SPLAT stays the bouncer. If a manipulated agent asks for something outside its lease, it isn't SPLAT's <em>opinion</em> that says no &mdash; it's the same containment every native agent lives under.</p>
+    <p>Two receipts make the partnership auditable, not just safe:</p>
+    <div class="squad">
+      <div class="agent">
+        <div class="agent-head c-net"><span class="agent-name">The case number</span><span class="chip">Trace id</span></div>
+        <p>An outside framework hands SPLAT its own trace id with any request. SPLAT writes it into the tamper-evident ledger &mdash; <em>after</em> the work ran, so the entry records the outcome too. Later, an auditor holding the outside tool's trace can find the exact kernel-side record of what really executed. Two notebooks, one case number.</p>
+      </div>
+      <div class="agent">
+        <div class="agent-head c-cmp"><span class="agent-name">The wax seal</span><span class="chip">Audit anchor</span></div>
+        <p>Every answer comes back stamped with the fingerprint of the ledger's newest page. Because each page is bonded to the one before it, that single stamp vouches for everything the request did. Save it with your checkpoint, and you can prove forever which history your answer was built on.</p>
+      </div>
+    </div>
+    <p>For Python folks there's a ready-made kit: the <em>splat-langgraph</em> package turns SPLAT's whole toolset &mdash; commands, diagnostics, investigations, the Brain, the crews &mdash; into LangGraph tools, forwarding the case number and catching the wax seal automatically.</p>
+  </section>
+
+  <section>
+    <p class="part">Appendix</p>
+    <h2>Little glossary</h2>
+    <dl>
+      <div class="term"><dt>Agent</dt><dd>An AI worker with a job description: one reasoning model, one tool, one allowed destination.</dd></div>
+      <div class="term"><dt>Mission</dt><dd>One agent doing one job once, inside its lease, from launch to plain-English verdict.</dd></div>
+      <div class="term"><dt>Template</dt><dd>The recipe an agent is built from — which model, which tool, which destination, which questions it answers.</dd></div>
+      <div class="term"><dt>Lease</dt><dd>The time-boxed, capped permission slip a mission runs under. Expires when the job ends.</dd></div>
+      <div class="term"><dt>Sandbox / jail</dt><dd>The locked room: a fenced folder plus hard limits on memory, CPU, and privileges, enforced by Windows.</dd></div>
+      <div class="term"><dt>Prompt injection</dt><dd>Tricking an AI by hiding instructions in something it reads. The forged note slipped to your contractor.</dd></div>
+      <div class="term"><dt>DLP (the censor)</dt><dd>Data-loss prevention: the filter that masks passwords, keys, and personal numbers before anything leaves your machine.</dd></div>
+      <div class="term"><dt>Egress firewall</dt><dd>The single approved phone line. Any attempt to call anywhere else is refused.</dd></div>
+      <div class="term"><dt>Audit ledger</dt><dd>The chained, tamper-evident logbook of everything every agent ever did.</dd></div>
+      <div class="term"><dt>Remediation</dt><dd>A suggested fix, run in its own sandbox, with a rollback (undo) for anything that changes state.</dd></div>
+      <div class="term"><dt>Kernel</dt><dd>The deepest layer of an operating system. When enforcement lives there, programs above it — including AIs — can't opt out.</dd></div>
+      <div class="term"><dt>MCP</dt><dd>Model Context Protocol — the standard plug that lets outside AI tools request work through SPLAT's containment instead of running loose.</dd></div>
+      <div class="term"><dt>Trace id</dt><dd>A case number an outside AI framework hands over with a request, written into the ledger so both sides' records join on one value.</dd></div>
+      <div class="term"><dt>Audit anchor</dt><dd>The wax seal on every answer: the ledger's newest fingerprint, vouching for the entire chain of records beneath it.</dd></div>
+    </dl>
+  </section>
+
+  <footer>
+    <span>SPLAT · Platten Industries</span>
+    <span>Engineers wanted: the README has the full technical story</span>
+  </footer>
+
+</div>
+
+
+
+</body>
+</html>
