@@ -107,6 +107,10 @@ if ($MakeAppx -and (Test-Path $MakeAppx)) {
 Copy-Item "$ScriptRoot\install-enterprise.ps1" "$OutputDir\install-enterprise.ps1" -Force
 Copy-Item "$ScriptRoot\uninstall-enterprise.ps1" "$OutputDir\uninstall-enterprise.ps1" -Force
 
+# Ship the plain-English guide beside the package. Whoever evaluates a build is rarely whoever
+# produced it, and this is a self-contained page - no server, no install, just open it.
+Copy-Item "$ProjectRoot\docs\SPLAT-Field-Guide.html" "$OutputDir\SPLAT-Field-Guide.html" -Force
+
 Write-Host "`n===============================================================================" -ForegroundColor Green
 Write-Host "  MSIX BUILD & ENTERPRISE SIGNING COMPLETED SUCCESSFULLY!" -ForegroundColor Green
 Write-Host "  Output Directory: $OutputDir" -ForegroundColor Green
