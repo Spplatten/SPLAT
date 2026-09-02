@@ -69,8 +69,17 @@ fi
 
 echo
 echo "== toolchain =="
+# rustup installs into ~/.cargo and puts it on PATH from .bashrc, which a non-login shell never
+# reads - so `command -v cargo` reported MISSING on a machine that had 1.98 installed and sank the
+# verdict to YELLOW over nothing. Source the env the same way setup-guest.sh does before deciding.
+if [ -f "$HOME/.cargo/env" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.cargo/env"
+fi
+export PATH="$HOME/.cargo/bin:$PATH"
+
 for t in clang bpftool cargo rustc; do
-  if have "$t"; then green "  [ok] $t"; else yellow "  [missing] $t — run setup-guest.sh"; downgrade YELLOW; fi
+  if have "$t"; then green "  [ok] $t ($("$t" --version 2>/dev/null | head -1))"; else yellow "  [missing] $t — run setup-guest.sh"; downgrade YELLOW; fi
 done
 
 echo

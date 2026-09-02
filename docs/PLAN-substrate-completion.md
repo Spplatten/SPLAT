@@ -58,8 +58,14 @@ matters as much: if this is not done, every downstream capability inherits an un
 evidence file; deleting or staling that file turns the suite red; README and the Field Guide agree
 with the evidence, and are *made* to agree by a test rather than by memory.
 
-**Human-only:** the run itself needs `sudo` inside WSL for BPF-LSM load. Everything else is
-agent-buildable.
+**Human-only:** the run itself needs `sudo` inside WSL for BPF-LSM load, and `sudo` here prompts for
+a password an agent cannot supply. Everything else is agent-buildable. Step-by-step in
+[RUNBOOK-human-steps.md](RUNBOOK-human-steps.md).
+
+**Starting position is better than the plan docs assume (verified 2026-09-02):** preflight is
+**GREEN** on this machine — `bpf` is live in the active LSM list, BTF and cgroup v2 are present, the
+full toolchain is installed and `vmlinux.h` is generated for both crates. Nothing is blocked on
+setup; the gate is blocked only on the harness being unable to fail.
 
 ---
 
