@@ -25,12 +25,26 @@ cargo build --release
 
 echo
 echo "== running canary (sudo: BPF-LSM load needs root) =="
-# The loader creates the cgroup, seeds the lease, forks canary.sh into it, and streams violations.
+# Hash the BPF source so the evidence file names the exact program that produced it; proof of an
+# older program must never read as proof of the current one.
+BPF_SHA="$(sha256sum src/bpf/lease_lsm.bpf.c | cut -d' ' -f1)"
+
+# The loader creates the cgroup, seeds the lease, forks canary.sh into it, streams violations,
+# then asserts the outcome and writes evidence/. It exits non-zero on a bad run - this script
+# no longer asks a human to eyeball whether the kernel did its job.
 sudo /tmp/splat_canary_target/release/splat-canary \
   --cgroup "$CGROUP" \
   --protect /etc/shadow \
   --allow-connect 127.0.0.1 \
-  --canary ./canary.sh
+  --canary ./canary.sh \
+  --bpf-sha "$BPF_SHA" \
+  --evidence-dir ./evidence
+status=$?
 
 echo
-echo "Expected: exactly one ALLOWED action passed, and three -EPERM lines from the kernel."
+if [ "$status" -eq 0 ]; then
+  echo "PASS — evidence written to evidence/. Commit it."
+else
+  echo "FAIL (exit $status) — see the VERDICT lines above. The evidence file records why."
+fi
+exit "$status"

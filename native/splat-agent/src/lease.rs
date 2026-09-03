@@ -21,11 +21,23 @@ pub struct InodeKey {
     pub _pad: u32,
 }
 
+/// Userspace `st_dev` and the kernel's `inode->i_sb->s_dev` encode the same device differently:
+/// glibc packs major/minor into a 64-bit `dev_t`, while the kernel packs `(major << 20) | minor`
+/// into 32 bits. The BPF program keys on the kernel form, so passing `st_dev` through made every
+/// (dev, ino) lookup miss. That is not a symmetric failure - exec falls closed and is obvious,
+/// but `protected_inodes` falls OPEN, because a missed lookup there reads as "not protected".
+/// Caught by the canary on 2026-09-02, where the kernel denied exec of an allow-listed /bin/sh.
+fn kernel_dev_from_st_dev(st_dev: u64) -> u32 {
+    let major = ((st_dev >> 8) & 0xfff) | ((st_dev >> 32) & !0xfffu64);
+    let minor = (st_dev & 0xff) | ((st_dev >> 12) & !0xffu64);
+    (((major << 20) | (minor & 0xf_ffff)) & 0xffff_ffff) as u32
+}
+
 pub fn inode_key_for_path(path: &Path) -> Result<InodeKey> {
     let md = fs::metadata(path).with_context(|| format!("stat path {}", path.display()))?;
     Ok(InodeKey {
         ino: md.ino(),
-        dev: md.dev() as u32,
+        dev: kernel_dev_from_st_dev(md.dev()),
         _pad: 0,
     })
 }

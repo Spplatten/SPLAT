@@ -21,8 +21,9 @@ Re-verify before building on any line of this — the tree is shared and moves u
 | Piece | Real state |
 | :--- | :--- |
 | BPF-LSM program + hooks | Built. `bprm_check_security`, `file_open`, `socket_connect` in [lease_lsm.bpf.c](../native/splat-agent/src/bpf/lease_lsm.bpf.c) |
-| Resident daemon | Built, and further along than PLAN-agent-trust-layer.md claims. `splat-agent` is tokio-based with a TCP listener, ephemeral cgroup creation, and child spawn ([main.rs](../native/splat-agent/src/main.rs)) |
-| Canary harness | Built — but **verifies by human eyeball**. `run-canary.sh` ends with `echo "Expected: ... three -EPERM lines"`. No assertion, no exit-code gate, no committed evidence |
+| Resident daemon | **Does not compile.** `splat-agent` is written — tokio, TCP listener, ephemeral cgroup, child spawn — but `cargo build` fails with 4 × E0106 at [main.rs:50-53](../native/splat-agent/src/main.rs): `libbpf_rs::Map` needs a lifetime parameter in libbpf-rs 0.24. An earlier revision of this table said "Built" on the strength of reading the source; building it is the only way to know |
+| Canary harness | **Now asserts** (2026-09-02). Computes a verdict from the ringbuf events, writes `evidence/canary-<kernel>.json`, and exits non-zero on a bad run. Awaiting its first passing run |
+| `(dev, ino)` map key | **Fixed** (2026-09-02). Userspace passed `st_dev` where the kernel builds `(major << 20) \| minor`, so every lookup missed — exec failed closed, protected inodes failed **open**. Same bug fixed in the daemon's `lease.rs` |
 | OverlayFS CoW | `setup`/`teardown` implemented ([cow.rs](../native/splat-agent/src/cow.rs)); not yet driven per mission from the host |
 | Policy compiler | `TemplatePolicyCompiler.CompileTemplatePolicy` exists (template → `LeaseSpec`); the kernel round-trip is unproven |
 | Transport | **TCP loopback + newline JSON**, not vsock + gRPC. `splat-agent` has no `tonic`/`prost`; [proto/splat_sandbox.proto](../proto/splat_sandbox.proto) is written and unused. `WslLeasedExecutor` has a `useVsock` flag defaulting to `false` |
