@@ -96,6 +96,22 @@ dpkg = show(call({
     "leaseDurationSeconds": 20,
 }, "exec"), "exec")
 
+print()
+print("== 5. EGRESS: permitted destination vs unleased destination ==")
+print("   The lease permits 127.0.0.1 only. curl to it must be allowed through (a refused")
+print("   connection is fine - that is the kernel PERMITTING the syscall); 1.1.1.1 must not.")
+egress_ok = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-egress-ok",
+    "command": "/usr/bin/curl", "arguments": "--max-time 3 -s -o /dev/null http://127.0.0.1/",
+    "leaseDurationSeconds": 20,
+}, "egress-allowed"), "egress-allowed")
+
+egress_bad = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-egress-bad",
+    "command": "/usr/bin/curl", "arguments": "--max-time 3 -s -o /dev/null http://1.1.1.1/",
+    "leaseDurationSeconds": 20,
+}, "egress-denied"), "egress-denied")
+
 def had(msgs, t):
     return any(m.get("type") == t for m in (msgs or []))
 
@@ -126,6 +142,51 @@ if mode_denied:
     print("    ^ denied by file mode, not by the lease - is this daemon running as root?")
 print(f"  unleased second exec blocked   : {had(dpkg, 'VIOLATION')}")
 print(f"  dpkg output leaked             : {'dpkg' in text(dpkg).lower() and 'version' in text(dpkg).lower()}")
+print()
+print(f"  egress to 127.0.0.1 permitted  : {not had(egress_ok, 'VIOLATION')}")
+print(f"  egress to 1.1.1.1 refused      : {had(egress_bad, 'VIOLATION')}")
+
+# A run that is not recorded is not proof - the same rule the canary follows.
+import datetime, os
+evidence = {
+    "schema": 1,
+    "recorded_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
+    "results": {
+        "permitted_tool_ran": "uid=" in text(allowed),
+        "protected_inode_leaked": leaked,
+        "protected_inode_violation": had(shadow, "VIOLATION"),
+        "unleased_second_exec_blocked": had(dpkg, "VIOLATION"),
+        "egress_permitted_destination_allowed": not had(egress_ok, "VIOLATION"),
+        "egress_unleased_destination_blocked": had(egress_bad, "VIOLATION"),
+    },
+    "violations": [
+        {k: m.get(k) for k in ("hook", "pid", "detail", "detailText", "comm") if k in m}
+        for m in (shadow or []) + (dpkg or []) + (egress_bad or [])
+        if m.get("type") == "VIOLATION"
+    ],
+}
+evidence["verdict"] = "PASS" if (
+    evidence["results"]["permitted_tool_ran"]
+    and not evidence["results"]["protected_inode_leaked"]
+    and evidence["results"]["protected_inode_violation"]
+    and evidence["results"]["unleased_second_exec_blocked"]
+    and evidence["results"]["egress_unleased_destination_blocked"]
+) else "INCOMPLETE"
+
+out_dir = os.environ.get("SPLAT_EVIDENCE_DIR", "/mnt/c/C_AGENT_BUILDER/native/splat-agent/evidence")
+try:
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, "daemon-probe.json")
+    with open(path, "w") as f:
+        json.dump(evidence, f, indent=2)
+        f.write(chr(10))
+    print()
+    print(f"  evidence written: {path}  (verdict {evidence['verdict']})")
+except OSError as e:
+    print()
+    print(f"  could not write evidence: {e}")
+
 print()
 if had(dpkg, "VIOLATION"):
     print("  >> Unleased exec was refused by the kernel. The pre_exec cgroup join is working:")
