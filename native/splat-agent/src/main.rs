@@ -469,20 +469,54 @@ async fn handle_client(
 
                 let (tx, mut rx) = mpsc::channel::<serde_json::Value>(64);
 
+                // The violation forwarder must end when the child does. It previously looped on a
+                // broadcast receiver that never closes while holding a clone of `tx`, so the pump
+                // below never saw the channel close: EXIT was never sent, the lease was never
+                // revoked at exit (only later by the expiry reaper), and every EXECUTE_TOOL hung
+                // until the client gave up. Requests that produced no output looked like silence.
+                let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
                 let tx_viol = tx.clone();
                 tokio::spawn(async move {
-                    while let Ok(v) = viol_rx.recv().await {
-                        if v.cgroup_id == target_cgid {
-                            let chunk = serde_json::json!({
-                                "type": "VIOLATION",
-                                "cgroupId": v.cgroup_id,
-                                "pid": v.pid,
-                                "hook": v.hook,
-                                "detail": v.detail,
-                                "detailText": v.detail_text,
-                                "comm": v.comm
-                            });
-                            let _ = tx_viol.send(chunk).await;
+                    loop {
+                        tokio::select! {
+                            _ = &mut done_rx => {
+                                // The ringbuf is polled on a ~100ms tick, so a denial that killed
+                                // the child can still be in flight as it exits. Wait briefly, then
+                                // flush whatever queued, so the last violation is not lost.
+                                tokio::time::sleep(Duration::from_millis(250)).await;
+                                while let Ok(v) = viol_rx.try_recv() {
+                                    if v.cgroup_id == target_cgid {
+                                        let chunk = serde_json::json!({
+                                            "type": "VIOLATION",
+                                            "cgroupId": v.cgroup_id,
+                                            "pid": v.pid,
+                                            "hook": v.hook,
+                                            "detail": v.detail,
+                                            "detailText": v.detail_text,
+                                            "comm": v.comm
+                                        });
+                                        let _ = tx_viol.send(chunk).await;
+                                    }
+                                }
+                                break;
+                            }
+                            recv = viol_rx.recv() => match recv {
+                                Ok(v) => {
+                                    if v.cgroup_id == target_cgid {
+                                        let chunk = serde_json::json!({
+                                            "type": "VIOLATION",
+                                            "cgroupId": v.cgroup_id,
+                                            "pid": v.pid,
+                                            "hook": v.hook,
+                                            "detail": v.detail,
+                                            "detailText": v.detail_text,
+                                            "comm": v.comm
+                                        });
+                                        let _ = tx_viol.send(chunk).await;
+                                    }
+                                }
+                                Err(_) => break,
+                            },
                         }
                     }
                 });
@@ -523,12 +557,22 @@ async fn handle_client(
 
                 drop(tx);
 
+                // Reap the child concurrently with pumping, and use its exit to release the
+                // violation forwarder. Waiting after the pump would deadlock: the pump cannot end
+                // until every sender is dropped, and the forwarder does not drop its sender until
+                // it learns the child is gone.
+                let waiter = tokio::spawn(async move {
+                    let status = child.wait().await;
+                    let _ = done_tx.send(());
+                    status
+                });
+
                 // Pump stream chunks to client
                 while let Some(msg) = rx.recv().await {
                     writer.write_all(format!("{msg}\n").as_bytes()).await?;
                 }
 
-                let status = child.wait().await?;
+                let status = waiter.await.context("join child reaper")??;
                 let exit_code = status.code().unwrap_or(-1);
 
                 let exit_chunk = serde_json::json!({

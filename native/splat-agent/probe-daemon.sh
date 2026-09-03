@@ -165,6 +165,7 @@ if silent:
 print(f"  egress to 127.0.0.1 permitted  : {answered(egress_ok) and not had(egress_ok, 'VIOLATION')}")
 print(f"  egress to 1.1.1.1 refused      : {had(egress_bad, 'VIOLATION')}")
 print(f"  network OFF denies 127.0.0.1   : {had(egress_off, 'VIOLATION')}")
+print(f"  every request sent EXIT        : {all(had(m, 'EXIT') for m in (allowed, shadow, dpkg, egress_ok, egress_bad, egress_off))}")
 
 # A run that is not recorded is not proof - the same rule the canary follows.
 import datetime, os
@@ -180,6 +181,11 @@ evidence = {
         "egress_permitted_destination_allowed": answered(egress_ok) and not had(egress_ok, "VIOLATION"),
         "egress_unleased_destination_blocked": had(egress_bad, "VIOLATION"),
         "egress_denied_when_network_off": had(egress_off, "VIOLATION"),
+        # The daemon once never sent EXIT at all: its violation forwarder held the stream open
+        # forever, so requests hung and the lease was only reclaimed by the expiry reaper.
+        "every_request_completed": all(
+            had(m, "EXIT") for m in (allowed, shadow, dpkg, egress_ok, egress_bad, egress_off)
+        ),
     },
     "violations": [
         {k: m.get(k) for k in ("hook", "pid", "detail", "detailText", "comm") if k in m}
@@ -199,6 +205,7 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["unleased_second_exec_blocked"]
     and evidence["results"]["egress_unleased_destination_blocked"]
     and evidence["results"]["egress_denied_when_network_off"]
+    and evidence["results"]["every_request_completed"]
 ) else "INCOMPLETE"
 
 out_dir = os.environ.get("SPLAT_EVIDENCE_DIR", "/mnt/c/C_AGENT_BUILDER/native/splat-agent/evidence")
