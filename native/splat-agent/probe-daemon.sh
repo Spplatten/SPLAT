@@ -106,13 +106,13 @@ egress_ok = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-egress-ok",
     "command": "/usr/bin/curl", "arguments": "--max-time 3 -s -o /dev/null http://127.0.0.1/",
     "allowNetwork": True, "leaseDurationSeconds": 20,
-}, "egress-allowed"), "egress-allowed")
+}, "egress-allowed", settle=6.0), "egress-allowed")
 
 egress_bad = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-egress-bad",
     "command": "/usr/bin/curl", "arguments": "--max-time 3 -s -o /dev/null http://1.1.1.1/",
     "allowNetwork": True, "leaseDurationSeconds": 20,
-}, "egress-denied"), "egress-denied")
+}, "egress-denied", settle=6.0), "egress-denied")
 
 print()
 print("== 6. EGRESS: the network switch OFF denies even the permitted address ==")
@@ -121,7 +121,7 @@ egress_off = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-egress-off",
     "command": "/usr/bin/curl", "arguments": "--max-time 3 -s -o /dev/null http://127.0.0.1/",
     "allowNetwork": False, "leaseDurationSeconds": 20,
-}, "egress-off"), "egress-off")
+}, "egress-off", settle=6.0), "egress-off")
 
 def had(msgs, t):
     return any(m.get("type") == t for m in (msgs or []))
@@ -154,7 +154,15 @@ if mode_denied:
 print(f"  unleased second exec blocked   : {had(dpkg, 'VIOLATION')}")
 print(f"  dpkg output leaked             : {'dpkg' in text(dpkg).lower() and 'version' in text(dpkg).lower()}")
 print()
-print(f"  egress to 127.0.0.1 permitted  : {not had(egress_ok, 'VIOLATION')}")
+# "No violation" is not the same as "allowed" - a request that never answered also has no
+# violation. Require the daemon to have actually said something before scoring it as permitted.
+def answered(msgs):
+    return bool(msgs)
+
+silent = [n for n, m in (("egress-allowed", egress_ok), ("egress-denied", egress_bad), ("egress-off", egress_off)) if not answered(m)]
+if silent:
+    print(f"  !! no response at all from: {', '.join(silent)} - cannot score these, raise settle")
+print(f"  egress to 127.0.0.1 permitted  : {answered(egress_ok) and not had(egress_ok, 'VIOLATION')}")
 print(f"  egress to 1.1.1.1 refused      : {had(egress_bad, 'VIOLATION')}")
 print(f"  network OFF denies 127.0.0.1   : {had(egress_off, 'VIOLATION')}")
 
@@ -169,7 +177,7 @@ evidence = {
         "protected_inode_leaked": leaked,
         "protected_inode_violation": had(shadow, "VIOLATION"),
         "unleased_second_exec_blocked": had(dpkg, "VIOLATION"),
-        "egress_permitted_destination_allowed": not had(egress_ok, "VIOLATION"),
+        "egress_permitted_destination_allowed": answered(egress_ok) and not had(egress_ok, "VIOLATION"),
         "egress_unleased_destination_blocked": had(egress_bad, "VIOLATION"),
         "egress_denied_when_network_off": had(egress_off, "VIOLATION"),
     },
