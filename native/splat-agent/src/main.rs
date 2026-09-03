@@ -3,13 +3,13 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use libbpf_rs::skel::{OpenSkel, Skel, SkelBuilder};
-use libbpf_rs::{MapCore, MapFlags, RingBufferBuilder};
+use libbpf_rs::{MapCore, MapFlags, MapHandle, RingBufferBuilder};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
@@ -46,42 +46,41 @@ struct Args {
     mock_bpf: bool,
 }
 
+/// Owned duplicates of the skeleton's lease maps.
+///
+/// The generated skeleton hands out `MapMut<'obj>`, which borrows the BPF object and so cannot be
+/// stored in a struct that outlives it — the four E0106 errors this replaced. `MapHandle` owns a
+/// dup'd file descriptor instead, freeing the lease driver from the skeleton's lifetime entirely.
+/// No `Mutex` either: every `MapCore` operation takes `&self`, and the kernel serialises map
+/// updates itself, so the lock only ever added contention and a poisoning failure mode.
 struct LiveBpfSync {
-    leased_cgroups: Arc<Mutex<libbpf_rs::Map>>,
-    protected_inodes: Arc<Mutex<libbpf_rs::Map>>,
-    allowed_exec_inodes: Arc<Mutex<libbpf_rs::Map>>,
-    allowed_connect_ipv4: Arc<Mutex<libbpf_rs::Map>>,
+    leased_cgroups: MapHandle,
+    protected_inodes: MapHandle,
+    allowed_exec_inodes: MapHandle,
+    allowed_connect_ipv4: MapHandle,
 }
 
 impl BpfMapSync for LiveBpfSync {
     fn add_lease(&self, lease: &lease::ActiveLease) -> Result<()> {
         let one: u8 = 1;
         self.leased_cgroups
-            .lock()
-            .unwrap()
             .update(&lease.cgroup_id.to_ne_bytes(), &[one], MapFlags::ANY)
             .context("update leased_cgroups")?;
 
         for key in &lease.protected_inodes {
             self.protected_inodes
-                .lock()
-                .unwrap()
                 .update(bytes_of(key), &[one], MapFlags::ANY)
                 .context("update protected_inodes")?;
         }
 
         for key in &lease.allowed_exec_inodes {
             self.allowed_exec_inodes
-                .lock()
-                .unwrap()
                 .update(bytes_of(key), &[one], MapFlags::ANY)
                 .context("update allowed_exec_inodes")?;
         }
 
         for ip in &lease.allowed_ips {
             self.allowed_connect_ipv4
-                .lock()
-                .unwrap()
                 .update(&ip.to_ne_bytes(), &[one], MapFlags::ANY)
                 .context("update allowed_connect_ipv4")?;
         }
@@ -90,15 +89,17 @@ impl BpfMapSync for LiveBpfSync {
     }
 
     fn remove_lease(&self, lease: &lease::ActiveLease) -> Result<()> {
-        let _ = self.leased_cgroups.lock().unwrap().delete(&lease.cgroup_id.to_ne_bytes());
+        // Teardown is best-effort by design: a key that is already gone is the desired end state,
+        // and a revoke must not abort partway and leave the rest of the lease live in the kernel.
+        let _ = self.leased_cgroups.delete(&lease.cgroup_id.to_ne_bytes());
         for key in &lease.protected_inodes {
-            let _ = self.protected_inodes.lock().unwrap().delete(bytes_of(key));
+            let _ = self.protected_inodes.delete(bytes_of(key));
         }
         for key in &lease.allowed_exec_inodes {
-            let _ = self.allowed_exec_inodes.lock().unwrap().delete(bytes_of(key));
+            let _ = self.allowed_exec_inodes.delete(bytes_of(key));
         }
         for ip in &lease.allowed_ips {
-            let _ = self.allowed_connect_ipv4.lock().unwrap().delete(&ip.to_ne_bytes());
+            let _ = self.allowed_connect_ipv4.delete(&ip.to_ne_bytes());
         }
         Ok(())
     }
@@ -149,13 +150,29 @@ async fn main() -> Result<()> {
                             }
                         }
 
-                        let sync_driver = LiveBpfSync {
-                            leased_cgroups: Arc::new(Mutex::new(skel.maps.leased_cgroups)),
-                            protected_inodes: Arc::new(Mutex::new(skel.maps.protected_inodes)),
-                            allowed_exec_inodes: Arc::new(Mutex::new(skel.maps.allowed_exec_inodes)),
-                            allowed_connect_ipv4: Arc::new(Mutex::new(skel.maps.allowed_connect_ipv4)),
-                        };
-                        bpf_sync = Some(Arc::new(sync_driver));
+                        // Dup each map fd out of the skeleton. Any failure here means the daemon
+                        // cannot enforce leases, so it must not silently fall through to a state
+                        // where missions run believing they are contained.
+                        match (
+                            MapHandle::try_from(&skel.maps.leased_cgroups),
+                            MapHandle::try_from(&skel.maps.protected_inodes),
+                            MapHandle::try_from(&skel.maps.allowed_exec_inodes),
+                            MapHandle::try_from(&skel.maps.allowed_connect_ipv4),
+                        ) {
+                            (Ok(leased_cgroups), Ok(protected_inodes), Ok(allowed_exec_inodes), Ok(allowed_connect_ipv4)) => {
+                                bpf_sync = Some(Arc::new(LiveBpfSync {
+                                    leased_cgroups,
+                                    protected_inodes,
+                                    allowed_exec_inodes,
+                                    allowed_connect_ipv4,
+                                }));
+                                info!("Lease maps bound; kernel enforcement is live.");
+                            }
+                            _ => error!(
+                                "Could not duplicate the BPF lease map descriptors. Leases will NOT \
+                                 be enforced in-kernel; refusing to report containment."
+                            ),
+                        }
                     }
                     Err(e) => warn!("Failed to attach BPF-LSM programs: {e}"),
                 },

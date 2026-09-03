@@ -299,6 +299,16 @@ public class DocumentationDriftTests
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
+    /// The shields.io badge at the top of the README states the same count in URL-encoded form
+    /// (<c>Tests-297%2F297%20passing</c>), which the prose regex above cannot see. It sat at 297
+    /// while the suite was at 342 - stale in the most prominent place in the repository, and missed
+    /// precisely because it did not spell out "automated tests".
+    /// </summary>
+    private static readonly Regex TestCountBadgeRegex = new(
+        @"Tests-(?<first>\d+)%2F(?<second>\d+)%20passing",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
     /// Every documented test count, from both spellings in use: "297/297 automated tests" in the
     /// README's status table and "340 automated tests" in the tutorial's prose. In the paired form
     /// both halves are held to the real number, since a passing suite means run and passed are equal.
@@ -316,12 +326,16 @@ public class DocumentationDriftTests
                 continue;
             }
 
-            foreach (Match match in TestCountClaimRegex.Matches(File.ReadAllText(full)))
+            string text = File.ReadAllText(full);
+            foreach (var regex in new[] { TestCountClaimRegex, TestCountBadgeRegex })
             {
-                claims.Add((relative, int.Parse(match.Groups["first"].Value)));
-                if (match.Groups["second"].Success)
+                foreach (Match match in regex.Matches(text))
                 {
-                    claims.Add((relative, int.Parse(match.Groups["second"].Value)));
+                    claims.Add((relative, int.Parse(match.Groups["first"].Value)));
+                    if (match.Groups["second"].Success)
+                    {
+                        claims.Add((relative, int.Parse(match.Groups["second"].Value)));
+                    }
                 }
             }
         }
