@@ -86,8 +86,8 @@ shadow = show(call({
 
 print()
 print("== 4. FORBIDDEN: exec a binary that is NOT on the lease allow-list (/usr/bin/dpkg) ==")
-print("   Known suspicion: the daemon spawns the tool and only then moves it into the leased")
-print("   cgroup, so the tool's OWN exec is not policed. If that is right, this SUCCEEDS.")
+print("   The tool now joins its cgroup in pre_exec, before exec, so bprm_check_security should")
+print("   see a leased cgroup id and refuse this. Expect a VIOLATION and no dpkg output.")
 dpkg = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-exec",
     "command": "/usr/bin/dpkg", "arguments": "--version",
@@ -124,11 +124,14 @@ if mode_denied:
     print("    ^ denied by file mode, not by the lease - is this daemon running as root?")
 print(f"  unleased exec was blocked      : {had(dpkg, 'VIOLATION')}")
 print()
-if not had(dpkg, "VIOLATION"):
-    print("  >> Unleased exec was NOT blocked. This confirms the spawn/attach ordering defect:")
-    print("     the tool execs before it joins the leased cgroup, so bprm_check_security sees")
-    print("     an unleased cgroup id and the exec allow-list never applies to the tool itself.")
+if had(dpkg, "VIOLATION"):
+    print("  >> Unleased exec was refused by the kernel. The pre_exec cgroup join is working:")
+    print("     the tool is inside its lease before bprm_check_security runs.")
+elif not had(shadow, "VIOLATION"):
+    print("  >> Nothing was refused by the kernel at all. Either this daemon is not running as")
+    print("     root, or no lease reached the maps - check its log for 'kernel enforcement is live'.")
 else:
-    print("  >> Unleased exec WAS blocked - the ordering concern does not apply as analysed.")
-    print("     Capture this output; it refutes a static reading of the spawn path.")
+    print("  >> File access was policed but the unleased exec was NOT. The tool is inside its")
+    print("     cgroup by the time it opens files, yet its own exec escaped the allow-list.")
+    print("     Capture this: it means the pre_exec join did not take effect before exec.")
 PY

@@ -1,4 +1,6 @@
 use std::mem::MaybeUninit;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::process::CommandExt as _;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Stdio;
@@ -273,15 +275,37 @@ async fn handle_client(
 
                 info!("Executing tool for mission {mission_id}: {command} {arguments}");
 
-                // 1. Provision Ephemeral Cgroup
-                let cg = match EphemeralCgroup::create(mission_id, 256 * 1024 * 1024, 50, 100) {
-                    Ok(c) => c,
+                // 1. Provision Ephemeral Cgroup.
+                //
+                // When the daemon is enforcing, a cgroup we could not create is a cgroup we cannot
+                // police, so the request is refused rather than run in the host's own cgroup. The
+                // previous fallback logged a warning and executed anyway under a fabricated
+                // cgroup_id of 1 - uncontained, while the caller was told the tool had run.
+                let (cg, cgroup_is_real) = match EphemeralCgroup::create(mission_id, 256 * 1024 * 1024, 50, 100) {
+                    Ok(c) => (c, true),
+                    Err(e) if lease_mgr.is_enforcing() => {
+                        error!("Refusing to execute for mission {mission_id}: cgroup creation failed: {e}");
+                        let err_chunk = serde_json::json!({
+                            "type": "STDERR",
+                            "data": format!("SPLAT refused to execute: no lease could be provisioned ({e}).\n")
+                        });
+                        writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                        let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                        writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                        line.clear();
+                        continue;
+                    }
                     Err(e) => {
-                        warn!("Could not create cgroup: {e}. Running in standard process namespace.");
-                        EphemeralCgroup {
-                            path: std::path::PathBuf::from("/tmp"),
-                            cgroup_id: 1,
-                        }
+                        // Not enforcing anyway (mock / unprivileged): the daemon has already said so
+                        // at startup, so running uncontained here is honest rather than misleading.
+                        warn!("Could not create cgroup: {e}. Not enforcing; running in standard process namespace.");
+                        (
+                            EphemeralCgroup {
+                                path: std::path::PathBuf::from("/tmp"),
+                                cgroup_id: 1,
+                            },
+                            false,
+                        )
                     }
                 };
 
@@ -313,6 +337,50 @@ async fn handle_client(
                 cmd.stdout(Stdio::piped());
                 cmd.stderr(Stdio::piped());
 
+                // Join the leased cgroup BETWEEN fork and exec.
+                //
+                // Attaching after spawn() returns is too late: bprm_check_security fires during the
+                // exec, when the process is still in the daemon's own cgroup, so `is_leased` was
+                // false and the exec allow-list never applied to the tool itself. It also left a
+                // window in which the tool ran wholly unleased. Doing it in pre_exec closes both.
+                //
+                // pre_exec runs in the forked child of a multithreaded process, so it must be
+                // async-signal-safe: no allocation, no locks. The path is turned into a CString in
+                // the parent, and writing "0" to cgroup.procs means "the calling process", which
+                // avoids formatting a pid here. Returning Err fails the spawn, so a tool that
+                // cannot be placed in its lease never executes.
+                if cgroup_is_real {
+                    let procs = cg.path.join("cgroup.procs");
+                    match std::ffi::CString::new(procs.as_os_str().as_bytes()) {
+                        Ok(procs_c) => unsafe {
+                            cmd.pre_exec(move || {
+                                let fd = libc::open(procs_c.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC);
+                                if fd < 0 {
+                                    return Err(std::io::Error::last_os_error());
+                                }
+                                let joined = libc::write(fd, b"0\n".as_ptr().cast(), 2);
+                                libc::close(fd);
+                                if joined < 0 {
+                                    return Err(std::io::Error::last_os_error());
+                                }
+                                Ok(())
+                            });
+                        },
+                        Err(e) => {
+                            error!("Refusing to execute for mission {mission_id}: cgroup path is not a valid C string: {e}");
+                            let err_chunk = serde_json::json!({
+                                "type": "STDERR",
+                                "data": "SPLAT refused to execute: the lease cgroup path could not be used.\n"
+                            });
+                            writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                            let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                            writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                            line.clear();
+                            continue;
+                        }
+                    }
+                }
+
                 let mut child = match cmd.spawn() {
                     Ok(c) => c,
                     Err(e) => {
@@ -332,9 +400,20 @@ async fn handle_client(
                     }
                 };
 
-                // Attach child PID to ephemeral cgroup
-                if let Some(pid) = child.id() {
-                    let _ = cg.attach_pid(pid);
+                // The child joined its cgroup in pre_exec, before exec, so there is nothing to attach
+                // here. Verify rather than assume: a tool running outside its lease must be visible,
+                // not silently tolerated the way the discarded attach_pid error used to be.
+                if cgroup_is_real {
+                    if let Some(pid) = child.id() {
+                        match cg.contains_pid(pid) {
+                            Ok(true) => {}
+                            Ok(false) => error!(
+                                "Mission {mission_id}: pid {pid} is NOT in its leased cgroup — it is \
+                                 running UNCONTAINED. Treat any output from it as ungoverned."
+                            ),
+                            Err(e) => warn!("Mission {mission_id}: could not verify cgroup membership for pid {pid}: {e}"),
+                        }
+                    }
                 }
 
                 let stdout = child.stdout.take();
@@ -426,4 +505,62 @@ async fn handle_client(
     }
 
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use std::ffi::CString;
+    use std::os::unix::process::CommandExt as _;
+
+    /// The containment property depends on the cgroup join landing BEFORE the exec, which is the
+    /// whole reason it moved into `pre_exec`. tokio's `pre_exec` delegates straight to std's, so
+    /// exercising it here tests the same mechanism the daemon uses, without needing root.
+    #[test]
+    fn pre_exec_side_effect_lands_before_the_child_execs() {
+        let path = std::env::temp_dir().join(format!("splat_pre_exec_{}", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let c = CString::new(path.to_str().unwrap()).unwrap();
+
+        let mut cmd = std::process::Command::new("/bin/true");
+        unsafe {
+            cmd.pre_exec(move || {
+                let fd = libc::open(
+                    c.as_ptr(),
+                    libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
+                    0o600 as libc::c_int,
+                );
+                if fd < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                let written = libc::write(fd, b"0\n".as_ptr().cast(), 2);
+                libc::close(fd);
+                if written < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+
+        let status = cmd.status().expect("spawn /bin/true");
+        assert!(status.success(), "child should have run");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("pre_exec wrote the file"),
+            "0\n",
+            "pre_exec must have written before the exec replaced the image"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Failing the join must fail the spawn. If this ever regresses, a tool that could not be placed
+    /// in its lease would run anyway - the fail-open shape this whole change exists to remove.
+    #[test]
+    fn pre_exec_failure_prevents_the_child_from_running() {
+        let mut cmd = std::process::Command::new("/bin/true");
+        unsafe {
+            cmd.pre_exec(|| Err(std::io::Error::from_raw_os_error(libc::EPERM)));
+        }
+        assert!(
+            cmd.status().is_err(),
+            "a failed cgroup join must abort the spawn, never execute uncontained"
+        );
+    }
 }

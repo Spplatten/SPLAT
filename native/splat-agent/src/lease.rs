@@ -98,6 +98,16 @@ impl LeaseManager {
         }
     }
 
+    /// Whether leases registered here actually reach the kernel.
+    ///
+    /// False in mock and unprivileged modes, where the daemon is openly a stub. Callers use this to
+    /// decide whether a containment failure is tolerable (dev run) or must refuse the work
+    /// (enforcing run) - the distinction that keeps "we could not contain it" from being logged as a
+    /// warning and then executed anyway.
+    pub fn is_enforcing(&self) -> bool {
+        self.bpf_sync.is_some()
+    }
+
     pub fn register_lease(
         &self,
         cgroup_id: u64,

@@ -56,6 +56,18 @@ impl EphemeralCgroup {
         fs::write(&procs, format!("{pid}\n")).with_context(|| format!("attach pid {pid} to {}", procs.display()))?;
         Ok(())
     }
+
+    /// Whether `pid` is a member of this cgroup.
+    ///
+    /// Used to confirm a tool really landed in its lease. Membership is what the BPF program keys
+    /// on via `bpf_get_current_cgroup_id`, so a process outside the cgroup is entirely unpoliced —
+    /// worth an explicit check rather than an assumption.
+    pub fn contains_pid(&self, pid: u32) -> Result<bool> {
+        let procs = self.path.join("cgroup.procs");
+        let body = fs::read_to_string(&procs)
+            .with_context(|| format!("read {}", procs.display()))?;
+        Ok(body.lines().any(|l| l.trim() == pid.to_string()))
+    }
 }
 
 impl Drop for EphemeralCgroup {
