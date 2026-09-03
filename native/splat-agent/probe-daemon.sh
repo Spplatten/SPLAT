@@ -68,10 +68,11 @@ print()
 # NOTE: the daemon splits `arguments` on whitespace, so no single argument may contain a
 # space - `-c cat /etc/shadow` becomes `sh -c cat` with the path as $0, and cat then reads
 # stdin and hangs. Every probe below therefore uses single-token arguments.
-print("== 2. PERMITTED: exec an allow-listed binary (/bin/sh) ==")
+print("== 2. PERMITTED: run the requested tool itself ==")
+print("   The lease allow-lists the command it was asked to run, so this must succeed.")
 allowed = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-allowed",
-    "command": "/bin/sh", "arguments": "-c id",
+    "command": "/usr/bin/id", "arguments": "",
     "leaseDurationSeconds": 20,
 }, "allowed"), "allowed")
 
@@ -85,12 +86,13 @@ shadow = show(call({
 }, "shadow"), "shadow")
 
 print()
-print("== 4. FORBIDDEN: exec a binary that is NOT on the lease allow-list (/usr/bin/dpkg) ==")
-print("   The tool now joins its cgroup in pre_exec, before exec, so bprm_check_security should")
-print("   see a leased cgroup id and refuse this. Expect a VIOLATION and no dpkg output.")
+print("== 4. FORBIDDEN: an ALLOWED tool reaching for an unleased binary ==")
+print("   /bin/sh is leased; dpkg is not. sh runs, then its exec of dpkg must be refused.")
+print("   Requesting dpkg directly would no longer test this - the daemon allow-lists whatever")
+print("   command it is asked to run, which is why the lease has to stop the SECOND exec.")
 dpkg = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-exec",
-    "command": "/usr/bin/dpkg", "arguments": "--version",
+    "command": "/bin/sh", "arguments": "-c dpkg",
     "leaseDurationSeconds": 20,
 }, "exec"), "exec")
 
@@ -117,12 +119,13 @@ leaked = "root:" in shadow_text
 # daemon running as root.
 mode_denied = "Permission denied" in shadow_text and not had(shadow, "VIOLATION")
 
-print(f"  permitted exec produced output : {'uid=' in text(allowed)}")
+print(f"  permitted tool ran             : {'uid=' in text(allowed)}")
 print(f"  /etc/shadow contents leaked    : {leaked}")
 print(f"  kernel VIOLATION for the read  : {had(shadow, 'VIOLATION')}")
 if mode_denied:
     print("    ^ denied by file mode, not by the lease - is this daemon running as root?")
-print(f"  unleased exec was blocked      : {had(dpkg, 'VIOLATION')}")
+print(f"  unleased second exec blocked   : {had(dpkg, 'VIOLATION')}")
+print(f"  dpkg output leaked             : {'dpkg' in text(dpkg).lower() and 'version' in text(dpkg).lower()}")
 print()
 if had(dpkg, "VIOLATION"):
     print("  >> Unleased exec was refused by the kernel. The pre_exec cgroup join is working:")

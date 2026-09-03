@@ -317,7 +317,22 @@ async fn handle_client(
                     allowed_egress_ports: vec![80, 443],
                     read_only_fs: false,
                     protected_paths: vec!["/etc/shadow".to_string(), "/etc/sudoers".to_string()],
-                    allowed_exec_paths: vec!["/bin/sh".to_string(), "/bin/ping".to_string(), "/usr/bin/curl".to_string()],
+                    // The tool the caller asked for must itself be executable, or the lease refuses
+                    // the very thing it was created to run. Before this, the list was the three
+                    // hardcoded entries alone, so every EXECUTE_TOOL for anything else died at exec
+                    // with a bare "Operation not permitted" - which read as a daemon bug rather than
+                    // as policy. The other three stay because a shell tool commonly reaches for them.
+                    allowed_exec_paths: {
+                        let mut paths = vec![
+                            "/bin/sh".to_string(),
+                            "/bin/ping".to_string(),
+                            "/usr/bin/curl".to_string(),
+                        ];
+                        if !paths.iter().any(|p| p == command) {
+                            paths.push(command.to_string());
+                        }
+                        paths
+                    },
                     lease_duration_seconds: duration_sec,
                     limits: lease::LeaseLimits {
                         max_memory_bytes: 256 * 1024 * 1024,
@@ -381,9 +396,42 @@ async fn handle_client(
                     }
                 }
 
+                // Subscribe BEFORE spawning. An exec refused by the LSM fails inside the child, so
+                // spawn() returns EPERM and the request ends here - if the subscription only began
+                // after a successful spawn, the kernel's own violation for that refusal would never
+                // reach the caller, who then cannot tell "the lease refused this" from "no such
+                // binary". That is exactly what the first root run showed.
+                let target_cgid = cg.cgroup_id;
+                let mut viol_rx = viol_tx.subscribe();
+
                 let mut child = match cmd.spawn() {
                     Ok(c) => c,
                     Err(e) => {
+                        if lease_mgr.is_enforcing() && e.raw_os_error() == Some(libc::EPERM) {
+                            // Give the ringbuf a moment to deliver the matching violation rather
+                            // than inferring one from errno - the kernel's event or nothing.
+                            let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
+                            while tokio::time::Instant::now() < deadline {
+                                match tokio::time::timeout(Duration::from_millis(60), viol_rx.recv()).await {
+                                    Ok(Ok(v)) if v.cgroup_id == target_cgid => {
+                                        let chunk = serde_json::json!({
+                                            "type": "VIOLATION",
+                                            "cgroupId": v.cgroup_id,
+                                            "pid": v.pid,
+                                            "hook": v.hook,
+                                            "detail": v.detail,
+                                            "detailText": v.detail_text,
+                                            "comm": v.comm
+                                        });
+                                        writer.write_all(format!("{chunk}\n").as_bytes()).await?;
+                                        break;
+                                    }
+                                    Ok(Ok(_)) => continue,
+                                    _ => break,
+                                }
+                            }
+                        }
+
                         let err_chunk = serde_json::json!({
                             "type": "STDERR",
                             "data": format!("Failed to spawn process '{command}': {e}\n")
@@ -421,9 +469,7 @@ async fn handle_client(
 
                 let (tx, mut rx) = mpsc::channel::<serde_json::Value>(64);
 
-                let target_cgid = cg.cgroup_id;
                 let tx_viol = tx.clone();
-                let mut viol_rx = viol_tx.subscribe();
                 tokio::spawn(async move {
                     while let Ok(v) = viol_rx.recv().await {
                         if v.cgroup_id == target_cgid {
