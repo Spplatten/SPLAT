@@ -97,20 +97,31 @@ dpkg = show(call({
 }, "exec"), "exec")
 
 print()
-print("== 5. EGRESS: permitted destination vs unleased destination ==")
-print("   The lease permits 127.0.0.1 only. curl to it must be allowed through (a refused")
-print("   connection is fine - that is the kernel PERMITTING the syscall); 1.1.1.1 must not.")
+print("== 5. EGRESS: allow-list, with the network switch ON ==")
+print("   allowNetwork must be true or the lease seeds NO addresses and denies everything -")
+print("   which would make the 1.1.1.1 case pass for the wrong reason. With it on, 127.0.0.1 is")
+print("   the one permitted destination (a refused connection is fine: the kernel PERMITTED the")
+print("   syscall), and 1.1.1.1 must be refused by the allow-list itself.")
 egress_ok = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-egress-ok",
     "command": "/usr/bin/curl", "arguments": "--max-time 3 -s -o /dev/null http://127.0.0.1/",
-    "leaseDurationSeconds": 20,
+    "allowNetwork": True, "leaseDurationSeconds": 20,
 }, "egress-allowed"), "egress-allowed")
 
 egress_bad = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-egress-bad",
     "command": "/usr/bin/curl", "arguments": "--max-time 3 -s -o /dev/null http://1.1.1.1/",
-    "leaseDurationSeconds": 20,
+    "allowNetwork": True, "leaseDurationSeconds": 20,
 }, "egress-denied"), "egress-denied")
+
+print()
+print("== 6. EGRESS: the network switch OFF denies even the permitted address ==")
+print("   allowNetwork false seeds no addresses at all, so deny-by-default must hold.")
+egress_off = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-egress-off",
+    "command": "/usr/bin/curl", "arguments": "--max-time 3 -s -o /dev/null http://127.0.0.1/",
+    "allowNetwork": False, "leaseDurationSeconds": 20,
+}, "egress-off"), "egress-off")
 
 def had(msgs, t):
     return any(m.get("type") == t for m in (msgs or []))
@@ -145,6 +156,7 @@ print(f"  dpkg output leaked             : {'dpkg' in text(dpkg).lower() and 've
 print()
 print(f"  egress to 127.0.0.1 permitted  : {not had(egress_ok, 'VIOLATION')}")
 print(f"  egress to 1.1.1.1 refused      : {had(egress_bad, 'VIOLATION')}")
+print(f"  network OFF denies 127.0.0.1   : {had(egress_off, 'VIOLATION')}")
 
 # A run that is not recorded is not proof - the same rule the canary follows.
 import datetime, os
@@ -159,10 +171,11 @@ evidence = {
         "unleased_second_exec_blocked": had(dpkg, "VIOLATION"),
         "egress_permitted_destination_allowed": not had(egress_ok, "VIOLATION"),
         "egress_unleased_destination_blocked": had(egress_bad, "VIOLATION"),
+        "egress_denied_when_network_off": had(egress_off, "VIOLATION"),
     },
     "violations": [
         {k: m.get(k) for k in ("hook", "pid", "detail", "detailText", "comm") if k in m}
-        for m in (shadow or []) + (dpkg or []) + (egress_bad or [])
+        for m in (shadow or []) + (dpkg or []) + (egress_bad or []) + (egress_off or [])
         if m.get("type") == "VIOLATION"
     ],
 }
@@ -177,6 +190,7 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["protected_inode_violation"]
     and evidence["results"]["unleased_second_exec_blocked"]
     and evidence["results"]["egress_unleased_destination_blocked"]
+    and evidence["results"]["egress_denied_when_network_off"]
 ) else "INCOMPLETE"
 
 out_dir = os.environ.get("SPLAT_EVIDENCE_DIR", "/mnt/c/C_AGENT_BUILDER/native/splat-agent/evidence")
