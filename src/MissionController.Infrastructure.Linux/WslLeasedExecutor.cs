@@ -61,7 +61,14 @@ public class WslLeasedExecutor : ILeasedExecutor
             await client.ConnectAsync(_host, _port, cts.Token);
             using var stream = client.GetStream();
             using var reader = new StreamReader(stream, Encoding.UTF8);
-            using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+            // UTF-8 WITHOUT a byte order mark. `Encoding.UTF8` emits one, so StreamWriter prepended
+            // EF BB BF to the first write and the daemon answered every request with
+            // "Invalid JSON request: expected value at line 1 column 1". A BOM is meaningless on a
+            // socket and fatal to a line-delimited JSON protocol.
+            using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
+            {
+                AutoFlush = true
+            };
 
             // 1. Serialize Lease Request Envelope
             var payload = new
@@ -216,10 +223,28 @@ public class WslLeasedExecutor : ILeasedExecutor
 
         try
         {
+            // Loopback only. This previously launched the daemon with `--listen 0.0.0.0:50051`,
+            // undoing the fix that made the daemon's own default loopback: the control plane that
+            // executes leased processes was reachable from the guest's network interfaces - and on
+            // the LAN under mirrored networking - as an unauthenticated way to run commands inside
+            // the sandbox. Binding a containment control plane to a wildcard address is never right.
+            //
+            // The binary is taken from the build's CARGO_TARGET_DIR (see run-daemon.sh) with the
+            // in-tree target/ as a fallback; the old path named only the latter, which the standard
+            // build never produces.
+            const string daemonPaths =
+                "/tmp/splat_agent_target/release/splat-agent " +
+                "/mnt/c/C_AGENT_BUILDER/native/splat-agent/target/release/splat-agent";
+
             var psi = new ProcessStartInfo
             {
                 FileName = "wsl.exe",
-                Arguments = "-u root -e /bin/bash -l -c \"export PATH=/root/.cargo/bin:$PATH; if ! pgrep -x splat-agent >/dev/null; then /mnt/c/C_AGENT_BUILDER/native/splat-agent/target/release/splat-agent --listen 0.0.0.0:50051 >/tmp/splat-agent.log 2>&1 & fi\"",
+                Arguments =
+                    "-u root -e /bin/bash -l -c \"export PATH=/root/.cargo/bin:$PATH; " +
+                    "if ! pgrep -x splat-agent >/dev/null; then " +
+                    $"for d in {daemonPaths}; do " +
+                    "[ -x \\\"$d\\\" ] && { \\\"$d\\\" --listen 127.0.0.1:50051 >/tmp/splat-agent.log 2>&1 & break; }; " +
+                    "done; fi\"",
                 UseShellExecute = false,
                 CreateNoWindow = true
             };

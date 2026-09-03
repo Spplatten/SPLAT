@@ -33,6 +33,17 @@ use cow::OverlayWorkspace;
 use lease::{bytes_of, BpfMapSync, LeaseConfig, LeaseManager};
 use violation::{RawViolationEvent, ViolationEvent};
 
+/// Reads a JSON array of strings from a request, distinguishing "absent" from "empty".
+///
+/// That distinction is the whole point: an absent key means the caller expressed no policy and a
+/// default applies, while an empty array means the caller explicitly permitted nothing. Collapsing
+/// them would turn "deny everything" into "use the defaults".
+fn string_list(v: &serde_json::Value, key: &str) -> Option<Vec<String>> {
+    v.get(key)?
+        .as_array()
+        .map(|a| a.iter().filter_map(|e| e.as_str().map(str::to_string)).collect())
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about = "SPLAT Layer-2 Resident eBPF Daemon")]
 struct Args {
@@ -313,10 +324,30 @@ async fn handle_client(
                     mission_id: mission_id.to_string(),
                     working_directory: work_dir.to_string(),
                     allow_network: parsed.get("allowNetwork").and_then(|v| v.as_bool()).unwrap_or(false),
-                    allowed_egress_ips: vec!["127.0.0.1".to_string()],
-                    allowed_egress_ports: vec![80, 443],
-                    read_only_fs: false,
-                    protected_paths: vec!["/etc/shadow".to_string(), "/etc/sudoers".to_string()],
+                    // The caller's declared policy is the lease. These were hardcoded, so a governed
+                    // template could name its one approved destination and the kernel would never
+                    // hear about it - the 1:1:1 rule held on the Windows side and evaporated here.
+                    // An absent key keeps the old default so the local probe still works; an empty
+                    // list is honoured as "nothing permitted" rather than silently widened.
+                    allowed_egress_ips: string_list(&parsed, "allowedEgressIps")
+                        .unwrap_or_else(|| vec!["127.0.0.1".to_string()]),
+                    allowed_egress_ports: parsed
+                        .get("allowedEgressPorts")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.iter().filter_map(|p| p.as_u64().map(|n| n as u32)).collect())
+                        .unwrap_or_else(|| vec![80, 443]),
+                    read_only_fs: parsed.get("readOnlyFs").and_then(|v| v.as_bool()).unwrap_or(false),
+                    // Union, never replacement: a caller may add protected paths but must not be
+                    // able to unprotect the ones this daemon always guards.
+                    protected_paths: {
+                        let mut paths = vec!["/etc/shadow".to_string(), "/etc/sudoers".to_string()];
+                        for extra in string_list(&parsed, "protectedPaths").unwrap_or_default() {
+                            if !paths.contains(&extra) {
+                                paths.push(extra);
+                            }
+                        }
+                        paths
+                    },
                     // The tool the caller asked for must itself be executable, or the lease refuses
                     // the very thing it was created to run. Before this, the list was the three
                     // hardcoded entries alone, so every EXECUTE_TOOL for anything else died at exec
@@ -334,10 +365,23 @@ async fn handle_client(
                         paths
                     },
                     lease_duration_seconds: duration_sec,
-                    limits: lease::LeaseLimits {
-                        max_memory_bytes: 256 * 1024 * 1024,
-                        max_cpu_percent: 50,
-                        max_pids: 50,
+                    // Clamps come from the caller too, but only downwards: a request may ask for
+                    // less than the daemon's ceiling, never more. A lease is a grant, not a
+                    // negotiation - letting the caller raise its own limits would make the clamp
+                    // advisory.
+                    limits: {
+                        let l = parsed.get("limits");
+                        let get_u64 = |k: &str, ceiling: u64| {
+                            l.and_then(|v| v.get(k))
+                                .and_then(|v| v.as_u64())
+                                .map(|n| n.min(ceiling))
+                                .unwrap_or(ceiling)
+                        };
+                        lease::LeaseLimits {
+                            max_memory_bytes: get_u64("maxMemoryBytes", 256 * 1024 * 1024),
+                            max_cpu_percent: get_u64("maxCpuPercent", 50) as u32,
+                            max_pids: get_u64("maxPids", 50) as u32,
+                        }
                     },
                 };
 
