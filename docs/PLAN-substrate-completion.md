@@ -21,7 +21,7 @@ Re-verify before building on any line of this — the tree is shared and moves u
 | Piece | Real state |
 | :--- | :--- |
 | BPF-LSM program + hooks | Built. `bprm_check_security`, `file_open`, `socket_connect` in [lease_lsm.bpf.c](../native/splat-agent/src/bpf/lease_lsm.bpf.c) |
-| Resident daemon | **Enforcing, proven under root** (2026-09-03). Fixed in three steps: owned `MapHandle`s so it compiles; the cgroup join moved into `pre_exec` so the tool's own exec is policed; and the requested tool added to the exec allow-list. A tool it spawned as uid 0 was then denied `/etc/shadow` and denied an unleased second exec, both by the kernel |
+| Resident daemon | **Enforcing, proven under root** (2026-09-03). Fixed in three steps: owned `MapHandle`s so it compiles; the cgroup join moved into `pre_exec` so the tool's own exec is policed; and the requested tool added to the exec allow-list. A tool it spawned as uid 0 was then denied `/etc/shadow`, denied an unleased second exec, and held to a one-address egress allow-list - all three hooks, recorded in `evidence/daemon-probe.json` |
 | Canary harness | **Asserts, and has passed** (2026-09-03). Computes a verdict from the ringbuf events, writes `evidence/canary-<kernel>.json`, exits non-zero on a bad run. First passing run is committed; Gate 0 is closed |
 | `(dev, ino)` map key | **Fixed** (2026-09-02). Userspace passed `st_dev` where the kernel builds `(major << 20) \| minor`, so every lookup missed — exec failed closed, protected inodes failed **open**. Same bug fixed in the daemon's `lease.rs` |
 | OverlayFS CoW | `setup`/`teardown` implemented ([cow.rs](../native/splat-agent/src/cow.rs)); not yet driven per mission from the host |

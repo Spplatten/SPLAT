@@ -189,6 +189,53 @@ public class DocumentationDriftTests
             "re-run native/splat-canary/run-canary.sh so the proof describes the code that ships.");
     }
 
+    /// <summary>
+    /// The canary proves the BPF program under its own loader; this proves the daemon that carries
+    /// it into the product. They are separate claims, so they get separate evidence and separate
+    /// checks — the README may only describe the daemon as enforcing while a passing probe record
+    /// says so, and must not while one does not.
+    /// </summary>
+    [Fact]
+    public void TheDaemonEnforcementClaim_MatchesItsProbeEvidence()
+    {
+        string readme = ReadmeText();
+        string file = Path.Combine(RepositoryRoot(), "native", "splat-agent", "evidence", "daemon-probe.json");
+
+        bool claimsEnforcing = readme.Contains("Enforcing, proven under root", StringComparison.OrdinalIgnoreCase);
+        bool proven = false;
+
+        if (File.Exists(file))
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(file));
+            var root = doc.RootElement;
+            proven = string.Equals(
+                root.TryGetProperty("verdict", out var v) ? v.GetString() : null,
+                "PASS",
+                StringComparison.OrdinalIgnoreCase);
+
+            if (proven && root.TryGetProperty("results", out var results))
+            {
+                // A PASS verdict is only as good as the properties behind it. Re-check the two that
+                // matter most here, so a future loosening of the probe's own criteria cannot quietly
+                // promote the README's claim.
+                foreach (var required in new[] { "protected_inode_violation", "unleased_second_exec_blocked" })
+                {
+                    if (!results.TryGetProperty(required, out var r) || !r.GetBoolean())
+                    {
+                        proven = false;
+                    }
+                }
+            }
+        }
+
+        Assert.True(
+            claimsEnforcing == proven,
+            proven
+                ? $"{file} records a passing daemon probe, but the README does not describe the daemon as enforcing."
+                : $"The README describes the daemon as enforcing, but {file} does not record a passing probe. "
+                  + "Run native/splat-agent/probe-daemon.sh against a root daemon, or withdraw the claim.");
+    }
+
     // ---------------------------------------------------------------- evidence helpers
 
     private sealed record KernelProof(string File, string Verdict, string KernelRelease);

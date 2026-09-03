@@ -54,8 +54,14 @@ impl ViolationEvent {
     }
 }
 
+/// Renders the raw `sin_addr.s_addr` word the kernel reports back into dotted quad.
+///
+/// Must mirror [`ipv4_to_be_u32`] exactly: the octets sit in memory order, so they are read with
+/// `to_ne_bytes`. Using `to_be_bytes` here reversed them on a little-endian host, and the denial of
+/// 127.0.0.1 was recorded as "1.0.0.127" — in the audit ledger, which is the one place a wrong
+/// address is worst. 1.1.1.1 hid it, being a byte-palindrome.
 pub fn be_u32_to_ipv4(be: u32) -> String {
-    let b = be.to_be_bytes();
+    let b = be.to_ne_bytes();
     format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
 }
 
@@ -98,6 +104,16 @@ mod tests {
         let v = ipv4_to_be_u32("127.0.0.1").unwrap();
         assert_eq!(v.to_ne_bytes(), [127, 0, 0, 1], "octets must survive in memory order");
         assert_ne!(v, 2_130_706_433, "0x7F000001 is the swapped form the kernel never looks up");
+    }
+
+    /// The formatter and the parser must be inverses. They were not: a denial of 127.0.0.1 was
+    /// written into the ledger as "1.0.0.127".
+    #[test]
+    fn rendering_round_trips_with_parsing() {
+        for addr in ["127.0.0.1", "1.1.1.1", "10.20.30.40", "8.8.8.8"] {
+            let raw = ipv4_to_be_u32(addr).unwrap();
+            assert_eq!(be_u32_to_ipv4(raw), addr, "{addr} must survive parse then render");
+        }
     }
 
     #[test]

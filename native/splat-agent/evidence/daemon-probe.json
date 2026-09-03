@@ -1,45 +1,53 @@
 {
   "schema": 1,
-  "recorded_utc": "2026-09-03T16:59:04Z",
+  "recorded_utc": "2026-09-03T17:02:58Z",
   "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
   "results": {
     "permitted_tool_ran": true,
     "protected_inode_leaked": false,
     "protected_inode_violation": true,
     "unleased_second_exec_blocked": true,
-    "egress_permitted_destination_allowed": false,
+    "egress_permitted_destination_allowed": true,
     "egress_unleased_destination_blocked": true,
-    "egress_denied_when_network_off": false
+    "egress_denied_when_network_off": true,
+    "every_request_completed": true
   },
   "violations": [
     {
       "hook": 2,
-      "pid": 8308,
+      "pid": 8540,
       "detail": 44904,
       "detailText": "file_open: denied access to protected sensitive file (inode 44904)",
       "comm": "cat"
     },
     {
       "hook": 1,
-      "pid": 8310,
+      "pid": 8542,
       "detail": 1633,
       "detailText": "bprm_check_security: denied execution of unleased binary (inode 1633)",
       "comm": "sh"
     },
     {
       "hook": 1,
-      "pid": 8310,
+      "pid": 8542,
       "detail": 1633,
       "detailText": "bprm_check_security: denied execution of unleased binary (inode 1633)",
       "comm": "sh"
     },
     {
       "hook": 3,
-      "pid": 8312,
+      "pid": 8544,
       "detail": 16843009,
       "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 1.1.1.1",
       "comm": "curl"
+    },
+    {
+      "hook": 3,
+      "pid": 8545,
+      "detail": 16777343,
+      "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 1.0.0.127",
+      "comm": "curl"
     }
   ],
-  "verdict": "INCOMPLETE"
+  "verdict": "PASS"
 }
