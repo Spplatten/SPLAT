@@ -67,5 +67,42 @@ pub fn ipv4_to_be_u32(s: &str) -> anyhow::Result<u32> {
     if parts.len() != 4 {
         anyhow::bail!("invalid IPv4 address: {s}");
     }
-    Ok(u32::from_ne_bytes([parts[0], parts[1], parts[2], parts[3]]).to_be())
+    // No byte swap. The BPF program reads sin_addr.s_addr straight out of the sockaddr, where the
+    // address already sits in network order, and keys the map on that raw u32. Reading those bytes
+    // on a little-endian host yields 127.0.0.1 as 0x0100007F. The `.to_be()` that used to be here
+    // produced 0x7F000001 instead, so the seeded allow-list never matched what the kernel looked up
+    // and EVERY destination was refused - including the one the lease existed to permit.
+    //
+    // Third instance of the same failure in this codebase: userspace and kernel disagreeing about an
+    // encoding, with nothing comparing the two. See kernel_dev_from_st_dev in lease.rs for the first.
+    Ok(u32::from_ne_bytes([parts[0], parts[1], parts[2], parts[3]]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pinned to the values the kernel actually reported on 2026-09-03. The daemon denied its own
+    /// permitted destination because it seeded 0x7F000001 while the ringbuf reported 0x0100007F for
+    /// the same address — the byte order the BPF program keys on.
+    #[test]
+    fn ipv4_matches_the_raw_sockaddr_byte_order() {
+        assert_eq!(ipv4_to_be_u32("127.0.0.1").unwrap(), 16_777_343); // 0x0100007F
+        assert_eq!(ipv4_to_be_u32("1.1.1.1").unwrap(), 16_843_009); // 0x01010101
+    }
+
+    /// The daemon and the canary must agree; they load the same BPF program, so a divergence here
+    /// means one of them silently enforces a different policy than the other.
+    #[test]
+    fn encoding_is_the_raw_octet_order_not_the_swapped_one() {
+        let v = ipv4_to_be_u32("127.0.0.1").unwrap();
+        assert_eq!(v.to_ne_bytes(), [127, 0, 0, 1], "octets must survive in memory order");
+        assert_ne!(v, 2_130_706_433, "0x7F000001 is the swapped form the kernel never looks up");
+    }
+
+    #[test]
+    fn rejects_malformed_addresses() {
+        assert!(ipv4_to_be_u32("1.2.3").is_err());
+        assert!(ipv4_to_be_u32("300.1.1.1").is_err());
+    }
 }

@@ -29,7 +29,7 @@ This is **blast-radius containment, not detection**. SPLAT does not claim to kno
 | Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 342/342 automated tests passing |
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 9 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining seven run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
-| Linux lease daemon (`splat-agent`) | **Enforcing, proven under root** — a tool it spawned as uid 0 was denied `/etc/shadow` (`file_open`) and denied an unleased second exec (`bprm_check_security`), both by the kernel. Egress enforcement through the daemon is covered by the probe but not yet recorded |
+| Linux lease daemon (`splat-agent`) | **Enforcing, proven under root** — a tool it spawned as uid 0 was denied `/etc/shadow` (`file_open`) and denied an unleased second exec (`bprm_check_security`), both by the kernel. Egress was the one hook still unproven here, and the run that tested it found the daemon refusing its OWN permitted destination - fixed, awaiting a re-run |
 | VSOCK low-latency RPC transport | **Roadmap** — design notes in internal docs |
 
 That table is the contract: nothing above it is aspirational, and nothing below it is hidden.

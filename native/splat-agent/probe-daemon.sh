@@ -166,8 +166,13 @@ evidence = {
         if m.get("type") == "VIOLATION"
     ],
 }
+# Every permitted action must succeed AND every forbidden one must be refused. Leaving the
+# permitted-egress check out of this - as the first version of this verdict did - let a lease that
+# denied EVERYTHING report PASS, which is the same "harness that cannot fail" the canary was fixed
+# for. Refusals alone prove the hooks fire, not that the policy is right.
 evidence["verdict"] = "PASS" if (
     evidence["results"]["permitted_tool_ran"]
+    and evidence["results"]["egress_permitted_destination_allowed"]
     and not evidence["results"]["protected_inode_leaked"]
     and evidence["results"]["protected_inode_violation"]
     and evidence["results"]["unleased_second_exec_blocked"]
