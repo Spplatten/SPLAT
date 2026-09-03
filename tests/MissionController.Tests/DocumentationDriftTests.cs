@@ -107,8 +107,12 @@ public class DocumentationDriftTests
     /// Each phrase below was in the README while the code said otherwise.
     /// </summary>
     [Theory]
-    // The BPF key holds the inode number alone; there is no device field in struct inode_key.
-    [InlineData("`(dev, ino)` inode identity")]
+    // NOTE: "`(dev, ino)` inode identity" was guarded here while struct inode_key was believed to
+    // hold the inode alone. It always had a dev field - the defect was that userspace seeded it
+    // with glibc's st_dev while the kernel keys on (major << 20) | minor, so every lookup missed.
+    // Fixed and proven by the canary on 2026-09-03, so the phrase is now accurate and no longer
+    // guarded. Retiring a guard needs the same evidence as making the claim.
+    //
     // True only on an incremental build; a cold build emits 186 MVVMTK0045 warnings.
     [InlineData("zero compiler warnings across the solution")]
     // fs_read/fs_write run on the Windows control plane, and run_command depends on a substrate
@@ -120,17 +124,121 @@ public class DocumentationDriftTests
     }
 
     /// <summary>
-    /// The README states the Linux substrate is unproven in several places. If the canary run ever
-    /// lands, these qualifications should be removed deliberately - and this test is where someone
-    /// will be reminded to do it, rather than leaving a shipped capability described as pending.
+    /// Binds the substrate's documented status to the recorded canary evidence, in both directions:
+    /// describing it as pending while valid proof exists understates the product, and describing it
+    /// as proven without evidence is the overclaim this repository exists to avoid.
+    ///
+    /// This replaced a test that only asserted the README still said "In bring-up" - which locked in
+    /// the pending wording and would have kept it there after the proof landed.
     /// </summary>
     [Fact]
-    public void TheLinuxSubstrateIsStillDescribedAsUnproven_UntilTheCanaryRunIsRecorded()
+    public void TheSubstrateProofState_MatchesWhatTheDocumentsClaim()
     {
         string readme = ReadmeText();
+        var proof = CurrentKernelProof();
 
-        Assert.Contains("In bring-up", readme, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("canary", readme, StringComparison.OrdinalIgnoreCase);
+        // Phrases that assert the -EPERM run has NOT happened yet. Kept literal so a rewording is a
+        // deliberate act rather than something this test silently stops noticing.
+        string[] pendingClaims =
+        {
+            "canary `-EPERM` run is the next gate",
+            "execution proof is pending",
+            "not yet proven in operation",
+        };
+
+        var stale = pendingClaims.Where(p => readme.Contains(p, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (proof is not null)
+        {
+            Assert.True(
+                stale.Count == 0,
+                $"Evidence at {proof.File} records a {proof.Verdict} run on kernel {proof.KernelRelease}, " +
+                $"but the README still says: {string.Join(" / ", stale)}. Update the documented status.");
+        }
+        else
+        {
+            Assert.True(
+                stale.Count > 0,
+                "No passing canary evidence matches the current BPF source, so the README must still " +
+                "describe the Linux substrate as unproven. Record a run, or restore the qualification.");
+        }
+    }
+
+    /// <summary>
+    /// Evidence proves the program that produced it, not whatever the program later became. The
+    /// canary records the SHA-256 of the BPF source it ran; if that source changes, the old evidence
+    /// stops counting and <see cref="TheSubstrateProofState_MatchesWhatTheDocumentsClaim"/> reverts
+    /// to demanding the pending wording until someone re-runs it.
+    /// </summary>
+    [Fact]
+    public void CommittedKernelEvidence_IsEitherAbsentOrMatchesItsBpfSource()
+    {
+        var files = EvidenceFiles();
+        if (files.Count == 0)
+        {
+            return; // Nothing recorded yet is a valid state; the test above enforces the wording.
+        }
+
+        string currentSha = BpfSourceSha256();
+        var matching = files.Where(f => ReadJsonString(f, "bpf_source_sha256") == currentSha).ToList();
+
+        Assert.True(
+            matching.Count > 0,
+            $"{files.Count} evidence file(s) exist but none names the current BPF source " +
+            $"({currentSha[..12]}…). The kernel program changed after the last recorded run — " +
+            "re-run native/splat-canary/run-canary.sh so the proof describes the code that ships.");
+    }
+
+    // ---------------------------------------------------------------- evidence helpers
+
+    private sealed record KernelProof(string File, string Verdict, string KernelRelease);
+
+    private static string EvidenceDir() =>
+        Path.Combine(RepositoryRoot(), "native", "splat-canary", "evidence");
+
+    private static List<string> EvidenceFiles() =>
+        Directory.Exists(EvidenceDir())
+            ? Directory.GetFiles(EvidenceDir(), "*.json").ToList()
+            : new List<string>();
+
+    private static string BpfSourceSha256()
+    {
+        string path = Path.Combine(RepositoryRoot(), "native", "splat-canary", "src", "bpf", "lease_lsm.bpf.c");
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        // The canary hashes the file's bytes via sha256sum, so hash bytes here too - reading it as
+        // text would let a line-ending normalisation quietly change the digest.
+        return Convert.ToHexString(sha.ComputeHash(File.ReadAllBytes(path))).ToLowerInvariant();
+    }
+
+    private static string? ReadJsonString(string file, string property)
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(file));
+        return doc.RootElement.TryGetProperty(property, out var v) ? v.GetString() : null;
+    }
+
+    /// <summary>The passing run, if any, that proves the BPF source currently in the tree.</summary>
+    private static KernelProof? CurrentKernelProof()
+    {
+        string currentSha = BpfSourceSha256();
+        foreach (var file in EvidenceFiles())
+        {
+            if (ReadJsonString(file, "bpf_source_sha256") != currentSha)
+            {
+                continue;
+            }
+
+            if (!string.Equals(ReadJsonString(file, "verdict"), "PASS", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return new KernelProof(
+                Path.GetFileName(file),
+                "PASS",
+                ReadJsonString(file, "kernel_release") ?? "unknown");
+        }
+
+        return null;
     }
 
     /// <summary>

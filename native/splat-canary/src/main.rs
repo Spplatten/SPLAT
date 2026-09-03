@@ -115,6 +115,17 @@ fn read_trimmed(path: &str) -> String {
         .unwrap_or_else(|_| "unavailable".to_string())
 }
 
+/// The active LSM list corroborates the run but is not what proves it: securityfs has to be mounted
+/// by hand and does not survive a WSL restart, so it is often absent. Say which, rather than logging
+/// a bare "unavailable" that reads like a defect. The load-bearing proof is that the program
+/// attached at all - the kernel refuses to load a BPF-LSM program when `bpf` is not in the list.
+fn active_lsms() -> String {
+    if !Path::new("/sys/kernel/security").exists() {
+        return "unavailable (securityfs not mounted)".to_string();
+    }
+    read_trimmed("/sys/kernel/security/lsm")
+}
+
 // Mirror of `struct inode_key` in the BPF program (repr(C), same field order/padding).
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -358,7 +369,7 @@ fn write_evidence(
          \"violations\": [\n{}\n  ],\n  \"failures\": [\n{}\n  ]\n}}\n",
         utc_now(),
         json_escape(&kernel),
-        json_escape(&read_trimmed("/sys/kernel/security/lsm")),
+        json_escape(&active_lsms()),
         Path::new("/sys/kernel/btf/vmlinux").exists(),
         json_escape(&args.bpf_sha),
         violations_json,

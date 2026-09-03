@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "verdict": "PASS",
+  "recorded_utc": "2026-09-03T15:53:43Z",
+  "kernel_release": "6.18.33.2-microsoft-standard-WSL2",
+  "active_lsms": "unavailable",
+  "btf_present": true,
+  "cgroup_id": 2571,
+  "bpf_source_sha256": "0d222b9820333167871efa68d28a5974154adca26f2e0f695eaec92d9297c9fa",
+  "canary_exit_code": 0,
+  "violations": [
+    { "hook": "open", "pid": 5704, "detail": 44904, "comm": "cat", "described": "open denied (inode 44904)" },
+    { "hook": "connect", "pid": 5705, "detail": 16843009, "comm": "curl", "described": "connect denied (dst 1.1.1.1)" },
+    { "hook": "exec", "pid": 5706, "detail": 1633, "comm": "sh", "described": "exec denied (inode 1633)" }
+  ],
+  "failures": [
+
+  ]
+}
