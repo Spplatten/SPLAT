@@ -38,16 +38,23 @@ the **SHA-256 of the BPF source that produced them** — so the proof cannot out
 the kernel still refused it `/etc/shadow`, and still refused an allow-listed `/bin/sh` its exec of an
 unleased binary.
 
+**And it holds end-to-end through the daemon's own protocol.** A second recorded run drove the daemon
+over its JSON protocol and returned PASS on every check: the permitted tool ran, the protected inode
+was refused and never leaked, an unleased second exec was blocked, the leased destination was allowed
+while an unleased one was refused, egress was denied with networking off, and every request completed.
+
 **The documentation cannot drift away from the evidence.** An automated test fails the build if the
 docs claim the substrate is pending while passing evidence exists, *and* fails if they drop the
-qualification when it does not — in both directions. 343 automated tests currently pass.
+qualification when it does not — in both directions. 347 automated tests currently pass.
 
 ---
 
 ## What is NOT proven — stated plainly
 
-- **The last hop.** No request has yet travelled from the MCP tools through the bridge into the lease
-  daemon. Until one does, treat the general-purpose `run_command` / `run_code` path as uncontained.
+- **The last hop.** The C# bridge now round-trips a real tool to the daemon and returns its output,
+  with four wire tests pinning the behaviour. What has *not* been demonstrated is a request
+  originating from the MCP tools — `run_command` / `run_code` — travelling that path. Treat those
+  two tools as uncontained until one does.
 - **The audit ledger is unkeyed.** Editing a historical row breaks the hash chain verifiably. It does
   **not** stop a determined local administrator from deleting the tail and recomputing. This is
   integrity against accident and casual editing, not against an adversary with write access.
