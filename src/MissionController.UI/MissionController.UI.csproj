@@ -15,6 +15,25 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+
+    <!--
+      MVVMTK0045: [ObservableProperty] on a field is not AOT-safe for WinRT. It fires 93 times here,
+      once per observable field across the nine ViewModels, and it was the entire warning output of a
+      cold solution build - drowning any real warning that might appear.
+
+      Suppressed rather than migrated, deliberately. The fix is partial properties, and the MVVM
+      Toolkit's generator emits no implementation for them under this project's language version:
+      converting one ViewModel produced CS9248 ("must have an implementation part") on every property,
+      including one with no initializer, and CS8050 on those with initializers. Both clear only under
+      <LangVersion>preview</LangVersion>. Putting a security product on unreleased language features to
+      silence an advisory warning is the worse trade.
+
+      The warning describes a scenario this project does not use: there is no PublishAot, no
+      PublishTrimmed, and no publish profile anywhere in the repository. UiWarningSuppressionTests
+      binds this suppression to that fact and fails the build if AOT or trimming is ever switched on,
+      so the day the scenario becomes real, this comment stops being true out loud instead of quietly.
+    -->
+    <NoWarn>$(NoWarn);MVVMTK0045</NoWarn>
   </PropertyGroup>
 
   <Import Project="Effects\Win2D\MissionController.Win2D.props" Condition="Exists('Effects\Win2D\MissionController.Win2D.props')" />
