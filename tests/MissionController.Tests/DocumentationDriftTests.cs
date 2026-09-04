@@ -170,6 +170,148 @@ public class DocumentationDriftTests
     /// stops counting and <see cref="TheSubstrateProofState_MatchesWhatTheDocumentsClaim"/> reverts
     /// to demanding the pending wording until someone re-runs it.
     /// </summary>
+    /// <summary>
+    /// Binds every documented latency figure to the committed benchmark, because the enterprise
+    /// brief carried an unmeasured "sub-millisecond" claim for months and the measurement, once
+    /// taken, came back at roughly four times that. A number nobody ran is not a small error in a
+    /// document a prospect can check.
+    ///
+    /// Guards the direction that actually bites: a doc may not promise sub-millisecond tool calls
+    /// unless committed evidence records a p50 overhead under 1 ms. It does not force the docs to
+    /// quote a figure at all - silence about performance is always honest.
+    /// </summary>
+    [Fact]
+    public void NoDocumentPromisesSubMillisecondCalls_UnlessTheBenchmarkRecordsIt()
+    {
+        double? measuredP50 = null;
+        string benchDir = Path.Combine(RepositoryRoot(), "src", "splat-bench", "evidence");
+
+        if (Directory.Exists(benchDir))
+        {
+            foreach (string file in Directory.EnumerateFiles(benchDir, "bench-*.json"))
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(file));
+                var root = doc.RootElement;
+
+                bool passed = string.Equals(
+                    root.TryGetProperty("verdict", out var v) ? v.GetString() : null,
+                    "PASS",
+                    StringComparison.OrdinalIgnoreCase);
+
+                if (passed
+                    && root.TryGetProperty("overhead_ms", out var overhead)
+                    && overhead.TryGetProperty("p50", out var p50))
+                {
+                    // Several machines may each commit a run; the slowest is the one a claim has to
+                    // survive, so a fast outlier cannot license a promise the fleet cannot keep.
+                    double value = p50.GetDouble();
+                    measuredP50 = measuredP50 is null ? value : Math.Max(measuredP50.Value, value);
+                }
+            }
+        }
+
+        bool subMillisecondIsSupported = measuredP50 is > 0 and < 1.0;
+        if (subMillisecondIsSupported)
+        {
+            return;
+        }
+
+        string[] phrases = { "sub-millisecond", "submillisecond", "<1ms", "< 1ms", "zero-latency" };
+        var offenders = new List<string>();
+
+        foreach (string path in DocumentationFiles())
+        {
+            string text = File.ReadAllText(path);
+            foreach (string phrase in phrases)
+            {
+                foreach (int at in Occurrences(text, phrase))
+                {
+                    if (!IsDenial(text, at, phrase.Length))
+                    {
+                        offenders.Add($"{Path.GetFileName(path)}: \"{phrase}\"");
+                    }
+                }
+            }
+        }
+
+        Assert.True(
+            offenders.Count == 0,
+            measuredP50 is null
+                ? "A document promises sub-millisecond execution, but no passing benchmark evidence exists under "
+                  + $"src/splat-bench/evidence. Run `dotnet run --project src/splat-bench -c Release` or drop the claim. Offenders: {string.Join("; ", offenders)}"
+                : $"A document promises sub-millisecond execution, but the recorded benchmark measured a p50 overhead of "
+                  + $"{measuredP50:F2} ms. Offenders: {string.Join("; ", offenders)}");
+    }
+
+    private static IEnumerable<int> Occurrences(string haystack, string needle)
+    {
+        for (int i = haystack.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
+             i >= 0;
+             i = haystack.IndexOf(needle, i + 1, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return i;
+        }
+    }
+
+    /// <summary>
+    /// True when the phrase is being denied rather than promised.
+    ///
+    /// The guard exists to stop the docs PROMISING sub-millisecond calls, and the most honest
+    /// sentence available - "latency is measured, and it is not sub-millisecond" - contains the
+    /// phrase verbatim. A test that forbids the words rather than the claim would push the docs
+    /// into vaguer language, which is the opposite of what this suite is for.
+    ///
+    /// Deliberately a heuristic over a window of surrounding text, not a parser. It is a tripwire
+    /// against drift, not a defence against someone determined to smuggle a claim past it.
+    /// </summary>
+    private static bool IsDenial(string text, int index, int length)
+    {
+        const int Window = 90;
+        int start = Math.Max(0, index - Window);
+        int end = Math.Min(text.Length, index + length + Window);
+        string around = text[start..end];
+
+        string[] cues = { "not ", "never", "no longer", "isn't", "is not", "wrong", "retired", "rather than", "instead of", "unmeasured", "estimate" };
+        return cues.Any(cue => around.Contains(cue, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The prose a reader outside the project actually sees - README plus docs/, minus the internal
+    /// planning notes.
+    ///
+    /// The exemption is not a loophole, it is the use/mention distinction. `PLAN-*` and the build
+    /// brief quote "&lt;1ms" precisely in order to retire it - "the `&lt;1ms` class of claim stays dead
+    /// until measured" is the sentence that got this benchmark written. Rewriting those would erase
+    /// the project's own record of killing the claim. Everything else defaults to guarded, so a new
+    /// prospect-facing document is covered the day it is added rather than the day someone
+    /// remembers to list it.
+    /// </summary>
+    private static IEnumerable<string> DocumentationFiles()
+    {
+        yield return Path.Combine(RepositoryRoot(), "README.md");
+
+        string docs = Path.Combine(RepositoryRoot(), "docs");
+        if (!Directory.Exists(docs))
+        {
+            yield break;
+        }
+
+        foreach (string file in Directory.EnumerateFiles(docs, "*.*")
+                     .Where(f => f.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+                              || f.EndsWith(".html", StringComparison.OrdinalIgnoreCase)))
+        {
+            string name = Path.GetFileName(file);
+            bool internalPlanning =
+                name.StartsWith("PLAN-", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("AGENT-BUILD-BRIEF.md", StringComparison.OrdinalIgnoreCase);
+
+            if (!internalPlanning)
+            {
+                yield return file;
+            }
+        }
+    }
+
     [Fact]
     public void CommittedKernelEvidence_IsEitherAbsentOrMatchesItsBpfSource()
     {

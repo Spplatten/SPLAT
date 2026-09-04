@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "verdict": "PASS",
+  "recorded_utc": "2026-09-04T20:32:59Z",
+  "subject": "governed Windows launch overhead vs the same tool run bare",
+  "tool": "C:\\Windows\\System32\\cmd.exe /c exit 0",
+  "os_version": "10.0.26200.0",
+  "processor_count": 16,
+  "elevated": false,
+  "iterations": 50,
+  "bare_ms": {
+    "n": 50,
+    "min": 32.05,
+    "p50": 39.81,
+    "p95": 49.86,
+    "max": 58.6,
+    "mean": 41.24
+  },
+  "contained_ms": {
+    "n": 50,
+    "min": 32.43,
+    "p50": 43.94,
+    "p95": 59.74,
+    "max": 64.19,
+    "mean": 44.22
+  },
+  "overhead_ms": {
+    "p50": 4.12,
+    "p95": 9.88
+  },
+  "contained_phase_p50_ms": {
+    "jail_provision": 1.35,
+    "sandbox_setup": 0.05,
+    "launch_and_wait": 41.38,
+    "jail_drain": 1
+  },
+  "failures": []
+}

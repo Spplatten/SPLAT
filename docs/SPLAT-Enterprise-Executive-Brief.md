@@ -10,9 +10,11 @@
 
 As enterprises transition from passive chat interfaces to autonomous agentic workflows (orchestrators, MCP servers, DevOps bots, code interpreters), they face a critical infrastructure bottleneck: **execution containment**.
 
-Today, over 95% of AI orchestration tools execute commands through unconstrained subshells. A single model hallucination or prompt injection can wipe file systems, read credentials, or exfiltrate sensitive data. Existing workarounds—such as remote cloud microVMs—introduce 200–800ms of network latency, create continuous cloud compute subscription costs, and leak private enterprise data over the public internet.
+Today, most AI orchestration tools execute commands through unconstrained subshells. A single model hallucination or prompt injection can wipe file systems, read credentials, or exfiltrate sensitive data. The common workaround—remote cloud microVMs—pays a network round trip on every tool call, carries continuous compute subscription costs, and sends private enterprise data off the host.
 
-**SPLAT** solves this fundamental bottleneck. It provides a **local-first, kernel-enforced execution substrate** that executes agent tool calls in sub-millisecond time ($<1\text{ms}$) while mathematically guaranteeing containment at the operating system kernel boundary.
+**SPLAT** solves this fundamental bottleneck. It provides a **local-first, kernel-enforced execution substrate** that runs agent tool calls on the machine that issued them, with containment enforced at the operating system kernel boundary rather than by the agent's cooperation.
+
+**Measured cost of that containment:** on Windows 10.0.26200, over 50 alternating iterations of the same tool run contained and bare, the governed path added **4.12 ms at p50 and 9.88 ms at p95** ([evidence](../src/splat-bench/evidence)). Most of a contained call is Windows process creation, which both arms pay; the locks themselves — ACL jail, job object, restricted token, jail drain — account for roughly 2.4 ms of it. Re-measure with `dotnet run --project src/splat-bench -c Release`.
 
 ```
                            THE SPLAT GUARANTEE
@@ -23,7 +25,7 @@ Today, over 95% of AI orchestration tools execute commands through unconstrained
  │    • Merkle Audit Ledger: Cryptographically chained SOC2/HIPAA record  │
  │    • Capability Compiler: Translates tool contracts to kernel leases   │
  └──────────────────────────────────┬─────────────────────────────────────┘
-                                    │ Hyper-V VSOCK (<1ms latency)
+                                    │ Hyper-V VSOCK (latency not yet measured)
  ┌──────────────────────────────────▼─────────────────────────────────────┐
  │ 2. LINUX SUBSTRATE (WSL2 MicroVM / Resident Rust Daemon)               │
  │    • Ephemeral cgroups v2: Hard CPU, Memory, and PID clamps            │
@@ -45,12 +47,16 @@ Today, over 95% of AI orchestration tools execute commands through unconstrained
 
 ### The Problem: Why Enterprise AI is Stalled at the Execution Layer
 
-| Approach | Latency | Data Privacy | Security Boundary | Operational Cost |
+Only the SPLAT row below is measured. The others are left unquantified on purpose: this project has
+not benchmarked E2B, Modal, or Docker, and publishing checkable numbers about named competitors that
+we have not run is the fastest way to lose a technical reader.
+
+| Approach | Added latency | Data Privacy | Security Boundary | Operational Cost |
 | :--- | :--- | :--- | :--- | :--- |
-| **Direct Subshell (`bash`/`cmd`)** | $\sim 1\text{ms}$ | Local | **None** (Full user compromise risk) | Low |
-| **Cloud MicroVMs (E2B, Modal)** | $200–800\text{ms}$ | High Risk (Cloud transmission) | Hypervisor | High (\$0.05–\$0.20/hour active VM) |
-| **Standard Docker on Host** | $50–150\text{ms}$ | Local | Container Daemon (root escape risk) | Medium |
-| **SPLAT Substrate** | **$<1\text{ms}$** | **100% Local Air-Gapped** | **Kernel BPF-LSM + Job Sandbox** | **Zero Cloud Infrastructure** |
+| **Direct Subshell (`bash`/`cmd`)** | none — no boundary to cross | Local | **None** (full user compromise risk) | Low |
+| **Cloud MicroVMs (E2B, Modal)** | a network round trip, not measured here | High Risk (cloud transmission) | Hypervisor | Per-hour active VM |
+| **Standard Docker on Host** | not measured here | Local | Container daemon (root escape risk) | Medium |
+| **SPLAT Substrate** | **4.12 ms p50 / 9.88 ms p95, measured** | **100% local** | **Kernel BPF-LSM + Job Sandbox** | **Zero cloud infrastructure** |
 
 ---
 
@@ -59,8 +65,8 @@ Today, over 95% of AI orchestration tools execute commands through unconstrained
 #### 1. Blast-Radius Containment, Not Semantic Guesswork
 SPLAT does not rely on fragile prompt filters or semantic heuristics to detect attacks. Instead, it treats agent containment as an **operating system invariant**. Before any tool executes, SPLAT issues a single-use, seconds-scale **Capability Lease**. If an agent attempts to touch unauthorized files, execute foreign binaries, or initiate rogue network connections, the kernel immediately blocks the syscall with `-EPERM`.
 
-#### 2. Sub-Millisecond Hyper-V VSOCK Speed
-By operating over local memory channels (Hyper-V VSOCK and shared memory), SPLAT eliminates public internet round-trips. Multi-step agent loops that require 20–50 consecutive tool executions run in seconds rather than minutes.
+#### 2. No Network Round Trip
+By operating over local channels rather than the public internet, SPLAT keeps every tool call on the issuing machine. The measured containment cost is 4.12 ms at p50 on Windows 10.0.26200; the VSOCK transport itself has not been separately measured and is not claimed here.
 
 #### 3. Zero Custom Kernel Maintenance (Stock Microsoft WSL2 Kernel)
 SPLAT is engineered to run directly on stock Microsoft WSL2 Linux kernels (6.6+ / 6.18+). It leverages native `CONFIG_BPF_LSM`, `CONFIG_DEBUG_INFO_BTF`, and unified `cgroup v2` without requiring proprietary kernel builds or breaking system updates.
@@ -87,7 +93,7 @@ Every tool invocation, standard output stream, and security violation is cryptog
 ### Commercial Applications
 
 1. **Enterprise SecOps & Incident Response:** Safely grant AI agents terminal access to investigate live telemetry and logs without risk of unauthorized lateral movement.
-2. **Autonomous Software Engineering & DevOps:** Execute LLM-generated code, build scripts, and test runners in an air-gapped, zero-latency sandbox on developer workstations.
+2. **Autonomous Software Engineering & DevOps:** Execute LLM-generated code, build scripts, and test runners in a local sandbox on developer workstations, with no round trip off the machine.
 3. **Regulated Workloads (FinTech, Healthcare, Defense):** Enable autonomous agent tooling on strictly air-gapped, on-premises workstations where cloud-based sandboxes violate compliance mandates.
 
 ---

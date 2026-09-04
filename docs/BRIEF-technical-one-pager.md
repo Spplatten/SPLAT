@@ -1,8 +1,8 @@
 <!-- PROSPECT-FACING. Every claim here must trace to committed evidence or a named source file.
-     Deliberately excludes the latency figures and competitor comparison in
-     SPLAT-Enterprise-Executive-Brief.md: no benchmark harness exists in this repo, so those
-     numbers are unmeasured and a technical reader can call them. Do not reintroduce them
-     without a committed benchmark. -->
+     The latency figure below is measured by src/splat-bench and recorded under its evidence/ dir;
+     re-measure rather than re-estimate. Competitor numbers stay out: this project has never run
+     E2B, Modal or Docker, and checkable claims about named competitors we have not benchmarked are
+     the fastest way to lose a technical reader. -->
 
 # Kernel-Enforced Containment for AI Agents
 ### Platten Industries — SPLAT (Sandboxed Process Lease & Agent Telemetry)
@@ -58,8 +58,10 @@ qualification when it does not — in both directions. 347 automated tests curre
 - **The audit ledger is unkeyed.** Editing a historical row breaks the hash chain verifiably. It does
   **not** stop a determined local administrator from deleting the tail and recomputing. This is
   integrity against accident and casual editing, not against an adversary with write access.
-- **No latency benchmark exists yet.** Any performance number you have seen from us is an estimate,
-  not a measurement.
+- **Latency is now measured, and it is not sub-millisecond.** On Windows `10.0.26200`, over 50
+  alternating iterations, the governed path added **4.12 ms at p50 and 9.88 ms at p95** over the same
+  tool run bare. About 2.4 ms of that is the locks; the rest is process creation both paths pay. Any
+  older sub-millisecond figure you may have seen from us was an estimate, and it was wrong.
 
 The shipped Windows path — job-object clamps, restricted token, ACL-jailed workspace, secret scrubbing
 before egress, and the chained audit ledger — is what runs the governed diagnostic and investigation

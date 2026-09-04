@@ -89,7 +89,7 @@ Every Copilot tool execution—whether successful, denied by policy, or killed b
 
 | Dimension | Standard Subshell (`cmd`/`ps`) | Cloud MicroVMs (E2B/Modal) | SPLAT Native Substrate |
 | :--- | :--- | :--- | :--- |
-| **Execution Latency** | $<1\text{ms}$ | $200–800\text{ms}$ | **$<1\text{ms}$ (Sub-millisecond)** |
+| **Added execution latency** | none (no boundary crossed) | a network round trip, not measured by us | **4.12 ms p50 / 9.88 ms p95, measured on Windows 10.0.26200** |
 | **Data Residency** | Local | 3rd Party Cloud (Data Exfiltration Risk) | **100% Air-Gapped Local Workstation** |
 | **Security Boundary** | None (Full User Token) | Hypervisor (Cloud) | **Windows Job Sandbox + eBPF-LSM + Token De-escalation** |
 | **Cost per Seat** | \$0 | \$50–\$200 / user / month | **\$0 Cloud Compute (Native OS Hardware)** |
