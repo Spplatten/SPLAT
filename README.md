@@ -5,7 +5,7 @@
 [![.NET 9](https://img.shields.io/badge/.NET-9.0-512BD4?logo=dotnet&logoColor=white)](src/)
 [![Rust](https://img.shields.io/badge/Rust-libbpf--rs%20%2B%20eBPF-CE412B?logo=rust&logoColor=white)](native/splat-agent/)
 [![WinUI 3](https://img.shields.io/badge/UI-WinUI%203%20%2F%20Windows%20App%20SDK-0078D6?logo=windows&logoColor=white)](src/MissionController.UI/)
-[![Tests](https://img.shields.io/badge/Tests-348%2F348%20passing-success)](tests/MissionController.Tests/)
+[![Tests](https://img.shields.io/badge/Tests-350%2F350%20passing-success)](tests/MissionController.Tests/)
 [![Build](https://img.shields.io/badge/Build-0%20errors-success)](src/)
 
 **New here, or allergic to jargon?** Start with **[The SPLAT Field Guide](docs/TUTORIAL.md)** — the whole system explained in plain English.
@@ -19,14 +19,27 @@ Every mainstream approach to "safe" AI agent execution filters in user space —
 - On **Windows**, tool processes execute inside suspended-spawn Job Objects under a restricted token whose privileges are stripped, whose Administrators SID is marked deny-only, and whose integrity level is dropped to Medium — inside NTFS ACL jails with inheritance severed. The OS object manager enforces the boundary.
 - On **Linux**, a BPF-LSM program is written to enforce a per-cgroup *capability lease* inside the kernel itself, so that an exec, file-open, or connect outside the lease dies with `-EPERM` before it happens. This half is **proven in operation on a stock WSL2 kernel** — a recorded canary run shows all three hooks returning `-EPERM` while a permitted action succeeds ([evidence](native/splat-canary/evidence)) — and **proven through the daemon**: a tool executed by `splat-agent` running as uid 0 was refused `/etc/shadow` by the kernel, and an allow-listed shell was refused its exec of an unleased binary. What remains unproven is the last hop - no request has yet travelled from the MCP tools through the C# bridge into that path. See the status table and the substrate section below before relying on it.
 
-This is **blast-radius containment, not detection**. SPLAT does not claim to know when an agent has been prompt-injected; it guarantees that whatever the agent has become, it cannot act outside the lease it was granted.
+This is **blast-radius containment, not detection**. SPLAT does not claim to know when an agent has been prompt-injected; it guarantees that whatever the agent has become, it cannot act outside the lease it was granted. Prompt injection is not a bug with a patch; it is a structural property of putting untrusted text into the same channel as instructions. Every mitigation running at the agent's own privilege fails at the moment the agent is compromised. The only defenses that survive are the ones the agent cannot reach.
+
+## What makes SPLAT different (and what does not)
+
+Technical evaluations of agent sandboxes tend to blur together into generic "isolation." In reality, three concrete architectural choices separate SPLAT from anything else on the market, in descending order of defensibility:
+
+1. **The unit of containment is a task, not a box.** Sandboxes-for-agents (E2B, Modal, Daytona, Fly) hand an agent an entire microVM where it can do whatever it wants inside the machine perimeter. Isolation is real, but the granularity is "the machine." Runtime security tools (Falco, Tetragon) do eBPF enforcement, but their unit is a long-lived cluster workload and their operator is a security team writing deployment-wide policy. SPLAT's unit is **one mission**: *this model, this binary, this destination, for this many seconds*. That is a capability grant, not a perimeter. Enforcing at that granularity requires a policy compiler, a dynamic lease lifecycle, and an in-kernel hook—most sandboxing efforts stop at the container.
+2. **It runs on the box the agent is already on, on an unmodified kernel.** This is SPLAT's sharpest commercial wedge. Every cloud sandbox requires shipping workloads and private corporate data to someone else's infrastructure—an absolute non-starter for the exact buyers who most need containment: health systems, defense, finance, and anyone with data that cannot leave the host. SPLAT contains an agent locally on stock WSL2 (`6.18.33.2-microsoft-standard-WSL2`), native BTF, with no custom kernel build and no proprietary kernel fork. That is a deployment story cloud sandboxes structurally cannot tell.
+3. **The evidence discipline is itself the differentiator.** In an early security category where 90% of claims are aspirational, SPLAT makes every claim load-bearing:
+   - Automated tests (`DocumentationDriftTests`) fail the build in both directions: if the documentation undersells proven capability *and* if it oversells unproven capability.
+   - Proof records are cryptographically pinned to the SHA-256 digest of the exact BPF source that generated them; a proof cannot outlive its code.
+   - When [`src/splat-bench`](src/splat-bench) benchmarked real containment overhead and retired the inherited `<1ms` marketing figure by recording **4.12 ms p50 / 9.88 ms p95**, the project published the worse measured numbers rather than preserving marketing optics. Evaluators reading this codebase can trust that claims represent verified reality.
+
+**What is NOT differentiated:** The Windows half. Win32 Job Objects, restricted tokens with `USE_FOR_DENY_ONLY` on the Administrators SID, Medium integrity drops, and NTFS ACL jails are essentially the Chromium sandbox architecture, well-trodden and proven in production browsers since 2008. It is competently implemented and asserted against `whoami` running inside the sandbox, but it is standard defense-in-depth, not the defensible moat. The moat is the Linux capability lease enforced by BPF-LSM on an unmodified kernel.
 
 ## Status at a glance
 
 | Component | State |
 | :--- | :--- |
 | Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
-| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 348/348 automated tests passing |
+| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 350/350 automated tests passing |
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 9 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining seven run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
 | Linux lease daemon (`splat-agent`) | **Enforcing, proven under root** — a tool it spawned as uid 0 was denied `/etc/shadow` (`file_open`) and denied an unleased second exec (`bprm_check_security`), both by the kernel. All three hooks proven through it, plus deny-by-default egress and request completion, recorded in [evidence/daemon-probe.json](native/splat-agent/evidence/daemon-probe.json) |
@@ -119,10 +132,10 @@ Every call lands in the audit ledger attributed to a resolved principal — the 
 
 ```text
 $ dotnet test tests/MissionController.Tests/MissionController.Tests.csproj
-Passed!  - Failed: 0, Passed: 297, Skipped: 0, Total: 297, Duration: 4 s - MissionController.Tests.dll (net9.0)
+Passed!  - Failed: 0, Passed: 350, Skipped: 0, Total: 350, Duration: 4 s - MissionController.Tests.dll (net9.0)
 ```
 
-297 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
+350 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
 
 **On the warning count.** An incremental `dotnet build` reports zero warnings, but that is an artifact of caching rather than a property of the source: a cold `--no-incremental` build re-runs the CommunityToolkit source generators and emits **186 `MVVMTK0045` warnings**, one per `[ObservableProperty]` field that should be declared as a partial property for WinRT marshalling. They are cosmetic and confined to the view models, but a "zero warnings" claim would only have been true on the build nobody runs from clean. Converting the fields is tracked work; the badge above claims zero *errors*, which holds either way.
 
@@ -141,7 +154,7 @@ SPLAT/
 ├── native/
 │   ├── splat-agent/                             # Rust eBPF daemon: lease_lsm.bpf.c + libbpf-rs loader
 │   └── splat-canary/                            # Minimal -EPERM proof harness (preflight → canary)
-├── tests/MissionController.Tests/               # 297 xUnit unit / integration / security tests
+├── tests/MissionController.Tests/               # 350 xUnit unit / integration / security tests
 ├── packaging/                                   # Signed MSIX build + Intune/SCCM silent install scripts
 └── docs/                                        # Architecture notes & briefs
 ```

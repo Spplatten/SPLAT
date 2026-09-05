@@ -17,6 +17,41 @@ operating system, not by the agent's cooperation or by our own front end.
 
 ---
 
+## What makes SPLAT different (and what doesn't)
+
+Three concrete properties separate SPLAT from anything else in the agent security space:
+
+1. **The unit of containment is a task, not a box.** Cloud sandboxes (E2B, Modal, Daytona, Fly) hand an
+   agent an entire microVM; isolation is real, but the unit of containment is "the machine." Falco and
+   Tetragon do eBPF enforcement, but their unit is a persistent cluster workload and their operator is a
+   security team writing deployment manifests. SPLAT's unit is **one mission**: *this model, this binary,
+   this destination, for this many seconds*. That is a capability grant, not a perimeter. Enforcing at
+   that granularity requires a policy compiler, a dynamic lease lifecycle, and an in-kernel hook—most teams
+   stop at the container.
+2. **It runs on the box the agent is already on, on an unmodified kernel.** This is the sharpest commercial
+   wedge. Every cloud sandbox requires shipping workloads and private data to someone else's infrastructure—a
+   non-starter for the exact buyers who most need containment: health systems, defense, finance, and anyone
+   with data that cannot leave the host. SPLAT contains an agent locally on stock WSL2 (`6.18.33.2`), native
+   BTF, with no custom kernel and no kernel fork. That is a deployment story cloud sandboxes structurally
+   cannot tell.
+3. **The evidence discipline is itself the differentiator.** In an early security market where 90% of claims
+   are aspirational, SPLAT makes every claim load-bearing:
+   - Automated tests (`DocumentationDriftTests`) fail the build in both directions if the documentation
+     undersells proven capability *or* oversells unproven capability.
+   - Proof records are cryptographically pinned to the SHA-256 digest of the exact BPF source that generated
+     them; a proof cannot outlive its code.
+   - When [`src/splat-bench`](../src/splat-bench) benchmarked real containment overhead and retired the
+     inherited `<1ms` marketing figure by recording **4.12 ms p50 / 9.88 ms p95**, the project published the
+     worse measured numbers rather than preserving marketing optics.
+
+**What is not the moat:** The Windows half (Job Objects, restricted tokens with `USE_FOR_DENY_ONLY` on the
+admin SID, Medium integrity drops, ACL jails) is essentially the Chromium sandbox architecture, well-trodden
+since 2008. It is competently executed and asserted against `whoami` inside the sandbox, but it is standard
+defense-in-depth, not the defensible moat. The moat is the Linux capability lease enforced by BPF-LSM on an
+unmodified kernel.
+
+---
+
 ## What is proven, with receipts
 
 A machine-checked canary run on a **stock, unmodified WSL2 kernel** (`6.18.33.2-microsoft-standard-WSL2`
@@ -45,7 +80,7 @@ while an unleased one was refused, egress was denied with networking off, and ev
 
 **The documentation cannot drift away from the evidence.** An automated test fails the build if the
 docs claim the substrate is pending while passing evidence exists, *and* fails if they drop the
-qualification when it does not — in both directions. 347 automated tests currently pass.
+qualification when it does not — in both directions. 350 automated tests currently pass.
 
 ---
 

@@ -58,16 +58,34 @@ Nobody is selling that to Windows fleet operators.
 Fintech, health tech, legal tech — 100 to 1,000 people. Real budget, real obligations, and far faster
 than a Fortune 500 security org.
 
+- **Why now:** developers are using Copilot, Claude Code, or Cursor with local terminal/filesystem access.
+  Cloud sandbox alternatives require shipping private company source code, databases, and IP to third-party
+  cloud infrastructure—which compliance and legal teams immediately reject.
 - **Where to find them:** LinkedIn job posts mentioning Copilot, Cursor, or Claude Code rollouts;
   companies publicly announcing internal AI programs.
 - **Who to contact:** Head of Security or Head of Platform Engineering. **Not** the CISO cold.
+- **Opener angle:** SPLAT runs locally on the developer's box on an unmodified kernel (stock WSL2), keeping
+  code and execution entirely on-premises without cloud sandbox data exfiltration risk.
 - **Caveat:** be honest that the ledger is unkeyed. Do not sell tamper-proof to a regulated buyer.
+
+### 6. CI/CD & platform teams running agentic PR and build workflows
+Untrusted PR code, third-party actions, and automated code generation create severe supply-chain execution risk.
+A build step is an even better fit for a capability lease than a chat agent is: it is already declarative,
+already short-lived, and already carries an execution manifest.
+
+- **Why now:** teams want agents to review PRs, run tests, and execute fixes without giving malicious PRs
+  ambient access to build runners or corporate CI secrets.
+- **Where to find them:** GitHub discussions around CI security; teams maintaining GitHub Actions runners;
+  DevOps engineers posting about automated agent CI pipelines.
+- **Who to contact:** Head of DevOps, Platform Architect, or Lead Infrastructure Engineer.
+- **Opener angle:** capability leases (task-scoped, time-boxed, destination-clamped) applied directly to
+  build runner steps on stock kernels.
 
 ---
 
 ## Tier 3 — Amplifiers, not customers (the real fix for having no network)
 
-### 6. Practitioners who write publicly about prompt injection and agent security
+### 7. Practitioners who write publicly about prompt injection and agent security
 They will not buy. They can make you non-cold, which is worth more than any single deal right now.
 
 - **Where to find them:** authors of prompt-injection writeups, maintainers of agent-security tooling,

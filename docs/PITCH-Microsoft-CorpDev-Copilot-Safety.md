@@ -89,6 +89,9 @@ Every Copilot tool execution—whether successful, denied by policy, or killed b
 
 | Dimension | Standard Subshell (`cmd`/`ps`) | Cloud MicroVMs (E2B/Modal) | SPLAT Native Substrate |
 | :--- | :--- | :--- | :--- |
+| **Unit of Containment** | None (Full User Process) | **"The Machine"** (Perimeter-based VM) | **One Mission** (Task-level Capability Lease) |
+| **Execution Location** | Local Workstation | 3rd Party Cloud Infrastructure | **Local Workstation (Zero Infrastructure Export)** |
+| **Kernel Requirements** | Standard OS | Remote Hypervisor Guest | **Unmodified Stock Kernel (Windows + stock WSL2, zero forks)** |
 | **Added execution latency** | none (no boundary crossed) | a network round trip, not measured by us | **4.12 ms p50 / 9.88 ms p95, measured on Windows 10.0.26200** |
 | **Data Residency** | Local | 3rd Party Cloud (Data Exfiltration Risk) | **100% Air-Gapped Local Workstation** |
 | **Security Boundary** | None (Full User Token) | Hypervisor (Cloud) | **Windows Job Sandbox + eBPF-LSM + Token De-escalation** |

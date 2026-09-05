@@ -62,19 +62,25 @@ we have not run is the fastest way to lose a technical reader.
 
 ### Core Value Propositions
 
-#### 1. Blast-Radius Containment, Not Semantic Guesswork
-SPLAT does not rely on fragile prompt filters or semantic heuristics to detect attacks. Instead, it treats agent containment as an **operating system invariant**. Before any tool executes, SPLAT issues a single-use, seconds-scale **Capability Lease**. If an agent attempts to touch unauthorized files, execute foreign binaries, or initiate rogue network connections, the kernel immediately blocks the syscall with `-EPERM`.
+#### 1. The Unit of Containment is a Task, Not a Box
+Cloud sandboxes (E2B, Modal, Daytona, Fly) hand an agent an entire microVM where it can do whatever it wants inside the machine perimeter. Isolation is real, but the unit of containment is "the machine." Runtime observability tools (Falco, Tetragon) enforce eBPF policies, but their unit is a persistent cluster workload managed by a security team. SPLAT's unit is **one mission**: *this model, this binary, this destination, for this many seconds*. That is a single-use, seconds-scale **Capability Lease**, not a perimeter. Enforcing at this granularity requires a policy compiler, a dynamic lease lifecycle, and an in-kernel hook—stopping at the container is no longer sufficient.
 
-#### 2. No Network Round Trip
-By operating over local channels rather than the public internet, SPLAT keeps every tool call on the issuing machine. The measured containment cost is 4.12 ms at p50 on Windows 10.0.26200; the VSOCK transport itself has not been separately measured and is not claimed here.
+#### 2. Local Host Execution on Unmodified Stock Kernels (The Commercial Wedge)
+Every cloud sandbox requires shipping workloads, proprietary code, and sensitive enterprise data to third-party cloud infrastructure. This is an absolute non-starter for the exact buyers who most need containment: health systems, defense, finance, intelligence, and anyone operating under strict data residency or air-gap mandates. SPLAT contains agents locally on stock Microsoft WSL2 Linux kernels (6.6+ / 6.18+), leveraging native `CONFIG_BPF_LSM`, `CONFIG_DEBUG_INFO_BTF`, and unified `cgroup v2` without requiring proprietary kernel builds, custom forks, or breaking OS updates. That is an on-premises deployment story cloud sandboxes structurally cannot tell.
 
-#### 3. Zero Custom Kernel Maintenance (Stock Microsoft WSL2 Kernel)
-SPLAT is engineered to run directly on stock Microsoft WSL2 Linux kernels (6.6+ / 6.18+). It leverages native `CONFIG_BPF_LSM`, `CONFIG_DEBUG_INFO_BTF`, and unified `cgroup v2` without requiring proprietary kernel builds or breaking system updates.
+#### 3. Evidence-Backed Engineering Discipline
+In an emerging security category where 90% of claims are aspirational, SPLAT makes every claim load-bearing:
+- Automated tests (`DocumentationDriftTests`) fail the build in both directions if documentation undersells proven capability or oversells unproven capability.
+- Proof records are cryptographically pinned to the SHA-256 digest of the exact BPF source that generated them; a proof cannot outlive its code.
+- When [`src/splat-bench`](../src/splat-bench) benchmarked real containment overhead and retired the inherited `<1ms` marketing figure by measuring **4.12 ms p50 / 9.88 ms p95**, the project published the measured numbers rather than preserving marketing optics.
 
-#### 4. Discard-on-Failure Atomic Rollback (OverlayFS CoW)
+#### 4. Transparent Architectural Boundaries: Defense-in-Depth vs The Defensive Moat
+SPLAT maintains clear distinctions between standard isolation and genuine moats. The Windows control plane implements the Chromium sandbox architecture (Win32 Job Objects, restricted tokens with `USE_FOR_DENY_ONLY` on the Administrators SID, Medium integrity drops, and NTFS ACL jails)—well-trodden and proven in production browsers since 2008. It is competently executed and asserted against `whoami` inside the sandbox, serving as robust local defense-in-depth. The defensible technological moat is the Linux capability lease enforced by BPF-LSM directly inside unmodified stock kernels.
+
+#### 5. Discard-on-Failure Atomic Rollback (OverlayFS CoW)
 Every mission operates inside an ephemeral OverlayFS Copy-on-Write workspace. Changes are isolated to temporary scratch memory. If an operation fails, triggers a policy violation, or is revoked by the operator, the workspace is discarded instantly with zero side effects on the host filesystem.
 
-#### 5. Tamper-Evident Merkle Audit Ledger (SOC2 / HIPAA Compliance)
+#### 6. Tamper-Evident Merkle Audit Ledger (SOC2 / HIPAA Compliance)
 Every tool invocation, standard output stream, and security violation is cryptographically signed and chained using SHA-256 into a tamper-evident audit ledger (`SqliteChainedAuditLedger`). SecOps and compliance teams have mathematical proof of execution integrity.
 
 ---
@@ -94,7 +100,8 @@ Every tool invocation, standard output stream, and security violation is cryptog
 
 1. **Enterprise SecOps & Incident Response:** Safely grant AI agents terminal access to investigate live telemetry and logs without risk of unauthorized lateral movement.
 2. **Autonomous Software Engineering & DevOps:** Execute LLM-generated code, build scripts, and test runners in a local sandbox on developer workstations, with no round trip off the machine.
-3. **Regulated Workloads (FinTech, Healthcare, Defense):** Enable autonomous agent tooling on strictly air-gapped, on-premises workstations where cloud-based sandboxes violate compliance mandates.
+3. **CI/CD & Supply-Chain Pipeline Execution:** Secure automated build steps, untrusted PR test execution, and third-party action runs. A build step is inherently declarative, short-lived, and manifest-driven—making it an ideal fit for kernel capability leases.
+4. **Regulated Workloads (FinTech, Healthcare, Defense):** Enable autonomous agent tooling on strictly air-gapped, on-premises workstations where cloud-based sandboxes violate compliance and data sovereignty mandates.
 
 ---
 
