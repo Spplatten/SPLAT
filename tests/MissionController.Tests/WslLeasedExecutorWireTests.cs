@@ -22,6 +22,13 @@ namespace MissionController.Tests;
 /// </summary>
 public class WslLeasedExecutorWireTests
 {
+    /// <summary>
+    /// A stand-in for the daemon's 0600 token. Supplied directly so these tests keep testing the
+    /// wire and nothing else - the bridge otherwise reads the real secret out of the guest through
+    /// `wsl.exe -u root`, which is neither available nor relevant here.
+    /// </summary>
+    private const string TestToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
     private static LeaseSpec SampleLease() => new(
         MissionId: Guid.NewGuid(),
         WorkingDirectory: "/tmp",
@@ -88,7 +95,7 @@ public class WslLeasedExecutorWireTests
             "{\"type\":\"STDOUT\",\"data\":\"ok\\n\"}",
             "{\"type\":\"EXIT\",\"exitCode\":0}");
 
-        var executor = new WslLeasedExecutor("127.0.0.1", port);
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
         var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", "");
 
         byte[] request = await daemon;
@@ -120,7 +127,7 @@ public class WslLeasedExecutorWireTests
         var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
 
         var lease = SampleLease();
-        var executor = new WslLeasedExecutor("127.0.0.1", port);
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
         await executor.ExecuteLeasedAsync(lease, "/usr/bin/curl", "--max-time 3");
 
         byte[] request = await daemon;
@@ -141,6 +148,70 @@ public class WslLeasedExecutorWireTests
     }
 
     /// <summary>
+    /// The daemon refuses any EXECUTE_TOOL that does not present its token, so the bridge has to
+    /// carry one. Before F07 the daemon ran commands as root for anyone who could open a loopback
+    /// socket, and the envelope had no field for a credential at all.
+    /// </summary>
+    [Fact]
+    public async Task TheRequestCarriesTheAuthToken()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
+
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
+        await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", "");
+
+        byte[] request = await daemon;
+        listener.Stop();
+
+        using var doc = JsonDocument.Parse(Encoding.UTF8.GetString(request).Trim());
+        Assert.Equal(TestToken, doc.RootElement.GetProperty("authToken").GetString());
+    }
+
+    /// <summary>
+    /// No token, no request. Sending an unauthenticated envelope and letting the daemon refuse it
+    /// would work, but it turns a configuration problem into a containment-shaped error message;
+    /// the bridge knows perfectly well that it has nothing to present.
+    /// </summary>
+    [Fact]
+    public async Task WithoutATokenTheBridgeRefusesRatherThanSendingAnUnauthenticatedRequest()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
+
+        try
+        {
+            // A path no daemon ever wrote, so the guest read finds nothing either.
+            var executor = new WslLeasedExecutor(
+                "127.0.0.1", port, authTokenPath: "/nonexistent/splat/agent.token");
+
+            var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", "");
+
+            // This class reports transport failures rather than throwing, so the refusal arrives
+            // the same way every other one does.
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("auth token", result.StandardError, StringComparison.OrdinalIgnoreCase);
+
+            // The property that matters: nothing reached the wire. The bridge stopped before it
+            // could send an envelope the daemon would only have refused anyway.
+            var finished = await Task.WhenAny(daemon, Task.Delay(500));
+            Assert.True(
+                finished != daemon || (await daemon).Length == 0,
+                "an EXECUTE_TOOL envelope went out without a token");
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    /// <summary>
     /// A kernel denial must reach the caller as a structured event, not just as text in stderr -
     /// it is what the audit ledger records and what the UI shows as containment holding.
     /// </summary>
@@ -158,7 +229,7 @@ public class WslLeasedExecutorWireTests
             "{\"type\":\"EXIT\",\"exitCode\":1}");
 
         var seen = new List<LeaseViolationEvent>();
-        var executor = new WslLeasedExecutor("127.0.0.1", port);
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
         var result = await executor.ExecuteLeasedAsync(
             SampleLease(), "/bin/cat", "/etc/shadow",
             violations: new Progress<LeaseViolationEvent>(v => { lock (seen) { seen.Add(v); } }));
@@ -194,7 +265,7 @@ public class WslLeasedExecutorWireTests
 
         var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
 
-        var executor = new WslLeasedExecutor("127.0.0.1", port);
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
         var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", "");
 
         await daemon;

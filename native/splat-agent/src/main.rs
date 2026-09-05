@@ -1,10 +1,8 @@
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::process::CommandExt as _;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,6 +16,7 @@ use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
+mod auth;
 mod cgroup;
 mod cow;
 mod lease;
@@ -33,10 +32,64 @@ mod lease_lsm {
 }
 use lease_lsm::*;
 
+use auth::PeerAuth;
 use cgroup::EphemeralCgroup;
 use cow::OverlayWorkspace;
 use lease::{bytes_of, lease_map_keys, BpfMapSync, LeaseConfig, LeaseManager};
 use violation::{RawViolationEvent, ViolationEvent};
+
+/// Drops the calling (forked, pre-exec) process to an unprivileged identity.
+///
+/// Async-signal-safe: raw libc calls, no allocation and no locks, because this runs in the forked
+/// child of a multithreaded process. Returning Err fails the spawn, so a tool whose privilege could
+/// not be dropped never executes - the same fail-closed shape as the cgroup join above it.
+fn drop_privileges(uid: u32, gid: u32) -> std::io::Result<()> {
+    unsafe {
+        // A daemon that is not root forks a child that is not root, so the invariant already holds
+        // and there is nothing to transition from - setgroups and setresuid would simply return
+        // EPERM and refuse every spawn. The property being protected is "the workload is not root",
+        // not "the workload is uid 65534".
+        if libc::geteuid() != 0 && libc::getuid() != 0 {
+            return Ok(());
+        }
+
+        // Supplementary groups survive setuid, so a workload could keep group membership the
+        // target account never had. Clear them while still privileged enough to do so.
+        if libc::setgroups(0, std::ptr::null()) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if libc::setresgid(gid, gid, gid) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // setresuid, not setuid: it sets the saved-set-user-id too, so the workload cannot call
+        // seteuid(0) and climb back. A plain setuid from root does that as a side effect, but
+        // being explicit is the difference between relying on it and stating it.
+        if libc::setresuid(uid, uid, uid) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // Belt and braces: if any of the three somehow left root reachable, refuse the exec.
+        if libc::geteuid() == 0 || libc::getuid() == 0 {
+            return Err(std::io::Error::from_raw_os_error(libc::EPERM));
+        }
+    }
+    Ok(())
+}
+
+/// The effective uid of a running pid, read from /proc/<pid>/status.
+fn effective_uid_of(pid: u32) -> Result<Option<u32>> {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .with_context(|| format!("read /proc/{pid}/status"))?;
+
+    for l in status.lines() {
+        if let Some(rest) = l.strip_prefix("Uid:") {
+            // "Uid:\treal\teffective\tsaved\tfs"
+            let mut it = rest.split_whitespace();
+            let _real = it.next();
+            return Ok(it.next().and_then(|v| v.parse::<u32>().ok()));
+        }
+    }
+    Ok(None)
+}
 
 /// Reads a JSON array of strings from a request, distinguishing "absent" from "empty".
 ///
@@ -66,6 +119,26 @@ struct Args {
     // reports containment it does not have.
     #[arg(long, default_value = "false")]
     mock_bpf: bool,
+
+    /// Root-owned 0600 file holding the shared secret every EXECUTE_TOOL must present.
+    ///
+    /// Created on first run. There is no way to turn authentication off: a daemon that runs
+    /// commands as root while treating "opened a loopback socket" as authority is not a sandbox.
+    #[arg(long, default_value = "/etc/splat/agent.token")]
+    auth_token_file: String,
+
+    /// The uid a leased tool runs as. Defaults to nobody.
+    ///
+    /// The daemon needs root to load BPF programs and write the cgroup tree; the WORKLOAD needs
+    /// none of that. It used to inherit the daemon's uid 0, so every containment claim rested on
+    /// three LSM hooks holding against a root process - with the cgroup controls, host mounts and
+    /// every unprotected file still reachable underneath them.
+    #[arg(long, default_value_t = 65534)]
+    workload_uid: u32,
+
+    /// The gid a leased tool runs as. Defaults to nogroup.
+    #[arg(long, default_value_t = 65534)]
+    workload_gid: u32,
 }
 
 /// What the daemon can actually observe about its own substrate.
@@ -252,6 +325,30 @@ async fn main() -> Result<()> {
         std::process::exit(1);
     }
 
+    // Establish who is allowed to talk to this daemon before it starts listening. Same posture as
+    // the enforcement gate above: if the credential cannot be established, do not serve.
+    let peer_auth = match PeerAuth::load_or_create(Path::new(&args.auth_token_file)) {
+        Ok(a) => Arc::new(a),
+        Err(e) => {
+            error!(
+                "Refusing to start: could not establish the peer authentication token at {}: {e:#}",
+                args.auth_token_file
+            );
+            std::process::exit(1);
+        }
+    };
+
+    if args.workload_uid == 0 || args.workload_gid == 0 {
+        error!(
+            "Refusing to start: --workload-uid/--workload-gid resolve to root ({}/{}). A leased \
+             tool that runs as root is not leased.",
+            args.workload_uid, args.workload_gid
+        );
+        std::process::exit(1);
+    }
+
+    let workload_ids = WorkloadIdentity { uid: args.workload_uid, gid: args.workload_gid };
+
     let lease_manager = LeaseManager::new(bpf_sync);
 
     // Background expiration reaper
@@ -297,8 +394,9 @@ async fn main() -> Result<()> {
                 info!("Accepted connection from {peer}");
                 let mgr = lease_manager.clone();
                 let viol_tx_clone = viol_tx.clone();
+                let auth = peer_auth.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone).await {
+                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids).await {
                         error!("Client session error: {e:#}");
                     }
                 });
@@ -310,10 +408,19 @@ async fn main() -> Result<()> {
     }
 }
 
+/// The unprivileged identity a leased tool is dropped to before it execs.
+#[derive(Clone, Copy)]
+struct WorkloadIdentity {
+    uid: u32,
+    gid: u32,
+}
+
 async fn handle_client(
     socket: TcpStream,
     lease_mgr: LeaseManager,
     viol_tx: broadcast::Sender<ViolationEvent>,
+    peer_auth: Arc<PeerAuth>,
+    workload: WorkloadIdentity,
 ) -> Result<()> {
     let (reader, mut writer) = socket.into_split();
     let mut buf_reader = BufReader::new(reader);
@@ -359,6 +466,23 @@ async fn handle_client(
             }
 
             "EXECUTE_TOOL" => {
+                // Authenticate BEFORE reading a single policy field. This request names a command
+                // for a root daemon to run; until the caller is known, none of it is a request,
+                // it is an offer. HEALTH_CHECK stays open on purpose - a liveness probe should not
+                // need a secret, and it discloses nothing an attacker gains from.
+                if !peer_auth.accepts(parsed.get("authToken").and_then(|v| v.as_str())) {
+                    warn!("Rejected an unauthenticated EXECUTE_TOOL request");
+                    let err_chunk = serde_json::json!({
+                        "type": "STDERR",
+                        "data": "SPLAT refused the request: missing or invalid authToken.\n"
+                    });
+                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                    let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                    writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                    line.clear();
+                    continue;
+                }
+
                 let mission_id = parsed.get("missionId").and_then(|v| v.as_str()).unwrap_or("default");
                 let command = parsed.get("command").and_then(|v| v.as_str()).unwrap_or("/bin/sh");
                 let arguments = parsed.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
@@ -518,6 +642,14 @@ async fn handle_client(
                 // the parent, and writing "0" to cgroup.procs means "the calling process", which
                 // avoids formatting a pid here. Returning Err fails the spawn, so a tool that
                 // cannot be placed in its lease never executes.
+                //
+                // The privilege drop happens in the SAME closure, immediately after the join and
+                // before the exec, because the two orderings conflict: writing cgroup.procs needs
+                // root, and the workload must not have it. Command::uid/gid cannot express that -
+                // std applies them before pre_exec runs, so the join would fail as nobody.
+                // Order within the drop matters too: setgroups first (it needs privilege), then
+                // gid, then uid, because setuid is the step that makes the rest impossible.
+                let (wl_uid, wl_gid) = (workload.uid, workload.gid);
                 if cgroup_is_real {
                     let procs = cg.path.join("cgroup.procs");
                     match std::ffi::CString::new(procs.as_os_str().as_bytes()) {
@@ -532,7 +664,8 @@ async fn handle_client(
                                 if joined < 0 {
                                     return Err(std::io::Error::last_os_error());
                                 }
-                                Ok(())
+
+                                drop_privileges(wl_uid, wl_gid)
                             });
                         },
                         Err(e) => {
@@ -547,6 +680,14 @@ async fn handle_client(
                             line.clear();
                             continue;
                         }
+                    }
+                }
+
+                // Even without a cgroup - the openly non-enforcing dev path - the workload still
+                // drops privilege. There is no configuration in which a leased tool runs as root.
+                if !cgroup_is_real {
+                    unsafe {
+                        cmd.pre_exec(move || drop_privileges(wl_uid, wl_gid));
                     }
                 }
 
@@ -615,6 +756,19 @@ async fn handle_client(
                             ),
                             Err(e) => warn!("Mission {mission_id}: could not verify cgroup membership for pid {pid}: {e}"),
                         }
+                    }
+                }
+
+                // Verify rather than assume, the same way cgroup membership is verified: a drop
+                // that silently did not happen looks identical to one that did.
+                if let Some(pid) = child.id() {
+                    match effective_uid_of(pid) {
+                        Ok(Some(0)) => error!(
+                            "Mission {mission_id}: pid {pid} is running as ROOT. The privilege drop \
+                             did not take; treat any output from it as ungoverned."
+                        ),
+                        Ok(_) => {}
+                        Err(e) => warn!("Mission {mission_id}: could not read the uid of pid {pid}: {e}"),
                     }
                 }
 

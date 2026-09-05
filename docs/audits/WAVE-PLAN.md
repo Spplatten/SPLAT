@@ -64,7 +64,7 @@ Remaining in this theme is F20 — a remediation verdict that comes from a measu
 rather than an exit code. The timeout fix narrows it; closing it needs each action to declare what
 restored means, which is a design, not a patch.
 
-## Wave 3 — Linux fail-closed and lease isolation (F04/F05/F06/F09 done)
+## Wave 3 — Linux fail-closed and lease isolation (F04/F05/F06/F07 done)
 
 | Finding | Change | State |
 | --- | --- | --- |
@@ -74,19 +74,27 @@ restored means, which is a design, not a patch.
 | F09 | Clamps resolved before the cgroup exists, written with errors propagated, read back, and refused if looser than requested | done, `f2e77f9` |
 | F05 | Expiry kills inside the installed policy and only then withdraws it; a lost client kills too; `Drop` drains before `rmdir` | done, `f2e77f9` |
 | F06 | Every policy key carries the cgroup id, so concurrent leases stop receiving the union of each other's permissions | done |
-| F07 | The bridge peer is authenticated; caller-supplied policy is not the authorization source | **open** |
+| F07 | Every EXECUTE_TOOL presents a root-owned 0600 token, compared in constant time; the workload drops to an unprivileged uid before exec, or the spawn fails | done |
 | F08 | Publish the actual supported syscall/protocol matrix and refuse policy outside it | **open** |
 
 Evidence: `native/splat-agent/evidence/fail-closed-probe.json` records the same invocation at both
 commits — the committed daemon started unprivileged with no BPF and answered `bpfLsmActive: true`;
 the current one exits 1.
 
+F07's remaining half is provenance, not authentication: the daemon still appends the caller's
+requested command to that lease's own exec allow-list, and the bridge still drops the
+`ProtectedInodes` / `AllowedExecInodes` the controller computed because Windows inode identities
+mean nothing in the guest. Resolving that is F11's wire contract - one versioned envelope carrying
+paths the daemon resolves where they are enforceable - not a patch to this code.
+
 **The F06 in-kernel proof is outstanding.** The change is verified at the key layer — byte-level
 tests over the same `lease_map_keys` the live driver calls, plus size and alignment assertions
 against the BPF structs — but the audit's exit gate is concurrent A/B leases proving in the kernel
 that A cannot use B's permission, and that needs a root daemon. Re-running
 `native/splat-agent/probe-daemon.sh` under root closes this and restores the README's enforcement
-claim, which is withdrawn until then: the recorded probe passed against a program that has since
+claim, which is withdrawn until then. The same run is what proves F07's privilege drop actually
+transitions - on an unprivileged dev daemon `drop_privileges` takes its already-unprivileged path,
+so `setgroups`/`setresgid`/`setresuid` have never executed: the recorded probe passed against a program that has since
 been re-keyed, and `TheDaemonEnforcementClaim_MatchesItsProbeEvidence` now binds that claim to the
 agent BPF source the way the canary guard always bound the canary's.
 

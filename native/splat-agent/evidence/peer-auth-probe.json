@@ -1,0 +1,31 @@
+{
+  "probe": "peer authentication and workload privilege drop",
+  "recordedUtc": "2026-09-05T21:40:00Z",
+  "kernel": "6.18.33.2-microsoft-standard-WSL2",
+  "findings": ["F07"],
+  "daemonInvocation": "splat-agent --listen 127.0.0.1:50111 --mock-bpf --auth-token-file /tmp/splat-evid.token",
+  "daemonEuid": 1000,
+  "results": {
+    "token_file_mode": "600",
+    "unauthenticated_execute_refused": true,
+    "wrong_token_execute_refused": true,
+    "correct_token_execute_ran": true,
+    "workload_uid_was_not_root": true,
+    "workload_uid_observed": 1000,
+    "root_workload_uid_refused_at_startup": true
+  },
+  "transcript": {
+    "no_token": "{\"data\":\"SPLAT refused the request: missing or invalid authToken.\\n\",\"type\":\"STDERR\"}",
+    "wrong_token": "{\"data\":\"SPLAT refused the request: missing or invalid authToken.\\n\",\"type\":\"STDERR\"}",
+    "correct_token": "{\"data\":\"uid=1000(platten_industries) gid=1000(platten_industries) ...\\n\",\"type\":\"STDOUT\"}",
+    "workload_uid_0_startup": "Refusing to start: --workload-uid/--workload-gid resolve to root (0/65534). A leased tool that runs as root is not leased."
+  },
+  "beforeThisChange": {
+    "verdict": "Any process able to open a TCP connection to the daemon's loopback port could name a command and have the root daemon run it, as root. There was no credential field in the protocol at all."
+  },
+  "notProvenHere": [
+    "The root -> nobody transition itself. This daemon ran as uid 1000, so drop_privileges took its already-unprivileged path and the workload inherited uid 1000 - which satisfies the invariant being protected (the workload is not root) without exercising setgroups/setresgid/setresuid.",
+    "That a second local user in the guest cannot read the 0600 token. The probe host has no passwordless sudo, so the file was created by, and readable to, the same account that ran the daemon.",
+    "Both need a root daemon on a BPF-LSM host, the same run that closes F06's in-kernel gate and restores the withdrawn enforcement claim."
+  ]
+}
