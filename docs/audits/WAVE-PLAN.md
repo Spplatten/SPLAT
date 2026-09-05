@@ -1,12 +1,12 @@
 # SPLAT remediation waves
 
 Working plan derived from the four reports in this directory. The audits say *what* is broken and
-*why*; this says **which wave it lands in and who owns the file while it does**.
+*why*; this says **which wave it lands in and what has actually shipped**.
 
-Two agents edit `C:\C_AGENT_BUILDER` concurrently. Most of the friction so far has not been
-disagreement, it has been two sessions writing the same file minutes apart. So every wave below
-names an owner and a file set, and the rule is: **do not edit a file listed under the other owner's
-active wave.** Report the finding instead.
+Written while two agents were editing `C:\C_AGENT_BUILDER` concurrently; the second session has
+since closed, so the ownership columns below are history rather than a live constraint. The rule
+they encode is still worth keeping if a second session is ever opened on this tree: name the file
+set before starting, and report a finding in someone else's files instead of editing them.
 
 Finding IDs: `Fnn` from [clinical audit](2026-09-04-clinical-audit.md), `AG-Fnn` from
 [antigravity deep audit](2026-09-05-antigravity-deep-audit.md). Sequencing rationale is in the
@@ -27,24 +27,23 @@ Finding IDs: `Fnn` from [clinical audit](2026-09-04-clinical-audit.md), `AG-Fnn`
 Each fix is proven differentially: the attack test fails against the parent commit and passes after,
 with a negative control asserting the legitimate path still works.
 
-## Wave 1b — Windows containment (in flight, other session)
+## Wave 1b — Windows containment and the loopback surface (done, `616c272` + `87ea3df`)
 
-| Finding | Change | Files — do not edit |
+| Finding | Change | State |
 | --- | --- | --- |
-| AG-F01 / F18 | Loopback `:5678` auth gate | `Triggers/EmbeddedWebhookListener.cs` |
-| F12 | AppContainer selection must exempt templates whose sensors need WMI/EventLog RPC | `Models.cs`, `GovernedTemplateCatalog.*.cs`, `SensorAppContainer.cs` |
-| — | Containment differential tests, documented test count | `SensorNetworkContainmentTests.cs`, `README.md`, `TUTORIAL.md`, `SPLAT-Field-Guide.html` |
+| F12 | AppContainer denial skips templates whose sensors need WMI / Event Log / Defender RPC | done |
+| — | Containment differential tests restored to a PowerShell host; all nine pass | done |
+| AG-F01 / F18 | Loopback gate fails closed: minted token, fixed-time compare, Host check, `/webhook` gated, 1 MiB body cap | done |
+| AG-F05 | OAuth `state` recorded, compared in fixed time, expired at 10 min, consumed on success | done |
 
-**Open review note on the in-flight gate:** `IsAuthorized` returns `true` when no token is
-configured, so a host without `SPLAT_API_KEY` set is exactly as open as before the fix. A loopback
-execution endpoint should mint an ephemeral token at startup and fail closed when it has none.
-Token comparison should also be `CryptographicOperations.FixedTimeEquals`, not `string.Equals`.
-The OAuth callback route cannot carry a bearer header — a browser redirect lands there — so its
-protection has to be the `state` nonce (AG-F05), which is currently accepted and discarded.
+The gate as first written returned `true` when no token was configured — the default — so a host
+that had never set `SPLAT_API_KEY` was as open as before it existed, while the test asserting a 401
+for a wrong token still passed. That shape is the one to watch for elsewhere: a check whose negative
+case is tested and whose unconfigured case is not.
 
 ---
 
-## Wave 2 — Failure is not evidence (uncontended half done, `0f78cf0`)
+## Wave 2 — Failure is not evidence (done, `0f78cf0` + `616c272`)
 
 A failed run must not become accepted evidence, indexed memory, or a successful tool result.
 
@@ -54,13 +53,16 @@ A failed run must not become accepted evidence, indexed memory, or a successful 
 | F16 | Simulated execution is opt-in (`allowSimulatedExecution`), off by default | done |
 | F13 | `QualityIslandEngine`'s offline path reports its own evaluation instead of hardcoding success | done |
 | F13 | `SandboxedRemediationEngine` fails on timeout; the ledger action name carries the verdict | done |
-| F13 | `MissionExecutionEngine` stops on nonzero exit and timeout instead of logging and continuing | **open — contended file** |
-| F14 | Raw stdout/stderr is sanitized before it leaves through MCP, not only before the model call | **open — contended file** |
+| F13 | `MissionExecutionEngine` stops on nonzero exit and timeout instead of logging and continuing | done |
+| F14 | Raw stdout/stderr is sanitized before it leaves the engine, not only before the model call | done |
 | F20 | A remediation verdict comes from a postcondition, not only from an exit code | **open — design, not a patch** |
 
-Exit gate for the remainder: force a tool failure, a timeout, malformed model output and an
-exhausted quality island; assert an unsuccessful terminal result and zero accepted-memory
-insertions in each.
+Also done: the quality gate's verdict now decides the ledger action, whether the analysis is
+indexed, and whether the run reaches a Completed chunk.
+
+Remaining in this theme is F20 — a remediation verdict that comes from a measured postcondition
+rather than an exit code. The timeout fix narrows it; closing it needs each action to declare what
+restored means, which is a design, not a patch.
 
 ## Wave 3 — Linux fail-closed and lease isolation
 
@@ -106,10 +108,17 @@ independent of the code.
 
 ## The ordering argument
 
-Wave 2 before Wave 3. A kernel boundary that cannot be bypassed is worth little while the layer
-above it reports a failed run as a success — the strongest containment in the world still hands the
-operator a confident wrong answer. Truthful results are also the cheapest wave and the one that
-makes every later gate measurable.
+Wave 2 went before Wave 3, and that ordering held up. A kernel boundary that cannot be bypassed is
+worth little while the layer above it reports a failed run as a success — the strongest containment
+in the world still hands the operator a confident wrong answer. Truthful results were also the
+cheapest wave, and they are what makes every later gate measurable: with the engine now refusing a
+dead sensor and a rejected analysis, a Wave 3 exit gate can be asserted on the result rather than
+inferred from a log line.
+
+**Next is Wave 3.** It is the largest remaining block, it is entirely Rust, and F04/F05/F06 are the
+three findings that most directly contradict the product'''s central claim — a daemon that runs work
+without the policy it reported installing, a lease whose expiry removes enforcement but not the
+workload, and capability maps shared across missions.
 
 Wave 4's `F15/F17` is the decision the competition audit keeps circling: SPLAT will not beat n8n on
 breadth, and the workflow layer as built bypasses the mission engine it exists to protect. The

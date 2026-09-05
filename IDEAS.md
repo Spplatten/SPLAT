@@ -1,6 +1,7 @@
 # 💡 SPLAT Idea Ledger & Product Strategy (IDEAS.md)
 
 > **Status:** Living Idea File / Non-Binding Strategic Exploration  
+> **Master Strategy:** See [Platten Industries Commercial Master Strategy](docs/PLATTEN-INDUSTRIES-MASTER-PROPOSAL.md) for the unified executive brief, ARR model, and CorpDev thesis.  
 > **Target Horizon:** Post-v1.0 Commercialization & Enterprise Rollout  
 > **Relationship to Core Scope:** This document captures business hypotheses, packaging models, monetization tracks, and potential feature explorations. It serves as strategic context and does not impose engineering constraints on immediate core engine deliverables in `scope.md`.
 
