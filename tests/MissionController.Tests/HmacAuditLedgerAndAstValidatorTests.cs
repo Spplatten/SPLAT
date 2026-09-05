@@ -151,7 +151,7 @@ print(f'Mean: {mean}')
 
     private class MockLeasedExecutor : ILeasedExecutor
     {
-        public Task<ProcessExecutionResult> ExecuteLeasedAsync(LeaseSpec lease, string command, string arguments, IProgress<string>? stdout = null, IProgress<string>? stderr = null, IProgress<LeaseViolationEvent>? violations = null, System.Threading.CancellationToken ct = default) =>
+        public Task<ProcessExecutionResult> ExecuteLeasedAsync(LeaseSpec lease, string command, IReadOnlyList<string> argv, IProgress<string>? stdout = null, IProgress<string>? stderr = null, IProgress<LeaseViolationEvent>? violations = null, System.Threading.CancellationToken ct = default) =>
             Task.FromResult(new ProcessExecutionResult(0, "Mock stdout", "", false, new JobResourceMetrics(1024, 0, 50, 50, 1)));
     }
 }

@@ -193,7 +193,7 @@ public class McpTraceAnchorTests
         public Task<ProcessExecutionResult> ExecuteLeasedAsync(
             LeaseSpec lease,
             string command,
-            string arguments,
+            IReadOnlyList<string> argv,
             IProgress<string>? stdout = null,
             IProgress<string>? stderr = null,
             IProgress<LeaseViolationEvent>? violations = null,

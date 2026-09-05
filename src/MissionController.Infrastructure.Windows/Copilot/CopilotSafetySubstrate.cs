@@ -205,10 +205,25 @@ public sealed class CopilotSafetySubstrate : ICopilotSafetySubstrate
                 TimestampUtc: v.TimestampUtc));
         });
 
+        // The Windows job-object path above still takes a command line, because CreateProcessW
+        // does. The leased path does not: splitting happens here, where the sanitized text is
+        // intact, and travels as an explicit argv array.
+        IReadOnlyList<string> argv;
+        try
+        {
+            argv = MissionController.Core.PosixArgumentSplitter.Split(effectiveArgs);
+        }
+        catch (FormatException ex)
+        {
+            return CopilotExecutionResult.Blocked(
+                $"arguments could not be parsed into an argument vector: {ex.Message}",
+                Array.Empty<CopilotSecurityViolation>());
+        }
+
         var execResult = await _leasedExecutor.ExecuteLeasedAsync(
             lease: lease,
             command: context.ExecutableOrCommand,
-            arguments: effectiveArgs,
+            argv: argv,
             violations: violationProgress,
             ct: cancellationToken);
 

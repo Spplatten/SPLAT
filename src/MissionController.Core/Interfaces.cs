@@ -310,10 +310,17 @@ public record LeaseSpec(
 /// </summary>
 public interface ILeasedExecutor
 {
+    /// <param name="argv">
+    /// The tool's arguments, already separated. This was a single string that the guest daemon then
+    /// split on whitespace - so <c>-c '&lt;code&gt;'</c> reached python as the literal
+    /// <c>'print(123)'</c>, which evaluates to a discarded string and exits 0 with no output.
+    /// Splitting has to happen where the original text is intact; by the time a pre-quoted string
+    /// is on the wire the information needed to split it correctly is gone.
+    /// </param>
     Task<ProcessExecutionResult> ExecuteLeasedAsync(
         LeaseSpec lease,
         string command,
-        string arguments,
+        IReadOnlyList<string> argv,
         IProgress<string>? stdout = null,
         IProgress<string>? stderr = null,
         IProgress<LeaseViolationEvent>? violations = null,

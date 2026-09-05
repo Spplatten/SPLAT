@@ -1,0 +1,51 @@
+{
+  "probe": "argv wire contract: argument fidelity and negative policy cases",
+  "recordedUtc": "2026-09-05T22:35:00Z",
+  "kernel": "6.18.33.2-microsoft-standard-WSL2",
+  "findings": ["F11"],
+  "daemonInvocation": "splat-agent --listen 127.0.0.1:50131 --mock-bpf --auth-token-file /tmp/splat-f11b.token",
+  "beforeThisChange": {
+    "wire": "arguments: \"-c '<code>'\" (a pre-quoted string), split in the guest with split_whitespace()",
+    "cases": [
+      {
+        "sent": "-c 'print(123)'",
+        "observed": "exit 0, NO OUTPUT",
+        "why": "python received the literal argument 'print(123)' including the quotes - a string expression that evaluates and is discarded, so a caller asking to print a number got a successful run with nothing printed"
+      },
+      {
+        "sent": "-c 'print(1, 2)'",
+        "observed": "exit 1, SyntaxError: unterminated string literal on the fragment 'print(1,",
+        "why": "the whitespace split tore the code in half at the space"
+      }
+    ]
+  },
+  "afterThisChange": {
+    "wire": "protocolVersion: 2 with an explicit argv array; no string is ever re-split",
+    "cases": [
+      { "argv": ["-c", "print(123)"], "stdout": "123", "exitCode": 0 },
+      { "argv": ["-c", "print(1, 2)"], "stdout": "1 2", "exitCode": 0 },
+      {
+        "description": "embedded double quotes, single quotes, newlines, a tab and non-ASCII in one argument",
+        "argvCodeRepr": "'print(\"quoted \\\\\"inner\\\\\" and \\'single\\'\")\\nprint(\"héllo → 世界\")\\nprint(\"tab\\\\there\")\\nprint(1, 2)'",
+        "stdout": ["quoted \"inner\" and 'single'", "héllo → 世界", "tab\there", "1 2"],
+        "exitCode": 0
+      }
+    ],
+    "negativeCases": [
+      {
+        "description": "a version 1 request (no protocolVersion, arguments as a string)",
+        "response": "SPLAT refused the request: protocol version 1 is not supported. This daemon speaks version 2, which requires an explicit argv array.",
+        "exitCode": -1
+      },
+      {
+        "description": "a command that is not in its own lease's allowedExecPaths",
+        "response": "SPLAT refused to execute: '/usr/bin/python3' is not in this lease's allowedExecPaths.",
+        "exitCode": -1
+      }
+    ]
+  },
+  "notProvenHere": [
+    "The run was against --mock-bpf, so the kernel hooks were not loaded and allowedExecPaths was checked by the daemon rather than enforced by bprm_check_security. The coherence refusal above is a userspace guard that keeps a caller from getting a bare -EPERM; the enforcement behind it still needs the root run.",
+    "Bash and Node were not exercised, only Python. The argv path is language-agnostic by construction - nothing inspects the argument - but the audit asks for all three."
+  ]
+}

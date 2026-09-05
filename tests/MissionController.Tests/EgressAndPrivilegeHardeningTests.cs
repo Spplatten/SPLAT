@@ -340,7 +340,7 @@ public class EgressAndPrivilegeHardeningTests
             LeaseDurationSeconds: 5,
             Limits: new LeaseResourceLimits(256L * 1024 * 1024, 50, 100));
 
-        var result = await executor.ExecuteLeasedAsync(lease, "/bin/true", string.Empty);
+        var result = await executor.ExecuteLeasedAsync(lease, "/bin/true", Array.Empty<string>());
 
         Assert.Null(result.FinalMetrics.PeakMemoryBytes);
         Assert.Null(result.FinalMetrics.TotalCpuKernelTimeMs);

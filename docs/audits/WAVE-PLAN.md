@@ -103,7 +103,7 @@ agent BPF source the way the canary guard always bound the canary's.
 | Finding | Change |
 | --- | --- |
 | F10 | MCP filesystem confinement is handle-based and race-resistant, not a path-prefix string compare |
-| F11 | One versioned wire contract: explicit `argv`, policy hash, effective permissions, terminal outcome |
+| F11 | One versioned wire contract: explicit `argv`, and the compiled policy carried as paths the guest resolves | **done** — `protocolVersion: 2`; a v1 request is refused rather than guessed at |
 | AG-F06 | DLP gains bare-token rules (AWS, GitHub, OpenAI, Stripe, JWT) — today only `key=value` shapes redact |
 | AG-F07 | Recalled memory is wrapped in untrusted delimiters before it reaches a prompt |
 | F15 / F17 | The workflow builder either registers and runs the graph it draws, or stops advertising that it does |

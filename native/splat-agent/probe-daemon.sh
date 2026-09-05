@@ -4,21 +4,42 @@
 # The daemon must already be running as root in another terminal:
 #     sudo /tmp/splat_agent_target/release/splat-agent
 #
-# This does NOT need root itself - it is only a client. Usage:  bash probe-daemon.sh [host:port]
+# This is only a client, but it does need to READ the daemon's token: EXECUTE_TOOL carries a
+# root-owned 0600 secret, so the one privileged step here is `sudo cat` on that file.
+#
+# Usage:  bash probe-daemon.sh [host:port] [token-file]
 set -uo pipefail
 ADDR="${1:-127.0.0.1:50051}"
 HOST="${ADDR%%:*}"
 PORT="${ADDR##*:}"
+TOKEN_FILE="${2:-/etc/splat/agent.token}"
 
 command -v python3 >/dev/null || { echo "python3 required" >&2; exit 2; }
 
-python3 - "$HOST" "$PORT" <<'PY'
-import json, socket, sys
+# Readable directly when the daemon was started with a token file in user space; otherwise this
+# is the password prompt. Failing to read it is not fatal here - the probe goes on to be refused
+# and says so plainly, which beats a silent run scoring six False against the wrong cause.
+if [ -r "$TOKEN_FILE" ]; then
+    TOKEN="$(cat "$TOKEN_FILE")"
+else
+    echo "  reading the daemon token from $TOKEN_FILE (needs sudo - it is root-owned 0600)"
+    TOKEN="$(sudo cat "$TOKEN_FILE" 2>/dev/null || true)"
+fi
+[ -n "$TOKEN" ] || echo "  WARNING: no token read from $TOKEN_FILE - every EXECUTE_TOOL will be refused."
+
+python3 - "$HOST" "$PORT" "$TOKEN" <<'PY'
+import json, os, socket, sys
 
 host, port = sys.argv[1], int(sys.argv[2])
+token = sys.argv[3] if len(sys.argv) > 3 else ""
 
 def call(req, label, settle=2.0):
     """Send one request, collect every response line until the daemon stops talking."""
+    # Every EXECUTE_TOOL has carried a root-owned shared secret since the peer-auth change; a
+    # probe that omits it is refused at the gate and learns nothing about the kernel. Injected
+    # here rather than at six call sites so no future probe can forget it.
+    if req.get("type") == "EXECUTE_TOOL":
+        req = dict(req, authToken=token, protocolVersion=2)
     out = []
     try:
         s = socket.create_connection((host, port), timeout=5)
@@ -48,8 +69,11 @@ def call(req, label, settle=2.0):
     return out
 
 def show(msgs, label):
+    # Must hand back None, not []. Flattening "could not connect" into "connected and said
+    # nothing" defeated the `allowed is None` guard below, so a run that reached no daemon at
+    # all still scored every check False and wrote INCOMPLETE over committed PASS evidence.
     if msgs is None:
-        return []
+        return None
     print(f"  [{label}] {len(msgs)} message(s)")
     for m in msgs:
         t = m.get("type", "?")
@@ -65,14 +89,17 @@ print("== 1. health check ==")
 show(call({"type": "HEALTH_CHECK"}, "health"), "health")
 
 print()
-# NOTE: the daemon splits `arguments` on whitespace, so no single argument may contain a
-# space - `-c cat /etc/shadow` becomes `sh -c cat` with the path as $0, and cat then reads
-# stdin and hangs. Every probe below therefore uses single-token arguments.
+# Arguments travel as an explicit argv array. The daemon used to receive one string and split it
+# on whitespace, so `-c cat /etc/shadow` became `sh -c cat` with the path as $0 and cat then read
+# stdin and hung - which is why every probe here used to be restricted to single-token arguments.
+# Each request also names its own allowedExecPaths rather than relying on the daemon's legacy
+# default set, so what each probe permits is stated here rather than inherited.
 print("== 2. PERMITTED: run the requested tool itself ==")
 print("   The lease allow-lists the command it was asked to run, so this must succeed.")
 allowed = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-allowed",
-    "command": "/usr/bin/id", "arguments": "",
+    "command": "/usr/bin/id", "argv": [],
+    "allowedExecPaths": ["/usr/bin/id"],
     "leaseDurationSeconds": 20,
 }, "allowed"), "allowed")
 
@@ -81,18 +108,20 @@ print("== 3. FORBIDDEN: read a protected inode (/etc/shadow) ==")
 print("   The lease protects /etc/shadow. Expect a VIOLATION and no file contents.")
 shadow = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-shadow",
-    "command": "/bin/cat", "arguments": "/etc/shadow",
+    "command": "/bin/cat", "argv": ["/etc/shadow"],
+    "allowedExecPaths": ["/bin/cat"],
     "leaseDurationSeconds": 20,
 }, "shadow"), "shadow")
 
 print()
 print("== 4. FORBIDDEN: an ALLOWED tool reaching for an unleased binary ==")
-print("   /bin/sh is leased; dpkg is not. sh runs, then its exec of dpkg must be refused.")
-print("   Requesting dpkg directly would no longer test this - the daemon allow-lists whatever")
-print("   command it is asked to run, which is why the lease has to stop the SECOND exec.")
+print("   /bin/sh is the ONLY entry in this lease's allow-list; dpkg is not. sh runs, then its")
+print("   exec of dpkg must be refused. Requesting dpkg directly would not test this - the lease")
+print("   has to stop the SECOND exec, which is the one the caller never declared.")
 dpkg = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-exec",
-    "command": "/bin/sh", "arguments": "-c dpkg",
+    "command": "/bin/sh", "argv": ["-c", "dpkg --version"],
+    "allowedExecPaths": ["/bin/sh"],
     "leaseDurationSeconds": 20,
 }, "exec"), "exec")
 
@@ -104,13 +133,17 @@ print("   the one permitted destination (a refused connection is fine: the kerne
 print("   syscall), and 1.1.1.1 must be refused by the allow-list itself.")
 egress_ok = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-egress-ok",
-    "command": "/usr/bin/curl", "arguments": "--max-time 3 -s -o /dev/null http://127.0.0.1/",
+    "command": "/usr/bin/curl",
+    "argv": ["--max-time", "3", "-s", "-o", "/dev/null", "http://127.0.0.1/"],
+    "allowedExecPaths": ["/usr/bin/curl"],
     "allowNetwork": True, "leaseDurationSeconds": 20,
 }, "egress-allowed", settle=6.0), "egress-allowed")
 
 egress_bad = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-egress-bad",
-    "command": "/usr/bin/curl", "arguments": "--max-time 3 -s -o /dev/null http://1.1.1.1/",
+    "command": "/usr/bin/curl",
+    "argv": ["--max-time", "3", "-s", "-o", "/dev/null", "http://1.1.1.1/"],
+    "allowedExecPaths": ["/usr/bin/curl"],
     "allowNetwork": True, "leaseDurationSeconds": 20,
 }, "egress-denied", settle=6.0), "egress-denied")
 
@@ -119,7 +152,9 @@ print("== 6. EGRESS: the network switch OFF denies even the permitted address ==
 print("   allowNetwork false seeds no addresses at all, so deny-by-default must hold.")
 egress_off = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-egress-off",
-    "command": "/usr/bin/curl", "arguments": "--max-time 3 -s -o /dev/null http://127.0.0.1/",
+    "command": "/usr/bin/curl",
+    "argv": ["--max-time", "3", "-s", "-o", "/dev/null", "http://127.0.0.1/"],
+    "allowedExecPaths": ["/usr/bin/curl"],
     "allowNetwork": False, "leaseDurationSeconds": 20,
 }, "egress-off", settle=6.0), "egress-off")
 
@@ -135,8 +170,19 @@ print("READING")
 print("=" * 68)
 
 if allowed is None:
-    print("  Daemon not reachable - start it as root first.")
+    print("  Daemon not reachable - start it as root first, then run this client against it.")
     sys.exit(2)
+
+# A request refused at the daemon's gate - wrong credential, unsupported protocol version - is
+# turned away before any lease is installed. That is not a containment measurement: every check
+# below would read False and the verdict written would describe this probe's own envelope rather
+# than the kernel. Stop before the evidence write, and name the gate that refused.
+refusal = text(allowed)
+if "SPLAT refused the request" in refusal:
+    print("  Refused at the daemon's gate - no lease was installed, so nothing here is a")
+    print("  measurement of containment:")
+    print(f"    {refusal.strip()}")
+    sys.exit(3)
 
 shadow_text = text(shadow)
 leaked = "root:" in shadow_text
@@ -168,9 +214,22 @@ print(f"  network OFF denies 127.0.0.1   : {had(egress_off, 'VIOLATION')}")
 print(f"  every request sent EXIT        : {all(had(m, 'EXIT') for m in (allowed, shadow, dpkg, egress_ok, egress_bad, egress_off))}")
 
 # A run that is not recorded is not proof - the same rule the canary follows.
-import datetime, os
+import datetime
+# Hash the daemon's kernel program into the record. Without it a months-old PASS kept standing
+# over a rewritten BPF program - which is exactly what happened when the policy maps were re-keyed
+# per lease, and why the README's enforcement claim had to be withdrawn by hand.
+import hashlib
+bpf_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src", "bpf", "lease_lsm.bpf.c")
+try:
+    with open(bpf_src, "rb") as f:
+        bpf_sha = hashlib.sha256(f.read()).hexdigest()
+except OSError:
+    bpf_sha = "unreadable"
+
 evidence = {
-    "schema": 1,
+    "schema": 2,
+    "bpf_source_sha256": bpf_sha,
+    "protocol_version": 2,
     "recorded_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
     "results": {
@@ -212,6 +271,20 @@ out_dir = os.environ.get("SPLAT_EVIDENCE_DIR", "/mnt/c/C_AGENT_BUILDER/native/sp
 try:
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "daemon-probe.json")
+    # A failed run must not erase a passing one. The README's enforcement claim is bound to this
+    # file, so an INCOMPLETE landing on top of a PASS silently withdraws a proven claim - and the
+    # runs most likely to do it failed for reasons that say nothing about the kernel: daemon not
+    # started, wrong token, older protocol. A downgrade goes to its own file and announces itself.
+    if evidence["verdict"] != "PASS" and os.path.exists(path):
+        try:
+            with open(path) as f:
+                standing = json.load(f).get("verdict")
+        except (OSError, ValueError):
+            standing = None
+        if standing == "PASS":
+            path = os.path.join(out_dir, "daemon-probe.INCOMPLETE.json")
+            print()
+            print("  NOT overwriting the standing PASS evidence with this INCOMPLETE run.")
     with open(path, "w") as f:
         json.dump(evidence, f, indent=2)
         f.write(chr(10))

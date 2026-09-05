@@ -575,7 +575,7 @@ public class DocumentationDriftTests
     private sealed class StubExecutor : ILeasedExecutor
     {
         public Task<ProcessExecutionResult> ExecuteLeasedAsync(
-            LeaseSpec lease, string command, string arguments,
+            LeaseSpec lease, string command, IReadOnlyList<string> argv,
             IProgress<string>? stdout = null, IProgress<string>? stderr = null,
             IProgress<LeaseViolationEvent>? violations = null, CancellationToken ct = default) =>
             Task.FromResult(new ProcessExecutionResult(0, "", "", false, JobResourceMetrics.Unavailable));

@@ -27,12 +27,13 @@ public class McpServerTests
         public LeaseSpec? LastLease { get; private set; }
         public string? LastCommand { get; private set; }
         public string? LastArguments { get; private set; }
+        public IReadOnlyList<string>? LastArgv { get; private set; }
         public bool SimulateViolation { get; set; }
 
         public Task<ProcessExecutionResult> ExecuteLeasedAsync(
             LeaseSpec lease,
             string command,
-            string arguments,
+            IReadOnlyList<string> argv,
             IProgress<string>? stdout = null,
             IProgress<string>? stderr = null,
             IProgress<LeaseViolationEvent>? violations = null,
@@ -40,7 +41,8 @@ public class McpServerTests
         {
             LastLease = lease;
             LastCommand = command;
-            LastArguments = arguments;
+            LastArgv = argv;
+            LastArguments = string.Join(" ", argv);
 
             if (SimulateViolation)
             {
@@ -640,7 +642,7 @@ public class McpServerTests
     }
 
     [Fact]
-    public async Task RunCode_EscapesSingleQuotesSafely()
+    public async Task RunCode_SendsTheCodeAsOneUnmodifiedArgument()
     {
         var executor = new MockLeasedExecutor();
         var compiler = new TemplatePolicyCompiler();
@@ -665,9 +667,16 @@ public class McpServerTests
 
         var response = await handler.ProcessMessageAsync(request);
         Assert.NotNull(response.Result);
-        Assert.NotNull(executor.LastArguments);
-        // Asserts POSIX single-quote escaping format: -c 'echo '\''hello world'\'' && echo "nested quotes"'
-        Assert.Contains("-c 'echo '\\''hello world'\\'' && echo \"nested quotes\"'", executor.LastArguments);
+        Assert.NotNull(executor.LastArgv);
+
+        // This used to assert POSIX single-quote escaping, because the code was spliced into a
+        // command STRING that the guest daemon then split on whitespace. Both halves of that are
+        // gone: the code is one element of an argv array, so there is nothing to escape for and
+        // nothing downstream to re-split. Escaping correctly for a split that should not happen
+        // is a smaller bug than the split.
+        Assert.Equal(2, executor.LastArgv!.Count);
+        Assert.Equal("-c", executor.LastArgv[0]);
+        Assert.Equal("echo 'hello world' && echo \"nested quotes\"", executor.LastArgv[1]);
     }
 
     [Fact]

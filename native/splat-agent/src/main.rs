@@ -22,6 +22,15 @@ mod cow;
 mod lease;
 mod violation;
 
+/// The only EXECUTE_TOOL envelope this daemon speaks.
+///
+/// Version 1 carried `arguments` as a single string, which the daemon then split on whitespace.
+/// That is not a parse, it is a guess: MCP's run_code shipped `-c '<code>'` and the split handed
+/// python the literal `'print(123)'` - a string expression that evaluates, prints nothing and
+/// exits 0. Any argument containing a space tore in half. There is no way to repair a v1 request
+/// here, because the information needed to split it correctly was destroyed before it was sent.
+const PROTOCOL_VERSION: u64 = 2;
+
 /// Daemon-wide ceilings. A request may ask for less; it can never ask for more.
 const MAX_MEMORY_BYTES_CEILING: u64 = 256 * 1024 * 1024;
 const MAX_CPU_PERCENT_CEILING: u32 = 50;
@@ -485,11 +494,51 @@ async fn handle_client(
 
                 let mission_id = parsed.get("missionId").and_then(|v| v.as_str()).unwrap_or("default");
                 let command = parsed.get("command").and_then(|v| v.as_str()).unwrap_or("/bin/sh");
-                let arguments = parsed.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
+                // One contract, checked before anything else is read. A caller that does not name
+                // a version is a v1 caller whose arguments cannot be reconstructed.
+                let protocol_version = parsed.get("protocolVersion").and_then(|v| v.as_u64()).unwrap_or(1);
+                if protocol_version != PROTOCOL_VERSION {
+                    warn!("Rejected an EXECUTE_TOOL at protocol version {protocol_version}");
+                    let err_chunk = serde_json::json!({
+                        "type": "STDERR",
+                        "data": format!(
+                            "SPLAT refused the request: protocol version {protocol_version} is not supported. \
+                             This daemon speaks version {PROTOCOL_VERSION}, which requires an explicit argv array.\n")
+                    });
+                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                    let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                    writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                    line.clear();
+                    continue;
+                }
+
+                // argv verbatim. Absent is distinct from empty: empty means "no arguments", which
+                // is a legitimate request, while absent means the caller did not speak v2.
+                let argv: Vec<String> = match parsed.get("argv") {
+                    Some(v) if v.is_array() => v
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter_map(|e| e.as_str().map(str::to_string))
+                        .collect(),
+                    _ => {
+                        warn!("Rejected an EXECUTE_TOOL with no argv array");
+                        let err_chunk = serde_json::json!({
+                            "type": "STDERR",
+                            "data": "SPLAT refused the request: argv must be an array of strings. \
+                                     A pre-quoted argument string cannot be split back into arguments.\n"
+                        });
+                        writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                        let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                        writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                        line.clear();
+                        continue;
+                    }
+                };
                 let work_dir = parsed.get("workingDirectory").and_then(|v| v.as_str()).unwrap_or("/tmp");
                 let duration_sec = parsed.get("leaseDurationSeconds").and_then(|v| v.as_u64()).unwrap_or(30) as u32;
 
-                info!("Executing tool for mission {mission_id}: {command} {arguments}");
+                info!("Executing tool for mission {mission_id}: {command} {argv:?}");
 
                 // 0. Resolve the clamps FIRST.
                 //
@@ -579,21 +628,30 @@ async fn handle_client(
                         }
                         paths
                     },
-                    // The tool the caller asked for must itself be executable, or the lease refuses
-                    // the very thing it was created to run. Before this, the list was the three
-                    // hardcoded entries alone, so every EXECUTE_TOOL for anything else died at exec
-                    // with a bare "Operation not permitted" - which read as a daemon bug rather than
-                    // as policy. The other three stay because a shell tool commonly reaches for them.
-                    allowed_exec_paths: {
-                        let mut paths = vec![
-                            "/bin/sh".to_string(),
-                            "/bin/ping".to_string(),
-                            "/usr/bin/curl".to_string(),
-                        ];
-                        if !paths.iter().any(|p| p == command) {
-                            paths.push(command.to_string());
+                    // The controller's list when it sends one, and only then the legacy default.
+                    //
+                    // The daemon used to append the requested command to its own allow-list and add
+                    // /bin/sh, /bin/ping and /usr/bin/curl to every lease regardless of need - so a
+                    // caller wrote its own policy, and every mission could reach a shell whether or
+                    // not it asked. An explicit list from an authenticated controller is a policy;
+                    // a list the daemon assembled from the request is a restatement of the request.
+                    allowed_exec_paths: match string_list(&parsed, "allowedExecPaths") {
+                        Some(declared) => declared,
+                        None => {
+                            warn!(
+                                "Mission {mission_id} declared no allowedExecPaths; falling back to the \
+                                 legacy default set. A controller-issued lease should name its own."
+                            );
+                            let mut paths = vec![
+                                "/bin/sh".to_string(),
+                                "/bin/ping".to_string(),
+                                "/usr/bin/curl".to_string(),
+                            ];
+                            if !paths.iter().any(|p| p == command) {
+                                paths.push(command.to_string());
+                            }
+                            paths
                         }
-                        paths
                     },
                     lease_duration_seconds: duration_sec,
                     // Resolved above, before the cgroup existed, and already read back out of the
@@ -604,6 +662,23 @@ async fn handle_client(
                         max_pids: cg.effective.max_pids,
                     },
                 };
+
+                // A lease whose exec policy excludes the command it was created to run is
+                // incoherent: the kernel would refuse the exec and the caller would read a bare
+                // "Operation not permitted" as a daemon fault. Say so here instead.
+                if !lease_cfg.allowed_exec_paths.iter().any(|p| p == command) {
+                    error!("Refusing to execute for mission {mission_id}: '{command}' is not in this lease's allowedExecPaths");
+                    let err_chunk = serde_json::json!({
+                        "type": "STDERR",
+                        "data": format!(
+                            "SPLAT refused to execute: '{command}' is not in this lease's allowedExecPaths.\n")
+                    });
+                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                    let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                    writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                    line.clear();
+                    continue;
+                }
 
                 // A lease that could not be installed is a refusal, not a warning. register_lease
                 // rolls back its own partial map writes and returns Err, so there is no state in
@@ -623,9 +698,7 @@ async fn handle_client(
 
                 // 2. Spawn Subprocess
                 let mut cmd = Command::new(command);
-                if !arguments.is_empty() {
-                    cmd.args(arguments.split_whitespace());
-                }
+                cmd.args(&argv);
                 cmd.current_dir(if Path::new(work_dir).exists() { work_dir } else { "/tmp" });
                 cmd.stdout(Stdio::piped());
                 cmd.stderr(Stdio::piped());

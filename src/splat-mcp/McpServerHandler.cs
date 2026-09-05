@@ -240,7 +240,8 @@ public class McpServerHandler
                     ""type"": ""object"",
                     ""properties"": {
                         ""command"": { ""type"": ""string"", ""description"": ""The executable to run (e.g. /bin/bash, /usr/bin/python3, /bin/ls)"" },
-                        ""arguments"": { ""type"": ""string"", ""description"": ""Command arguments"" },
+                        ""args"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Arguments as a vector, already separated. Preferred: nothing re-splits it, so spaces and quotes inside an argument survive intact."" },
+                        ""arguments"": { ""type"": ""string"", ""description"": ""Legacy shell-style argument string. Split POSIX-style on this side before it reaches the guest; an unterminated quote is refused rather than guessed. Prefer 'args'."" },
                         ""workingDirectory"": { ""type"": ""string"", ""description"": ""Working directory inside sandbox"", ""default"": ""/tmp"" },
                         ""allowNetwork"": { ""type"": ""boolean"", ""description"": ""Whether network egress is permitted"", ""default"": false },
                         ""allowedEgressIps"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Allow-listed egress IPv4 addresses (e.g. 127.0.0.1)"" },
@@ -549,7 +550,44 @@ public class McpServerHandler
             };
         }
 
-        string arguments = args.TryGetProperty("arguments", out var argProp) ? argProp.GetString() ?? "" : "";
+        // `args` (an array) is the contract; `arguments` (a string) is the legacy shape, split
+        // here rather than in the guest. The daemon used to split on whitespace, which cannot
+        // recover quoting and produced silently wrong argument vectors.
+        IReadOnlyList<string> argv;
+        string argumentsForLog;
+        if (args.TryGetProperty("args", out var argvProp) && argvProp.ValueKind == JsonValueKind.Array)
+        {
+            var list = new List<string>();
+            foreach (var el in argvProp.EnumerateArray())
+            {
+                if (el.GetString() is string a)
+                {
+                    list.Add(a);
+                }
+            }
+            argv = list;
+            argumentsForLog = string.Join(" ", list);
+        }
+        else
+        {
+            string arguments = args.TryGetProperty("arguments", out var argProp) ? argProp.GetString() ?? "" : "";
+            try
+            {
+                argv = PosixArgumentSplitter.Split(arguments);
+            }
+            catch (FormatException ex)
+            {
+                return new McpToolCallResult
+                {
+                    IsError = true,
+                    Content = new List<McpContentItem>
+                    {
+                        new() { Type = "text", Text = $"Error: could not parse 'arguments': {ex.Message} Pass an 'args' array instead." }
+                    }
+                };
+            }
+            argumentsForLog = arguments;
+        }
         string workDir = args.TryGetProperty("workingDirectory", out var wdProp) ? wdProp.GetString() ?? "/tmp" : "/tmp";
         bool allowNetwork = GetSafeBool(args, "allowNetwork", false);
         uint timeoutSec = (uint)GetSafeInt(args, "timeoutSeconds", 30, 5, 300);
@@ -579,12 +617,19 @@ public class McpServerHandler
             AllowedEgressIps: egressIps,
             AllowedEgressPorts: new List<uint> { 80, 443 },
             ReadOnlyFs: readOnlyFs,
+            // Inode NUMBERS are not knowable here - this process runs on Windows and the files
+            // live in the guest - so the zeros say so rather than the 1 and 2 that used to sit
+            // there looking like identities. The daemon resolves SourcePath in the environment
+            // where an inode means something, which is the only place the resolution is valid.
             ProtectedInodes: new List<InodeIdentifierModel>
             {
-                new(1, 0, "/etc/shadow"),
-                new(2, 0, "/etc/sudoers")
+                new(0, 0, "/etc/shadow"),
+                new(0, 0, "/etc/sudoers")
             },
-            AllowedExecInodes: new List<InodeIdentifierModel>(),
+            // The command is the policy for this tool: run_command executes exactly what it was
+            // asked to, so that is what the lease permits and nothing else. An empty list here
+            // meant the daemon assembled its own, which made the request its own authorization.
+            AllowedExecInodes: new List<InodeIdentifierModel> { new(0, 0, command) },
             LeaseDurationSeconds: timeoutSec,
             Limits: new LeaseResourceLimits(
                 MaxMemoryBytes: 256 * 1024 * 1024,
@@ -603,7 +648,7 @@ public class McpServerHandler
         var execResult = await _leasedExecutor.ExecuteLeasedAsync(
             lease,
             command,
-            arguments,
+            argv,
             violations: violationProgress,
             ct: ct);
 
@@ -633,7 +678,7 @@ public class McpServerHandler
             missionId,
             "mcp-tool-run_command",
             "EXECUTED_LEASABLE_COMMAND",
-            $"Command='{command}' Args='{arguments}' ExitCode={execResult.ExitCode} Violations={violations.Count}",
+            $"Command='{command}' Args='{argumentsForLog}' ExitCode={execResult.ExitCode} Violations={violations.Count}",
             await ResolveActorAsync(ct),
             ct);
 
@@ -690,36 +735,34 @@ public class McpServerHandler
         uint timeoutSec = (uint)GetSafeInt(args, "timeoutSeconds", 30, 5, 300);
 
         string runner;
-        string runnerArgs;
 
-        // POSIX single-quote escaping: replace ' with '\'' and enclose within single quotes
-        string escapedCode = code.Replace("'", "'\\''");
-
+        // No quoting. The code is ONE argument, and it travels as one element of an argv array -
+        // so there is no string for anything downstream to re-split, and no escaping to get wrong.
+        // The previous version single-quoted it and the guest then split the result on whitespace,
+        // which handed python `'print(123)'`: a string literal that evaluates, prints nothing and
+        // exits 0. `print(1, 2)` arrived as `'print(1,` and died on an unterminated string.
         switch (language.ToLowerInvariant())
         {
             case "python":
             case "python3":
             case "py":
                 runner = "/usr/bin/python3";
-                runnerArgs = $"-c '{escapedCode}'";
                 break;
 
             case "sh":
                 runner = "/bin/sh";
-                runnerArgs = $"-c '{escapedCode}'";
                 break;
 
             case "bash":
             default:
                 runner = "/bin/bash";
-                runnerArgs = $"-c '{escapedCode}'";
                 break;
         }
 
         var wrappedArgs = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
         {
             command = runner,
-            arguments = runnerArgs,
+            args = new[] { "-c", code },
             workingDirectory = workDir,
             allowNetwork = allowNetwork,
             timeoutSeconds = timeoutSec

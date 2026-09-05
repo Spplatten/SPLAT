@@ -55,16 +55,20 @@ public class WslLeasedExecutor : ILeasedExecutor
             : Environment.GetEnvironmentVariable("SPLAT_AGENT_TOKEN");
     }
 
+    /// <summary>The envelope version this bridge speaks; the daemon refuses anything else.</summary>
+    private const int ProtocolVersion = 2;
+
     public async Task<ProcessExecutionResult> ExecuteLeasedAsync(
         LeaseSpec lease,
         string command,
-        string arguments,
+        IReadOnlyList<string> argv,
         IProgress<string>? stdout = null,
         IProgress<string>? stderr = null,
         IProgress<LeaseViolationEvent>? violations = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(lease);
+        ArgumentNullException.ThrowIfNull(argv);
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
 
         var stopwatch = Stopwatch.StartNew();
@@ -109,15 +113,24 @@ public class WslLeasedExecutor : ILeasedExecutor
             var payload = new
             {
                 type = "EXECUTE_TOOL",
+                protocolVersion = ProtocolVersion,
                 authToken,
                 missionId = lease.MissionId.ToString(),
                 command = command,
-                arguments = arguments,
+                argv,
                 workingDirectory = lease.WorkingDirectory,
                 allowNetwork = lease.AllowNetwork,
                 allowedEgressIps = lease.AllowedEgressIps,
                 allowedEgressPorts = lease.AllowedEgressPorts,
                 readOnlyFs = lease.ReadOnlyFs,
+                // The compiled policy, as PATHS. The lease carries InodeIdentifierModel, but a
+                // Windows-side inode number means nothing in the guest - TemplatePolicyCompiler
+                // already fills them with (0, 0, path), which says the path was always the payload.
+                // These were dropped from the envelope entirely, so the daemon fell back to its own
+                // hardcoded defaults and the compiled policy was not the authorization source for
+                // this path at all.
+                protectedPaths = lease.ProtectedInodes.Select(i => i.SourcePath).ToArray(),
+                allowedExecPaths = lease.AllowedExecInodes.Select(i => i.SourcePath).ToArray(),
                 leaseDurationSeconds = lease.LeaseDurationSeconds,
                 limits = new
                 {

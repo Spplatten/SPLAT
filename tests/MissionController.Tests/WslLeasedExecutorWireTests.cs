@@ -96,7 +96,7 @@ public class WslLeasedExecutorWireTests
             "{\"type\":\"EXIT\",\"exitCode\":0}");
 
         var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
-        var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", "");
+        var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
         byte[] request = await daemon;
         listener.Stop();
@@ -128,7 +128,7 @@ public class WslLeasedExecutorWireTests
 
         var lease = SampleLease();
         var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
-        await executor.ExecuteLeasedAsync(lease, "/usr/bin/curl", "--max-time 3");
+        await executor.ExecuteLeasedAsync(lease, "/usr/bin/curl", new[] { "--max-time", "3" });
 
         byte[] request = await daemon;
         listener.Stop();
@@ -137,8 +137,20 @@ public class WslLeasedExecutorWireTests
         var root = doc.RootElement;
 
         Assert.Equal("EXECUTE_TOOL", root.GetProperty("type").GetString());
+        Assert.Equal(2, root.GetProperty("protocolVersion").GetInt32());
         Assert.Equal("/usr/bin/curl", root.GetProperty("command").GetString());
-        Assert.Equal("--max-time 3", root.GetProperty("arguments").GetString());
+
+        // argv, not a pre-quoted string. The daemon used to split whatever arrived on whitespace,
+        // which cannot recover quoting - so the arguments had to stop being a string on the wire.
+        var argv = root.GetProperty("argv");
+        Assert.Equal(2, argv.GetArrayLength());
+        Assert.Equal("--max-time", argv[0].GetString());
+        Assert.Equal("3", argv[1].GetString());
+
+        // The compiled policy travels as paths, resolvable in the guest. Both lists were dropped
+        // from the envelope entirely, so the daemon fell back to its own hardcoded defaults.
+        Assert.True(root.TryGetProperty("protectedPaths", out _));
+        Assert.True(root.TryGetProperty("allowedExecPaths", out _));
         Assert.Equal(lease.MissionId.ToString(), root.GetProperty("missionId").GetString());
         Assert.True(root.GetProperty("allowNetwork").GetBoolean());
         Assert.True(root.GetProperty("readOnlyFs").GetBoolean());
@@ -162,7 +174,7 @@ public class WslLeasedExecutorWireTests
         var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
 
         var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
-        await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", "");
+        await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
         byte[] request = await daemon;
         listener.Stop();
@@ -191,7 +203,7 @@ public class WslLeasedExecutorWireTests
             var executor = new WslLeasedExecutor(
                 "127.0.0.1", port, authTokenPath: "/nonexistent/splat/agent.token");
 
-            var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", "");
+            var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
             // This class reports transport failures rather than throwing, so the refusal arrives
             // the same way every other one does.
@@ -231,7 +243,7 @@ public class WslLeasedExecutorWireTests
         var seen = new List<LeaseViolationEvent>();
         var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
         var result = await executor.ExecuteLeasedAsync(
-            SampleLease(), "/bin/cat", "/etc/shadow",
+            SampleLease(), "/bin/cat", new[] { "/etc/shadow" },
             violations: new Progress<LeaseViolationEvent>(v => { lock (seen) { seen.Add(v); } }));
 
         await daemon;
@@ -266,7 +278,7 @@ public class WslLeasedExecutorWireTests
         var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
 
         var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
-        var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", "");
+        var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
         await daemon;
         listener.Stop();
