@@ -64,7 +64,7 @@ Remaining in this theme is F20 — a remediation verdict that comes from a measu
 rather than an exit code. The timeout fix narrows it; closing it needs each action to declare what
 restored means, which is a design, not a patch.
 
-## Wave 3 — Linux fail-closed and lease isolation (F04/F05/F06/F07 done)
+## Wave 3 — Linux fail-closed and lease isolation (done)
 
 | Finding | Change | State |
 | --- | --- | --- |
@@ -75,7 +75,7 @@ restored means, which is a design, not a patch.
 | F05 | Expiry kills inside the installed policy and only then withdraws it; a lost client kills too; `Drop` drains before `rmdir` | done, `f2e77f9` |
 | F06 | Every policy key carries the cgroup id, so concurrent leases stop receiving the union of each other's permissions | done |
 | F07 | Every EXECUTE_TOOL presents a root-owned 0600 token, compared in constant time; the workload drops to an unprivileged uid before exec, or the spawn fails | done |
-| F08 | Publish the actual supported syscall/protocol matrix and refuse policy outside it | **open** |
+| F08 | `SUPPORTED_POLICY.md` states what each hook enforces, what the daemon enforces, what it refuses and what it does not police; `readOnlyFs` and `overlayFs.enableCow` are refused rather than ignored; the connect hook now keys on address AND port and denies IPv6 | done |
 
 Evidence: `native/splat-agent/evidence/fail-closed-probe.json` records the same invocation at both
 commits — the committed daemon started unprivileged with no BPF and answered `bpfLsmActive: true`;

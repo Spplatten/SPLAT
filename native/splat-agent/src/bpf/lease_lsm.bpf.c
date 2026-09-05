@@ -36,6 +36,7 @@
 char LICENSE[] SEC("license") = "GPL"; // BPF-LSM + ringbuf helpers require a GPL-compatible license.
 
 #define AF_INET 2
+#define AF_INET6 10
 #define EPERM 1
 
 // Inode identity. The (dev, ino) pair is unique across all mounts/filesystems.
@@ -54,11 +55,17 @@ struct lease_inode_key {
     __u32 _pad;
 };
 
-// Same, for an approved IPv4 destination. 16 bytes.
+// An approved IPv4 ENDPOINT - address and port together, 16 bytes.
+//
+// The port used to be absent: the lease parsed allowedEgressPorts, carried them in its config, and
+// never sent them to the kernel, so an approved host was approved on every port it listened on.
+// `port` is kept in network byte order so it compares directly against sin_port with no byte swap
+// in the hook.
 struct lease_ipv4_key {
     __u64 cgroup_id;
     __u32 addr;
-    __u32 _pad;
+    __u16 port;
+    __u16 _pad;
 };
 
 enum splat_hook {
@@ -217,20 +224,37 @@ int BPF_PROG(splat_socket_connect, struct socket *sock, struct sockaddr *address
     if (!is_leased(cgid))
         return 0;
 
-    // Only police IPv4. AF_UNIX / AF_INET6 fall through to whatever other LSMs decided.
     sa_family_t family = BPF_CORE_READ(address, sa_family);
+
+    // IPv6 is DENIED outright for a leased process, not waved through.
+    //
+    // There is no v6 allow-list - the lease speaks in IPv4 /32s - so every AF_INET6 connect used to
+    // return 0 here and reach the network unpoliced. That made `allowNetwork: false` mean "no IPv4",
+    // which is not what it says, and left a dual-stacked host one getaddrinfo away from egress.
+    // Denying is the only answer that matches the policy vocabulary; allowing v6 destinations needs
+    // a v6 allow-list, and until there is one there is nothing to check an address against.
+    if (family == AF_INET6) {
+        report(cgid, HOOK_CONNECT, 0);
+        return -EPERM;
+    }
+
+    // Anything else - AF_UNIX, AF_NETLINK - is NOT policed by this hook and is documented as such
+    // in SUPPORTED_POLICY.md. Denying local IPC wholesale would break name resolution and logging
+    // for the shipped catalogue; claiming it is contained when it is not would be worse than both.
     if (family != AF_INET)
         return 0;
 
     struct sockaddr_in *in = (struct sockaddr_in *)address;
     __u32 daddr = BPF_CORE_READ(in, sin_addr.s_addr); // network byte order
+    __u16 dport = BPF_CORE_READ(in, sin_port);        // network byte order
 
     struct lease_ipv4_key k = {};
     k.cgroup_id = cgid;
     k.addr = daddr;
+    k.port = dport;
     k._pad = 0;
     if (bpf_map_lookup_elem(&allowed_connect_ipv4, &k) != NULL)
-        return 0; // Approved egress target FOR THIS LEASE.
+        return 0; // Approved endpoint FOR THIS LEASE - this address on this port.
 
     report(cgid, HOOK_CONNECT, daddr);
     return -EPERM;

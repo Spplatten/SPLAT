@@ -42,19 +42,31 @@ impl LeaseInodeKey {
     }
 }
 
-/// Mirrors `struct lease_ipv4_key`. The address stays in network byte order.
+/// Mirrors `struct lease_ipv4_key`. Address AND port, both in network byte order.
+///
+/// The port used to be missing on both sides: `allowed_egress_ports` was parsed, stored on the
+/// config and never sent anywhere, so a lease that approved one host approved it on every port
+/// that host listened on. Network byte order so the hook compares it straight against `sin_port`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LeaseIpv4Key {
     pub cgroup_id: u64,
     pub addr: u32,
-    pub _pad: u32,
+    pub port: u16,
+    pub _pad: u16,
 }
 
 impl LeaseIpv4Key {
-    pub fn new(cgroup_id: u64, addr: u32) -> Self {
-        Self { cgroup_id, addr, _pad: 0 }
+    pub fn new(cgroup_id: u64, endpoint: &Ipv4Endpoint) -> Self {
+        Self { cgroup_id, addr: endpoint.addr, port: endpoint.port, _pad: 0 }
     }
+}
+
+/// One approved destination: an IPv4 address on one port, both network byte order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Ipv4Endpoint {
+    pub addr: u32,
+    pub port: u16,
 }
 
 // A map key whose Rust layout disagrees with the BPF struct silently looks up the wrong bytes, and
@@ -116,7 +128,7 @@ pub struct ActiveLease {
     pub expires_at: Instant,
     pub protected_inodes: Vec<InodeKey>,
     pub allowed_exec_inodes: Vec<InodeKey>,
-    pub allowed_ips: Vec<u32>,
+    pub allowed_endpoints: Vec<Ipv4Endpoint>,
 }
 
 pub fn bytes_of<T: Copy>(v: &T) -> &[u8] {
@@ -146,9 +158,9 @@ pub fn lease_map_keys(lease: &ActiveLease) -> LeaseMapKeys {
             .map(|k| LeaseInodeKey::new(lease.cgroup_id, k))
             .collect(),
         allowed_ipv4: lease
-            .allowed_ips
+            .allowed_endpoints
             .iter()
-            .map(|ip| LeaseIpv4Key::new(lease.cgroup_id, *ip))
+            .map(|e| LeaseIpv4Key::new(lease.cgroup_id, e))
             .collect(),
     }
 }
@@ -205,11 +217,16 @@ impl LeaseManager {
             }
         }
 
-        let mut allowed_ips = Vec::new();
+        // The cross product of approved addresses and approved ports. An address with no port is
+        // not a destination, and the lease has always named both - only one of them ever travelled.
+        let mut allowed_endpoints = Vec::new();
         if config.allow_network {
             for ip in &config.allowed_egress_ips {
-                if let Ok(val) = ipv4_to_be_u32(ip) {
-                    allowed_ips.push(val);
+                let Ok(addr) = ipv4_to_be_u32(ip) else { continue };
+                for port in &config.allowed_egress_ports {
+                    if let Ok(p) = u16::try_from(*port) {
+                        allowed_endpoints.push(Ipv4Endpoint { addr, port: p.to_be() });
+                    }
                 }
             }
         }
@@ -234,7 +251,7 @@ impl LeaseManager {
             expires_at: now + duration,
             protected_inodes,
             allowed_exec_inodes,
-            allowed_ips,
+            allowed_endpoints,
         };
 
         // A map write that failed used to be a warning, and the lease was registered anyway. The
@@ -443,6 +460,25 @@ mod tests {
     }
 
     #[test]
+    fn the_endpoint_cross_product_is_what_reaches_the_maps() {
+        // Two addresses and two ports is four endpoints, not two - a lease that names both
+        // dimensions has to install both, and only the address half ever travelled before.
+        let sync = RecordingSync::new(false);
+        let mgr = LeaseManager::new(Some(sync));
+
+        let mut cfg = config(vec!["/etc/hostname"], 30);
+        cfg.allow_network = true;
+        cfg.allowed_egress_ips = vec!["127.0.0.1".to_string(), "10.0.0.1".to_string()];
+        cfg.allowed_egress_ports = vec![80, 443];
+
+        let lease = mgr
+            .register_lease(77, PathBuf::from("/tmp/cg"), &cfg)
+            .expect("register");
+
+        assert_eq!(lease_map_keys(&lease).allowed_ipv4.len(), 4);
+    }
+
+    #[test]
     fn an_expired_lease_carries_the_cgroup_the_reaper_has_to_kill() {
         let sync = RecordingSync::new(false);
         let mgr = LeaseManager::new(Some(sync));
@@ -513,9 +549,11 @@ mod isolation_tests {
                 .contains(bytes_of(&LeaseInodeKey::new(cgroup_id, inode)))
         }
 
-        fn may_connect(&self, cgroup_id: u64, addr: u32) -> bool {
-            self.allowed_ipv4
-                .contains(bytes_of(&LeaseIpv4Key::new(cgroup_id, addr)))
+        fn may_connect(&self, cgroup_id: u64, addr: u32, port: u16) -> bool {
+            self.allowed_ipv4.contains(bytes_of(&LeaseIpv4Key::new(
+                cgroup_id,
+                &Ipv4Endpoint { addr, port: port.to_be() },
+            )))
         }
     }
 
@@ -523,7 +561,12 @@ mod isolation_tests {
         InodeKey { ino, dev: 66, _pad: 0 }
     }
 
-    fn lease_for(cgroup_id: u64, exec: Vec<InodeKey>, protected: Vec<InodeKey>, ips: Vec<u32>) -> ActiveLease {
+    fn lease_for(
+        cgroup_id: u64,
+        exec: Vec<InodeKey>,
+        protected: Vec<InodeKey>,
+        endpoints: Vec<Ipv4Endpoint>,
+    ) -> ActiveLease {
         let now = Instant::now();
         ActiveLease {
             mission_id: format!("m-{cgroup_id}"),
@@ -532,13 +575,18 @@ mod isolation_tests {
             expires_at: now + Duration::from_secs(30),
             protected_inodes: protected,
             allowed_exec_inodes: exec,
-            allowed_ips: ips,
+            allowed_endpoints: endpoints,
         }
     }
 
     const PYTHON: u64 = 4242;
     const SHADOW: u64 = 1111;
     const GRANTS_IP: u32 = 0x0100_007f;
+    const HTTPS: u16 = 443;
+
+    fn endpoint(addr: u32, port: u16) -> Ipv4Endpoint {
+        Ipv4Endpoint { addr, port: port.to_be() }
+    }
 
     #[test]
     fn one_missions_allowed_executable_is_not_granted_to_another() {
@@ -561,15 +609,31 @@ mod isolation_tests {
     fn one_missions_egress_destination_is_not_granted_to_another() {
         let mut maps = FakeKernelMaps::default();
 
-        let a = lease_for(100, vec![], vec![], vec![GRANTS_IP]);
+        let a = lease_for(100, vec![], vec![], vec![endpoint(GRANTS_IP, HTTPS)]);
         let b = lease_for(200, vec![], vec![], vec![]);
         maps.install(&a);
         maps.install(&b);
 
-        assert!(maps.may_connect(a.cgroup_id, GRANTS_IP));
+        assert!(maps.may_connect(a.cgroup_id, GRANTS_IP, HTTPS));
         assert!(
-            !maps.may_connect(b.cgroup_id, GRANTS_IP),
+            !maps.may_connect(b.cgroup_id, GRANTS_IP, HTTPS),
             "B declared no egress at all and must not inherit A's destination"
+        );
+    }
+
+    #[test]
+    fn an_approved_host_is_not_approved_on_every_port() {
+        let mut maps = FakeKernelMaps::default();
+
+        // The lease names 443. Port 22 on the same host was never granted - and used to be
+        // reachable anyway, because the key carried no port at all.
+        let a = lease_for(100, vec![], vec![], vec![endpoint(GRANTS_IP, HTTPS)]);
+        maps.install(&a);
+
+        assert!(maps.may_connect(a.cgroup_id, GRANTS_IP, HTTPS));
+        assert!(
+            !maps.may_connect(a.cgroup_id, GRANTS_IP, 22),
+            "approving a host on 443 must not approve it on 22"
         );
     }
 
@@ -613,6 +677,8 @@ mod isolation_tests {
         // A mismatch looks up the wrong bytes, and for protected_inodes a miss falls OPEN.
         assert_eq!(std::mem::size_of::<LeaseInodeKey>(), 24);
         assert_eq!(std::mem::align_of::<LeaseInodeKey>(), 8);
+        // struct lease_ipv4_key { __u64; __u32; __u16; __u16; } - still 16 bytes with the port
+        // folded into the padding the address left behind.
         assert_eq!(std::mem::size_of::<LeaseIpv4Key>(), 16);
         assert_eq!(std::mem::align_of::<LeaseIpv4Key>(), 8);
     }
