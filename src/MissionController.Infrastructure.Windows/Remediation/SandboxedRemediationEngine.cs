@@ -107,18 +107,34 @@ public sealed class SandboxedRemediationEngine : IRemediationEngine
                 timeoutSeconds: 45,
                 cancellationToken: cancellationToken);
 
-            bool success = execResult.ExitCode == 0;
+            // A process killed at the 45s ceiling has not finished its work, whatever exit code the
+            // kill produced. Reading only the exit code let a half-applied repair - or a half-undone
+            // rollback - report as a completed one.
+            bool success = execResult.ExitCode == 0 && !execResult.TimedOut;
             string output = string.IsNullOrEmpty(execResult.StandardError)
                 ? execResult.StandardOutput
                 : $"{execResult.StandardOutput}\n[STDERR]: {execResult.StandardError}";
 
-            // 5. Audit Result
-            string completionTag = isRollback ? "REMEDIATION_ROLLBACK_COMPLETED" : "REMEDIATION_FIX_COMPLETED";
+            string? failureReason = success
+                ? null
+                : execResult.TimedOut
+                    ? "Process exceeded its 45s remediation budget and was terminated; the change may be half-applied."
+                    : $"Process failed with exit code {execResult.ExitCode}";
+
+            // 5. Audit Result. The action name carries the verdict, so a reader scanning the ledger
+            // for what happened does not have to parse the detail string to find out.
+            string completionTag = (isRollback, success) switch
+            {
+                (true, true) => "REMEDIATION_ROLLBACK_COMPLETED",
+                (true, false) => "REMEDIATION_ROLLBACK_FAILED",
+                (false, true) => "REMEDIATION_FIX_COMPLETED",
+                (false, false) => "REMEDIATION_FIX_FAILED"
+            };
             await _auditLedger.AppendLogAsync(
                 missionId,
                 templateId,
                 completionTag,
-                $"ActionId: {actionId} | ExitCode: {execResult.ExitCode} | Success: {success}",
+                $"ActionId: {actionId} | ExitCode: {execResult.ExitCode} | TimedOut: {execResult.TimedOut} | Success: {success}",
                 operatorIdentity,
                 cancellationToken);
 
@@ -126,7 +142,7 @@ public sealed class SandboxedRemediationEngine : IRemediationEngine
                 actionId,
                 success,
                 output,
-                success ? null : $"Process failed with exit code {execResult.ExitCode}",
+                failureReason,
                 isRollback,
                 DateTime.UtcNow);
         }

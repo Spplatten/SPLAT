@@ -94,7 +94,7 @@ public class WorkflowGovernanceTests
     public async Task TheExecutionIdOnTheResult_IsTheIdWrittenToTheLedger()
     {
         var ledger = new RecordingAuditLedger();
-        var engine = new WorkflowExecutionEngine(auditLedger: ledger);
+        var engine = new WorkflowExecutionEngine(auditLedger: ledger, allowSimulatedExecution: true);
 
         var result = await engine.ExecuteAsync(
             SingleScriptGraph("Write-Output 'hello'"),
@@ -146,7 +146,7 @@ public class WorkflowGovernanceTests
     [Fact]
     public async Task ARolledBackTransaction_IsReportedAsAFailedRun()
     {
-        var engine = new WorkflowExecutionEngine();
+        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-tx-honesty",
@@ -255,7 +255,7 @@ public class WorkflowGovernanceTests
     [Fact]
     public async Task AConditionScopedToAField_IgnoresEveryOtherNodesOutput()
     {
-        var engine = new WorkflowExecutionEngine();
+        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
 
         // 'probe' is the field under test and reports healthy. The trigger payload - which an
         // unauthenticated caller controls - carries the alarm text the gate looks for.
@@ -294,7 +294,7 @@ public class WorkflowGovernanceTests
     [Fact]
     public async Task AConditionWithNoMatchPattern_IsRefused()
     {
-        var engine = new WorkflowExecutionEngine();
+        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-empty-condition",
@@ -316,7 +316,7 @@ public class WorkflowGovernanceTests
     [Fact]
     public async Task ADescendantOfASkippedNode_IsSkippedToo()
     {
-        var engine = new WorkflowExecutionEngine();
+        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-transitive-skip",
@@ -351,7 +351,7 @@ public class WorkflowGovernanceTests
     [Fact]
     public async Task TheOAuthNode_RefusesRatherThanVaultingAFabricatedToken()
     {
-        var engine = new WorkflowExecutionEngine();
+        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-oauth-honesty",
@@ -377,7 +377,7 @@ public class WorkflowGovernanceTests
     [Fact]
     public async Task TheGovernedHttpNode_SaysItSentNothing()
     {
-        var engine = new WorkflowExecutionEngine();
+        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-http-honesty",

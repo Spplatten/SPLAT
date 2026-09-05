@@ -32,6 +32,16 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
     private readonly ISemanticMemoryIndex? _semanticMemoryIndex;
     private readonly IRemediationEngine? _remediationEngine;
 
+    /// <summary>
+    /// Whether a node may "run" without a real sandbox.
+    ///
+    /// With neither a launcher nor a sandbox factory the engine used to return
+    /// "[SIMULATED_SANDBOX] Executed script: ..." and report the run successful - so the default
+    /// composition, which wires neither, produced confident output for work that never happened.
+    /// Simulation is now something a caller asks for by name.
+    /// </summary>
+    private readonly bool _allowSimulatedExecution;
+
     public WorkflowExecutionEngine(
         IDataLossPreventionSanitizer? dlpSanitizer = null,
         IProcessLauncher? processLauncher = null,
@@ -39,7 +49,8 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         IAuditLedger? auditLedger = null,
         IModelStreamClient? modelClient = null,
         ISemanticMemoryIndex? semanticMemoryIndex = null,
-        IRemediationEngine? remediationEngine = null)
+        IRemediationEngine? remediationEngine = null,
+        bool allowSimulatedExecution = false)
     {
         _dlpSanitizer = dlpSanitizer;
         _processLauncher = processLauncher;
@@ -48,6 +59,7 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         _modelClient = modelClient;
         _semanticMemoryIndex = semanticMemoryIndex;
         _remediationEngine = remediationEngine;
+        _allowSimulatedExecution = allowSimulatedExecution;
     }
 
     public async Task<WorkflowExecutionResult> ExecuteAsync(
@@ -332,7 +344,7 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         string runtime = node.Configuration.TryGetValue("Runtime", out var r) ? r : "powershell";
         string command = BindNodeCommand(node, node.ScriptCommand, nodeOutputs, runtime);
 
-        var run = await RunConfinedScriptInternalAsync(command, runtime, ct);
+        var run = await RunConfinedScriptInternalAsync(node.NodeId, command, runtime, ct);
         if (run.TimedOut)
         {
             throw new WorkflowNodeFailedException(
@@ -397,6 +409,7 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
             || runtime.Equals("pwsh", StringComparison.OrdinalIgnoreCase);
 
     private async Task<(string Output, int ExitCode, bool TimedOut)> RunConfinedScriptInternalAsync(
+        string nodeId,
         string command,
         string runtime,
         CancellationToken ct)
@@ -432,6 +445,14 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
 
             string output = string.IsNullOrWhiteSpace(result.StandardOutput) ? result.StandardError : result.StandardOutput;
             return (output, result.ExitCode, result.TimedOut);
+        }
+
+        if (!_allowSimulatedExecution)
+        {
+            throw new WorkflowNodeFailedException(
+                nodeId,
+                "no process launcher or job sandbox is wired, so nothing was executed. " +
+                "Construct the engine with allowSimulatedExecution: true to run it as a demo.");
         }
 
         string activeRuntime = string.IsNullOrWhiteSpace(runtime) ? "powershell" : runtime;
@@ -489,7 +510,7 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
             // select tools from the governed catalogue against a model. The label says so, because
             // an observation that reports health it never measured is worse than no observation.
             string toolCommand = $"Write-Output '[TOOL_EXECUTION:{selectedTool}] PLACEHOLDER PROBE - no telemetry was read.'";
-            var run = await RunConfinedScriptInternalAsync(toolCommand, "powershell", ct);
+            var run = await RunConfinedScriptInternalAsync(node.NodeId, toolCommand, "powershell", ct);
             if (run.TimedOut || run.ExitCode != 0)
             {
                 throw new WorkflowNodeFailedException(
@@ -611,7 +632,7 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
             ? BindNodeCommand(node, rb, nodeOutputs, runtime)
             : string.Empty;
 
-        var primary = await RunConfinedScriptInternalAsync(primaryCommand, runtime, ct);
+        var primary = await RunConfinedScriptInternalAsync(node.NodeId, primaryCommand, runtime, ct);
 
         // A script that died or timed out proves nothing about the assertion, so it is treated as a
         // failed assertion and rolled back - never committed because its stderr happened to carry
@@ -629,7 +650,7 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         string rollbackOutput = string.Empty;
         if (!string.IsNullOrWhiteSpace(rollbackCommand))
         {
-            var rollback = await RunConfinedScriptInternalAsync(rollbackCommand, runtime, ct);
+            var rollback = await RunConfinedScriptInternalAsync(node.NodeId, rollbackCommand, runtime, ct);
             rollbackOutput = rollback.Output;
 
             // A rollback that itself failed leaves the machine in the speculative state the scope
@@ -700,21 +721,21 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
 
         string fullPrompt = $"{prompt}\n\nContext:\n{contextBuilder}";
 
-        if (_modelClient != null)
+        // No model, no analysis. This branch used to emit "Status: VERIFIED" over a character count,
+        // which is the worst shape a governed result can take: it names the evidence it processed
+        // and the verdict it reached, having done neither. A missing service is a failed node.
+        if (_modelClient is null)
         {
-            var model = node.TargetModel ?? "claude-3-5-sonnet";
-            await foreach (var token in _modelClient.StreamAnalysisAsync(model, "You are a governed workflow specialist.", fullPrompt, ct))
-            {
-                yield return new MissionChunk(executionId, MissionChunkType.AiToken, token, DateTime.UtcNow);
-            }
+            throw new WorkflowNodeFailedException(
+                node.NodeId,
+                $"no model client is configured, so '{node.TargetModel ?? "the requested model"}' produced no analysis; " +
+                $"{contextBuilder.Length} characters of evidence were collected but not evaluated.");
         }
-        else
+
+        var model = node.TargetModel ?? "claude-3-5-sonnet";
+        await foreach (var token in _modelClient.StreamAnalysisAsync(model, "You are a governed workflow specialist.", fullPrompt, ct))
         {
-            yield return new MissionChunk(
-                executionId,
-                MissionChunkType.AiToken,
-                $"[GOVERNED_AI_ANALYSIS] Processed {contextBuilder.Length} chars of scrubbed evidence. Status: VERIFIED. Model: {node.TargetModel ?? "default"}.",
-                DateTime.UtcNow);
+            yield return new MissionChunk(executionId, MissionChunkType.AiToken, token, DateTime.UtcNow);
         }
     }
 

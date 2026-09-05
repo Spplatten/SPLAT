@@ -21,6 +21,24 @@ namespace MissionController.Tests;
 
 public class WorkflowEngineTests
 {
+    /// <summary>
+    /// Minimal model. AgentReasoning now fails without one rather than emitting "Status: VERIFIED"
+    /// over a character count, so a test about ledger rows or DLP has to supply a real analysis leg.
+    /// </summary>
+    private sealed class StubWorkflowModelClient : IModelStreamClient
+    {
+        public Task<ModelAvailability> CheckAvailabilityAsync(string requestedModel, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ModelAvailability(true, "stub-provider", requestedModel, null));
+
+        public async IAsyncEnumerable<string> StreamAnalysisAsync(
+            string requestedModel, string systemPrompt, string userPrompt,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            yield return "stub analysis";
+        }
+    }
+
     private sealed class InMemoryAuditLedger : IAuditLedger
     {
         public List<(Guid MissionId, string TemplateId, string Action, string Details)> Logs { get; } = new();
@@ -148,7 +166,7 @@ public class WorkflowEngineTests
     public async Task WorkflowExecutionEngine_ExecutesSequentialGraph_LogsLedger()
     {
         var ledger = new InMemoryAuditLedger();
-        var engine = new WorkflowExecutionEngine(auditLedger: ledger);
+        var engine = new WorkflowExecutionEngine(auditLedger: ledger, modelClient: new StubWorkflowModelClient(), allowSimulatedExecution: true);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-sequential-test",
@@ -184,7 +202,7 @@ public class WorkflowEngineTests
     public async Task WorkflowExecutionEngine_SanitizesSensitiveSecretsWithDlp()
     {
         var dlp = new RegexDataLossPreventionSanitizer();
-        var engine = new WorkflowExecutionEngine(dlpSanitizer: dlp);
+        var engine = new WorkflowExecutionEngine(dlpSanitizer: dlp, modelClient: new StubWorkflowModelClient(), allowSimulatedExecution: true);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-dlp-test",
@@ -211,7 +229,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task WorkflowExecutionEngine_ConditionalBranching_SkipsInactiveBranch()
     {
-        var engine = new WorkflowExecutionEngine();
+        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-branch-test",
@@ -290,7 +308,7 @@ public class WorkflowEngineTests
     {
         // The engine no longer takes an ICredentialVault: it has nothing legitimate to put in one
         // until a real token endpoint exists, and holding the dependency invited the fabrication.
-        var engine = new WorkflowExecutionEngine();
+        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-oauth-test",
@@ -340,7 +358,7 @@ public class WorkflowEngineTests
     {
         var ledger = new InMemoryAuditLedger();
         var dlp = new RegexDataLossPreventionSanitizer();
-        var engine = new WorkflowExecutionEngine(dlpSanitizer: dlp, auditLedger: ledger);
+        var engine = new WorkflowExecutionEngine(dlpSanitizer: dlp, auditLedger: ledger, allowSimulatedExecution: true);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-react-test",
@@ -376,7 +394,7 @@ public class WorkflowEngineTests
         {
             var ctx = new SqliteStorageContext(dbPath);
             var memoryIndex = new SqliteSemanticMemoryIndex(ctx);
-            var engine = new WorkflowExecutionEngine(semanticMemoryIndex: memoryIndex);
+            var engine = new WorkflowExecutionEngine(semanticMemoryIndex: memoryIndex, allowSimulatedExecution: true);
 
             var graph = new WorkflowGraph(
                 WorkflowId: "flow-memory-test",
@@ -421,7 +439,7 @@ public class WorkflowEngineTests
     [Fact]
     public async Task WorkflowExecution_TransactionalScope_SuccessWhenAssertionMatches()
     {
-        var engine = new WorkflowExecutionEngine();
+        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-tx-success-test",
@@ -449,7 +467,7 @@ public class WorkflowEngineTests
     public async Task WorkflowExecution_TransactionalScope_RollsBackOnAssertionFailure()
     {
         var ledger = new InMemoryAuditLedger();
-        var engine = new WorkflowExecutionEngine(auditLedger: ledger);
+        var engine = new WorkflowExecutionEngine(auditLedger: ledger, modelClient: new StubWorkflowModelClient(), allowSimulatedExecution: true);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-tx-rollback-test",
@@ -484,7 +502,7 @@ public class WorkflowEngineTests
     {
         int port = 5698;
         var registry = new InMemoryWorkflowRegistry();
-        var engine = new WorkflowExecutionEngine();
+        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
         using var listener = new EmbeddedWebhookListener(port, registry, engine);
 
         var testWorkflow = new WorkflowGraph(

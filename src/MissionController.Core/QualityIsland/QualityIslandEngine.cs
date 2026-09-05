@@ -471,10 +471,19 @@ public sealed class QualityIslandEngine : IIsolatedQualityIsland
 
         EmitTokens(content, request.MissionId, tokenProgress, chunkProgress);
 
+        // The offline artifact is evaluated by the same oracles as a model's, and then that verdict
+        // is REPORTED. Hardcoding success here meant the one path that runs when no model is
+        // configured - the default on a fresh install - returned IsSuccess regardless of what its
+        // own evaluation said, so a deterministic analysis that failed its schema or grounding
+        // checks still reached the caller as accepted evidence.
+        string? offlineFailureReason = eval.PassedQuadrantI
+            ? null
+            : string.Join("; ", eval.OracleResult.RejectionReasons.Concat(eval.SemanticResult.QualityNotes));
+
         return new QualityIslandResult(
             MissionId: request.MissionId,
             TemplateId: request.TemplateId,
-            IsSuccess: true,
+            IsSuccess: eval.PassedQuadrantI,
             OutputContent: content,
             WinningArtifact: candidate,
             EvaluatedCohort: new[] { candidate },
@@ -482,7 +491,7 @@ public sealed class QualityIslandEngine : IIsolatedQualityIsland
                 TotalCandidatesGenerated: 1,
                 EscalationCount: 0,
                 EscalationTriggered: false,
-                InitialFailureReason: null,
+                InitialFailureReason: offlineFailureReason,
                 EscalatedModelUsed: null,
                 TotalLatencyMs: stopwatch.ElapsedMilliseconds),
             CompletedAtUtc: DateTime.UtcNow);
