@@ -129,6 +129,62 @@ public static class GovernedArgumentBinder
         });
     }
 
+    /// <summary>
+    /// Placeholder shape for workflow node references. Node IDs are author-chosen slugs
+    /// (<c>recall-memory</c>), so the hyphen is admitted here rather than by widening
+    /// <see cref="PlaceholderPattern"/>, which would change how the shipped mission templates parse.
+    /// </summary>
+    private static readonly Regex WorkflowPlaceholderPattern =
+        new(@"\{(?<key>[A-Za-z_][A-Za-z0-9_-]*)\}", RegexOptions.Compiled, PatternTimeout);
+
+    /// <summary>
+    /// Binds upstream node outputs and node configuration into a workflow node's script command.
+    ///
+    /// A workflow's values are strictly less trustworthy than a mission's declared parameters: they
+    /// arrive as an unauthenticated webhook body, as a previous node's raw stdout, or as whatever a
+    /// model emitted. They therefore get the same treatment - one pass over the author's original
+    /// template, refusal rather than repair - instead of the sequential <c>string.Replace</c> loop
+    /// this class was written to retire.
+    /// </summary>
+    /// <exception cref="TemplateParameterRejectedException">
+    /// A value cannot be placed safely. The node must fail; a repaired command is not an option.
+    /// </exception>
+    public static string BindWorkflowCommand(
+        string? commandTemplate,
+        IReadOnlyDictionary<string, string> values,
+        bool isPowerShell = true)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+
+        if (string.IsNullOrEmpty(commandTemplate))
+        {
+            return string.Empty;
+        }
+
+        return WorkflowPlaceholderPattern.Replace(commandTemplate, match =>
+        {
+            string key = match.Groups["key"].Value;
+
+            // An unresolved placeholder is left as the author wrote it, matching Bind().
+            if (!values.TryGetValue(key, out var value) || value is null)
+            {
+                return match.Value;
+            }
+
+            // An upstream node that produced nothing is a normal outcome, and the empty string
+            // cannot inject. Dropping the token changes the command's shape, but that is the
+            // template author's problem, not a boundary the binder should refuse at.
+            if (value.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            bool insideQuotedLiteral = isPowerShell && IsInsideSingleQuotedLiteral(commandTemplate, match.Index);
+            Validate(key, value, insideQuotedLiteral, field: null);
+            return value;
+        });
+    }
+
     private static void Validate(string key, string value, bool insideQuotedLiteral, TemplateParameterField? field)
     {
         // A control character is a statement separator or a terminal escape in every shell involved,

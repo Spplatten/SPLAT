@@ -49,10 +49,16 @@ public static partial class GovernedTemplateCatalog
     // rather than reading the local machine. Declaring it here is what makes the reach governable -
     // TemplatePolicyCompiler resolves this FQDN and pins the /32s into the mission's BPF-LSM
     // LeaseSpec, so on the Linux substrate the tool can open exactly this host on 443 and nothing
-    // else. On Windows the Win32 job object clamps memory, CPU, privilege and filesystem but does
-    // NOT filter sockets, so there the declaration is an audited governance claim rather than an
-    // enforced boundary. Templates using it must therefore stay read-only and credential-free: the
-    // containment that makes a fetch safe is not switched on yet on the platform SPLAT ships on.
+    // else.
+    //
+    // EgressScope.ToolProcess is what carries that fact to the sandbox, and it is the ONLY thing
+    // that keeps a network stack switched on for a tool: every other template in this catalog now
+    // runs in an AppContainer with zero capabilities and cannot open a socket at all. The cost of
+    // that reach is that Windows cannot yet pin WHICH host - an AppContainer chooses network or no
+    // network, not a destination - so for this rule specifically the FQDN remains an audited
+    // governance claim rather than an enforced boundary until a broker or WFP filter lands.
+    // Templates using it must therefore stay read-only and credential-free.
+    //
     // Declaring a tool egress does not widen the AI call - the provider client opens its own scope
     // for the synthesis leg, so that request stays pinned to the gateway regardless of this rule.
     private const string GrantsGovFqdn = "api.grants.gov";
@@ -61,7 +67,8 @@ public static partial class GovernedTemplateCatalog
         GrantsGovFqdn,
         443,
         true,
-        "Grants.gov public Search2 API (read-only opportunity discovery; no credential presented)");
+        "Grants.gov public Search2 API (read-only opportunity discovery; no credential presented)",
+        EgressScope.ToolProcess);
 
     // --- Tool host binaries ----------------------------------------------------------------
     private const string CmdExe = @"C:\Windows\System32\cmd.exe";

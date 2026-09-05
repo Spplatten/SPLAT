@@ -436,7 +436,7 @@ public class CopilotSafetySubstrateTests
             int timeoutSeconds,
             IProgress<string>? stdoutProgress = null,
             IProgress<string>? stderrProgress = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default, bool denyNetworkAccess = false)
         {
             LaunchCount++;
             var metrics = new JobResourceMetrics(1024 * 1024, 512 * 1024, 10, 20, 1);

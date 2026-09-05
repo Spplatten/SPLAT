@@ -10,7 +10,17 @@ public record EgressRule(
     string AllowedFqdn,
     int AllowedPort = 443,
     bool EnforceHttpsOnly = true,
-    string Description = "Approved outbound destination");
+    string Description = "Approved outbound destination",
+    EgressScope Scope = EgressScope.ModelGateway)
+{
+    /// <summary>
+    /// True when no sensor tool needs a network stack to satisfy this rule, so the tool process can
+    /// be denied one outright. Defaulting to the safe answer is deliberate: a template author who
+    /// says nothing gets the contained behaviour, and widening it is the edit that has to be
+    /// written down.
+    /// </summary>
+    public bool ToolProcessNeedsNetwork => Scope == EgressScope.ToolProcess;
+}
 
 public record SingleToolDefinition(
     string ToolId,

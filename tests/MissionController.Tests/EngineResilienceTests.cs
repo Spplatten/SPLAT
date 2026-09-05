@@ -47,7 +47,7 @@ public class EngineResilienceTests
             string executable, string arguments, string workingDirectory, IJobSandbox jobSandbox,
             bool dropAdminPrivileges, int timeoutSeconds,
             IProgress<string>? stdoutProgress = null, IProgress<string>? stderrProgress = null,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default, bool denyNetworkAccess = false) =>
             throw new InvalidOperationException("CreateProcessW failed (Win32 error 5: access denied)");
     }
 
@@ -57,7 +57,7 @@ public class EngineResilienceTests
             string executable, string arguments, string workingDirectory, IJobSandbox jobSandbox,
             bool dropAdminPrivileges, int timeoutSeconds,
             IProgress<string>? stdoutProgress = null, IProgress<string>? stderrProgress = null,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default, bool denyNetworkAccess = false) =>
             Task.FromResult(new ProcessExecutionResult(
                 0, "sensor output", "", false, new JobResourceMetrics(1, 10, 10, 1024, 2048)));
     }

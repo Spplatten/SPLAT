@@ -286,10 +286,11 @@ public class WorkflowEngineTests
     }
 
     [Fact]
-    public async Task OAuthExecutionNode_StoresTokenInCredentialVault()
+    public async Task OAuthExecutionNode_RefusesToVaultAFabricatedToken()
     {
-        var vault = new InMemoryCredentialVault();
-        var engine = new WorkflowExecutionEngine(credentialVault: vault);
+        // The engine no longer takes an ICredentialVault: it has nothing legitimate to put in one
+        // until a real token endpoint exists, and holding the dependency invited the fabrication.
+        var engine = new WorkflowExecutionEngine();
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-oauth-test",
@@ -307,9 +308,11 @@ public class WorkflowEngineTests
             new Dictionary<string, string> { { "code", "test_auth_code_123" } },
             "operator");
 
-        Assert.True(result.Success);
-        Assert.True(vault.Vault.ContainsKey("oauth_token_tiktok"));
-        Assert.Contains("tok_vaulted_", vault.Vault["oauth_token_tiktok"]);
+        // The node used to mint "tok_vaulted_<guid>" and deposit it under the provider's live vault
+        // key, so an operator would find a bearer token no authorization server ever issued.
+        Assert.False(result.Success);
+        Assert.Contains("not implemented", result.FailureReason);
+        Assert.DoesNotContain("tok_vaulted_", string.Join(" ", result.ExecutionLogs));
     }
 
     [Fact]
@@ -466,7 +469,10 @@ public class WorkflowEngineTests
 
         var result = await engine.ExecuteAsync(graph, new Dictionary<string, string>(), "Operator");
 
-        Assert.True(result.Success);
+        // A rolled-back scope did not do what it was asked to. The rollback working is not a
+        // success; it is a contained failure, and the result says so.
+        Assert.False(result.Success);
+        Assert.Contains("VERIFIED_GOOD", result.FailureReason);
         string output = result.NodeOutputs["tx-node"];
         Assert.Contains("[TRANSACTION_ROLLED_BACK]", output);
         Assert.Contains("RESTORE_BASELINE_SNAPSHOT", output);

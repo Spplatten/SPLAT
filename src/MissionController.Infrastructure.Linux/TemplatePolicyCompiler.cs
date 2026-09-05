@@ -73,7 +73,14 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
         var allowedIps = new List<string>();
         var allowedPorts = new List<uint>();
 
-        string targetFqdn = template.EgressRule.AllowedFqdn?.Trim() ?? string.Empty;
+        // Only a rule whose destination is opened by the SENSOR earns a network lease. This used to
+        // read the FQDN alone, and since every template carries one - defaulting to the AI gateway,
+        // which SPLAT's own process calls rather than the tool - the compiler opened the network for
+        // the entire catalogue when almost no sensor touches it. Scope is what separates the two.
+        string targetFqdn = template.EgressRule.ToolProcessNeedsNetwork
+            ? template.EgressRule.AllowedFqdn?.Trim() ?? string.Empty
+            : string.Empty;
+
         if (!string.IsNullOrEmpty(targetFqdn) &&
             !targetFqdn.Equals("none", StringComparison.OrdinalIgnoreCase) &&
             !targetFqdn.Equals("localhost", StringComparison.OrdinalIgnoreCase) &&

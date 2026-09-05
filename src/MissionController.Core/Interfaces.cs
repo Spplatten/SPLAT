@@ -18,6 +18,14 @@ public interface IJobSandbox : IDisposable
 
 public interface IProcessLauncher
 {
+    /// <param name="denyNetworkAccess">
+    /// Launch the tool with no network stack at all (Windows: an AppContainer holding zero capability
+    /// SIDs). Defaults to false so existing callers are unchanged, but the mission engine passes true
+    /// for every template whose declared egress belongs to the model gateway rather than the sensor -
+    /// which is nearly all of them. An implementation that cannot apply the isolation must THROW
+    /// rather than launch an unconfined process: silently running a tool with full network because
+    /// containment was unavailable is the exact failure this parameter exists to prevent.
+    /// </param>
     Task<ProcessExecutionResult> LaunchSuspendedInJobAsync(
         string executable,
         string arguments,
@@ -27,7 +35,8 @@ public interface IProcessLauncher
         int timeoutSeconds,
         IProgress<string>? stdoutProgress = null,
         IProgress<string>? stderrProgress = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool denyNetworkAccess = false);
 }
 
 public record ProcessExecutionResult(

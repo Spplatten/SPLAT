@@ -227,7 +227,11 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
                 template.Tool.TimeoutSeconds,
                 stdoutProgress,
                 stderrProgress,
-                cancellationToken);
+                cancellationToken,
+                // The template's egress declaration decides whether the sensor gets a network stack
+                // at all. Almost every template's rule names the AI gateway - a call SPLAT's own
+                // process makes - so the tool itself needs nothing and is launched network-denied.
+                denyNetworkAccess: !template.EgressRule.ToolProcessNeedsNetwork);
         }
         catch (OperationCanceledException)
         {

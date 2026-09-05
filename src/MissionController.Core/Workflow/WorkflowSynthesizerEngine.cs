@@ -91,7 +91,10 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
                         Name: "Correlate Memory Context",
                         NodeType: WorkflowNodeType.SandboxedScript,
                         Configuration: new Dictionary<string, string>(),
-                        ScriptCommand: "Write-Output '=== INCIDENT CORRELATION ENGINE ==='; Write-Output 'Analyzing context: {recall-memory}'"),
+                        // The recall output is a multi-line blob containing quotes and pipes, so it
+                        // is NOT interpolated into the command line - the governed binder would
+                        // refuse it, correctly. The node reads it from the execution context.
+                        ScriptCommand: "Write-Output '=== INCIDENT CORRELATION ENGINE ==='"),
                     new(
                         NodeId: "store-memory",
                         Name: "Index Knowledge to Semantic Vector Store",
@@ -312,7 +315,11 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
                     Name: "Sandboxed Step Runner",
                     NodeType: WorkflowNodeType.SandboxedScript,
                     Configuration: new Dictionary<string, string>(),
-                    ScriptCommand: "Write-Output '=== EXECUTING GOVERNED AUTOMATION ==='; Write-Output 'Task: " + prompt.Replace("'", "") + "'"),
+                    // The operator's prompt is NOT concatenated into the command line. Stripping
+                    // single quotes left a double quote, a backtick or a semicolon free to close
+                    // the -Command region, and the binder never sees text baked in at synthesis
+                    // time. The prompt is carried in Description and in the agent node's Prompt.
+                    ScriptCommand: "Write-Output '=== EXECUTING GOVERNED AUTOMATION ==='"),
                 new(
                     NodeId: "step-analysis",
                     Name: "Synthesis Agent",

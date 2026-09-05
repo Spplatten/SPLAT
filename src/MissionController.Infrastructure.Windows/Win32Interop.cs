@@ -12,6 +12,15 @@ internal static class Win32Interop
     public const uint STARTF_USESTDHANDLES = 0x00000100;
     public const uint HANDLE_FLAG_INHERIT = 0x00000001;
 
+    // Required for the STARTUPINFOEX form of CreateProcess. Without this flag the kernel reads only
+    // the STARTUPINFO prefix and the attribute list carrying the AppContainer SID is ignored - the
+    // process then launches successfully with FULL network access, which is the dangerous silent
+    // failure this whole path exists to prevent.
+    public const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
+
+    // PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES: attaches a SECURITY_CAPABILITIES to the child.
+    public static readonly IntPtr PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES = new(0x00020009);
+
     // Job Object Limit Flags
     public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
     public const uint JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200;
@@ -295,4 +304,98 @@ internal static class Win32Interop
         int TokenInformationClass,
         IntPtr TokenInformation,
         uint TokenInformationLength);
+
+    // --- AppContainer network isolation -------------------------------------------------------
+    // A job object clamps CPU, memory and PIDs but has no concept of a socket. An AppContainer does:
+    // a process launched into one reaches the network ONLY through capability SIDs it was granted,
+    // so handing it an empty capability array removes the network stack rather than filtering it.
+
+    /// <summary>
+    /// The trailing <c>lpAttributeList</c> is what distinguishes this from STARTUPINFO. The struct
+    /// must be passed with <see cref="EXTENDED_STARTUPINFO_PRESENT"/> or the extra field is ignored.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct STARTUPINFOEX
+    {
+        public STARTUPINFO StartupInfo;
+        public IntPtr lpAttributeList;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SECURITY_CAPABILITIES
+    {
+        public IntPtr AppContainerSid;
+        public IntPtr Capabilities;
+        public uint CapabilityCount;
+        public uint Reserved;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool InitializeProcThreadAttributeList(
+        IntPtr lpAttributeList,
+        int dwAttributeCount,
+        int dwFlags,
+        ref IntPtr lpSize);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UpdateProcThreadAttribute(
+        IntPtr lpAttributeList,
+        uint dwFlags,
+        IntPtr Attribute,
+        IntPtr lpValue,
+        IntPtr cbSize,
+        IntPtr lpPreviousValue,
+        IntPtr lpReturnSize);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern void DeleteProcThreadAttributeList(IntPtr lpAttributeList);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CreateProcessExtendedW(
+        string? lpApplicationName,
+        string? lpCommandLine,
+        ref SECURITY_ATTRIBUTES lpProcessAttributes,
+        ref SECURITY_ATTRIBUTES lpThreadAttributes,
+        bool bInheritHandles,
+        uint dwCreationFlags,
+        IntPtr lpEnvironment,
+        string? lpCurrentDirectory,
+        ref STARTUPINFOEX lpStartupInfo,
+        out PROCESS_INFORMATION lpProcessInformation);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateProcessAsUserW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CreateProcessAsUserExtendedW(
+        IntPtr hToken,
+        string? lpApplicationName,
+        string? lpCommandLine,
+        ref SECURITY_ATTRIBUTES lpProcessAttributes,
+        ref SECURITY_ATTRIBUTES lpThreadAttributes,
+        bool bInheritHandles,
+        uint dwCreationFlags,
+        IntPtr lpEnvironment,
+        string? lpCurrentDirectory,
+        ref STARTUPINFOEX lpStartupInfo,
+        out PROCESS_INFORMATION lpProcessInformation);
+
+    /// <summary>Returns S_OK, or HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) when the profile is reusable.</summary>
+    [DllImport("userenv.dll", CharSet = CharSet.Unicode)]
+    public static extern int CreateAppContainerProfile(
+        string pszAppContainerName,
+        string pszDisplayName,
+        string pszDescription,
+        IntPtr pCapabilities,
+        uint dwCapabilityCount,
+        out IntPtr ppSidAppContainerSid);
+
+    [DllImport("userenv.dll", CharSet = CharSet.Unicode)]
+    public static extern int DeriveAppContainerSidFromAppContainerName(
+        string pszAppContainerName,
+        out IntPtr ppsidAppContainerSid);
+
+    [DllImport("advapi32.dll")]
+    public static extern IntPtr FreeSid(IntPtr pSid);
 }

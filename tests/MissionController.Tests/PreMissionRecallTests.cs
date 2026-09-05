@@ -41,7 +41,7 @@ public class PreMissionRecallTests
             string executable, string arguments, string workingDirectory, IJobSandbox jobSandbox,
             bool dropAdminPrivileges, int timeoutSeconds,
             IProgress<string>? stdoutProgress = null, IProgress<string>? stderrProgress = null,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default, bool denyNetworkAccess = false) =>
             Task.FromResult(new ProcessExecutionResult(
                 0, _stdout, "", false, new JobResourceMetrics(1, 10, 10, 1024, 2048)));
     }

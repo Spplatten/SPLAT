@@ -49,7 +49,7 @@ public class SanitizationAndRevocationTests
             int timeoutSeconds,
             IProgress<string>? stdoutProgress = null,
             IProgress<string>? stderrProgress = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default, bool denyNetworkAccess = false)
         {
             WasLaunched = true;
             return Task.FromResult(new ProcessExecutionResult(0, "Tool stdout with normal data", "", false, new JobResourceMetrics(1, 10, 10, 1024, 2048)));

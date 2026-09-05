@@ -12,7 +12,7 @@
   BUT THE TEST CANNOT REACH THE ARTIFACT, and the artifact can only be republished from a Claude
   session holding its URL. A commit that updates this file and TUTORIAL.md therefore leaves the
   published page silently behind, and it has: the artifact sat at 342 tests through three commits
-  that moved the repo to 367. So copies 1 and 2 are authoritative and CI-enforced; copy 3 is
+  that moved the repo to 387. So copies 1 and 2 are authoritative and CI-enforced; copy 3 is
   best-effort, and whoever next opens a session with that URL should re-publish it from this file.
   Do not read the artifact to learn the current state - read this file.
 -->
@@ -618,7 +618,7 @@
     <p>SPLAT's documentation makes a point of never blurring the line between built and planned. This guide keeps that promise:</p>
     <div class="status">
       <div class="status-card"><span class="chip st-good">Working today</span>
-        <p><strong>The Windows containment system</strong> — frozen starts, resource clamps, stripped privileges, folder jails. <strong>The governance layer</strong> — the 1:1:1 rule, the secret-scrubbing censor, the one-line-out firewall, the tamper-evident ledger, local memory. <strong>The full app</strong>, the 40+ agent catalog, and a connector that lets other AI tools (like Claude Code or Python LangGraph agents) borrow SPLAT's locked rooms. Backed by 367 automated tests, all passing.</p></div>
+        <p><strong>The Windows containment system</strong> — frozen starts, resource clamps, stripped privileges, folder jails. <strong>The governance layer</strong> — the 1:1:1 rule, the secret-scrubbing censor, the one-line-out firewall, the tamper-evident ledger, local memory. <strong>The full app</strong>, the 40+ agent catalog, and a connector that lets other AI tools (like Claude Code or Python LangGraph agents) borrow SPLAT's locked rooms. Backed by 387 automated tests, all passing.</p></div>
       <div class="status-card"><span class="chip st-warn">Being built</span>
         <p><strong>The Linux-side deep containment</strong> — a guard that lives inside the Linux kernel itself and vetoes forbidden actions before they happen. <strong>The proof run is now on record.</strong> On a stock Microsoft kernel, the guard let through the one thing the job was allowed to do and refused the other three outright: reading the password file, calling an unapproved address, and running an unapproved program. The refusals came from the kernel, not from SPLAT asking nicely. The service that routes work to that guard now runs too: a tool it started with full root privileges was still refused the password file, by the kernel rather than by SPLAT's say-so. What is <em>not</em> yet true is that the app's own missions travel that road — the Windows side has not been connected to it yet, so today it is proven, and not yet plumbed in.</p></div>
       <div class="status-card"><span class="chip st-plan">Planned</span>

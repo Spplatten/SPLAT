@@ -330,7 +330,7 @@ public class GovernedArgumentBinderTests
             string executable, string arguments, string workingDirectory, IJobSandbox jobSandbox,
             bool dropAdminPrivileges, int timeoutSeconds,
             IProgress<string>? stdoutProgress = null, IProgress<string>? stderrProgress = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default, bool denyNetworkAccess = false)
         {
             WasCalled = true;
             return Task.FromResult(new ProcessExecutionResult(

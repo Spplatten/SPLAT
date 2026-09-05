@@ -14,11 +14,20 @@ namespace MissionController.Core.Workflow;
 
 public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
 {
+    /// <summary>Per-node wall-clock budget for a confined script, in seconds.</summary>
+    private const int ScriptTimeoutSeconds = 60;
+
+    /// <summary>
+    /// Substitution shape for free text that never reaches a command line - a memory document, a
+    /// recall query. Kept single-pass so a value containing <c>{OtherNode}</c> stays inert.
+    /// </summary>
+    private static readonly Regex NodeReferencePattern =
+        new(@"\{(?<key>[A-Za-z_][A-Za-z0-9_-]*)\}", RegexOptions.Compiled, TimeSpan.FromMilliseconds(250));
+
     private readonly IDataLossPreventionSanitizer? _dlpSanitizer;
     private readonly IProcessLauncher? _processLauncher;
     private readonly Func<IJobSandbox>? _sandboxFactory;
     private readonly IAuditLedger? _auditLedger;
-    private readonly ICredentialVault? _credentialVault;
     private readonly IModelStreamClient? _modelClient;
     private readonly ISemanticMemoryIndex? _semanticMemoryIndex;
     private readonly IRemediationEngine? _remediationEngine;
@@ -28,7 +37,6 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         IProcessLauncher? processLauncher = null,
         Func<IJobSandbox>? sandboxFactory = null,
         IAuditLedger? auditLedger = null,
-        ICredentialVault? credentialVault = null,
         IModelStreamClient? modelClient = null,
         ISemanticMemoryIndex? semanticMemoryIndex = null,
         IRemediationEngine? remediationEngine = null)
@@ -37,7 +45,6 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         _processLauncher = processLauncher;
         _sandboxFactory = sandboxFactory;
         _auditLedger = auditLedger;
-        _credentialVault = credentialVault;
         _modelClient = modelClient;
         _semanticMemoryIndex = semanticMemoryIndex;
         _remediationEngine = remediationEngine;
@@ -55,36 +62,55 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         var logs = new List<string>();
         var nodeOutputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+        string? failureReason = null;
         try
         {
-            await foreach (var chunk in ExecuteStreamingInternalAsync(graph, triggerPayload, operatorIdentity, nodeOutputs, cancellationToken))
+            await foreach (var chunk in ExecuteStreamingInternalAsync(graph, triggerPayload, operatorIdentity, executionId, nodeOutputs, cancellationToken))
             {
                 logs.Add($"[{chunk.TimestampUtc:HH:mm:ss.fff}] [{chunk.ChunkType}] {chunk.Content}");
                 progress?.Report(chunk.Content);
             }
-
-            return new WorkflowExecutionResult(
-                graph.WorkflowId,
-                executionId,
-                Success: true,
-                nodeOutputs,
-                logs,
-                startedUtc,
-                DateTime.UtcNow);
+        }
+        catch (WorkflowNodeFailedException ex)
+        {
+            // The failing node's own output never reached the recording path, so it is restored
+            // here; an operator diagnosing the run needs the evidence that produced the failure.
+            if (ex.NodeOutput is not null)
+            {
+                nodeOutputs[ex.NodeId] = ex.NodeOutput;
+            }
+            failureReason = ex.Message;
         }
         catch (Exception ex)
         {
-            logs.Add($"[ERROR] Workflow failed: {ex.Message}");
-            return new WorkflowExecutionResult(
-                graph.WorkflowId,
-                executionId,
-                Success: false,
-                nodeOutputs,
-                logs,
-                startedUtc,
-                DateTime.UtcNow,
-                FailureReason: ex.Message);
+            failureReason = ex.Message;
         }
+
+        if (failureReason is not null)
+        {
+            logs.Add($"[ERROR] Workflow failed: {failureReason}");
+
+            if (_auditLedger != null)
+            {
+                await _auditLedger.AppendLogAsync(
+                    executionId,
+                    graph.WorkflowId,
+                    "WORKFLOW_FAILED",
+                    failureReason,
+                    operatorIdentity,
+                    cancellationToken);
+            }
+        }
+
+        return new WorkflowExecutionResult(
+            graph.WorkflowId,
+            executionId,
+            Success: failureReason is null,
+            nodeOutputs,
+            logs,
+            startedUtc,
+            DateTime.UtcNow,
+            FailureReason: failureReason);
     }
 
     public IAsyncEnumerable<MissionChunk> ExecuteStreamingAsync(
@@ -93,20 +119,27 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         string operatorIdentity,
         CancellationToken cancellationToken = default)
     {
-        return ExecuteStreamingInternalAsync(graph, triggerPayload, operatorIdentity, null, cancellationToken);
+        return ExecuteStreamingInternalAsync(graph, triggerPayload, operatorIdentity, Guid.NewGuid(), null, cancellationToken);
     }
 
+    /// <summary>
+    /// <paramref name="executionId"/> is supplied by the caller so that the id on the returned
+    /// <see cref="WorkflowExecutionResult"/>, the id on every emitted chunk and the id written to
+    /// the audit ledger are one identity. Minting a second id here left a run whose result could
+    /// not be joined to its own ledger records.
+    /// </summary>
     private async IAsyncEnumerable<MissionChunk> ExecuteStreamingInternalAsync(
         WorkflowGraph graph,
         IReadOnlyDictionary<string, string> triggerPayload,
         string operatorIdentity,
+        Guid executionId,
         IDictionary<string, string>? externalNodeOutputs,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         graph.Validate();
-        var executionId = Guid.NewGuid();
         var nodeOutputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var activeBranch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var skippedNodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         if (_auditLedger != null)
         {
@@ -131,22 +164,24 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Check if node is skipped due to conditional branching
+            // A node runs when at least one incoming edge is live: its source actually ran, and the
+            // edge is either unconditional or names the branch the source selected. Testing only
+            // for a matching branch let a skip leak - the node immediately after the condition was
+            // skipped, then everything downstream of it ran anyway against stale upstream outputs.
             var incomingEdges = graph.Edges.Where(e => e.TargetNodeId.Equals(node.NodeId, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (incomingEdges.Count > 0 && incomingEdges.Any(e => !string.IsNullOrEmpty(e.ConditionBranch)))
+            if (incomingEdges.Count > 0 &&
+                !incomingEdges.Any(e =>
+                    !skippedNodes.Contains(e.SourceNodeId) &&
+                    (string.IsNullOrEmpty(e.ConditionBranch) ||
+                     activeBranch.Contains($"{e.SourceNodeId}:{e.ConditionBranch}"))))
             {
-                bool branchMatches = incomingEdges.Any(e => 
-                    activeBranch.Contains($"{e.SourceNodeId}:{e.ConditionBranch}"));
-
-                if (!branchMatches)
-                {
-                    yield return new MissionChunk(
-                        executionId,
-                        MissionChunkType.StatusChange,
-                        $"Skipping node '{node.Name}' ({node.NodeId}) — conditional branch inactive.",
-                        DateTime.UtcNow);
-                    continue;
-                }
+                skippedNodes.Add(node.NodeId);
+                yield return new MissionChunk(
+                    executionId,
+                    MissionChunkType.StatusChange,
+                    $"Skipping node '{node.Name}' ({node.NodeId}) — conditional branch inactive.",
+                    DateTime.UtcNow);
+                continue;
             }
 
             yield return new MissionChunk(
@@ -179,11 +214,11 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
                     break;
 
                 case WorkflowNodeType.OAuthExchange:
-                    nodeResult = await ExecuteOAuthNodeAsync(node, nodeOutputs, triggerPayload, executionId, cancellationToken);
+                    nodeResult = ExecuteOAuthNode(node);
                     break;
 
                 case WorkflowNodeType.GovernedHttp:
-                    nodeResult = ProcessGovernedHttpNode(node, nodeOutputs);
+                    nodeResult = ProcessGovernedHttpNode(node);
                     break;
 
                 case WorkflowNodeType.Condition:
@@ -294,18 +329,74 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         Guid executionId,
         CancellationToken ct)
     {
-        string command = node.ScriptCommand ?? string.Empty;
-        command = InterpolateVariables(command, nodeOutputs);
-        foreach (var kvp in node.Configuration)
+        string runtime = node.Configuration.TryGetValue("Runtime", out var r) ? r : "powershell";
+        string command = BindNodeCommand(node, node.ScriptCommand, nodeOutputs, runtime);
+
+        var run = await RunConfinedScriptInternalAsync(command, runtime, ct);
+        if (run.TimedOut)
         {
-            command = command.Replace($"{{{kvp.Key}}}", kvp.Value, StringComparison.OrdinalIgnoreCase);
+            throw new WorkflowNodeFailedException(
+                node.NodeId, $"the script exceeded its {ScriptTimeoutSeconds}s budget.", run.Output);
         }
 
-        string runtime = node.Configuration.TryGetValue("Runtime", out var r) ? r : "powershell";
-        return await RunConfinedScriptInternalAsync(command, runtime, ct);
+        // The exit code was previously discarded, so a script that failed outright still fed its
+        // stderr downstream as if it were a result and the run still reported success.
+        if (run.ExitCode != 0)
+        {
+            throw new WorkflowNodeFailedException(
+                node.NodeId, $"the script exited {run.ExitCode}: {TrimForDisplay(run.Output)}", run.Output);
+        }
+
+        return run.Output;
     }
 
-    private async Task<string> RunConfinedScriptInternalAsync(
+    /// <summary>
+    /// Resolves a node's script command against upstream outputs and its own configuration.
+    ///
+    /// Both sources are untrusted: a node output is a previous process's raw stdout and the trigger
+    /// payload is an unauthenticated webhook body, yet the resolved string becomes a
+    /// <c>powershell.exe -Command</c> line. They therefore go through
+    /// <see cref="GovernedArgumentBinder"/>, which refuses a value it cannot place rather than
+    /// escaping it. The two sources are merged into ONE lookup and bound in a single pass: chaining
+    /// two <c>string.Replace</c> loops let a value substituted by the first be re-scanned by the
+    /// second, which is exactly the second-order injection the binder exists to prevent.
+    /// </summary>
+    private static string BindNodeCommand(
+        WorkflowNode node,
+        string? commandTemplate,
+        IReadOnlyDictionary<string, string> nodeOutputs,
+        string runtime)
+    {
+        if (string.IsNullOrEmpty(commandTemplate))
+        {
+            return string.Empty;
+        }
+
+        var values = new Dictionary<string, string>(nodeOutputs, StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in node.Configuration)
+        {
+            // Configuration is author-controlled, so it wins a key collision with a node output.
+            values[kvp.Key] = kvp.Value;
+        }
+
+        try
+        {
+            // Quoted-literal detection follows PowerShell's rules (a doubled quote continues the
+            // literal). Claiming that context for bash or python would relax the policy in the
+            // permissive direction, so every other runtime gets the strict bare-position set.
+            return GovernedArgumentBinder.BindWorkflowCommand(commandTemplate, values, IsPowerShellRuntime(runtime));
+        }
+        catch (TemplateParameterRejectedException ex)
+        {
+            throw new WorkflowNodeFailedException(node.NodeId, ex.Message);
+        }
+    }
+
+    private static bool IsPowerShellRuntime(string runtime) =>
+        string.IsNullOrWhiteSpace(runtime) || runtime.Equals("powershell", StringComparison.OrdinalIgnoreCase)
+            || runtime.Equals("pwsh", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<(string Output, int ExitCode, bool TimedOut)> RunConfinedScriptInternalAsync(
         string command,
         string runtime,
         CancellationToken ct)
@@ -336,14 +427,15 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
                 AppDomain.CurrentDomain.BaseDirectory,
                 sandbox,
                 dropAdminPrivileges: true,
-                timeoutSeconds: 60,
+                timeoutSeconds: ScriptTimeoutSeconds,
                 cancellationToken: ct);
 
-            return string.IsNullOrWhiteSpace(result.StandardOutput) ? result.StandardError : result.StandardOutput;
+            string output = string.IsNullOrWhiteSpace(result.StandardOutput) ? result.StandardError : result.StandardOutput;
+            return (output, result.ExitCode, result.TimedOut);
         }
 
         string activeRuntime = string.IsNullOrWhiteSpace(runtime) ? "powershell" : runtime;
-        return $"[SIMULATED_SANDBOX:{activeRuntime}] Executed script: {command}";
+        return ($"[SIMULATED_SANDBOX:{activeRuntime}] Executed script: {command}", 0, false);
     }
 
     private async IAsyncEnumerable<MissionChunk> ExecuteReActAgentNodeAsync(
@@ -392,15 +484,26 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
             string stepThought = $"Thought {step}: Querying diagnostic tool '{selectedTool}' under sandbox boundaries.";
             yield return new MissionChunk(executionId, MissionChunkType.AiToken, stepThought + "\n", DateTime.UtcNow);
 
-            // Confined execution of the tool
-            string toolCommand = $"Write-Output '[TOOL_EXECUTION:{selectedTool}] Telemetry status: Normal. Verified boundary invariants.'";
-            string rawOutput = await RunConfinedScriptInternalAsync(toolCommand, "powershell", ct);
+            // Confined execution of the tool. The probe echoes a fixed line rather than reading any
+            // real telemetry - this loop is a placeholder for GovernedInvestigationLoop, which does
+            // select tools from the governed catalogue against a model. The label says so, because
+            // an observation that reports health it never measured is worse than no observation.
+            string toolCommand = $"Write-Output '[TOOL_EXECUTION:{selectedTool}] PLACEHOLDER PROBE - no telemetry was read.'";
+            var run = await RunConfinedScriptInternalAsync(toolCommand, "powershell", ct);
+            if (run.TimedOut || run.ExitCode != 0)
+            {
+                throw new WorkflowNodeFailedException(
+                    node.NodeId,
+                    $"tool probe '{selectedTool}' exited {run.ExitCode}{(run.TimedOut ? " (timed out)" : string.Empty)}; " +
+                    "a failed observation must not be scored as a clean one.",
+                    run.Output);
+            }
 
             // Immediate DLP pass on tool observation
-            string scrubbedOutput = rawOutput;
+            string scrubbedOutput = run.Output;
             if (_dlpSanitizer != null)
             {
-                var dlp = _dlpSanitizer.Sanitize(rawOutput);
+                var dlp = _dlpSanitizer.Sanitize(run.Output);
                 scrubbedOutput = dlp.SanitizedContent;
             }
 
@@ -437,7 +540,7 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         string content;
         if (node.Configuration.TryGetValue("Content", out var c))
         {
-            content = InterpolateVariables(c, nodeOutputs);
+            content = SubstituteText(c, nodeOutputs);
         }
         else
         {
@@ -465,7 +568,7 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         CancellationToken ct)
     {
         string query = node.Configuration.TryGetValue("Query", out var q) ? q : "incident anomaly pattern";
-        query = InterpolateVariables(query, nodeOutputs);
+        query = SubstituteText(query, nodeOutputs);
 
         int topK = 3;
         if (node.Configuration.TryGetValue("TopK", out var tkStr) && int.TryParse(tkStr, out var tk))
@@ -500,32 +603,45 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         Guid executionId,
         CancellationToken ct)
     {
-        string primaryCommand = node.ScriptCommand ?? string.Empty;
-        primaryCommand = InterpolateVariables(primaryCommand, nodeOutputs);
-        foreach (var kvp in node.Configuration)
-        {
-            primaryCommand = primaryCommand.Replace($"{{{kvp.Key}}}", kvp.Value, StringComparison.OrdinalIgnoreCase);
-        }
-
-        string rollbackCommand = node.Configuration.TryGetValue("RollbackScript", out var rb) ? rb : string.Empty;
-        rollbackCommand = InterpolateVariables(rollbackCommand, nodeOutputs);
-
         string assertion = node.Configuration.TryGetValue("Assertion", out var ass) ? ass : "SUCCESS";
         string runtime = node.Configuration.TryGetValue("Runtime", out var rt) ? rt : "powershell";
 
-        string primaryOutput = await RunConfinedScriptInternalAsync(primaryCommand, runtime, ct);
+        string primaryCommand = BindNodeCommand(node, node.ScriptCommand, nodeOutputs, runtime);
+        string rollbackCommand = node.Configuration.TryGetValue("RollbackScript", out var rb)
+            ? BindNodeCommand(node, rb, nodeOutputs, runtime)
+            : string.Empty;
 
-        bool passed = primaryOutput.Contains(assertion, StringComparison.OrdinalIgnoreCase);
+        var primary = await RunConfinedScriptInternalAsync(primaryCommand, runtime, ct);
+
+        // A script that died or timed out proves nothing about the assertion, so it is treated as a
+        // failed assertion and rolled back - never committed because its stderr happened to carry
+        // the assertion text.
+        bool passed = primary.ExitCode == 0
+            && !primary.TimedOut
+            && primary.Output.Contains(assertion, StringComparison.OrdinalIgnoreCase);
+
         if (passed)
         {
-            return $"[TRANSACTION_COMMITTED] Assertion '{assertion}' verified. Output: {primaryOutput.Trim()}";
+            return $"[TRANSACTION_COMMITTED] Assertion '{assertion}' verified. Output: {primary.Output.Trim()}";
         }
 
         // Assertion failed -> Execute Rollback Script
         string rollbackOutput = string.Empty;
         if (!string.IsNullOrWhiteSpace(rollbackCommand))
         {
-            rollbackOutput = await RunConfinedScriptInternalAsync(rollbackCommand, runtime, ct);
+            var rollback = await RunConfinedScriptInternalAsync(rollbackCommand, runtime, ct);
+            rollbackOutput = rollback.Output;
+
+            // A rollback that itself failed leaves the machine in the speculative state the scope
+            // was supposed to be able to abandon. That is the loudest failure this engine has.
+            if (rollback.TimedOut || rollback.ExitCode != 0)
+            {
+                throw new WorkflowNodeFailedException(
+                    node.NodeId,
+                    $"assertion '{assertion}' failed AND the rollback exited {rollback.ExitCode}" +
+                    $"{(rollback.TimedOut ? " (timed out)" : string.Empty)}; the speculative change may still be applied.",
+                    $"[TRANSACTION_ROLLBACK_FAILED] {rollbackOutput.Trim()}");
+            }
         }
 
         if (_remediationEngine != null && node.Configuration.TryGetValue("RemediationActionId", out var actId))
@@ -553,19 +669,20 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
                 ct);
         }
 
-        return $"[TRANSACTION_ROLLED_BACK] Assertion '{assertion}' failed against output. Rollback applied: {rollbackOutput.Trim()}";
+        // A rolled-back scope did not achieve what it was asked to. Reporting the run as a success
+        // because the rollback worked is the same error as scoring a refused mission as a clean one.
+        throw new WorkflowNodeFailedException(
+            node.NodeId,
+            $"assertion '{assertion}' failed against the script output; rollback was applied.",
+            $"[TRANSACTION_ROLLED_BACK] Assertion '{assertion}' failed against output. Rollback applied: {rollbackOutput.Trim()}");
     }
 
-    private static string InterpolateVariables(string template, IReadOnlyDictionary<string, string> nodeOutputs)
-    {
-        if (string.IsNullOrEmpty(template)) return string.Empty;
-        string result = template;
-        foreach (var kvp in nodeOutputs)
-        {
-            result = result.Replace($"{{{kvp.Key}}}", kvp.Value, StringComparison.OrdinalIgnoreCase);
-        }
-        return result;
-    }
+    private static string SubstituteText(string template, IReadOnlyDictionary<string, string> nodeOutputs) =>
+        string.IsNullOrEmpty(template)
+            ? string.Empty
+            : NodeReferencePattern.Replace(
+                template,
+                m => nodeOutputs.TryGetValue(m.Groups["key"].Value, out var v) ? v : m.Value);
 
     private async IAsyncEnumerable<MissionChunk> ExecuteAgentNodeAsync(
         WorkflowNode node,
@@ -601,54 +718,70 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         }
     }
 
-    private async Task<string> ExecuteOAuthNodeAsync(
-        WorkflowNode node,
-        IReadOnlyDictionary<string, string> nodeOutputs,
-        IReadOnlyDictionary<string, string> triggerPayload,
-        Guid executionId,
-        CancellationToken ct)
+    /// <summary>
+    /// Refuses, deliberately. The previous implementation minted a random string, wrote it to the
+    /// real DPAPI vault under the provider's live key and reported a successful code exchange - so
+    /// an operator inspecting the vault would find a bearer token no authorization server ever
+    /// issued, and the ledger would corroborate it. Nothing is written until a token endpoint is
+    /// actually wired.
+    /// </summary>
+    private static string ExecuteOAuthNode(WorkflowNode node)
     {
         string provider = node.Configuration.TryGetValue("Provider", out var prov) ? prov : "GenericOAuth";
-        string code = triggerPayload.TryGetValue("code", out var c) ? c : "auth_code_intercepted_sample";
 
-        string secretVaultKey = $"oauth_token_{provider.ToLowerInvariant()}";
-        string tokenJson = $"{{\"access_token\":\"tok_vaulted_{Guid.NewGuid():N}\",\"token_type\":\"Bearer\",\"expires_in\":86400,\"provider\":\"{provider}\"}}";
-
-        if (_credentialVault != null)
-        {
-            await _credentialVault.StoreSecretStringAsync(secretVaultKey, tokenJson, ct);
-        }
-
-        return $"OAuth code exchange successful for {provider}. Access token securely deposited into DPAPI vault under key '{secretVaultKey}'. (Plaintext masked by governance).";
+        throw new WorkflowNodeFailedException(
+            node.NodeId,
+            $"OAuth code exchange for '{provider}' is not implemented: no token endpoint is configured, " +
+            "and a fabricated token must not enter the credential vault.");
     }
 
-    private static string ProcessGovernedHttpNode(WorkflowNode node, IReadOnlyDictionary<string, string> nodeOutputs)
+    /// <summary>
+    /// Placeholder. No request is made: there is no pinned client here and no call into
+    /// <see cref="IEgressFirewall"/>, so the node names the pin it WOULD apply and states plainly
+    /// that it applied nothing.
+    /// </summary>
+    private static string ProcessGovernedHttpNode(WorkflowNode node)
     {
-        string fqdn = node.AllowedEgressFqdn ?? "api.example.com";
+        string fqdn = node.AllowedEgressFqdn ?? "(none declared)";
         string method = node.Configuration.TryGetValue("Method", out var m) ? m : "POST";
         string path = node.Configuration.TryGetValue("Path", out var p) ? p : "/events";
 
-        return $"[GOVERNED_HTTP] {method} https://{fqdn}{path} sent successfully under egress firewall policy.";
+        return $"[GOVERNED_HTTP:NOT_IMPLEMENTED] No request was sent. Declared target: {method} https://{fqdn}{path}. " +
+               "IEgressFirewall.ValidateOutboundTarget and a pinned client must be wired before this node carries traffic.";
     }
 
     private static (string Branch, string Log) EvaluateConditionNode(WorkflowNode node, IReadOnlyDictionary<string, string> nodeOutputs)
     {
-        string field = node.Configuration.TryGetValue("Field", out var f) ? f : string.Empty;
         string expected = node.Configuration.TryGetValue("Matches", out var exp) ? exp : string.Empty;
 
-        bool isMatch = false;
-        foreach (var output in nodeOutputs.Values)
+        // string.Contains("") is true of every string, so a condition with no pattern took the
+        // "true" branch on every run regardless of evidence. A gate with nothing to test is a
+        // misconfiguration, not a pass.
+        if (string.IsNullOrEmpty(expected))
         {
-            if (output.Contains(expected, StringComparison.OrdinalIgnoreCase))
-            {
-                isMatch = true;
-                break;
-            }
+            throw new WorkflowNodeFailedException(node.NodeId, "the condition declares no 'Matches' pattern to test.");
         }
 
-        string branch = isMatch ? "true" : "false";
-        string log = $"Condition evaluation on '{expected}': Result={branch}.";
-        return (branch, log);
+        // 'Field' names the node whose output is under test. It was read and then discarded, so a
+        // condition scoped to one node was in fact satisfied by ANY node's output containing the
+        // text - including the trigger payload that an unauthenticated caller controls.
+        string field = node.Configuration.TryGetValue("Field", out var f) ? f : string.Empty;
+
+        if (string.IsNullOrWhiteSpace(field))
+        {
+            bool anyMatch = nodeOutputs.Values.Any(v => v.Contains(expected, StringComparison.OrdinalIgnoreCase));
+            return (anyMatch ? "true" : "false",
+                $"Condition on any upstream output for '{expected}': Result={(anyMatch ? "true" : "false")}.");
+        }
+
+        if (!nodeOutputs.TryGetValue(field, out var scoped))
+        {
+            throw new WorkflowNodeFailedException(
+                node.NodeId, $"condition field '{field}' produced no output to test; it did not run upstream of this gate.");
+        }
+
+        bool isMatch = scoped.Contains(expected, StringComparison.OrdinalIgnoreCase);
+        return (isMatch ? "true" : "false", $"Condition on '{field}' for '{expected}': Result={(isMatch ? "true" : "false")}.");
     }
 
     private static string TrimForDisplay(string text, int maxLen = 120)

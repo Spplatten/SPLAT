@@ -175,6 +175,30 @@ public record WorkflowGraph(
     }
 }
 
+/// <summary>
+/// Raised when a node cannot complete. The run stops here rather than continuing on a node's
+/// unusable output: a workflow that reports success its own audit ledger contradicts is worth less
+/// than one that reports the failure.
+/// </summary>
+public sealed class WorkflowNodeFailedException : Exception
+{
+    public string NodeId { get; }
+
+    /// <summary>
+    /// Whatever the node produced before it failed. Carried on the exception because the failing
+    /// node's output is the first thing an operator needs, and the run is abandoned before the
+    /// normal output-recording path is reached.
+    /// </summary>
+    public string? NodeOutput { get; }
+
+    public WorkflowNodeFailedException(string nodeId, string reason, string? nodeOutput = null)
+        : base($"Node '{nodeId}' failed: {reason}")
+    {
+        NodeId = nodeId;
+        NodeOutput = nodeOutput;
+    }
+}
+
 public record WorkflowExecutionResult(
     string WorkflowId,
     Guid ExecutionId,

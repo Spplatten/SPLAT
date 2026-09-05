@@ -21,7 +21,8 @@ public class LinuxSubstrateAndCompilerTests
         string fqdn = "none",
         int port = 443,
         long maxRam = 128 * 1024 * 1024,
-        int maxCpu = 40)
+        int maxCpu = 40,
+        EgressScope scope = EgressScope.ModelGateway)
     {
         var toolDef = new SingleToolDefinition(
             ToolId: "test-tool-1",
@@ -35,7 +36,8 @@ public class LinuxSubstrateAndCompilerTests
 
         var egress = new EgressRule(
             AllowedFqdn: fqdn,
-            AllowedPort: port);
+            AllowedPort: port,
+            Scope: scope);
 
         return new SingleToolTemplate(
             TemplateId: "atlas-net-test",
@@ -94,7 +96,10 @@ public class LinuxSubstrateAndCompilerTests
     [Fact]
     public void PolicyCompiler_AllowsLocalhostWhenExplicitlyConfigured()
     {
-        var template = CreateMockTemplate(fqdn: "127.0.0.1", port: 8080);
+        // "Explicitly configured" now means the rule names ToolProcess scope. A destination alone
+        // no longer opens the tool's network: the default rule names the model gateway, which the
+        // host reaches, and reading that as tool egress is what opened the whole catalogue.
+        var template = CreateMockTemplate(fqdn: "127.0.0.1", port: 8080, scope: EgressScope.ToolProcess);
         var lease = _compiler.CompileTemplatePolicy(template, Guid.NewGuid(), "/tmp/splat_test");
 
         Assert.True(lease.AllowNetwork);

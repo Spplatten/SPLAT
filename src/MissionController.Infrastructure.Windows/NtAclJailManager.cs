@@ -5,6 +5,7 @@ using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 using MissionController.Core.Interfaces;
+using MissionController.Infrastructure.Windows.Security;
 
 namespace MissionController.Infrastructure.Windows.Jails;
 
@@ -57,6 +58,25 @@ public sealed class NtAclJailManager : IJailManager
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                 PropagationFlags.None,
                 AccessControlType.Allow));
+
+            // Network-denied sensors run as SPLAT's AppContainer, whose SID is NOT the operator's
+            // and therefore matches none of the ACEs above - and inheritance was just stripped, so
+            // nothing else grants it either. Without this ACE CreateProcess fails outright: the jail
+            // is the child's working directory, so an unreachable jail is an unlaunchable tool.
+            //
+            // Modify rather than FullControl: the tool needs to read, write and enumerate its own
+            // scratch space, never to rewrite the ACL that confines it. Best-effort by design - a
+            // machine that cannot furnish an AppContainer must still provision a working jail for
+            // the unconfined path, and the launcher is what refuses that launch, not the jail.
+            if (SensorAppContainer.TryGetSid(out var appContainerSid, out _) && appContainerSid is not null)
+            {
+                dirSecurity.AddAccessRule(new FileSystemAccessRule(
+                    appContainerSid,
+                    FileSystemRights.Modify | FileSystemRights.Synchronize,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow));
+            }
 
             dirInfo.SetAccessControl(dirSecurity);
         }, cancellationToken);
