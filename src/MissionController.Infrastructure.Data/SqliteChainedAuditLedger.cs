@@ -154,7 +154,7 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
 
         await using var conn = _context.CreateConnection();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT Id, TimestampUtc, MissionId, TemplateId, Action, Details, OperatorIdentity, PreviousHash, EntryHash, DetailsCommitment, HashVersion FROM AuditLedger ORDER BY Id ASC;";
+        cmd.CommandText = "SELECT Id, TimestampUtc, MissionId, TemplateId, Action, Details, OperatorIdentity, PreviousHash, EntryHash, DetailsCommitment, HashVersion, DetailsSalt, RedactedAtUtc FROM AuditLedger ORDER BY Id ASC;";
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         string expectedPreviousHash = GenesisHash;
@@ -171,6 +171,8 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
             string entry = reader.GetString(8);
             string? commitment = reader.IsDBNull(9) ? null : reader.GetString(9);
             long hashVersion = reader.IsDBNull(10) ? 1 : reader.GetInt64(10);
+            string? salt = reader.IsDBNull(11) ? null : reader.GetString(11);
+            bool isRedacted = !reader.IsDBNull(12);
 
             // 1. Verify previous hash link matches
             if (!string.Equals(prev, expectedPreviousHash, StringComparison.OrdinalIgnoreCase))
@@ -182,12 +184,29 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
             string calculatedHash;
             if (hashVersion >= 2 && commitment is not null)
             {
-                calculatedHash = ComputeEntryHashV2(prev, ts, mid, tid, act, commitment, op, hmacKey);
-                // If keyed check fails and hmacKey was active, try unkeyed for backward compatibility
-                if (!string.Equals(entry, calculatedHash, StringComparison.OrdinalIgnoreCase) && hmacKey != null)
+                // The chain commits to the COMMITMENT, not to the narrative. Recomputing EntryHash
+                // from the stored commitment therefore says nothing about the text an auditor
+                // actually reads, and without this check `UPDATE AuditLedger SET Details = '...'`
+                // left verification green while the displayed evidence was forged.
+                if (!isRedacted)
                 {
-                    calculatedHash = ComputeEntryHashV2(prev, ts, mid, tid, act, commitment, op, null);
+                    if (salt is null ||
+                        !string.Equals(ComputeDetailsCommitment(salt, det), commitment, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
                 }
+                else if (salt is not null)
+                {
+                    // Cryptographic erasure drops the salt. A row claiming redaction while keeping
+                    // one was edited by hand rather than swept by the retention service.
+                    return false;
+                }
+
+                // No unkeyed retry. Accepting a hash that verifies WITHOUT the configured key lets a
+                // writer replace a keyed chain with plain SHA-256 and still pass; a ledger written
+                // before the key was provisioned needs a recorded migration, not a silent downgrade.
+                calculatedHash = ComputeEntryHashV2(prev, ts, mid, tid, act, commitment, op, hmacKey);
             }
             else
             {

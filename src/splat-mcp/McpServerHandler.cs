@@ -39,8 +39,29 @@ public class McpServerHandler
     /// <c>"mcp-client"</c>, which named the transport in the column reserved for who acted and made
     /// every non-repudiation claim over this server's rows unfounded.
     /// </summary>
-    private async Task<string> ResolveActorAsync(CancellationToken ct) =>
-        (await _identityProvider.ResolveAsync(ct)).ToLedgerIdentity();
+    private async Task<string> ResolveActorAsync(CancellationToken ct)
+    {
+        // Resolved once per tool call and reused. Every handler still asks for the actor where it
+        // needs one, but the provider is consulted at the gate in HandleToolsCallAsync, so the
+        // identity that authorized the call is the identity that lands in the ledger row - not a
+        // second resolution that could answer differently.
+        if (CurrentActor.Value is { } cached)
+        {
+            return cached;
+        }
+
+        string actor = (await _identityProvider.ResolveAsync(ct)).ToLedgerIdentity();
+        CurrentActor.Value = actor;
+        return actor;
+    }
+
+    /// <summary>
+    /// The actor for the tool call in flight. AsyncLocal rather than a field so the value is scoped
+    /// to one logical request even if the transport is ever driven concurrently, and so it reaches
+    /// every handler the dispatch switch calls without threading a parameter through twelve
+    /// signatures.
+    /// </summary>
+    private static readonly AsyncLocal<string?> CurrentActor = new();
 
     /// <summary>
     /// The only directory subtree <c>fs_read</c> and <c>fs_write</c> may touch.
@@ -410,6 +431,14 @@ public class McpServerHandler
         var paramDoc = request.Params.Value;
         string toolName = paramDoc.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
         JsonElement args = paramDoc.TryGetProperty("arguments", out var argsProp) ? argsProp : default;
+
+        // IDENTITY BEFORE EFFECTS. Each handler used to resolve the actor on its way to the ledger,
+        // which put resolution AFTER the side effect: run_command executed and fs_write hit disk,
+        // and only then did a rejected credential throw - so the call left an execution or a file
+        // behind, and because the throw skipped the append that followed it, no ledger row either.
+        // Resolving here means an unauthenticated caller reaches no executor and no filesystem.
+        CurrentActor.Value = null;
+        await ResolveActorAsync(ct);
 
         McpToolCallResult toolResult;
 
