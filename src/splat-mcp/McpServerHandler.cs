@@ -246,7 +246,7 @@ public class McpServerHandler
                         ""allowNetwork"": { ""type"": ""boolean"", ""description"": ""Whether network egress is permitted"", ""default"": false },
                         ""allowedEgressIps"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Allow-listed egress IPv4 addresses (e.g. 127.0.0.1)"" },
                         ""timeoutSeconds"": { ""type"": ""integer"", ""description"": ""Lease lifespan in seconds (5-300)"", ""default"": 30 },
-                        ""readOnlyFs"": { ""type"": ""boolean"", ""description"": ""Mount root as read-only"", ""default"": false },
+                        ""readOnlyFs"": { ""type"": ""boolean"", ""description"": ""NOT ENFORCED - the guest daemon establishes no mount namespace for the workload, so it REFUSES this request rather than accepting a boundary it cannot impose. Leave false."", ""default"": false },
                         ""traceId"": { ""type"": ""string"", ""description"": ""Optional external orchestrator trace id (LangSmith/OpenTelemetry run id). Correlated into the chained audit ledger and echoed in the auditAnchor result item."" },
                         ""clientName"": { ""type"": ""string"", ""description"": ""Optional calling framework name (e.g. langgraph, copilot-studio), recorded with the trace correlation."" }
                     },

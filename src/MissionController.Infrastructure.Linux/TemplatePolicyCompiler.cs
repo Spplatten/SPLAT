@@ -130,9 +130,16 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
             MaxCpuPercent: cpuPercent,
             MaxPids: 50);
 
-        // 5. CoW OverlayFS scratch space
+        // 5. CoW OverlayFS scratch space - REQUESTED OFF, because nothing provides it.
+        //
+        // This was EnableCow: true on every compiled template, and the guest daemon consumed the
+        // field nowhere at all: the overlay code exists but is unwired, and mounting it in the
+        // daemon's own namespace would not be a boundary the tool could not step out of. The
+        // daemon now refuses enableCow rather than dropping it silently, so asking for it here
+        // would refuse every mission. The paths stay so the shape is ready when the mount
+        // namespace work lands; the promise does not.
         var overlay = new OverlayFsSpec(
-            EnableCow: true,
+            EnableCow: false,
             LowerDir: "/var/splat/baseline",
             ScratchDir: $"/tmp/splat_scratch/{missionId}");
 

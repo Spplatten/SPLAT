@@ -1,9 +1,26 @@
-﻿// Ephemeral OverlayFS Copy-on-Write workspace manager.
-// Creates merged view over lowerdir + transient upper/work dirs.
-// Discards scratch state on mission failure or teardown for clean rollback.
+﻿// Ephemeral OverlayFS copy-on-write workspace: merged view over lowerdir plus transient
+// upper/work dirs, discarded on teardown.
+//
+// NOT WIRED, AND NOT YET A BOUNDARY. Two separate facts, and the second is why the first has not
+// been fixed by simply calling it:
+//
+//   * `mount()` here happens in the DAEMON's mount namespace, so the overlay is visible to every
+//     process on the host rather than only to the leased tool.
+//   * A merged directory handed to a child as its working directory is a starting point, not a
+//     jail. The tool can `cd /` out of it in one syscall.
+//
+// Making this a filesystem boundary needs `unshare(CLONE_NEWNS)` in the child followed by
+// pivot_root, done inside the same pre_exec closure that already performs the cgroup join and the
+// privilege drop - and that closure is async-signal-safe code in a forked child of a multithreaded
+// process, so it is real work with real failure modes rather than a call site that was forgotten.
+//
+// Until that lands the daemon REFUSES `overlayFs.enableCow`, so the gap is a refusal rather than a
+// silently ignored field. The mount code stays because it is correct as far as it goes and is the
+// half that will be reused; it is parked, not abandoned.
+#![allow(dead_code)]
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::ffi::CString;
 use anyhow::{bail, Context, Result};
 

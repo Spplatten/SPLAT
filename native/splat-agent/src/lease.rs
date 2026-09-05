@@ -113,7 +113,6 @@ pub struct ActiveLease {
     /// The cgroup this lease polices. Carried so expiry can KILL the workload before withdrawing
     /// the policy - a reaper holding only a cgroup id can unpolice a process but cannot stop it.
     pub cgroup_path: PathBuf,
-    pub created_at: Instant,
     pub expires_at: Instant,
     pub protected_inodes: Vec<InodeKey>,
     pub allowed_exec_inodes: Vec<InodeKey>,
@@ -232,7 +231,6 @@ impl LeaseManager {
             mission_id: config.mission_id.clone(),
             cgroup_id,
             cgroup_path,
-            created_at: now,
             expires_at: now + duration,
             protected_inodes,
             allowed_exec_inodes,
@@ -531,7 +529,6 @@ mod isolation_tests {
             mission_id: format!("m-{cgroup_id}"),
             cgroup_id,
             cgroup_path: PathBuf::from(format!("/sys/fs/cgroup/splat_leases/mission_m-{cgroup_id}")),
-            created_at: now,
             expires_at: now + Duration::from_secs(30),
             protected_inodes: protected,
             allowed_exec_inodes: exec,

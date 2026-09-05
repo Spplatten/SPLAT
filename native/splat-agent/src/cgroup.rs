@@ -151,12 +151,6 @@ impl EphemeralCgroup {
             .to_string())
     }
 
-    pub fn attach_pid(&self, pid: u32) -> Result<()> {
-        let procs = self.path.join("cgroup.procs");
-        fs::write(&procs, format!("{pid}\n")).with_context(|| format!("attach pid {pid} to {}", procs.display()))?;
-        Ok(())
-    }
-
     /// Whether `pid` is a member of this cgroup.
     ///
     /// Used to confirm a tool really landed in its lease. Membership is what the BPF program keys

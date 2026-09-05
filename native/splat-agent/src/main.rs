@@ -43,7 +43,6 @@ use lease_lsm::*;
 
 use auth::PeerAuth;
 use cgroup::EphemeralCgroup;
-use cow::OverlayWorkspace;
 use lease::{bytes_of, lease_map_keys, BpfMapSync, LeaseConfig, LeaseManager};
 use violation::{RawViolationEvent, ViolationEvent};
 
@@ -540,7 +539,54 @@ async fn handle_client(
 
                 info!("Executing tool for mission {mission_id}: {command} {argv:?}");
 
-                // 0. Resolve the clamps FIRST.
+                // 0. Refuse policy this daemon cannot enforce.
+                //
+                // A field parsed into the lease and then never acted on is worse than an absent
+                // feature: the caller reads its request back as accepted. Both of these were in
+                // exactly that state - readOnlyFs was parsed into LeaseConfig and consulted by
+                // nothing, and overlayFs was sent by the bridge on every compiled template and
+                // consumed by nothing at all. The supported matrix lives in SUPPORTED_POLICY.md;
+                // anything outside it is refused here rather than accepted and dropped.
+                let mut unsupported: Vec<&str> = Vec::new();
+
+                if parsed.get("readOnlyFs").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    unsupported.push(
+                        "readOnlyFs: no mount namespace is established for the workload, so a \
+                         read-only root cannot be imposed on it",
+                    );
+                }
+
+                if parsed
+                    .get("overlayFs")
+                    .and_then(|v| v.get("enableCow"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    unsupported.push(
+                        "overlayFs.enableCow: the overlay would mount in the daemon's own mount \
+                         namespace and the tool could step out of the merged directory, so it \
+                         would not be a workspace boundary",
+                    );
+                }
+
+                if !unsupported.is_empty() {
+                    error!("Refusing to execute for mission {mission_id}: unsupported policy requested");
+                    let err_chunk = serde_json::json!({
+                        "type": "STDERR",
+                        "data": format!(
+                            "SPLAT refused the request: this daemon does not enforce {}. \
+                             Accepting it would report a containment it does not provide.\n",
+                            unsupported.join("; ")
+                        )
+                    });
+                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                    let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                    writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                    line.clear();
+                    continue;
+                }
+
+                // 0.5 Resolve the clamps.
                 //
                 // The cgroup used to be provisioned from three constants here while the request's
                 // own limits were parsed thirty lines below and then never applied to any
@@ -616,7 +662,9 @@ async fn handle_client(
                         .and_then(|v| v.as_array())
                         .map(|a| a.iter().filter_map(|p| p.as_u64().map(|n| n as u32)).collect())
                         .unwrap_or_else(|| vec![80, 443]),
-                    read_only_fs: parsed.get("readOnlyFs").and_then(|v| v.as_bool()).unwrap_or(false),
+                    // Always false by the time we get here - a true value was refused above.
+                    // Kept on the config so the shape of the lease still names the dimension.
+                    read_only_fs: false,
                     // Union, never replacement: a caller may add protected paths but must not be
                     // able to unprotect the ones this daemon always guards.
                     protected_paths: {

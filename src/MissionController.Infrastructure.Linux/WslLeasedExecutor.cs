@@ -22,7 +22,6 @@ public class WslLeasedExecutor : ILeasedExecutor
 {
     private readonly string _host;
     private readonly int _port;
-    private readonly bool _useVsock;
     private readonly string _authTokenPath;
 
     /// <summary>
@@ -36,16 +35,23 @@ public class WslLeasedExecutor : ILeasedExecutor
     private string? _cachedToken;
     private readonly SemaphoreSlim _tokenLock = new(1, 1);
 
+    /// <param name="authTokenPath">
+    /// Where the daemon keeps its shared secret inside the guest.
+    /// </param>
+    /// <remarks>
+    /// There was a <c>useVsock</c> parameter here that was stored and never read. AF_VSOCK is the
+    /// transport that would let the daemon identify its peer instead of trusting a shared secret
+    /// (see auth.rs), but none of it is implemented, and a constructor flag that silently does
+    /// nothing reads as a capability the caller can select.
+    /// </remarks>
     public WslLeasedExecutor(
         string host = "127.0.0.1",
         int port = 50051,
-        bool useVsock = false,
         string authTokenPath = "/etc/splat/agent.token",
         string? authToken = null)
     {
         _host = host;
         _port = port;
-        _useVsock = useVsock;
         _authTokenPath = authTokenPath;
         // An explicit token, then the environment, then the guest file. The first two exist so a
         // host that already holds the secret - or a test driving the wire against a stand-in

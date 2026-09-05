@@ -301,8 +301,10 @@ public record LeaseSpec(
     IReadOnlyList<InodeIdentifierModel> AllowedExecInodes,
     uint LeaseDurationSeconds,
     LeaseResourceLimits Limits,
-    OverlayFsSpec? OverlayFs = null,
-    IReadOnlyDictionary<string, string>? EnvironmentVariables = null);
+    // EnvironmentVariables was declared here and read by nothing - not the bridge, not the
+    // envelope, not the daemon. A tool's environment is a real policy dimension and it will need
+    // to come back with a hook behind it; as a field nobody consumed it only suggested one existed.
+    OverlayFsSpec? OverlayFs = null);
 
 /// <summary>
 /// Executes a tool command inside a hardware-isolated WSL2 guest VM under an in-kernel BPF-LSM capability lease.
