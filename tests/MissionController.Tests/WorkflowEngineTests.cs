@@ -522,6 +522,11 @@ public class WorkflowEngineTests
         listener.Start();
         using var httpClient = new HttpClient();
 
+        // Every route that can read or run something now needs the listener's token; the gate is
+        // exercised separately in LoopbackGateTests.
+        httpClient.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", listener.AuthToken);
+
         // 1. GET /api/v1/workflows
         var listResponse = await httpClient.GetAsync($"http://127.0.0.1:{port}/api/v1/workflows");
         Assert.Equal(System.Net.HttpStatusCode.OK, listResponse.StatusCode);

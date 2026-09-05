@@ -82,7 +82,7 @@ while an unleased one was refused, egress was denied with networking off, and ev
 
 **The documentation cannot drift away from the evidence.** An automated test fails the build if the
 docs claim the substrate is pending while passing evidence exists, *and* fails if they drop the
-qualification when it does not — in both directions. 406 automated tests currently pass.
+qualification when it does not — in both directions. 417 automated tests currently pass.
 
 ---
 
