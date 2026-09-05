@@ -1,0 +1,186 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace MissionController.Core.Workflow;
+
+public enum WorkflowTriggerType
+{
+    Manual,
+    Webhook,
+    OAuthCallback,
+    Schedule,
+    FileWatch
+}
+
+public enum WorkflowNodeType
+{
+    Trigger,
+    SandboxedScript,
+    AgentReasoning,
+    OAuthExchange,
+    GovernedHttp,
+    Condition,
+    ReActAgent,
+    MemoryStore,
+    MemoryRecall,
+    TransactionalScope
+}
+
+public record WorkflowTriggerConfig(
+    WorkflowTriggerType Type,
+    string? EndpointOrPath = null,
+    string? CronOrInterval = null,
+    string? SecretToken = null);
+
+public record WorkflowNode(
+    string NodeId,
+    string Name,
+    WorkflowNodeType NodeType,
+    IReadOnlyDictionary<string, string> Configuration,
+    string? TargetModel = null,
+    string? ScriptCommand = null,
+    string? AllowedEgressFqdn = null)
+{
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(NodeId))
+            throw new InvalidOperationException("NodeId must not be empty.");
+        if (string.IsNullOrWhiteSpace(Name))
+            throw new InvalidOperationException($"Node '{NodeId}' must have a valid Name.");
+    }
+}
+
+public record WorkflowEdge(
+    string SourceNodeId,
+    string TargetNodeId,
+    string? ConditionBranch = null);
+
+public record WorkflowGraph(
+    string WorkflowId,
+    string Name,
+    string Description,
+    WorkflowTriggerConfig Trigger,
+    IReadOnlyList<WorkflowNode> Nodes,
+    IReadOnlyList<WorkflowEdge> Edges,
+    IReadOnlyDictionary<string, string>? Metadata = null)
+{
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(WorkflowId))
+            throw new InvalidOperationException("WorkflowId must not be empty.");
+        if (string.IsNullOrWhiteSpace(Name))
+            throw new InvalidOperationException("Workflow Name must not be empty.");
+        if (Nodes == null || Nodes.Count == 0)
+            throw new InvalidOperationException("Workflow must contain at least one node.");
+
+        var duplicateIds = Nodes
+            .GroupBy(n => n.NodeId, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+
+        if (duplicateIds.Count > 0)
+            throw new InvalidOperationException($"Duplicate node IDs detected in workflow: {string.Join(", ", duplicateIds)}");
+
+        foreach (var node in Nodes)
+        {
+            node.Validate();
+        }
+
+        var nodeSet = new HashSet<string>(Nodes.Select(n => n.NodeId), StringComparer.OrdinalIgnoreCase);
+
+        if (Edges != null)
+        {
+            foreach (var edge in Edges)
+            {
+                if (!nodeSet.Contains(edge.SourceNodeId))
+                    throw new InvalidOperationException($"Edge source '{edge.SourceNodeId}' does not exist in workflow nodes.");
+                if (!nodeSet.Contains(edge.TargetNodeId))
+                    throw new InvalidOperationException($"Edge target '{edge.TargetNodeId}' does not exist in workflow nodes.");
+            }
+
+            // Cycle detection
+            DetectCycles();
+        }
+    }
+
+    private void DetectCycles()
+    {
+        var inDegree = Nodes.ToDictionary(n => n.NodeId, _ => 0, StringComparer.OrdinalIgnoreCase);
+        var adj = Nodes.ToDictionary(n => n.NodeId, _ => new List<string>(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var edge in Edges)
+        {
+            adj[edge.SourceNodeId].Add(edge.TargetNodeId);
+            inDegree[edge.TargetNodeId]++;
+        }
+
+        var queue = new Queue<string>(inDegree.Where(kvp => kvp.Value == 0).Select(kvp => kvp.Key));
+        int visitedCount = 0;
+
+        while (queue.Count > 0)
+        {
+            var curr = queue.Dequeue();
+            visitedCount++;
+
+            foreach (var neighbor in adj[curr])
+            {
+                inDegree[neighbor]--;
+                if (inDegree[neighbor] == 0)
+                {
+                    queue.Enqueue(neighbor);
+                }
+            }
+        }
+
+        if (visitedCount != Nodes.Count)
+        {
+            throw new InvalidOperationException("Workflow graph contains a cycle. SPLAT workflows must be directed acyclic graphs (DAGs).");
+        }
+    }
+
+    public IReadOnlyList<WorkflowNode> GetTopologicalOrder()
+    {
+        Validate();
+        var inDegree = Nodes.ToDictionary(n => n.NodeId, _ => 0, StringComparer.OrdinalIgnoreCase);
+        var adj = Nodes.ToDictionary(n => n.NodeId, _ => new List<string>(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var edge in Edges)
+        {
+            adj[edge.SourceNodeId].Add(edge.TargetNodeId);
+            inDegree[edge.TargetNodeId]++;
+        }
+
+        var queue = new Queue<string>(inDegree.Where(kvp => kvp.Value == 0).Select(kvp => kvp.Key));
+        var order = new List<WorkflowNode>();
+        var nodeDict = Nodes.ToDictionary(n => n.NodeId, n => n, StringComparer.OrdinalIgnoreCase);
+
+        while (queue.Count > 0)
+        {
+            var currId = queue.Dequeue();
+            order.Add(nodeDict[currId]);
+
+            foreach (var neighbor in adj[currId])
+            {
+                inDegree[neighbor]--;
+                if (inDegree[neighbor] == 0)
+                {
+                    queue.Enqueue(neighbor);
+                }
+            }
+        }
+
+        return order;
+    }
+}
+
+public record WorkflowExecutionResult(
+    string WorkflowId,
+    Guid ExecutionId,
+    bool Success,
+    IReadOnlyDictionary<string, string> NodeOutputs,
+    IReadOnlyList<string> ExecutionLogs,
+    DateTime StartedUtc,
+    DateTime CompletedUtc,
+    string? FailureReason = null);

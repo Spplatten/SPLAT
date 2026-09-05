@@ -62,6 +62,29 @@
             <Border Grid.Column="1" Style="{StaticResource SplatCardStyle}" Padding="18">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="12">
+                        <!-- AI Workflow & Agent Synthesizer (n8n Alternative) -->
+                        <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="14">
+                            <StackPanel Spacing="8">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="⚡ NATURAL-LANGUAGE WORKFLOW SYNTHESIZER" Style="{StaticResource SplatPageSectionLabelStyle}" Foreground="{ThemeResource SplatAccentBrush}" />
+                                    <TextBlock Text="(n8n Alternative / Zero-Trust Flow Builder)" FontSize="11" Foreground="{ThemeResource SplatTextSecondaryBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock Text="Describe your automation in plain English (e.g. 'Listen for TikTok OAuth callback and audit ad spend', or 'Scrape event logs for error spikes and alert SecOps'). SPLAT will compile it into sandboxed nodes." FontSize="11" Foreground="{ThemeResource SplatTextSecondaryBrush}" TextWrapping="Wrap" />
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" PlaceholderText="e.g. Set up a TikTok OAuth callback receiver, capture the token into DPAPI, and fetch ad campaign performance..." Text="{x:Bind ViewModel.NaturalLanguagePrompt, Mode=TwoWay}" />
+                                    <Button Grid.Column="1" Content="Synthesize Flow" Command="{x:Bind ViewModel.SynthesizeWorkflowCommand}" Style="{StaticResource AccentButtonStyle}" />
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Spacing="16" Margin="0,4,0,0">
+                                    <TextBlock Text="Webhook Trigger: http://127.0.0.1:5678/webhook/active" FontSize="11" Foreground="{ThemeResource SplatVioletBrush}" />
+                                    <TextBlock Text="OAuth Receiver: http://127.0.0.1:5678/oauth/callback/{provider}" FontSize="11" Foreground="{ThemeResource SplatGoodBrush}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
                         <TextBlock Text="PROJECT DEFINITION" Style="{StaticResource SplatPageSectionLabelStyle}" />
                         <Grid ColumnSpacing="10" RowSpacing="10">
                             <Grid.ColumnDefinitions>

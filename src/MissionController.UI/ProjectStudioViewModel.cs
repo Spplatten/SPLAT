@@ -87,6 +87,21 @@ public partial class ProjectStudioViewModel : ObservableObject
     [ObservableProperty]
     private bool _isLoading;
 
+    [ObservableProperty]
+    private string _naturalLanguagePrompt = string.Empty;
+
+    [ObservableProperty]
+    private string _synthesizedWorkflowSummary = string.Empty;
+
+    [ObservableProperty]
+    private bool _isSynthesizing;
+
+    [ObservableProperty]
+    private string _webhookUrl = "http://127.0.0.1:5678/webhook/custom-flow";
+
+    [ObservableProperty]
+    private string _oauthCallbackUrl = "http://127.0.0.1:5678/oauth/callback/tiktok";
+
     public ProjectStudioViewModel(
         ITemplateRegistry templateRegistry,
         IProjectTemplateRegistry projectRegistry)
@@ -125,6 +140,73 @@ public partial class ProjectStudioViewModel : ObservableObject
         DraftStages.Clear();
         SelectedStage = null;
         StatusMessage = "Draft cleared. Add ordered agent stages to define the project.";
+    }
+
+    [RelayCommand]
+    public async Task SynthesizeWorkflowAsync()
+    {
+        if (string.IsNullOrWhiteSpace(NaturalLanguagePrompt))
+        {
+            StatusMessage = "Enter a description of what you want your agent or workflow to do.";
+            return;
+        }
+
+        IsSynthesizing = true;
+        StatusMessage = "Synthesizing governed workflow with AI & vetted primitives...";
+        try
+        {
+            var synthesizer = new MissionController.Core.Workflow.WorkflowSynthesizerEngine();
+            var graph = await synthesizer.SynthesizeFromNaturalLanguageAsync(NaturalLanguagePrompt);
+
+            ProjectId = $"project-custom-{graph.WorkflowId.Replace("flow-", "")}";
+            ProjectName = graph.Name;
+            ProjectDescription = graph.Description;
+            ProjectCategory = "Synthesized Workflows";
+            WebhookUrl = $"http://127.0.0.1:5678/webhook/{graph.WorkflowId}";
+
+            DraftStages.Clear();
+            int stageNum = 1;
+            foreach (var node in graph.Nodes.Where(n => n.NodeType != MissionController.Core.Workflow.WorkflowNodeType.Trigger))
+            {
+                var matchingTemplate = AgentTemplates.FirstOrDefault(t =>
+                    t.TargetModel.Contains("claude", StringComparison.OrdinalIgnoreCase)) ?? AgentTemplates.FirstOrDefault();
+
+                if (matchingTemplate != null)
+                {
+                    string directive = node.NodeType switch
+                    {
+                        MissionController.Core.Workflow.WorkflowNodeType.OAuthExchange => $"[OAuth Exchange] Intercept and securely deposit token for {node.Configuration.GetValueOrDefault("Provider", "Provider")} into Windows DPAPI vault.",
+                        MissionController.Core.Workflow.WorkflowNodeType.SandboxedScript => $"[Sandboxed Script ({node.Configuration.GetValueOrDefault("Runtime", "PowerShell")})] {node.ScriptCommand}",
+                        MissionController.Core.Workflow.WorkflowNodeType.Condition => $"[Condition Gate] Evaluate trigger data for: {node.Configuration.GetValueOrDefault("Matches", "Pattern")}",
+                        MissionController.Core.Workflow.WorkflowNodeType.ReActAgent => $"[Governed ReAct Agent] Goal: {node.Configuration.GetValueOrDefault("Goal", "Investigate")} | Tools: {node.Configuration.GetValueOrDefault("AllowedTools", "DiagnosticSuite")} | MaxSteps: {node.Configuration.GetValueOrDefault("MaxSteps", "4")}",
+                        MissionController.Core.Workflow.WorkflowNodeType.MemoryRecall => $"[Semantic Memory Recall] Query: {node.Configuration.GetValueOrDefault("Query", "HistoricalIncidents")} | TopK: {node.Configuration.GetValueOrDefault("TopK", "3")}",
+                        MissionController.Core.Workflow.WorkflowNodeType.MemoryStore => $"[Semantic Memory Store] Key: {node.Configuration.GetValueOrDefault("Key", "KnowledgeEntry")}",
+                        MissionController.Core.Workflow.WorkflowNodeType.TransactionalScope => $"[Transactional Scope] Assertion: '{node.Configuration.GetValueOrDefault("Assertion", "SUCCESS")}' with automated rollback fallback.",
+                        _ => node.Configuration.GetValueOrDefault("Prompt", $"Execute governed {node.Name} task.")
+                    };
+
+                    DraftStages.Add(new ProjectStageDraftItem(
+                        $"stage-{stageNum}",
+                        $"Stage {stageNum}: {node.Name}",
+                        matchingTemplate,
+                        directive));
+                    stageNum++;
+                }
+            }
+
+            SelectedStage = DraftStages.LastOrDefault();
+            DeliverablesText = $"1. Complete sandboxed execution of {graph.Name}\n2. Notarize execution in SHA-256 chained audit ledger";
+            SynthesizedWorkflowSummary = $"{graph.Name} ({graph.Nodes.Count} nodes, trigger: {graph.Trigger.Type})";
+            StatusMessage = $"Successfully synthesized governed workflow '{graph.Name}' ({graph.Nodes.Count} nodes).";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Synthesis error: {ex.Message}";
+        }
+        finally
+        {
+            IsSynthesizing = false;
+        }
     }
 
     public void AddStage()
