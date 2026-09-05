@@ -4,10 +4,21 @@
 // whole pitch rests on: an unconstrained agent process that steps outside its declared
 // lease is stopped by the kernel with -EPERM, not by a user-space check it could skip.
 //
-// Enforcement is deliberately keyed on cgroup id + inode identity, NOT on resolved path
-// strings. Full path resolution inside a BPF program is racy (TOCTOU) and expensive; the
+// Enforcement is deliberately keyed on inode identity and destination address, NOT on resolved
+// path strings. Full path resolution inside a BPF program is racy (TOCTOU) and expensive; the
 // honest, defensible primitive is "this exact inode" / "this exact destination address".
 // The README documents that boundary rather than hiding it.
+//
+// EVERY policy key carries the cgroup id. That is not decoration. The maps were previously keyed
+// by the resource alone, with the cgroup only consulted to decide whether policy applied AT ALL -
+// so two concurrent leases received the union of each other's permissions: a mission that
+// allow-listed /usr/bin/python3 silently granted it to every other leased mission, and revoking
+// one lease deleted a protected-inode entry another lease was still relying on. A per-mission
+// capability lease that leaks across missions is not a capability lease.
+//
+// NOTE: native/splat-canary/src/bpf/lease_lsm.bpf.c is a deliberate fork of this file, frozen at
+// the shape its recorded evidence was produced against. It proves the primitive; this one is the
+// daemon's.
 //
 // Hooks:
 //   bprm_check_security -> only allow-listed executable inodes may exec           (-EPERM)
@@ -27,10 +38,26 @@ char LICENSE[] SEC("license") = "GPL"; // BPF-LSM + ringbuf helpers require a GP
 #define AF_INET 2
 #define EPERM 1
 
-// Inode identity key. (dev, ino) pair is unique across all mounts/filesystems.
+// Inode identity. The (dev, ino) pair is unique across all mounts/filesystems.
 struct inode_key {
     __u64 ino;
     __u32 dev;
+    __u32 _pad;
+};
+
+// A policy entry belongs to ONE lease. 24 bytes, natural 8-byte alignment; the Rust side mirrors
+// this layout exactly and a size assertion in lease.rs fails the build if the two ever drift.
+struct lease_inode_key {
+    __u64 cgroup_id;
+    __u64 ino;
+    __u32 dev;
+    __u32 _pad;
+};
+
+// Same, for an approved IPv4 destination. 16 bytes.
+struct lease_ipv4_key {
+    __u64 cgroup_id;
+    __u32 addr;
     __u32 _pad;
 };
 
@@ -56,27 +83,30 @@ struct {
     __type(value, __u8);
 } leased_cgroups SEC(".maps");
 
-// Inodes that a leased process may NOT open (e.g. /etc/shadow captured at lease time).
+// Inodes a given lease's processes may NOT open (e.g. /etc/shadow captured at lease time).
+// Entries are per-lease, so revoking one lease cannot remove a protection another still holds.
+// Sized for the 256 concurrent leases leased_cgroups admits, times a realistic protected set.
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key, struct inode_key);
+    __uint(max_entries, 8192);
+    __type(key, struct lease_inode_key);
     __type(value, __u8);
 } protected_inodes SEC(".maps");
 
-// The only executable inodes a leased process may exec. Everything else is denied.
+// The only executable inodes a given lease may exec. Everything else is denied - including a
+// binary some OTHER concurrent lease was granted.
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key, struct inode_key);
+    __uint(max_entries, 8192);
+    __type(key, struct lease_inode_key);
     __type(value, __u8);
 } allowed_exec_inodes SEC(".maps");
 
-// The only IPv4 destinations (network byte order, /32) a leased process may connect() to.
+// The only IPv4 destinations (network byte order, /32) a given lease may connect() to.
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 1024);
-    __type(key, __u32);
+    __uint(max_entries, 4096);
+    __type(key, struct lease_ipv4_key);
     __type(value, __u8);
 } allowed_connect_ipv4 SEC(".maps");
 
@@ -112,6 +142,16 @@ static __always_inline struct inode_key inode_key_of(struct inode *inode)
     return k;
 }
 
+static __always_inline struct lease_inode_key lease_inode_key_of(__u64 cgid, struct inode *inode)
+{
+    struct lease_inode_key k = {};
+    k.cgroup_id = cgid;
+    k.ino = BPF_CORE_READ(inode, i_ino);
+    k.dev = BPF_CORE_READ(inode, i_sb, s_dev);
+    k._pad = 0;
+    return k;
+}
+
 SEC("lsm/bprm_check_security")
 int BPF_PROG(splat_bprm_check, struct linux_binprm *bprm, int ret)
 {
@@ -135,9 +175,11 @@ int BPF_PROG(splat_bprm_check, struct linux_binprm *bprm, int ret)
         return -EPERM;
     }
 
-    struct inode_key k = inode_key_of(inode);
+    // Keyed by THIS lease. A binary another concurrent mission was granted is not on this
+    // mission's allow-list, which is the whole point of a per-mission lease.
+    struct lease_inode_key k = lease_inode_key_of(cgid, inode);
     if (bpf_map_lookup_elem(&allowed_exec_inodes, &k) != NULL)
-        return 0; // On the allow-list: permit.
+        return 0; // On this lease's allow-list: permit.
 
     report(cgid, HOOK_EXEC, (__u32)k.ino);
     return -EPERM;
@@ -157,7 +199,7 @@ int BPF_PROG(splat_file_open, struct file *file, int ret)
     if (!inode)
         return 0;
 
-    struct inode_key k = inode_key_of(inode);
+    struct lease_inode_key k = lease_inode_key_of(cgid, inode);
     if (bpf_map_lookup_elem(&protected_inodes, &k) != NULL) {
         report(cgid, HOOK_OPEN, (__u32)k.ino);
         return -EPERM;
@@ -183,8 +225,12 @@ int BPF_PROG(splat_socket_connect, struct socket *sock, struct sockaddr *address
     struct sockaddr_in *in = (struct sockaddr_in *)address;
     __u32 daddr = BPF_CORE_READ(in, sin_addr.s_addr); // network byte order
 
-    if (bpf_map_lookup_elem(&allowed_connect_ipv4, &daddr) != NULL)
-        return 0; // Approved egress target.
+    struct lease_ipv4_key k = {};
+    k.cgroup_id = cgid;
+    k.addr = daddr;
+    k._pad = 0;
+    if (bpf_map_lookup_elem(&allowed_connect_ipv4, &k) != NULL)
+        return 0; // Approved egress target FOR THIS LEASE.
 
     report(cgid, HOOK_CONNECT, daddr);
     return -EPERM;

@@ -355,6 +355,19 @@ public class DocumentationDriftTests
                 "PASS",
                 StringComparison.OrdinalIgnoreCase);
 
+            // A probe is only proof of the program it ran against. The canary evidence has been
+            // bound to its BPF source since the first recording; the daemon probe was not, so the
+            // agent's kernel program could be rewritten - as it was, when the policy maps were
+            // re-keyed per lease - while a months-old PASS kept the README's claim standing.
+            if (proven && root.TryGetProperty("bpf_source_sha256", out var sha))
+            {
+                proven = string.Equals(sha.GetString(), AgentBpfSourceSha256(), StringComparison.OrdinalIgnoreCase);
+            }
+            else
+            {
+                proven = false;
+            }
+
             if (proven && root.TryGetProperty("results", out var results))
             {
                 // A PASS verdict is only as good as the properties behind it. Re-check the two that
@@ -389,6 +402,14 @@ public class DocumentationDriftTests
         Directory.Exists(EvidenceDir())
             ? Directory.GetFiles(EvidenceDir(), "*.json").ToList()
             : new List<string>();
+
+    /// <summary>The daemon's own kernel program, which is a deliberate fork of the canary's.</summary>
+    private static string AgentBpfSourceSha256()
+    {
+        string path = Path.Combine(RepositoryRoot(), "native", "splat-agent", "src", "bpf", "lease_lsm.bpf.c");
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        return Convert.ToHexString(sha.ComputeHash(File.ReadAllBytes(path))).ToLowerInvariant();
+    }
 
     private static string BpfSourceSha256()
     {

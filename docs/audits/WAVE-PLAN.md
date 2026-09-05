@@ -64,21 +64,31 @@ Remaining in this theme is F20 — a remediation verdict that comes from a measu
 rather than an exit code. The timeout fix narrows it; closing it needs each action to declare what
 restored means, which is a design, not a patch.
 
-## Wave 3 — Linux fail-closed and lease isolation
+## Wave 3 — Linux fail-closed and lease isolation (F04/F05/F06/F09 done)
 
-All Rust, no C# contention. Largest wave; can run fully in parallel with Wave 2.
+| Finding | Change | State |
+| --- | --- | --- |
+| F04 | Daemon exits rather than serving without live BPF maps; `--mock-bpf` is the only way to ask for a non-enforcing one | done, `f2e77f9` |
+| F04 | Health reports observed state and an `enforcing` field, instead of three hardcoded `true` and a fixed kernel string | done, `f2e77f9` |
+| F04 | A failed map write refuses the lease and rolls back, instead of warning and registering it | done, `f2e77f9` |
+| F09 | Clamps resolved before the cgroup exists, written with errors propagated, read back, and refused if looser than requested | done, `f2e77f9` |
+| F05 | Expiry kills inside the installed policy and only then withdraws it; a lost client kills too; `Drop` drains before `rmdir` | done, `f2e77f9` |
+| F06 | Every policy key carries the cgroup id, so concurrent leases stop receiving the union of each other's permissions | done |
+| F07 | The bridge peer is authenticated; caller-supplied policy is not the authorization source | **open** |
+| F08 | Publish the actual supported syscall/protocol matrix and refuse policy outside it | **open** |
 
-| Finding | Change |
-| --- | --- |
-| F04 | No execution when BPF open/load/attach or map write fails; health reports observed state, not hardcoded `true` |
-| F05 | Expiry keeps the workload denied, then kills and reaps the cgroup before removing policy |
-| F06 | Policy keys include mission/cgroup identity, so concurrent leases cannot borrow each other's permissions |
-| F09 | The provisioned cgroup carries the accepted limits, read back, and fails closed |
-| F07 | The bridge peer is authenticated; caller-supplied policy is not the authorization source |
-| F08 | Publish the actual supported syscall/protocol matrix and refuse policy outside it |
+Evidence: `native/splat-agent/evidence/fail-closed-probe.json` records the same invocation at both
+commits — the committed daemon started unprivileged with no BPF and answered `bpfLsmActive: true`;
+the current one exits 1.
 
-Exit gate: concurrent A/B leases prove non-interference; a child and grandchild that outlive the
-parent leave no survivors within the agreed bound.
+**The F06 in-kernel proof is outstanding.** The change is verified at the key layer — byte-level
+tests over the same `lease_map_keys` the live driver calls, plus size and alignment assertions
+against the BPF structs — but the audit's exit gate is concurrent A/B leases proving in the kernel
+that A cannot use B's permission, and that needs a root daemon. Re-running
+`native/splat-agent/probe-daemon.sh` under root closes this and restores the README's enforcement
+claim, which is withdrawn until then: the recorded probe passed against a program that has since
+been re-keyed, and `TheDaemonEnforcementClaim_MatchesItsProbeEvidence` now binds that claim to the
+agent BPF source the way the canary guard always bound the canary's.
 
 ## Wave 4 — Boundaries and the wire contract
 

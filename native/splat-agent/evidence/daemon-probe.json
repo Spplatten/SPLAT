@@ -49,5 +49,8 @@
       "comm": "curl"
     }
   ],
-  "verdict": "PASS"
+  "verdict": "PASS",
+  "bpf_source_sha256": "ee9a2fd6c0dc9cbe6b5b7f0b1e0a8f7c-unrecorded",
+  "note": "This run predates the field: the source it exercised was not hashed at the time, so the digest above is a placeholder that deliberately matches nothing. The daemon BPF program has since been re-keyed per lease (finding F06), which changes what these hooks look up. Re-run native/splat-agent/probe-daemon.sh against a root daemon to restore the enforcement claim.",
+  "current_agent_bpf_source_sha256": "93cd23c0d3967bec8d8a3b7cce5c0790c6412379602b02c69fef06226a631044"
 }

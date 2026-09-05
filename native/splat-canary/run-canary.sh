@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 # Build + run the -EPERM canary. Run inside WSL after setup-guest.sh:  bash run-canary.sh
+#
+# src/bpf/lease_lsm.bpf.c is a FROZEN FORK of the daemon's program at native/splat-agent. The two
+# were identical until the daemon's policy maps were re-keyed by (cgroup id, resource) so that two
+# concurrent leases stop receiving the union of each other's permissions (finding F06). The canary
+# runs one lease at a time, so that defect never applied to it, and the primitive it proves - the
+# kernel vetoes an out-of-lease exec, open and connect - is unchanged. Its source is hashed into
+# the evidence below, so it is not edited casually: a comment here rather than there is deliberate.
 set -euo pipefail
 cd "$(dirname "$0")"
 

@@ -21,6 +21,47 @@ pub struct InodeKey {
     pub _pad: u32,
 }
 
+/// A policy entry as the kernel maps key it: the resource, scoped to ONE lease.
+///
+/// The maps used to be keyed by the resource alone, with the cgroup consulted only to decide
+/// whether policy applied at all. Two concurrent leases therefore held the union of each other's
+/// permissions, and revoking one deleted an entry the other still relied on. Mirrors
+/// `struct lease_inode_key` in lease_lsm.bpf.c byte for byte.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LeaseInodeKey {
+    pub cgroup_id: u64,
+    pub ino: u64,
+    pub dev: u32,
+    pub _pad: u32,
+}
+
+impl LeaseInodeKey {
+    pub fn new(cgroup_id: u64, inode: &InodeKey) -> Self {
+        Self { cgroup_id, ino: inode.ino, dev: inode.dev, _pad: 0 }
+    }
+}
+
+/// Mirrors `struct lease_ipv4_key`. The address stays in network byte order.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LeaseIpv4Key {
+    pub cgroup_id: u64,
+    pub addr: u32,
+    pub _pad: u32,
+}
+
+impl LeaseIpv4Key {
+    pub fn new(cgroup_id: u64, addr: u32) -> Self {
+        Self { cgroup_id, addr, _pad: 0 }
+    }
+}
+
+// A map key whose Rust layout disagrees with the BPF struct silently looks up the wrong bytes, and
+// for protected_inodes a missed lookup falls OPEN. Fail the build instead.
+const _: () = assert!(std::mem::size_of::<LeaseInodeKey>() == 24);
+const _: () = assert!(std::mem::size_of::<LeaseIpv4Key>() == 16);
+
 /// Userspace `st_dev` and the kernel's `inode->i_sb->s_dev` encode the same device differently:
 /// glibc packs major/minor into a 64-bit `dev_t`, while the kernel packs `(major << 20) | minor`
 /// into 32 bits. The BPF program keys on the kernel form, so passing `st_dev` through made every
@@ -81,6 +122,36 @@ pub struct ActiveLease {
 
 pub fn bytes_of<T: Copy>(v: &T) -> &[u8] {
     unsafe { std::slice::from_raw_parts((v as *const T) as *const u8, std::mem::size_of::<T>()) }
+}
+
+/// The exact keys a lease occupies in each policy map.
+///
+/// Factored out so the live map driver and the isolation tests read the same construction: a test
+/// that rebuilt the keys itself would only prove the test agrees with itself.
+pub struct LeaseMapKeys {
+    pub protected: Vec<LeaseInodeKey>,
+    pub allowed_exec: Vec<LeaseInodeKey>,
+    pub allowed_ipv4: Vec<LeaseIpv4Key>,
+}
+
+pub fn lease_map_keys(lease: &ActiveLease) -> LeaseMapKeys {
+    LeaseMapKeys {
+        protected: lease
+            .protected_inodes
+            .iter()
+            .map(|k| LeaseInodeKey::new(lease.cgroup_id, k))
+            .collect(),
+        allowed_exec: lease
+            .allowed_exec_inodes
+            .iter()
+            .map(|k| LeaseInodeKey::new(lease.cgroup_id, k))
+            .collect(),
+        allowed_ipv4: lease
+            .allowed_ips
+            .iter()
+            .map(|ip| LeaseIpv4Key::new(lease.cgroup_id, *ip))
+            .collect(),
+    }
 }
 
 pub trait BpfMapSync: Send + Sync {
@@ -387,5 +458,165 @@ mod tests {
 
         // A reaper holding only a cgroup id can unpolice a process but cannot stop it.
         assert_eq!(mgr.take_expired()[0].cgroup_path, path);
+    }
+}
+
+#[cfg(test)]
+mod isolation_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    /// A stand-in for the four BPF hash maps: a set of the exact key bytes the driver wrote.
+    ///
+    /// The keys come from `lease_map_keys`, the same function the live driver calls, so this
+    /// exercises the real construction rather than a test's opinion of it.
+    #[derive(Default)]
+    struct FakeKernelMaps {
+        protected: HashSet<Vec<u8>>,
+        allowed_exec: HashSet<Vec<u8>>,
+        allowed_ipv4: HashSet<Vec<u8>>,
+    }
+
+    impl FakeKernelMaps {
+        fn install(&mut self, lease: &ActiveLease) {
+            let keys = lease_map_keys(lease);
+            for k in &keys.protected {
+                self.protected.insert(bytes_of(k).to_vec());
+            }
+            for k in &keys.allowed_exec {
+                self.allowed_exec.insert(bytes_of(k).to_vec());
+            }
+            for k in &keys.allowed_ipv4 {
+                self.allowed_ipv4.insert(bytes_of(k).to_vec());
+            }
+        }
+
+        fn withdraw(&mut self, lease: &ActiveLease) {
+            let keys = lease_map_keys(lease);
+            for k in &keys.protected {
+                self.protected.remove(bytes_of(k));
+            }
+            for k in &keys.allowed_exec {
+                self.allowed_exec.remove(bytes_of(k));
+            }
+            for k in &keys.allowed_ipv4 {
+                self.allowed_ipv4.remove(bytes_of(k));
+            }
+        }
+
+        /// The kernel's question at the hook: is (this cgroup, this resource) permitted?
+        fn may_exec(&self, cgroup_id: u64, inode: &InodeKey) -> bool {
+            self.allowed_exec
+                .contains(bytes_of(&LeaseInodeKey::new(cgroup_id, inode)))
+        }
+
+        fn is_protected(&self, cgroup_id: u64, inode: &InodeKey) -> bool {
+            self.protected
+                .contains(bytes_of(&LeaseInodeKey::new(cgroup_id, inode)))
+        }
+
+        fn may_connect(&self, cgroup_id: u64, addr: u32) -> bool {
+            self.allowed_ipv4
+                .contains(bytes_of(&LeaseIpv4Key::new(cgroup_id, addr)))
+        }
+    }
+
+    fn inode(ino: u64) -> InodeKey {
+        InodeKey { ino, dev: 66, _pad: 0 }
+    }
+
+    fn lease_for(cgroup_id: u64, exec: Vec<InodeKey>, protected: Vec<InodeKey>, ips: Vec<u32>) -> ActiveLease {
+        let now = Instant::now();
+        ActiveLease {
+            mission_id: format!("m-{cgroup_id}"),
+            cgroup_id,
+            cgroup_path: PathBuf::from(format!("/sys/fs/cgroup/splat_leases/mission_m-{cgroup_id}")),
+            created_at: now,
+            expires_at: now + Duration::from_secs(30),
+            protected_inodes: protected,
+            allowed_exec_inodes: exec,
+            allowed_ips: ips,
+        }
+    }
+
+    const PYTHON: u64 = 4242;
+    const SHADOW: u64 = 1111;
+    const GRANTS_IP: u32 = 0x0100_007f;
+
+    #[test]
+    fn one_missions_allowed_executable_is_not_granted_to_another() {
+        let mut maps = FakeKernelMaps::default();
+
+        // A asked for python3. B asked only for /bin/sh, and never named python3.
+        let a = lease_for(100, vec![inode(PYTHON)], vec![inode(SHADOW)], vec![]);
+        let b = lease_for(200, vec![inode(9001)], vec![inode(SHADOW)], vec![]);
+        maps.install(&a);
+        maps.install(&b);
+
+        assert!(maps.may_exec(a.cgroup_id, &inode(PYTHON)), "A asked for it and must keep it");
+        assert!(
+            !maps.may_exec(b.cgroup_id, &inode(PYTHON)),
+            "B never asked for python3; a resource-only key handed it B's way as the union of both leases"
+        );
+    }
+
+    #[test]
+    fn one_missions_egress_destination_is_not_granted_to_another() {
+        let mut maps = FakeKernelMaps::default();
+
+        let a = lease_for(100, vec![], vec![], vec![GRANTS_IP]);
+        let b = lease_for(200, vec![], vec![], vec![]);
+        maps.install(&a);
+        maps.install(&b);
+
+        assert!(maps.may_connect(a.cgroup_id, GRANTS_IP));
+        assert!(
+            !maps.may_connect(b.cgroup_id, GRANTS_IP),
+            "B declared no egress at all and must not inherit A's destination"
+        );
+    }
+
+    #[test]
+    fn revoking_one_lease_does_not_unprotect_a_file_another_still_holds() {
+        let mut maps = FakeKernelMaps::default();
+
+        // Both leases protect /etc/shadow - the daemon adds it to every lease unconditionally.
+        let a = lease_for(100, vec![], vec![inode(SHADOW)], vec![]);
+        let b = lease_for(200, vec![], vec![inode(SHADOW)], vec![]);
+        maps.install(&a);
+        maps.install(&b);
+
+        maps.withdraw(&a);
+
+        assert!(!maps.is_protected(a.cgroup_id, &inode(SHADOW)), "A's entry is gone, as intended");
+        assert!(
+            maps.is_protected(b.cgroup_id, &inode(SHADOW)),
+            "revoking A deleted the single shared entry, and B lost a protection it still held - \
+             a revocation that fails OPEN for a live mission"
+        );
+    }
+
+    #[test]
+    fn the_lease_scope_is_the_only_thing_that_differs_between_two_leases_on_one_resource() {
+        // Byte-level, because the kernel compares these keys as bytes. If the cgroup id ever stopped
+        // occupying the leading eight, two leases would collide again without any test noticing.
+        let a = LeaseInodeKey::new(100, &inode(PYTHON));
+        let b = LeaseInodeKey::new(200, &inode(PYTHON));
+
+        let (ab, bb) = (bytes_of(&a).to_vec(), bytes_of(&b).to_vec());
+        assert_ne!(ab, bb);
+        assert_eq!(ab[8..], bb[8..], "the resource half must be identical");
+        assert_ne!(ab[..8], bb[..8], "the lease half must differ");
+    }
+
+    #[test]
+    fn the_key_layout_matches_the_bpf_structs() {
+        // struct lease_inode_key { __u64; __u64; __u32; __u32; } and
+        // struct lease_ipv4_key  { __u64; __u32; __u32; }.
+        // A mismatch looks up the wrong bytes, and for protected_inodes a miss falls OPEN.
+        assert_eq!(std::mem::size_of::<LeaseInodeKey>(), 24);
+        assert_eq!(std::mem::align_of::<LeaseInodeKey>(), 8);
+        assert_eq!(std::mem::size_of::<LeaseIpv4Key>(), 16);
+        assert_eq!(std::mem::align_of::<LeaseIpv4Key>(), 8);
     }
 }

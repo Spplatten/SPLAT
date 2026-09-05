@@ -35,7 +35,7 @@ use lease_lsm::*;
 
 use cgroup::EphemeralCgroup;
 use cow::OverlayWorkspace;
-use lease::{bytes_of, BpfMapSync, LeaseConfig, LeaseManager};
+use lease::{bytes_of, lease_map_keys, BpfMapSync, LeaseConfig, LeaseManager};
 use violation::{RawViolationEvent, ViolationEvent};
 
 /// Reads a JSON array of strings from a request, distinguishing "absent" from "empty".
@@ -118,21 +118,25 @@ impl BpfMapSync for LiveBpfSync {
             .update(&lease.cgroup_id.to_ne_bytes(), &[one], MapFlags::ANY)
             .context("update leased_cgroups")?;
 
-        for key in &lease.protected_inodes {
+        // Every policy entry is scoped to this lease's cgroup. Writing the bare resource key here
+        // is what let one mission's allow-list become every mission's.
+        let keys = lease_map_keys(lease);
+
+        for key in &keys.protected {
             self.protected_inodes
                 .update(bytes_of(key), &[one], MapFlags::ANY)
                 .context("update protected_inodes")?;
         }
 
-        for key in &lease.allowed_exec_inodes {
+        for key in &keys.allowed_exec {
             self.allowed_exec_inodes
                 .update(bytes_of(key), &[one], MapFlags::ANY)
                 .context("update allowed_exec_inodes")?;
         }
 
-        for ip in &lease.allowed_ips {
+        for key in &keys.allowed_ipv4 {
             self.allowed_connect_ipv4
-                .update(&ip.to_ne_bytes(), &[one], MapFlags::ANY)
+                .update(bytes_of(key), &[one], MapFlags::ANY)
                 .context("update allowed_connect_ipv4")?;
         }
 
@@ -142,15 +146,18 @@ impl BpfMapSync for LiveBpfSync {
     fn remove_lease(&self, lease: &lease::ActiveLease) -> Result<()> {
         // Teardown is best-effort by design: a key that is already gone is the desired end state,
         // and a revoke must not abort partway and leave the rest of the lease live in the kernel.
+        // Scoped deletes: another lease holding the same resource keeps its own entry. The bare
+        // resource key removed the shared one, so revoking A could unprotect a file B still had.
+        let keys = lease_map_keys(lease);
         let _ = self.leased_cgroups.delete(&lease.cgroup_id.to_ne_bytes());
-        for key in &lease.protected_inodes {
+        for key in &keys.protected {
             let _ = self.protected_inodes.delete(bytes_of(key));
         }
-        for key in &lease.allowed_exec_inodes {
+        for key in &keys.allowed_exec {
             let _ = self.allowed_exec_inodes.delete(bytes_of(key));
         }
-        for ip in &lease.allowed_ips {
-            let _ = self.allowed_connect_ipv4.delete(&ip.to_ne_bytes());
+        for key in &keys.allowed_ipv4 {
+            let _ = self.allowed_connect_ipv4.delete(bytes_of(key));
         }
         Ok(())
     }
