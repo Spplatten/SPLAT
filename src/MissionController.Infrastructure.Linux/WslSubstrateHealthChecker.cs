@@ -15,7 +15,14 @@ public record WslSubstrateStatus(
     bool OverlayFsSupported,
     string KernelVersion,
     uint ActiveLeaseCount,
-    string? Message);
+    string? Message,
+    /// <summary>
+    /// Whether the daemon holds live BPF map handles, i.e. whether a lease it accepts actually
+    /// reaches the kernel. This is the field to gate on: reachable is not the same as enforcing,
+    /// and the daemon used to report all three booleans above as hardcoded true regardless.
+    /// A daemon that predates this field reports nothing, which reads here as not enforcing.
+    /// </summary>
+    bool Enforcing = false);
 
 /// <summary>
 /// Probes and validates the status of the local WSL2 kernel substrate and BPF-LSM daemon.
@@ -71,6 +78,7 @@ public class WslSubstrateHealthChecker
             {
                 using var doc = JsonDocument.Parse(response);
                 var root = doc.RootElement;
+                bool enforcing = root.TryGetProperty("enforcing", out var enf) && enf.GetBoolean();
                 return new WslSubstrateStatus(
                     WslConfiguredForBpf: wslConfigured,
                     DaemonReachable: true,
@@ -79,7 +87,10 @@ public class WslSubstrateHealthChecker
                     OverlayFsSupported: root.TryGetProperty("overlayFsSupported", out var ofs) && ofs.GetBoolean(),
                     KernelVersion: root.TryGetProperty("kernelVersion", out var kv) ? kv.GetString() ?? "" : "",
                     ActiveLeaseCount: root.TryGetProperty("activeLeaseCount", out var alc) ? alc.GetUInt32() : 0,
-                    Message: "SPLAT Linux substrate online and operational.");
+                    Message: enforcing
+                        ? "SPLAT Linux substrate online and enforcing."
+                        : "SPLAT Linux daemon is reachable but NOT enforcing: leases it accepts do not reach the kernel. Treat any tool it runs as uncontained.",
+                    Enforcing: enforcing);
             }
         }
         catch (Exception ex)

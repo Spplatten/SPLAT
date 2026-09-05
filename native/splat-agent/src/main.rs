@@ -23,6 +23,11 @@ mod cow;
 mod lease;
 mod violation;
 
+/// Daemon-wide ceilings. A request may ask for less; it can never ask for more.
+const MAX_MEMORY_BYTES_CEILING: u64 = 256 * 1024 * 1024;
+const MAX_CPU_PERCENT_CEILING: u32 = 50;
+const MAX_PIDS_CEILING: u32 = 100;
+
 mod lease_lsm {
     include!(concat!(env!("OUT_DIR"), "/lease_lsm.skel.rs"));
 }
@@ -55,8 +60,41 @@ struct Args {
     #[arg(long, default_value = "127.0.0.1:50051")]
     listen: String,
 
+    // The ONE switch that admits the daemon is not enforcing. Without it, a daemon that cannot
+    // load its BPF-LSM programs exits instead of serving: a resident process that accepts
+    // EXECUTE_TOOL while its hooks are absent is not a degraded sandbox, it is a remote shell that
+    // reports containment it does not have.
     #[arg(long, default_value = "false")]
     mock_bpf: bool,
+}
+
+/// What the daemon can actually observe about its own substrate.
+///
+/// Every field here used to be a hardcoded `true` in the HEALTH_RESPONSE, alongside a fixed kernel
+/// string. The Windows health reader consumes these booleans and has no independent way to check
+/// them, so the one signal that was supposed to say "containment is live" said it unconditionally.
+struct SubstrateHealth {
+    bpf_lsm_active: bool,
+    cgroup_v2_active: bool,
+    overlayfs_supported: bool,
+    kernel_version: String,
+}
+
+impl SubstrateHealth {
+    fn observe(enforcing: bool) -> Self {
+        Self {
+            // Not "the kernel supports BPF-LSM" but "this daemon has live map handles", which is
+            // the only form of the claim a caller can act on.
+            bpf_lsm_active: enforcing,
+            cgroup_v2_active: Path::new("/sys/fs/cgroup/cgroup.controllers").exists(),
+            overlayfs_supported: std::fs::read_to_string("/proc/filesystems")
+                .map(|s| s.lines().any(|l| l.split_whitespace().last() == Some("overlay")))
+                .unwrap_or(false),
+            kernel_version: std::fs::read_to_string("/proc/sys/kernel/osrelease")
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|_| "unknown".to_string()),
+        }
+    }
 }
 
 /// Owned duplicates of the skeleton's lease maps.
@@ -195,6 +233,18 @@ async fn main() -> Result<()> {
         }
     }
 
+    // FAIL CLOSED. Reaching here without map handles means every hook is absent: a tool would run
+    // with the daemon's own privileges while the caller was told it held a capability lease. Each
+    // failure above logged and fell through, so the only symptom was a warning in a log nobody
+    // reads. --mock-bpf is the way to ask for a non-enforcing daemon on purpose.
+    if bpf_sync.is_none() && !args.mock_bpf {
+        error!(
+            "Refusing to start: BPF-LSM enforcement is not live{}. Re-run as root on a BPF-LSM kernel, or pass --mock-bpf for a daemon that openly does not contain anything.",
+            if is_root { "" } else { " (not running as root)" }
+        );
+        std::process::exit(1);
+    }
+
     let lease_manager = LeaseManager::new(bpf_sync);
 
     // Background expiration reaper
@@ -203,9 +253,29 @@ async fn main() -> Result<()> {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             interval.tick().await;
-            let expired = reaper_mgr.prune_expired();
-            for l in expired {
-                info!("Expired lease for mission {} (cg {})", l.mission_id, l.cgroup_id);
+            for l in reaper_mgr.take_expired() {
+                // Order is the whole point. Deleting the map entries first would leave a live
+                // process in a cgroup the hooks no longer recognise, and every hook returns allow
+                // for an unlisted cgroup - so the previous reaper did not end an overrunning
+                // workload, it FREED it. Kill inside the still-installed policy, then withdraw it.
+                match EphemeralCgroup::kill_tree(&l.cgroup_path) {
+                    Ok(0) => info!("Expired lease for mission {} (cg {}); nothing was still running", l.mission_id, l.cgroup_id),
+                    Ok(n) => warn!(
+                        "Expired lease for mission {} (cg {}): killed {n} process(es) that outlived it",
+                        l.mission_id, l.cgroup_id
+                    ),
+                    Err(e) => error!(
+                        "Expired lease for mission {} (cg {}) could NOT be drained: {e:#}. Holding its policy installed rather than unpolicing a live workload.",
+                        l.mission_id, l.cgroup_id
+                    ),
+                }
+
+                // Only withdraw the policy once the cgroup is empty. A surviving process keeps its
+                // lease so that it stays contained, and the failure above is what an operator acts
+                // on - an unpoliced survivor is not an acceptable resting state.
+                if EphemeralCgroup::kill_tree(&l.cgroup_path).is_ok() {
+                    reaper_mgr.release_expired(&l);
+                }
             }
         }
     });
@@ -266,12 +336,16 @@ async fn handle_client(
 
         match req_type {
             "HEALTH_CHECK" => {
+                let health = SubstrateHealth::observe(lease_mgr.is_enforcing());
                 let resp = serde_json::json!({
                     "type": "HEALTH_RESPONSE",
-                    "bpfLsmActive": true,
-                    "cgroupV2Active": true,
-                    "overlayFsSupported": true,
-                    "kernelVersion": "6.18.33.2-2",
+                    "bpfLsmActive": health.bpf_lsm_active,
+                    "cgroupV2Active": health.cgroup_v2_active,
+                    "overlayFsSupported": health.overlayfs_supported,
+                    "kernelVersion": health.kernel_version,
+                    // Named separately from the three booleans because it is the one a caller must
+                    // gate on: false means this daemon will run work it cannot contain.
+                    "enforcing": lease_mgr.is_enforcing(),
                     "activeLeaseCount": lease_mgr.get_active_count()
                 });
                 writer.write_all(format!("{resp}\n").as_bytes()).await?;
@@ -286,13 +360,38 @@ async fn handle_client(
 
                 info!("Executing tool for mission {mission_id}: {command} {arguments}");
 
+                // 0. Resolve the clamps FIRST.
+                //
+                // The cgroup used to be provisioned from three constants here while the request's
+                // own limits were parsed thirty lines below and then never applied to any
+                // controller, so a caller asking for 64 MiB received 256 and was told it had been
+                // accepted. Clamps come from the caller but only downwards: a lease is a grant, not
+                // a negotiation, and letting a request raise its own ceiling makes the clamp
+                // advisory.
+                let cgroup_limits = {
+                    let l = parsed.get("limits");
+                    let get_u64 = |k: &str, ceiling: u64| {
+                        l.and_then(|v| v.get(k))
+                            .and_then(|v| v.as_u64())
+                            .map(|n| n.min(ceiling))
+                            .unwrap_or(ceiling)
+                    };
+                    cgroup::CgroupLimits {
+                        max_memory_bytes: get_u64("maxMemoryBytes", MAX_MEMORY_BYTES_CEILING),
+                        max_cpu_percent: get_u64("maxCpuPercent", MAX_CPU_PERCENT_CEILING as u64) as u32,
+                        max_pids: get_u64("maxPids", MAX_PIDS_CEILING as u64) as u32,
+                    }
+                };
+
                 // 1. Provision Ephemeral Cgroup.
                 //
                 // When the daemon is enforcing, a cgroup we could not create is a cgroup we cannot
                 // police, so the request is refused rather than run in the host's own cgroup. The
                 // previous fallback logged a warning and executed anyway under a fabricated
                 // cgroup_id of 1 - uncontained, while the caller was told the tool had run.
-                let (cg, cgroup_is_real) = match EphemeralCgroup::create(mission_id, 256 * 1024 * 1024, 50, 100) {
+                // create() now also refuses when a controller did not take its clamp, so
+                // "provisioned" and "clamped" are one outcome rather than two.
+                let (cg, cgroup_is_real) = match EphemeralCgroup::create(mission_id, cgroup_limits) {
                     Ok(c) => (c, true),
                     Err(e) if lease_mgr.is_enforcing() => {
                         error!("Refusing to execute for mission {mission_id}: cgroup creation failed: {e}");
@@ -314,6 +413,7 @@ async fn handle_client(
                             EphemeralCgroup {
                                 path: std::path::PathBuf::from("/tmp"),
                                 cgroup_id: 1,
+                                effective: cgroup_limits,
                             },
                             false,
                         )
@@ -365,27 +465,30 @@ async fn handle_client(
                         paths
                     },
                     lease_duration_seconds: duration_sec,
-                    // Clamps come from the caller too, but only downwards: a request may ask for
-                    // less than the daemon's ceiling, never more. A lease is a grant, not a
-                    // negotiation - letting the caller raise its own limits would make the clamp
-                    // advisory.
-                    limits: {
-                        let l = parsed.get("limits");
-                        let get_u64 = |k: &str, ceiling: u64| {
-                            l.and_then(|v| v.get(k))
-                                .and_then(|v| v.as_u64())
-                                .map(|n| n.min(ceiling))
-                                .unwrap_or(ceiling)
-                        };
-                        lease::LeaseLimits {
-                            max_memory_bytes: get_u64("maxMemoryBytes", 256 * 1024 * 1024),
-                            max_cpu_percent: get_u64("maxCpuPercent", 50) as u32,
-                            max_pids: get_u64("maxPids", 50) as u32,
-                        }
+                    // Resolved above, before the cgroup existed, and already read back out of the
+                    // controllers - so this records what the kernel holds, not what was requested.
+                    limits: lease::LeaseLimits {
+                        max_memory_bytes: cg.effective.max_memory_bytes,
+                        max_cpu_percent: cg.effective.max_cpu_percent,
+                        max_pids: cg.effective.max_pids,
                     },
                 };
 
-                let _lease = lease_mgr.register_lease(cg.cgroup_id, &lease_cfg)?;
+                // A lease that could not be installed is a refusal, not a warning. register_lease
+                // rolls back its own partial map writes and returns Err, so there is no state in
+                // which the cgroup is policed while some of its protections are missing.
+                if let Err(e) = lease_mgr.register_lease(cg.cgroup_id, cg.path.clone(), &lease_cfg) {
+                    error!("Refusing to execute for mission {mission_id}: {e:#}");
+                    let err_chunk = serde_json::json!({
+                        "type": "STDERR",
+                        "data": format!("SPLAT refused to execute: the capability lease could not be installed ({e}).\n")
+                    });
+                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                    let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                    writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                    line.clear();
+                    continue;
+                }
 
                 // 2. Spawn Subprocess
                 let mut cmd = Command::new(command);
@@ -611,9 +714,39 @@ async fn handle_client(
                     status
                 });
 
-                // Pump stream chunks to client
+                // Pump stream chunks to client.
+                //
+                // A write failure here means the client is gone. `?` used to propagate straight out
+                // of handle_client, leaving the tool running against a socket nobody reads until
+                // the expiry reaper came round - and that reaper then unpoliced it rather than
+                // killing it. A lost client ends the lease, in the same order expiry uses: kill
+                // inside the installed policy, then withdraw the policy.
+                let mut pump_error: Option<std::io::Error> = None;
                 while let Some(msg) = rx.recv().await {
-                    writer.write_all(format!("{msg}\n").as_bytes()).await?;
+                    if let Err(e) = writer.write_all(format!("{msg}\n").as_bytes()).await {
+                        pump_error = Some(e);
+                        break;
+                    }
+                }
+
+                if let Some(e) = pump_error {
+                    if cgroup_is_real {
+                        match cg.kill_all() {
+                            Ok(n) if n > 0 => warn!(
+                                "Client for mission {mission_id} disconnected; killed {n} process(es) \
+                                 that were still holding its lease"
+                            ),
+                            Ok(_) => {}
+                            Err(err) => error!(
+                                "Client for mission {mission_id} disconnected and its cgroup could \
+                                 not be drained: {err:#}"
+                            ),
+                        }
+                    }
+                    lease_mgr.revoke_lease(cg.cgroup_id);
+                    // Reap the (now dead) child so no zombie is left behind.
+                    let _ = waiter.await;
+                    return Err(anyhow::Error::from(e).context("client write failed; lease terminated"));
                 }
 
                 let status = waiter.await.context("join child reaper")??;

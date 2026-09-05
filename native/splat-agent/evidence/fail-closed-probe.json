@@ -1,0 +1,21 @@
+{
+  "probe": "daemon fail-closed startup and observed health",
+  "recordedUtc": "2026-09-05T19:57:34Z",
+  "kernel": "6.18.33.2-microsoft-standard-WSL2",
+  "daemonSourceSha256": "2faac4c60fa0a5d0c9a6ea643e6375a6013f103657456e7caf1b1539005cc6d1",
+  "euid": 1000,
+  "findings": ["F04"],
+  "beforeThisChange": {
+    "invocation": "splat-agent --listen 127.0.0.1:50091 (unprivileged, no --mock-bpf)",
+    "started": true,
+    "healthResponse": {"activeLeaseCount":0,"bpfLsmActive":true,"cgroupV2Active":true,"kernelVersion":"6.18.33.2-2","overlayFsSupported":true,"type":"HEALTH_RESPONSE"},
+    "verdict": "Served requests with no BPF programs loaded while reporting bpfLsmActive true, cgroupV2Active true, overlayFsSupported true and a hardcoded kernel string."
+  },
+  "afterThisChange": {
+    "refusalInvocation": "splat-agent --listen 127.0.0.1:50092 (unprivileged, no --mock-bpf)",
+    "refusalExitCode": 1,
+    "mockInvocation": "splat-agent --listen 127.0.0.1:50093 --mock-bpf",
+    "healthResponse": {"activeLeaseCount":0,"bpfLsmActive":false,"cgroupV2Active":true,"enforcing":false,"kernelVersion":"6.18.33.2-microsoft-standard-WSL2","overlayFsSupported":true,"type":"HEALTH_RESPONSE"},
+    "verdict": "Refuses to start unless enforcement is live or --mock-bpf is passed; health reports observed state and a real kernel string."
+  }
+}

@@ -858,9 +858,12 @@ public class McpServerHandler
         var health = await _healthChecker.CheckHealthAsync(ct);
         var json = JsonSerializer.Serialize(health, new JsonSerializerOptions { WriteIndented = true });
 
+        // A daemon that answers but enforces nothing is not a healthy substrate. Reporting only on
+        // reachability let an agent client read "online and operational" off a process whose BPF
+        // hooks were never loaded, which is exactly the state the daemon now refuses to start in.
         return new McpToolCallResult
         {
-            IsError = !health.DaemonReachable,
+            IsError = !health.DaemonReachable || !health.Enforcing,
             Content = new List<McpContentItem>
             {
                 new() { Type = "text", Text = json }
