@@ -83,6 +83,13 @@ Every mission operates inside an ephemeral OverlayFS Copy-on-Write workspace. Ch
 #### 6. Tamper-Evident Merkle Audit Ledger (SOC2 / HIPAA Compliance)
 Every tool invocation, standard output stream, and security violation is cryptographically signed and chained using SHA-256 into a tamper-evident audit ledger (`SqliteChainedAuditLedger`). SecOps and compliance teams have mathematical proof of execution integrity.
 
+#### 7. Containment Substrate, Not an RPA Workflow Bot
+A fundamental architectural boundary separates SPLAT from Robotic Process Automation (RPA) tools and unconstrained web bots. SPLAT does not build agents that scrape consumer inboxes (e.g. Gmail/Outlook) or puppeteer browser sessions across advertising dashboards (e.g. configuring TikTok or Meta OAuth consoles). 
+
+In SPLAT's threat model, granting an LLM unconstrained browser access, broad egress, and administrative credentials creates an uncontainable blast radius where prompt injection leads directly to data exfiltration or credential theft. Instead, SPLAT operates strictly as an **execution containment substrate**:
+- **Native Governed Tasks:** Operates through declarative 1:1:1 templates (1 Model : 1 Tool : 1 Jail : 1 Egress FQDN) to execute local telemetry probes, log audits, and draft-only operational artifacts.
+- **Substrate for External Agents (`splat-mcp`):** Provides the kernel-enforced sandbox, resource clamps, and tamper-evident audit ledger that allow external orchestrators (Claude Code, LangGraph, Cursor) to execute terminal commands and code safely without exposing the host system.
+
 ---
 
 ### Technical Highlights & Architecture

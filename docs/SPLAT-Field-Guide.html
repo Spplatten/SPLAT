@@ -545,6 +545,15 @@
     </div>
 
     <p>Behind them sits a catalog of <strong>40+ specialists</strong> covering networking, identity, endpoint security, system operations, and compliance — plus a newer <em>Autonomous Operations</em> wing with agents that build and deploy websites, draft multi-platform marketing campaigns, and vet grant eligibility before drafting the application paperwork — all under the same leash as everyone else. For bigger jobs, <strong>Project Studio</strong> chains up to six agents in a fixed order, and even the notes they pass to each other are filtered for secrets first. No free-for-all swarms, no infinite loops — by design.</p>
+
+    <h3>Wait — is SPLAT an agent builder, or a containment zone?</h3>
+    <p>If you came here looking for an AI bot that opens a browser, logs into TikTok Ads Manager to configure OAuth callbacks, or connects to your personal email to scrape your inbox, you will quickly notice <strong>SPLAT does not do that</strong> — and that is entirely by design.</p>
+    <p>Those tasks belong to <strong>Robotic Process Automation (RPA)</strong> — unconstrained bots that navigate arbitrary websites, handle high-privilege credentials, and trigger irreversible cloud actions. In SPLAT's worldview, handing an AI free-roaming browser access and private credentials is an unacceptable security hazard: the moment that bot encounters prompt injection (in an email or a web page), an attacker can hijack it to steal tokens or exfiltrate data.</p>
+    <div class="pull">
+      <p>SPLAT is an <strong>execution containment substrate and governance zone</strong>. It does not send bots wandering across the web; it locks down execution on your machine.</p>
+    </div>
+    <p><strong>How SPLAT runs native tasks:</strong> When a specialist runs a task (such as inspecting local event logs, diagnosing network drops, or auditing OAuth configurations), it runs a single pre-vetted tool inside an OS-enforced sandbox. Privileges are stripped, filesystem access is jailed, DLP scrubs secrets, and network egress is locked to one pre-declared destination. It audits, diagnoses, and drafts — it never roams the web unchecked.</p>
+    <p><strong>Locked rooms for external agents:</strong> If you use external general agents (like Claude Code, Cursor, or LangGraph) that need to run commands or manipulate files, they plug into SPLAT via <code>splat-mcp</code>. The external agent provides the reasoning; SPLAT provides the bouncer, ensuring out-of-bounds actions die before touching your system.</p>
   </section>
 
   <section>

@@ -52,7 +52,7 @@ That table is the contract: nothing above it is aspirational, and nothing below 
 
 ```mermaid
 flowchart TD
-    subgraph CP ["Control plane — Windows (.NET 9)"]
+    subgraph CP["Control plane — Windows (.NET 9)"]
         UI["WinUI 3 operator console"] --> ENG["MissionExecutionEngine<br/>1:1:1 governed templates"]
         MCP["splat-mcp (MCP server)<br/>9 governed tools"] --> ENG
         ENG --> DLP["In-memory DLP sanitizer"]
@@ -60,15 +60,20 @@ flowchart TD
         FW --> AI["Streaming reasoning cores<br/>Claude / Gemini, key-routed"]
         ENG --> LED["SHA-256 chained audit ledger<br/>Merkle root verification"]
     end
-    subgraph WIN ["Windows substrate — shipped"]
-        JO["Win32 Job Objects<br/>hard CPU / RAM clamps, no breakaway"] --> RT["Restricted token<br/>privileges stripped · admin SID deny-only<br/>Medium integrity"] --> JAIL["NTFS ACL jails<br/>inheritance severed"]
+    subgraph WIN["Windows substrate — shipped"]
+        JO["Win32 Job Objects<br/>hard CPU / RAM clamps, no breakaway"]
+        RT["Restricted token<br/>privileges stripped · admin SID deny-only<br/>Medium integrity"]
+        JAIL["NTFS ACL jails<br/>inheritance severed"]
+        JO --> RT --> JAIL
     end
-    subgraph LNX ["Linux substrate — in bring-up (WSL2)"]
-        AGENT["splat-agent<br/>Rust / libbpf-rs / tokio"] --> LSM["lease_lsm.bpf.c (BPF-LSM)<br/>bprm_check_security · file_open · socket_connect"]
-        LSM --> EPERM["out-of-lease operation<br/>→ -EPERM, in-kernel"]
+    subgraph LNX["Linux substrate — in bring-up (WSL2)"]
+        AGENT["splat-agent<br/>Rust / libbpf-rs / tokio"]
+        LSM["lease_lsm.bpf.c (BPF-LSM)<br/>bprm_check_security · file_open · socket_connect"]
+        EPERM["out-of-lease operation<br/>blocked with -EPERM, in-kernel"]
+        AGENT --> LSM --> EPERM
     end
-    ENG --> WIN
-    ENG -. "WslLeasedExecutor +<br/>TemplatePolicyCompiler" .-> LNX
+    ENG --> JO
+    ENG -.->|WslLeasedExecutor +<br/>TemplatePolicyCompiler| AGENT
 ```
 
 ## Windows containment substrate (shipped)

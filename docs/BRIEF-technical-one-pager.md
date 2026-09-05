@@ -50,6 +50,8 @@ since 2008. It is competently executed and asserted against `whoami` inside the 
 defense-in-depth, not the defensible moat. The moat is the Linux capability lease enforced by BPF-LSM on an
 unmodified kernel.
 
+**What SPLAT is (and what it is not):** SPLAT is an execution containment substrate, not a generic RPA bot builder or web scraper. It does not spawn browser-puppeteering agents to click through third-party SaaS consoles (e.g. TikTok or Meta advertising setups) or scrape private inboxes. Granting an AI unconstrained web navigation and high-privilege credentials creates the exact blast radius SPLAT is designed to eliminate. Instead, SPLAT executes rigidly leased 1:1:1 diagnostic and audit tools locally, or serves as the host-level containment boundary (`splat-mcp`) for external agent runtimes.
+
 ---
 
 ## What is proven, with receipts
