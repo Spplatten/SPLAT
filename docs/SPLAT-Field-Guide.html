@@ -12,7 +12,7 @@
   BUT THE TEST CANNOT REACH THE ARTIFACT, and the artifact can only be republished from a Claude
   session holding its URL. A commit that updates this file and TUTORIAL.md therefore leaves the
   published page silently behind, and it has: the artifact sat at 342 tests through three commits
-  that moved the repo to 387. So copies 1 and 2 are authoritative and CI-enforced; copy 3 is
+  that moved the repo to 406. So copies 1 and 2 are authoritative and CI-enforced; copy 3 is
   best-effort, and whoever next opens a session with that URL should re-publish it from this file.
   Do not read the artifact to learn the current state - read this file.
 -->
@@ -668,6 +668,7 @@
       <div class="term"><dt>Prompt injection</dt><dd>Tricking an AI by hiding instructions in something it reads. The forged note slipped to your contractor.</dd></div>
       <div class="term"><dt>DLP (the censor)</dt><dd>Data-loss prevention: the filter that masks passwords, keys, and personal numbers before anything leaves your machine.</dd></div>
       <div class="term"><dt>Egress firewall</dt><dd>The single approved phone line. Any attempt to call anywhere else is refused.</dd></div>
+      <div class="term"><dt>Network denial</dt><dd>Stronger than the phone line, and what nearly every specialist now gets: no phone at all. The tool runs in a Windows AppContainer with no network permission, so it cannot dial <em>any</em> number — not even by skipping the phone book and punching in an address directly. The one specialist that genuinely reads a public grants database is still given a phone, and Windows cannot yet stop that one from dialling elsewhere; it is read-only and carries no password.</dd></div>
       <div class="term"><dt>Audit ledger</dt><dd>The chained, tamper-evident logbook of everything every agent ever did.</dd></div>
       <div class="term"><dt>Remediation</dt><dd>A suggested fix, run in its own sandbox, with a rollback (undo) for anything that changes state.</dd></div>
       <div class="term"><dt>Kernel</dt><dd>The deepest layer of an operating system. When enforcement lives there, programs above it — including AIs — can't opt out.</dd></div>

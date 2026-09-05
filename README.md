@@ -5,7 +5,7 @@
 [![.NET 9](https://img.shields.io/badge/.NET-9.0-512BD4?logo=dotnet&logoColor=white)](src/)
 [![Rust](https://img.shields.io/badge/Rust-libbpf--rs%20%2B%20eBPF-CE412B?logo=rust&logoColor=white)](native/splat-agent/)
 [![WinUI 3](https://img.shields.io/badge/UI-WinUI%203%20%2F%20Windows%20App%20SDK-0078D6?logo=windows&logoColor=white)](src/MissionController.UI/)
-[![Tests](https://img.shields.io/badge/Tests-387%2F387%20passing-success)](tests/MissionController.Tests/)
+[![Tests](https://img.shields.io/badge/Tests-406%2F406%20passing-success)](tests/MissionController.Tests/)
 [![Build](https://img.shields.io/badge/Build-0%20errors-success)](src/)
 
 **New here, or allergic to jargon?** Start with **[The SPLAT Field Guide](docs/TUTORIAL.md)** — the whole system explained in plain English.
@@ -39,7 +39,7 @@ Technical evaluations of agent sandboxes tend to blur together into generic "iso
 | Component | State |
 | :--- | :--- |
 | Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
-| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 387/387 automated tests passing |
+| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 406/406 automated tests passing |
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 9 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining seven run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
 | Linux lease daemon (`splat-agent`) | **Enforcing, proven under root** — a tool it spawned as uid 0 was denied `/etc/shadow` (`file_open`) and denied an unleased second exec (`bprm_check_security`), both by the kernel. All three hooks proven through it, plus deny-by-default egress and request completion, recorded in [evidence/daemon-probe.json](native/splat-agent/evidence/daemon-probe.json) |
@@ -86,6 +86,7 @@ Sensor tools never run as trusted children of the app. Each execution passes thr
 | Resource clamps | [`Win32JobSandbox.cs`](src/MissionController.Infrastructure.Windows/Win32JobSandbox.cs) — Job Object hard RAM/CPU limits |
 | Privilege strip | [`RestrictedTokenProvider.cs`](src/MissionController.Infrastructure.Windows/RestrictedTokenProvider.cs) — `DISABLE_MAX_PRIVILEGE` leaves only `SeChangeNotifyPrivilege`; Administrators (`S-1-5-32-544`) is marked `USE_FOR_DENY_ONLY`, so the SID can no longer grant access; integrity is lowered to Medium (`S-1-16-8192`) via `SetTokenInformation`. Asserted end-to-end against `whoami /priv` and `/groups` running inside the sandbox |
 | Filesystem jail | [`NtAclJailManager.cs`](src/MissionController.Infrastructure.Windows/NtAclJailManager.cs) — per-mission NTFS ACL jail with `SetAccessRuleProtection` inheritance severed |
+| Network denial | [`SensorAppContainer.cs`](src/MissionController.Infrastructure.Windows/SensorAppContainer.cs) — the tool is launched into an AppContainer holding **zero capability SIDs**, so it has no network stack rather than a filtered one. A job object clamps CPU, memory and PIDs but has no concept of a socket, so until this landed a tool that declared it only reads the local machine could still open any connection it liked. Proven differentially in [`SensorNetworkContainmentTests.cs`](tests/MissionController.Tests/SensorNetworkContainmentTests.cs): the same command that reaches a listener (and `1.1.1.1:443` by raw IP, so DNS cannot explain it) when unconfined is refused inside the container. **Coverage is partial, and measured.** The container is an RPC wall as well as a network one: `Get-WinEvent`, `Get-CimInstance` and `Get-MpComputerStatus` all fail inside it, so templates built on WMI, the Event Log service, Defender or the SCM keep their network stack rather than being silently broken — a live test asserts that WMI really is blocked, so the exemption cannot become folklore. Roughly half the catalog is contained today; closing the rest needs per-template verification or an egress control that is not also an RPC wall |
 | Governed remediation | [`SandboxedRemediationEngine.cs`](src/MissionController.Infrastructure.Windows/Remediation/SandboxedRemediationEngine.cs) — 1-click fixes run in their own sandbox, with rollback support for state-mutating actions |
 | Secrets at rest | [`DpapiCredentialVault.cs`](src/MissionController.Infrastructure.Windows/DpapiCredentialVault.cs) — Windows DPAPI CurrentUser vault |
 
@@ -130,6 +131,8 @@ Every call lands in the audit ledger attributed to a resolved principal — the 
 ## Governance model
 
 - **The 1:1:1 invariant.** Every governed template binds **1 template → 1 model → 1 dedicated native tool → 1 approved egress FQDN**, enforced by strict validation and an in-memory egress firewall ([`EgressFirewallHandler.cs`](src/MissionController.Infrastructure.Network/EgressFirewallHandler.cs)). A 40+ template catalog covers network, identity, endpoint, SysOps, and compliance runbooks.
+
+  **Which leg that FQDN governs.** Two different processes can reach a destination, and they are not contained the same way. Almost every template's rule names the **AI gateway**, which SPLAT's own process calls — that leg is pinned by the provider client and the firewall handler above. A template may instead declare that its **sensor** opens the destination (`EgressScope.ToolProcess`; today only the Grants.gov discovery suite). The distinction is enforced, not documentary: a gateway-scoped template's tool is launched with no network stack at all *where the container does not also break it* (see the network-denial row above), and on Linux `TemplatePolicyCompiler` no longer opens a kernel network lease for it — reading the FQDN alone previously granted one to the entire catalog. What Windows still cannot do is pin *which* host a sensor-scoped tool reaches: an AppContainer chooses network or no network, not a destination, so for that one suite the declared FQDN remains an audited governance claim until a loopback broker or WFP filter lands. Those templates are read-only and present no credential.
 - **Bounded composition, not swarms.** Project Studio chains at most six ordered agent stages with a bounded, DLP-filtered evidence hand-off between them. No recursive routing, no parallel swarm, no open-ended loops — multi-step autonomy is *earned* as the kernel substrate lands, not assumed.
 - **Reasoning cores are pluggable** — streaming Anthropic Claude and Google Gemini clients behind [`ModelClientRouter.cs`](src/MissionController.Infrastructure.Network/Ai/ModelClientRouter.cs), routed by available key.
 
@@ -137,10 +140,10 @@ Every call lands in the audit ledger attributed to a resolved principal — the 
 
 ```text
 $ dotnet test tests/MissionController.Tests/MissionController.Tests.csproj
-Passed!  - Failed: 0, Passed: 387, Skipped: 0, Total: 387, Duration: 4 s - MissionController.Tests.dll (net9.0)
+Passed!  - Failed: 0, Passed: 406, Skipped: 0, Total: 406, Duration: 4 s - MissionController.Tests.dll (net9.0)
 ```
 
-387 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
+406 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
 
 **On the warning count.** An incremental `dotnet build` reports zero warnings, but that is an artifact of caching rather than a property of the source: a cold `--no-incremental` build re-runs the CommunityToolkit source generators and emits **186 `MVVMTK0045` warnings**, one per `[ObservableProperty]` field that should be declared as a partial property for WinRT marshalling. They are cosmetic and confined to the view models, but a "zero warnings" claim would only have been true on the build nobody runs from clean. Converting the fields is tracked work; the badge above claims zero *errors*, which holds either way.
 

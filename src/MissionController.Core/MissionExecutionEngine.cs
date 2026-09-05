@@ -228,10 +228,15 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
                 stdoutProgress,
                 stderrProgress,
                 cancellationToken,
-                // The template's egress declaration decides whether the sensor gets a network stack
-                // at all. Almost every template's rule names the AI gateway - a call SPLAT's own
-                // process makes - so the tool itself needs nothing and is launched network-denied.
-                denyNetworkAccess: !template.EgressRule.ToolProcessNeedsNetwork);
+                // Two conditions, and both must hold. The egress declaration says whether the SENSOR
+                // needs a destination at all (almost never - the usual rule names the AI gateway,
+                // which SPLAT's own process calls). The subsystem check says whether containment
+                // would cost more than it buys: the AppContainer that removes the network also walls
+                // the tool off from WMI, the Event Log service and Defender, so a template built on
+                // those is left uncontained rather than silently broken in front of an operator.
+                denyNetworkAccess:
+                    !template.EgressRule.ToolProcessNeedsNetwork &&
+                    !template.ToolNeedsLocalSubsystems);
         }
         catch (OperationCanceledException)
         {
@@ -267,27 +272,94 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         }
 
         var execResult = launchResult!;
-        fullOutput.Append(execResult.StandardOutput);
-        if (!string.IsNullOrEmpty(execResult.StandardError))
+
+        // 5. Layer 4: credential and DLP sanitization, BEFORE a single byte of tool output is
+        // yielded.
+        //
+        // The scrub used to run after the raw stdout/stderr chunks had already left the engine, on
+        // the assumption that the model call was the only egress. It is not: the MCP server appends
+        // these very chunks to its tool result, so an external agent client received the credentials
+        // that SPLAT then carefully withheld from its own model. The stream is a boundary, and every
+        // consumer of it - UI, MCP, log sink - crosses the same one.
+        string rawStdout = execResult.StandardOutput ?? string.Empty;
+        string rawStderr = execResult.StandardError ?? string.Empty;
+        int credentialsRedacted = 0;
+        int dlpRedacted = 0;
+        var dlpCategories = new List<string>();
+
+        if (_credentialSanitizer != null)
+        {
+            var outCred = _credentialSanitizer.Sanitize(rawStdout);
+            var errCred = _credentialSanitizer.Sanitize(rawStderr);
+            rawStdout = outCred.SanitizedText;
+            rawStderr = errCred.SanitizedText;
+            credentialsRedacted = outCred.RedactedCount + errCred.RedactedCount;
+        }
+
+        if (_dlpSanitizer != null)
+        {
+            var outDlp = _dlpSanitizer.Sanitize(rawStdout);
+            var errDlp = _dlpSanitizer.Sanitize(rawStderr);
+            rawStdout = outDlp.SanitizedContent;
+            rawStderr = errDlp.SanitizedContent;
+            dlpRedacted = outDlp.RedactedCount + errDlp.RedactedCount;
+            dlpCategories.AddRange(outDlp.RedactedCategories);
+            foreach (var category in errDlp.RedactedCategories)
+            {
+                if (!dlpCategories.Contains(category)) dlpCategories.Add(category);
+            }
+        }
+
+        // Everything downstream - the chunk stream, the model prompt, the semantic index - reads
+        // from the sanitized text. There is no raw copy left to leak by accident.
+        fullOutput.Append(rawStdout);
+        if (!string.IsNullOrEmpty(rawStderr))
         {
             fullOutput.AppendLine();
-            fullOutput.Append(execResult.StandardError);
+            fullOutput.Append(rawStderr);
+        }
+        string sanitizedPayload = fullOutput.ToString();
+
+        if (credentialsRedacted > 0)
+        {
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.StatusChange,
+                $"⚡ Credential Shield: Redacted {credentialsRedacted} sensitive credentials/keys before the output left the sandbox.",
+                DateTime.UtcNow);
+        }
+
+        if (dlpRedacted > 0)
+        {
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.StatusChange,
+                $"⚡ DLP Filter Guard: Redacted {dlpRedacted} sensitive items ({string.Join(", ", dlpCategories)}) before the output left the sandbox.",
+                DateTime.UtcNow);
+
+            await _auditLedger.AppendLogAsync(
+                missionId,
+                template.TemplateId,
+                "DLP_REDACTION_ENFORCED",
+                $"RedactedCount: {dlpRedacted} | Categories: {string.Join(",", dlpCategories)}",
+                operatorIdentity,
+                cancellationToken);
         }
 
         yield return new MissionChunk(
             missionId,
             MissionChunkType.Stdout,
-            execResult.StandardOutput,
+            rawStdout,
             DateTime.UtcNow,
             null,
             execResult.FinalMetrics.PeakMemoryBytes);
 
-        if (!string.IsNullOrEmpty(execResult.StandardError))
+        if (!string.IsNullOrEmpty(rawStderr))
         {
             yield return new MissionChunk(
                 missionId,
                 MissionChunkType.Stderr,
-                execResult.StandardError,
+                rawStderr,
                 DateTime.UtcNow);
         }
 
@@ -299,51 +371,46 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             $"User CPU: {JobResourceMetrics.Describe(execResult.FinalMetrics.TotalCpuUserTimeMs, "ms")}",
             DateTime.UtcNow);
 
-        // 5. Audit Process Completion
+        // 5.5 The tool's own verdict. A template declares which exit codes mean "this ran", and a
+        // process that fell outside them - or was killed at its ceiling - produced telemetry that
+        // must not be analysed, indexed, or reported as a completed mission.
+        bool toolSucceeded = !execResult.TimedOut && template.Tool.AllowedExitCodes.Contains(execResult.ExitCode);
+
         await _auditLedger.AppendLogAsync(
             missionId,
             template.TemplateId,
-            "TOOL_EXECUTION_COMPLETED",
-            $"ExitCode: {execResult.ExitCode} | OutputBytes: {fullOutput.Length}",
+            toolSucceeded ? "TOOL_EXECUTION_COMPLETED" : "TOOL_EXECUTION_FAILED",
+            $"ExitCode: {execResult.ExitCode} | TimedOut: {execResult.TimedOut} | OutputBytes: {fullOutput.Length}",
             operatorIdentity,
             cancellationToken);
 
-        // 6. Layer 4: In-Memory DLP & Credential Sanitization before Egress
-        string sanitizedPayload = fullOutput.ToString();
-        if (_credentialSanitizer != null)
+        if (!toolSucceeded)
         {
-            var credResult = _credentialSanitizer.Sanitize(sanitizedPayload);
-            if (credResult.RedactedCount > 0)
-            {
-                sanitizedPayload = credResult.SanitizedText;
-                yield return new MissionChunk(
-                    missionId,
-                    MissionChunkType.StatusChange,
-                    $"⚡ Credential Shield: Redacted {credResult.RedactedCount} sensitive credentials/keys before AI analysis.",
-                    DateTime.UtcNow);
-            }
-        }
+            string verdict = execResult.TimedOut
+                ? $"the sensor exceeded its {template.Tool.TimeoutSeconds}s budget and was terminated"
+                : $"the sensor exited {execResult.ExitCode}, outside the codes this template accepts " +
+                  $"({string.Join(", ", template.Tool.AllowedExitCodes)})";
 
-        if (_dlpSanitizer != null)
-        {
-            var dlpResult = _dlpSanitizer.Sanitize(sanitizedPayload);
-            if (dlpResult.RedactedCount > 0)
-            {
-                sanitizedPayload = dlpResult.SanitizedContent;
-                yield return new MissionChunk(
-                    missionId,
-                    MissionChunkType.StatusChange,
-                    $"⚡ DLP Filter Guard: Redacted {dlpResult.RedactedCount} sensitive items ({string.Join(", ", dlpResult.RedactedCategories)}) before transmission.",
-                    DateTime.UtcNow);
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.Stderr,
+                $"⚠ MISSION FAILED: {verdict}. No AI analysis was performed and nothing was indexed.",
+                DateTime.UtcNow);
 
-                await _auditLedger.AppendLogAsync(
-                    missionId,
-                    template.TemplateId,
-                    "DLP_REDACTION_ENFORCED",
-                    $"RedactedCount: {dlpResult.RedactedCount} | Categories: {string.Join(",", dlpResult.RedactedCategories)}",
-                    operatorIdentity,
-                    cancellationToken);
-            }
+            await _auditLedger.AppendLogAsync(
+                missionId,
+                template.TemplateId,
+                "MISSION_FAILED",
+                verdict,
+                operatorIdentity,
+                cancellationToken);
+
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.StatusChange,
+                "Mission aborted. Failure sealed in the audit ledger; jail will be drained.",
+                DateTime.UtcNow);
+            yield break;
         }
 
         // 6.5 Pre-Mission Incident Recall. The semantic index used to be write-only - missions were
@@ -514,17 +581,22 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             islandResult.OutputContent,
             DateTime.UtcNow);
 
-        // 8. Audit AI Completion
+        // 8. Audit AI Completion. The island's own verdict decides which row this is: it can return
+        // the best of a rejected cohort with IsSuccess false, and publishing that as a completed
+        // analysis is how a refused diagnosis became evidence.
         await _auditLedger.AppendLogAsync(
             missionId,
             template.TemplateId,
-            "AI_ANALYSIS_COMPLETED",
-            $"AnalysisLength: {fullAiAnalysis.Length} chars",
+            islandResult.IsSuccess ? "AI_ANALYSIS_COMPLETED" : "AI_ANALYSIS_REJECTED",
+            $"AnalysisLength: {fullAiAnalysis.Length} chars | Accepted: {islandResult.IsSuccess}" +
+            (islandResult.Telemetry.InitialFailureReason is { Length: > 0 } reason ? $" | {reason}" : string.Empty),
             operatorIdentity,
             cancellationToken);
 
-        // 9. Index into In-Process Semantic Memory
-        if (_semanticMemoryIndex != null)
+        // 9. Index into In-Process Semantic Memory - only what the quality gate accepted. An
+        // unaccepted analysis indexed here is worse than no memory at all: every later mission
+        // recalls it as prior art and inherits its error, with nothing in the snippet saying so.
+        if (_semanticMemoryIndex != null && islandResult.IsSuccess)
         {
             await _semanticMemoryIndex.IndexMissionDocumentAsync(
                 missionId,
@@ -542,6 +614,28 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
 
         await _jailManager.DrainAndCleanupJailAsync(jailPath);
         jailDrained = true;
+
+        if (!islandResult.IsSuccess)
+        {
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.Stderr,
+                "⚠ MISSION INCOMPLETE: the analysis did not pass the quality gate, so it was not " +
+                "indexed as evidence. The telemetry above is real; the diagnosis is not accepted.",
+                DateTime.UtcNow);
+
+            await _auditLedger.AppendLogAsync(
+                missionId,
+                template.TemplateId,
+                "MISSION_FAILED",
+                islandResult.Telemetry.InitialFailureReason is { Length: > 0 } gateReason
+                    ? $"Analysis rejected by the quality gate: {gateReason}"
+                    : "Analysis rejected by the quality gate.",
+                operatorIdentity,
+                cancellationToken);
+
+            yield break;
+        }
 
         yield return new MissionChunk(
             missionId,

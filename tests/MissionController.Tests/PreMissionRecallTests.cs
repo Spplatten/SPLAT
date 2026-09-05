@@ -75,6 +75,23 @@ public class PreMissionRecallTests
             Task.FromResult(true);
     }
 
+    /// <summary>An analysis that satisfies the StructuredDiagnosis contract the engine requests.</summary>
+    private const string AcceptedDiagnosis = """
+        Sensor telemetry reviewed; the endpoint is operating normally.
+        ```json
+        {
+          "status": "Healthy",
+          "headline": "Sensor returned nominal output",
+          "findings": [
+            "Tool completed with the expected exit code"
+          ],
+          "recommendedActions": [
+            "No remediation required"
+          ]
+        }
+        ```
+        """;
+
     private sealed class RecordingModelClient : IModelStreamClient
     {
         public string? CapturedSystemPrompt;
@@ -246,8 +263,13 @@ public class PreMissionRecallTests
     public async Task BrokenMemoryIndex_DegradesToColdStart_WithoutAbortingTheMission()
     {
         var chunks = new List<MissionChunk>();
+
+        // The reply has to be a real structured diagnosis now: an analysis the quality gate rejects
+        // no longer reaches a Completed chunk, so a stub answering "ok" would fail this test for a
+        // reason that has nothing to do with the memory index it is actually about.
         var engine = new MissionExecutionEngine(
-            new FakeJailManager(), new StubProcessLauncher("ok"), new RecordingModelClient(),
+            new FakeJailManager(), new StubProcessLauncher("ok"),
+            new RecordingModelClient(AcceptedDiagnosis),
             new RecordingAuditLedger(), _ => new FakeJobSandbox(),
             semanticMemoryIndex: new ThrowingMemoryIndex());
 

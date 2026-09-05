@@ -49,6 +49,9 @@ public class SensorNetworkContainmentTests
             var launcher = new SuspendedProcessLauncher(new RestrictedTokenProvider());
             using var job = new Win32JobSandbox($"netcontain-{Guid.NewGuid():N}");
 
+            // The probe scripts are PowerShell, so the host has to be PowerShell. Running them
+            // through cmd.exe /c makes every control fail with exit 1 on a syntax error, which
+            // reads identically to a launch failure and tells you nothing about containment.
             var result = await launcher.LaunchSuspendedInJobAsync(
                 PowerShellExe,
                 $"-NoProfile -NonInteractive -Command \"{script}\"",
@@ -60,6 +63,16 @@ public class SensorNetworkContainmentTests
                 stderrProgress: null,
                 cancellationToken: default,
                 denyNetworkAccess: denyNetworkAccess);
+
+            // 0xC0000142: the image could not initialise. Inside an AppContainer that means the
+            // profile SID cannot read something the interpreter needs to start, so the process
+            // never ran its script - a distinct outcome from a script that ran and was denied.
+            if (result.ExitCode == -1073741502)
+            {
+                throw new InvalidOperationException(
+                    $"The probe process failed to initialise (0xC0000142) with denyNetworkAccess={denyNetworkAccess}. " +
+                    "Nothing about containment can be concluded: the interpreter never started.");
+            }
 
             return result.ExitCode;
         }
@@ -222,6 +235,47 @@ public class SensorNetworkContainmentTests
 
         Assert.True(lease.AllowNetwork);
         Assert.Contains(443u, lease.AllowedEgressPorts);
+    }
+
+    /// <summary>
+    /// The cost of containment, measured rather than assumed. The AppContainer that removes the
+    /// network is also an RPC wall, so WMI stops answering inside it - which is why templates built
+    /// on WMI are exempted instead of contained. Asserting it here keeps that exemption honest: if a
+    /// future Windows admits AppContainers to WMI, this test fails and the exemption can be dropped.
+    /// </summary>
+    [Fact]
+    public async Task Containment_AlsoBlocksWmi_WhichIsWhyWmiTemplatesAreExempt()
+    {
+        const string wmiProbe = "try { Get-CimInstance Win32_OperatingSystem -EA Stop | Out-Null; exit 0 } catch { exit 72 }";
+
+        int unconfined = await RunProbeAsync(wmiProbe, denyNetworkAccess: false);
+        Assert.True(unconfined == 0, $"Control failed: WMI is unavailable even unconfined (exit {unconfined}).");
+
+        int confined = await RunProbeAsync(wmiProbe, denyNetworkAccess: true);
+        Assert.Equal(72, confined);
+    }
+
+    /// <summary>
+    /// The exemption applied to the catalogue. A sensor that reads the event log, WMI or Defender
+    /// keeps its network stack because the alternative is a tool that cannot do its job - and a
+    /// silently broken sensor is worse than an uncontained one, since the operator sees only a
+    /// confusing error while the mission reports success at containing it.
+    /// </summary>
+    [Fact]
+    public void TemplatesBuiltOnLocalSubsystems_AreExemptFromContainment()
+    {
+        var exempt = GovernedTemplateCatalog.All.Where(t => t.ToolNeedsLocalSubsystems).ToList();
+
+        // The catalogue is heavily WMI- and event-log-based; an empty set here means the marker
+        // list stopped matching and every one of those templates is about to break at run time.
+        Assert.NotEmpty(exempt);
+
+        var stillContained = GovernedTemplateCatalog.All
+            .Where(t => !t.EgressRule.ToolProcessNeedsNetwork && !t.ToolNeedsLocalSubsystems)
+            .ToList();
+
+        Assert.NotEmpty(stillContained);
+        Assert.All(stillContained, t => Assert.DoesNotContain("Get-CimInstance", t.Tool.ArgumentsTemplate));
     }
 
     /// <summary>

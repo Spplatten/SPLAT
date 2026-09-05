@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.InteropServices;
 
 namespace MissionController.Infrastructure.Windows.Native;
@@ -352,7 +352,7 @@ internal static class Win32Interop
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern void DeleteProcThreadAttributeList(IntPtr lpAttributeList);
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateProcessW")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool CreateProcessExtendedW(
         string? lpApplicationName,
