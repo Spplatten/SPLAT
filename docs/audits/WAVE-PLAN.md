@@ -44,22 +44,23 @@ protection has to be the `state` nonce (AG-F05), which is currently accepted and
 
 ---
 
-## Wave 2 — Failure is not evidence
+## Wave 2 — Failure is not evidence (uncontended half done, `0f78cf0`)
 
-The single highest-value remaining wave, because every downstream claim inherits it: a failed run
-must not become accepted evidence, indexed memory, or a successful tool result.
+A failed run must not become accepted evidence, indexed memory, or a successful tool result.
 
-| Finding | Change | Owner |
+| Finding | Change | State |
 | --- | --- | --- |
-| F13 | `MissionExecutionEngine` stops on nonzero exit and timeout instead of logging and continuing | contended — assign |
-| F13 | `QualityIslandEngine` result is not published or indexed when `IsSuccess` is false | free |
-| F13 | `SandboxedRemediationEngine` verdict comes from a postcondition, not from exit code alone | free |
-| F16 | `AgentReasoning` with no model client fails instead of emitting `Status: VERIFIED` | free |
-| F16 | A workflow whose only node is unimplemented reports failure, not `Success=true` | free |
-| F14 | Raw stdout/stderr is sanitized before it leaves through MCP, not only before the model call | contended — assign |
+| F16 | `AgentReasoning` with no model fails instead of emitting `Status: VERIFIED` over a char count | done |
+| F16 | Simulated execution is opt-in (`allowSimulatedExecution`), off by default | done |
+| F13 | `QualityIslandEngine`'s offline path reports its own evaluation instead of hardcoding success | done |
+| F13 | `SandboxedRemediationEngine` fails on timeout; the ledger action name carries the verdict | done |
+| F13 | `MissionExecutionEngine` stops on nonzero exit and timeout instead of logging and continuing | **open — contended file** |
+| F14 | Raw stdout/stderr is sanitized before it leaves through MCP, not only before the model call | **open — contended file** |
+| F20 | A remediation verdict comes from a postcondition, not only from an exit code | **open — design, not a patch** |
 
-Exit gate: force a tool failure, a timeout, malformed model output and an exhausted quality island;
-assert an unsuccessful terminal result and zero accepted-memory insertions in each.
+Exit gate for the remainder: force a tool failure, a timeout, malformed model output and an
+exhausted quality island; assert an unsuccessful terminal result and zero accepted-memory
+insertions in each.
 
 ## Wave 3 — Linux fail-closed and lease isolation
 
