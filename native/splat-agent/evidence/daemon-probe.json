@@ -1,56 +1,91 @@
 {
-  "schema": 1,
-  "recorded_utc": "2026-09-03T17:02:58Z",
+  "schema": 2,
+  "bpf_source_sha256": "8ac49790aaaa6d3ffb04dd1ae568a0508537b43c0c0d216e71d2cbc20597fd59",
+  "protocol_version": 2,
+  "recorded_utc": "2026-09-06T00:38:15Z",
   "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
   "results": {
     "permitted_tool_ran": true,
+    "protected_inode_control_could_read_it": true,
     "protected_inode_leaked": false,
     "protected_inode_violation": true,
     "unleased_second_exec_blocked": true,
     "egress_permitted_destination_allowed": true,
     "egress_unleased_destination_blocked": true,
     "egress_denied_when_network_off": true,
-    "every_request_completed": true
+    "every_request_completed": true,
+    "workload_not_root": true,
+    "workload_uid_reported": "65534",
+    "concurrent_lease_isolation_held": true,
+    "unapproved_port_refused": true,
+    "ipv6_refused": true,
+    "expiry_killed_the_workload": true,
+    "expiry_elapsed_seconds": 5.3
   },
   "violations": [
     {
       "hook": 2,
-      "pid": 8540,
-      "detail": 44904,
-      "detailText": "file_open: denied access to protected sensitive file (inode 44904)",
+      "pid": 9036,
+      "detail": 742,
+      "detailText": "file_open: denied access to protected sensitive file (inode 742)",
       "comm": "cat"
     },
     {
       "hook": 1,
-      "pid": 8542,
+      "pid": 9040,
       "detail": 1633,
       "detailText": "bprm_check_security: denied execution of unleased binary (inode 1633)",
       "comm": "sh"
     },
     {
       "hook": 1,
-      "pid": 8542,
+      "pid": 9040,
       "detail": 1633,
       "detailText": "bprm_check_security: denied execution of unleased binary (inode 1633)",
       "comm": "sh"
     },
     {
       "hook": 3,
-      "pid": 8544,
+      "pid": 9043,
       "detail": 16843009,
       "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 1.1.1.1",
       "comm": "curl"
     },
     {
       "hook": 3,
-      "pid": 8545,
+      "pid": 9044,
       "detail": 16777343,
-      "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 1.0.0.127",
+      "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 127.0.0.1",
+      "comm": "curl"
+    },
+    {
+      "hook": 1,
+      "pid": 9051,
+      "detail": 1585,
+      "detailText": "bprm_check_security: denied execution of unleased binary (inode 1585)",
+      "comm": "sh"
+    },
+    {
+      "hook": 1,
+      "pid": 9051,
+      "detail": 1585,
+      "detailText": "bprm_check_security: denied execution of unleased binary (inode 1585)",
+      "comm": "sh"
+    },
+    {
+      "hook": 3,
+      "pid": 9052,
+      "detail": 16777343,
+      "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 127.0.0.1",
+      "comm": "curl"
+    },
+    {
+      "hook": 3,
+      "pid": 9053,
+      "detail": 0,
+      "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 0.0.0.0",
       "comm": "curl"
     }
   ],
-  "verdict": "PASS",
-  "bpf_source_sha256": "ee9a2fd6c0dc9cbe6b5b7f0b1e0a8f7c-unrecorded",
-  "note": "This run predates the field: the source it exercised was not hashed at the time, so the digest above is a placeholder that deliberately matches nothing. The daemon BPF program has since been re-keyed per lease (finding F06), which changes what these hooks look up. Re-run native/splat-agent/probe-daemon.sh against a root daemon to restore the enforcement claim.",
-  "current_agent_bpf_source_sha256": "93cd23c0d3967bec8d8a3b7cce5c0790c6412379602b02c69fef06226a631044"
+  "verdict": "PASS"
 }

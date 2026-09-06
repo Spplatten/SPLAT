@@ -59,14 +59,29 @@ These are reachable by a leased process. They are listed so nobody has to discov
 
 ## What has been proven, and where
 
+Everything in the two "enforced" tables above is proven against a root daemon on kernel
+6.18.33.2, in one run, recorded in `evidence/daemon-probe.json`. That file carries the SHA-256 of
+the BPF source it exercised, and `DocumentationDriftTests` fails the build if the README claims
+enforcement while the hash does not match what ships — so the proof cannot outlive the program.
+
 | Claim | Evidence |
 | --- | --- |
-| The kernel vetoes an out-of-lease exec, open and connect | `../splat-canary/evidence/canary-*.json` — one lease at a time, on a real BPF-LSM kernel |
+| Out-of-lease exec, open and connect are vetoed **through the daemon**, under root | `evidence/daemon-probe.json` (verdict PASS, 15 checks) |
+| A protected file is denied by the LEASE, not by file permissions | same run — a control reads `/etc/hostname` (644) unprotected, the leased run is refused with a kernel violation |
+| Two concurrent leases do not lend each other permissions | same run — B is denied an executable A holds live |
+| An approved host is not approved on every port | same run — `:9999` refused on a lease naming `:80` |
+| IPv6 is denied rather than waved through | same run |
+| The workload runs as `nobody`, not as the daemon's root | same run — `uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)` |
+| Expiry kills the workload rather than unpolicing it | same run — killed 5.3s into a 60s sleep |
+| The kernel vetoes an out-of-lease exec, open and connect, standalone | `../splat-canary/evidence/canary-*.json` — one lease at a time |
 | The daemon refuses to run without live enforcement | `evidence/fail-closed-probe.json` |
 | An unauthenticated caller cannot execute | `evidence/peer-auth-probe.json` |
 | Arguments survive the wire byte for byte | `evidence/wire-contract-probe.json` |
-| The three hooks hold *through the daemon*, under root | `evidence/daemon-probe.json` — **stale**: recorded against a kernel program that has since been re-keyed per lease. Re-run `probe-daemon.sh` against a root daemon to restore it. |
 
-Per-lease keying, the port check and the IPv6 denial are verified at the key layer and in userspace.
-**None of them has been loaded into a kernel yet** — the same root run that refreshes
-`daemon-probe.json` is what turns them from correct-looking into proven.
+What that run does **not** cover is everything in the *Not policed* table above. A PASS means the
+declared boundary holds, not that the boundary is complete.
+
+One thing it found that no amount of userspace testing would have: the memory, CPU and PID clamps
+had never applied. `splat_leases` never delegated its controllers to its children, so
+`mission_X/memory.max` did not exist, and the clamp write was discarded with `let _ = fs::write`.
+The first real lease a real daemon tried to provision refused, and named the file.

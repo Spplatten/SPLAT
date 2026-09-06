@@ -87,16 +87,35 @@ requested command to that lease's own exec allow-list, and the bridge still drop
 mean nothing in the guest. Resolving that is F11's wire contract - one versioned envelope carrying
 paths the daemon resolves where they are enforceable - not a patch to this code.
 
-**The F06 in-kernel proof is outstanding.** The change is verified at the key layer — byte-level
-tests over the same `lease_map_keys` the live driver calls, plus size and alignment assertions
-against the BPF structs — but the audit's exit gate is concurrent A/B leases proving in the kernel
-that A cannot use B's permission, and that needs a root daemon. Re-running
-`native/splat-agent/probe-daemon.sh` under root closes this and restores the README's enforcement
-claim, which is withdrawn until then. The same run is what proves F07's privilege drop actually
-transitions - on an unprivileged dev daemon `drop_privileges` takes its already-unprivileged path,
-so `setgroups`/`setresgid`/`setresuid` have never executed: the recorded probe passed against a program that has since
-been re-keyed, and `TheDaemonEnforcementClaim_MatchesItsProbeEvidence` now binds that claim to the
-agent BPF source the way the canary guard always bound the canary's.
+**PROVEN.** `native/splat-agent/evidence/daemon-probe.json`, verdict PASS, 15 checks against a root
+daemon on kernel 6.18.33.2. F05's kill-on-expiry, F06's concurrent-lease isolation, F07's
+root-to-nobody transition and F08's port and IPv6 checks all held in one run, alongside the three
+original hooks. The record carries the SHA-256 of the BPF source it exercised, and
+`TheDaemonEnforcementClaim_MatchesItsProbeEvidence` fails the build if the README claims enforcement
+while that hash does not match what ships — so the proof cannot outlive the program, which is
+exactly how the previous one had been standing over a rewritten kernel program.
+
+Getting there took two failed runs, and both were worth more than the green one.
+
+**The first refused every lease at `memory.max`.** `/sys/fs/cgroup/splat_leases` had never written
+its controllers to `cgroup.subtree_control`, so `mission_X/memory.max` did not exist and the
+resource clamps had **never applied — not once, for the life of the substrate**. It was invisible
+because the clamp write was `let _ = fs::write(..)` and the ENOENT went in the bin. F09's read-back
+is the only reason it surfaced, and it surfaced on the first real lease a real daemon tried to
+provision. No amount of userspace testing was going to find this: the whole failure lived in the gap
+between what a mock daemon does and what a root one does.
+
+**The second mis-scored two checks, and both were the probe's fault.** The protected-file test read
+`/etc/shadow` and expected a kernel violation — but F07 now drops the workload to `nobody`, and mode
+640 denies that read in the DAC check *before* `security_file_open` is reached. F07's own success had
+quietly turned that test into a measurement of nothing, and the probe blamed the daemon for it. It
+now runs a differential on `/etc/hostname` (644, so `nobody` genuinely can read it): a control run
+reads the file, the leased run is denied, and the control feeds the verdict so a denial is only
+scored when the same read succeeds without the protection. Separately, the expiry clock was timing
+the probe's own socket settle rather than the kill — `call()` now stops at the EXIT frame.
+
+The lesson worth keeping: **a passing check whose control was never verified is not a measurement.**
+Two of the three problems this exercise found were tests that could not fail.
 
 ## Wave 4 — Boundaries and the wire contract
 
