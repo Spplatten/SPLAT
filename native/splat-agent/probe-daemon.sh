@@ -28,7 +28,7 @@ fi
 [ -n "$TOKEN" ] || echo "  WARNING: no token read from $TOKEN_FILE - every EXECUTE_TOOL will be refused."
 
 python3 - "$HOST" "$PORT" "$TOKEN" <<'PY'
-import json, os, socket, sys
+import json, os, socket, sys, threading, time
 
 host, port = sys.argv[1], int(sys.argv[2])
 token = sys.argv[3] if len(sys.argv) > 3 else ""
@@ -158,6 +158,85 @@ egress_off = show(call({
     "allowNetwork": False, "leaseDurationSeconds": 20,
 }, "egress-off", settle=6.0), "egress-off")
 
+print()
+print("== 7. PRIVILEGE: the workload must not be running as root ==")
+print("   The daemon needs root to load BPF and write the cgroup tree; the TOOL needs none of it.")
+print("   It used to inherit uid 0, so every hook was being asked to hold against a root process.")
+priv = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-priv",
+    "command": "/usr/bin/id", "argv": ["-u"],
+    "allowedExecPaths": ["/usr/bin/id"],
+    "leaseDurationSeconds": 20,
+}, "priv"), "priv")
+
+print()
+print("== 8. ISOLATION: one lease must not lend its permissions to another (F06) ==")
+print("   A allow-lists /bin/cat and holds its lease open; B allow-lists only /bin/sh and tries")
+print("   to exec cat while A is still live. Keyed by resource alone, B would inherit A's grant.")
+
+concurrent = {}
+
+def hold_lease_a():
+    # Long enough that B runs entirely inside A's lease. /bin/sleep must be in A's allow-list
+    # too, since a leased process may only exec what its own lease names.
+    concurrent["a"] = call({
+        "type": "EXECUTE_TOOL", "missionId": "probe-iso-a",
+        "command": "/bin/sh", "argv": ["-c", "sleep 4"],
+        "allowedExecPaths": ["/bin/sh", "/bin/cat", "/bin/sleep", "/usr/bin/sleep"],
+        "leaseDurationSeconds": 20,
+    }, "iso-a", settle=8.0)
+
+t = threading.Thread(target=hold_lease_a, daemon=True)
+t.start()
+time.sleep(1.5)  # let A's lease install before B asks
+
+iso_b = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-iso-b",
+    "command": "/bin/sh", "argv": ["-c", "cat /etc/hostname"],
+    "allowedExecPaths": ["/bin/sh"],
+    "leaseDurationSeconds": 20,
+}, "iso-b", settle=6.0), "iso-b")
+t.join(timeout=15)
+iso_a = show(concurrent.get("a"), "iso-a")
+
+print()
+print("== 9. EGRESS PORT: an approved host is not approved on every port (F08) ==")
+print("   The lease names 127.0.0.1:80. A connect to 127.0.0.1:9999 must be refused - the key")
+print("   used to carry no port at all, so approving a host approved every port it listened on.")
+port_bad = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-port",
+    "command": "/usr/bin/curl",
+    "argv": ["--max-time", "3", "-s", "-o", "/dev/null", "http://127.0.0.1:9999/"],
+    "allowedExecPaths": ["/usr/bin/curl"],
+    "allowNetwork": True, "allowedEgressIps": ["127.0.0.1"], "allowedEgressPorts": [80],
+    "leaseDurationSeconds": 20,
+}, "port-denied", settle=6.0), "port-denied")
+
+print()
+print("== 10. EGRESS IPv6: denied outright, since the lease has no v6 vocabulary (F08) ==")
+print("   This used to fall through to ALLOW, which made allowNetwork mean 'no IPv4'.")
+v6 = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-v6",
+    "command": "/usr/bin/curl",
+    "argv": ["--max-time", "3", "-s", "-o", "/dev/null", "-6", "http://[::1]:80/"],
+    "allowedExecPaths": ["/usr/bin/curl"],
+    "allowNetwork": True, "allowedEgressIps": ["127.0.0.1"], "allowedEgressPorts": [80],
+    "leaseDurationSeconds": 20,
+}, "ipv6-denied", settle=6.0), "ipv6-denied")
+
+print()
+print("== 11. EXPIRY: an overrunning workload is KILLED, not merely unpoliced (F05) ==")
+print("   A 5s lease around a 60s sleep. The reaper must kill the cgroup inside its policy;")
+print("   before this it deleted the map entries and left the process running, unwatched.")
+expiry_start = time.time()
+expiry = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-expiry",
+    "command": "/bin/sh", "argv": ["-c", "sleep 60"],
+    "allowedExecPaths": ["/bin/sh", "/bin/sleep", "/usr/bin/sleep"],
+    "leaseDurationSeconds": 5,
+}, "expiry", settle=20.0), "expiry")
+expiry_elapsed = time.time() - expiry_start
+
 def had(msgs, t):
     return any(m.get("type") == t for m in (msgs or []))
 
@@ -213,6 +292,25 @@ print(f"  egress to 1.1.1.1 refused      : {had(egress_bad, 'VIOLATION')}")
 print(f"  network OFF denies 127.0.0.1   : {had(egress_off, 'VIOLATION')}")
 print(f"  every request sent EXIT        : {all(had(m, 'EXIT') for m in (allowed, shadow, dpkg, egress_ok, egress_bad, egress_off))}")
 
+# The tool prints its own numeric uid; anything but 0 is the property, and an empty answer is not
+# evidence of anything.
+priv_uid = text(priv).strip().splitlines()
+priv_uid = priv_uid[0].strip() if priv_uid else ""
+workload_not_root = priv_uid.isdigit() and priv_uid != "0"
+print()
+print(f"  workload uid (not 0)           : {workload_not_root}  (reported: {priv_uid or 'nothing'})")
+# B must be refused. Its own output must NOT contain the file it tried to read through cat.
+iso_holds = had(iso_b, "VIOLATION") and "localhost" not in text(iso_b)
+print(f"  B denied A's executable        : {iso_holds}")
+print(f"  A itself still ran             : {had(iso_a, 'EXIT')}")
+print(f"  wrong port refused             : {had(port_bad, 'VIOLATION')}")
+print(f"  IPv6 refused                   : {had(v6, 'VIOLATION')}")
+# The lease is 5s and the sleep is 60s, so a kill returns at roughly 5-7s. The 15s bound sits
+# clear of both the kill and this call's own 20s settle timeout - without that margin a socket
+# that simply gave up would score as a successful kill.
+expiry_killed = had(expiry, "EXIT") and expiry_elapsed < 15
+print(f"  expiry killed the workload     : {expiry_killed}  (returned after {expiry_elapsed:.1f}s of a 60s sleep)")
+
 # A run that is not recorded is not proof - the same rule the canary follows.
 import datetime
 # Hash the daemon's kernel program into the record. Without it a months-old PASS kept standing
@@ -245,10 +343,22 @@ evidence = {
         "every_request_completed": all(
             had(m, "EXIT") for m in (allowed, shadow, dpkg, egress_ok, egress_bad, egress_off)
         ),
+        # F07: the drop actually transitions when the daemon is root.
+        "workload_not_root": workload_not_root,
+        "workload_uid_reported": priv_uid,
+        # F06: concurrent leases do not lend each other permissions.
+        "concurrent_lease_isolation_held": iso_holds,
+        # F08: the endpoint key carries the port, and IPv6 is denied rather than waved through.
+        "unapproved_port_refused": had(port_bad, "VIOLATION"),
+        "ipv6_refused": had(v6, "VIOLATION"),
+        # F05: expiry kills the workload rather than unpolicing it.
+        "expiry_killed_the_workload": expiry_killed,
+        "expiry_elapsed_seconds": round(expiry_elapsed, 1),
     },
     "violations": [
         {k: m.get(k) for k in ("hook", "pid", "detail", "detailText", "comm") if k in m}
         for m in (shadow or []) + (dpkg or []) + (egress_bad or []) + (egress_off or [])
+              + (iso_b or []) + (port_bad or []) + (v6 or [])
         if m.get("type") == "VIOLATION"
     ],
 }
@@ -265,6 +375,12 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["egress_unleased_destination_blocked"]
     and evidence["results"]["egress_denied_when_network_off"]
     and evidence["results"]["every_request_completed"]
+    # Everything Wave 3 changed has to hold in the same run, or the run has not closed it.
+    and evidence["results"]["workload_not_root"]
+    and evidence["results"]["concurrent_lease_isolation_held"]
+    and evidence["results"]["unapproved_port_refused"]
+    and evidence["results"]["ipv6_refused"]
+    and evidence["results"]["expiry_killed_the_workload"]
 ) else "INCOMPLETE"
 
 out_dir = os.environ.get("SPLAT_EVIDENCE_DIR", "/mnt/c/C_AGENT_BUILDER/native/splat-agent/evidence")
