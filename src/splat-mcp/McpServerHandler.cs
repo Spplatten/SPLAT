@@ -75,6 +75,13 @@ public class McpServerHandler
     /// </summary>
     private readonly string _workspaceRoot;
 
+    /// <summary>
+    /// Decides containment from a HANDLE rather than from a string. The path-prefix test this
+    /// replaced was a statement about a name, and a junction inside the workspace normalises to a
+    /// name under the root while resolving somewhere else entirely.
+    /// </summary>
+    private readonly WorkspaceGuard _workspace;
+
     public McpServerHandler(
         ILeasedExecutor leasedExecutor,
         ITemplatePolicyCompiler policyCompiler,
@@ -105,46 +112,11 @@ public class McpServerHandler
         _crewRegistry = crewRegistry;
         _identityProvider = identityProvider ?? new McpOperatorIdentityProvider(
             new StaticOperatorIdentityProvider(OperatorIdentity.Unknown("mcp-stdio")));
-        _workspaceRoot = Path.GetFullPath(workspaceRoot ?? Path.Combine(
+        _workspace = new WorkspaceGuard(workspaceRoot ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "SPLAT",
             "mcp-workspace"));
-        Directory.CreateDirectory(_workspaceRoot);
-    }
-
-    /// <summary>
-    /// Resolves a caller-supplied path against the workspace root, or returns null if it escapes.
-    ///
-    /// Containment is decided on the CANONICAL path from Path.GetFullPath, never on the raw string:
-    /// a prefix test against unresolved input is defeated by <c>..</c> segments, by a path that is
-    /// merely a string prefix of the root (<c>…\mcp-workspace-evil</c>), and by the several spellings
-    /// Windows accepts for the same file. Relative paths are treated as workspace-relative, which is
-    /// the shape an agent naturally sends.
-    /// </summary>
-    private string? ResolveWithinWorkspace(string requestedPath)
-    {
-        string candidate;
-        try
-        {
-            candidate = Path.GetFullPath(Path.IsPathRooted(requestedPath)
-                ? requestedPath
-                : Path.Combine(_workspaceRoot, requestedPath));
-        }
-        catch (Exception)
-        {
-            // Malformed input (invalid characters, over-long, bad device name) is out of bounds by
-            // definition - there is no path here to authorise.
-            return null;
-        }
-
-        // The trailing separator makes this a true containment test rather than a prefix test.
-        string rootWithSeparator = _workspaceRoot.EndsWith(Path.DirectorySeparatorChar)
-            ? _workspaceRoot
-            : _workspaceRoot + Path.DirectorySeparatorChar;
-
-        return candidate.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase)
-            ? candidate
-            : null;
+        _workspaceRoot = _workspace.Root;
     }
 
     /// <summary>
@@ -783,8 +755,10 @@ public class McpServerHandler
             };
         }
 
-        string? resolvedPath = ResolveWithinWorkspace(path);
-        if (resolvedPath is null)
+        // The handle IS the authorisation. Reading by path afterwards would ask the filesystem a
+        // second, different question - which is the window a link swap lives in.
+        using var handle = _workspace.OpenForRead(path, out string? resolvedPath);
+        if (handle is null)
         {
             await _auditLedger.AppendLogAsync(
                 Guid.NewGuid(),
@@ -799,16 +773,13 @@ public class McpServerHandler
 
         try
         {
-            if (!File.Exists(resolvedPath))
+            string content;
+            await using (var stream = new FileStream(handle, FileAccess.Read))
+            using (var reader = new StreamReader(stream))
             {
-                return new McpToolCallResult
-                {
-                    IsError = true,
-                    Content = new List<McpContentItem> { new() { Type = "text", Text = $"File not found in workspace: {resolvedPath}" } }
-                };
+                content = await reader.ReadToEndAsync(ct);
             }
 
-            string content = await File.ReadAllTextAsync(resolvedPath, ct);
             await _auditLedger.AppendLogAsync(
                 Guid.NewGuid(),
                 "mcp-tool-fs_read",
@@ -847,8 +818,12 @@ public class McpServerHandler
             };
         }
 
-        string? resolvedPath = ResolveWithinWorkspace(path);
-        if (resolvedPath is null)
+        // The guard creates the parent, verifies IT really lands inside, refuses an existing leaf
+        // that is itself a link, and hands back a handle whose final path it has checked. Creating
+        // directories from a merely-lexical path was the previous version's own escape hatch: a
+        // junction anywhere along the way and Directory.CreateDirectory happily follows it.
+        using var handle = _workspace.OpenForWrite(path, out string? resolvedPath);
+        if (handle is null)
         {
             await _auditLedger.AppendLogAsync(
                 Guid.NewGuid(),
@@ -863,15 +838,11 @@ public class McpServerHandler
 
         try
         {
-            // Safe to create unconditionally: resolvedPath is already proven to sit under the
-            // workspace root, so this can only ever materialise directories inside it.
-            string? dir = Path.GetDirectoryName(resolvedPath);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            await using (var stream = new FileStream(handle, FileAccess.Write))
+            using (var writer = new StreamWriter(stream))
             {
-                Directory.CreateDirectory(dir);
+                await writer.WriteAsync(content.AsMemory(), ct);
             }
-
-            await File.WriteAllTextAsync(resolvedPath, content, ct);
             await _auditLedger.AppendLogAsync(
                 Guid.NewGuid(),
                 "mcp-tool-fs_write",

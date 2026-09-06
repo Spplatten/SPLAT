@@ -121,7 +121,7 @@ Two of the three problems this exercise found were tests that could not fail.
 
 | Finding | Change |
 | --- | --- |
-| F10 | MCP filesystem confinement is handle-based and race-resistant, not a path-prefix string compare |
+| F10 | MCP filesystem confinement is handle-based: the object is opened, its final path checked against the root via GetFinalPathNameByHandle, and that same handle used for the read or write | **done** |
 | F11 | One versioned wire contract: explicit `argv`, and the compiled policy carried as paths the guest resolves | **done** — `protocolVersion: 2`; a v1 request is refused rather than guessed at |
 | AG-F06 | DLP gains bare-token rules (AWS, GitHub, OpenAI, Stripe, JWT) — today only `key=value` shapes redact |
 | AG-F07 | Recalled memory is wrapped in untrusted delimiters before it reaches a prompt |
