@@ -56,6 +56,12 @@ def call(req, label, settle=2.0):
                 if not chunk:
                     break
                 buf += chunk
+                # EXIT is the daemon's last word on a request, but it keeps the connection open for
+                # the next one - so waiting for the socket to go quiet meant every call paid the
+                # full settle timeout. That made elapsed time meaningless: the expiry probe read
+                # 25.7s for a workload the reaper had killed at about 7.
+                if b'"EXIT"' in buf or b'"type": "EXIT"' in buf:
+                    break
         except socket.timeout:
             pass
     for line in buf.decode(errors="replace").splitlines():
@@ -104,14 +110,26 @@ allowed = show(call({
 }, "allowed"), "allowed")
 
 print()
-print("== 3. FORBIDDEN: read a protected inode (/etc/shadow) ==")
-print("   The lease protects /etc/shadow. Expect a VIOLATION and no file contents.")
-shadow = show(call({
-    "type": "EXECUTE_TOOL", "missionId": "probe-shadow",
-    "command": "/bin/cat", "argv": ["/etc/shadow"],
+print("== 3. FORBIDDEN: read a protected inode ==")
+print("   /etc/shadow is the wrong file for this now. The workload runs as nobody, so mode 640")
+print("   denies the read in the DAC check before security_file_open is ever reached - the probe")
+print("   passed for a reason that had nothing to do with the lease. /etc/hostname is 644, so")
+print("   nobody CAN read it, and only the LSM can stop them. Control first, then the test.")
+
+readable_control = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-readable",
+    "command": "/bin/cat", "argv": ["/etc/hostname"],
     "allowedExecPaths": ["/bin/cat"],
     "leaseDurationSeconds": 20,
-}, "shadow"), "shadow")
+}, "readable-control"), "readable-control")
+
+shadow = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-shadow",
+    "command": "/bin/cat", "argv": ["/etc/hostname"],
+    "allowedExecPaths": ["/bin/cat"],
+    "protectedPaths": ["/etc/hostname"],
+    "leaseDurationSeconds": 20,
+}, "protected"), "protected")
 
 print()
 print("== 4. FORBIDDEN: an ALLOWED tool reaching for an unleased binary ==")
@@ -234,7 +252,7 @@ expiry = show(call({
     "command": "/bin/sh", "argv": ["-c", "sleep 60"],
     "allowedExecPaths": ["/bin/sh", "/bin/sleep", "/usr/bin/sleep"],
     "leaseDurationSeconds": 5,
-}, "expiry", settle=20.0), "expiry")
+}, "expiry", settle=25.0), "expiry")
 expiry_elapsed = time.time() - expiry_start
 
 def had(msgs, t):
@@ -264,18 +282,21 @@ if "SPLAT refused the request" in refusal:
     sys.exit(3)
 
 shadow_text = text(shadow)
-leaked = "root:" in shadow_text
-# A non-root daemon proves nothing here: /etc/shadow is mode 640, so ordinary file permissions
-# deny the read and it LOOKS contained. Only a kernel VIOLATION distinguishes the lease doing
-# its job from the filesystem doing it - which is why this probe is only meaningful against a
-# daemon running as root.
+control_text = text(readable_control)
+# The control has to actually read the file, or the "protected" case proves nothing: a denial is
+# only evidence when the same read succeeds without the protection.
+control_read_it = bool(control_text.strip()) and "Permission denied" not in control_text
+leaked = control_read_it and control_text.strip() in shadow_text
 mode_denied = "Permission denied" in shadow_text and not had(shadow, "VIOLATION")
 
 print(f"  permitted tool ran             : {'uid=' in text(allowed)}")
-print(f"  /etc/shadow contents leaked    : {leaked}")
+print(f"  control read the file unprotected : {control_read_it}")
+print(f"  protected file contents leaked : {leaked}")
 print(f"  kernel VIOLATION for the read  : {had(shadow, 'VIOLATION')}")
 if mode_denied:
-    print("    ^ denied by file mode, not by the lease - is this daemon running as root?")
+    print("    ^ denied by file mode, not by the lease - the read was refused before the hook ran")
+if not control_read_it:
+    print("    ^ the CONTROL could not read it either, so the denial above proves nothing")
 print(f"  unleased second exec blocked   : {had(dpkg, 'VIOLATION')}")
 print(f"  dpkg output leaked             : {'dpkg' in text(dpkg).lower() and 'version' in text(dpkg).lower()}")
 print()
@@ -305,11 +326,18 @@ print(f"  B denied A's executable        : {iso_holds}")
 print(f"  A itself still ran             : {had(iso_a, 'EXIT')}")
 print(f"  wrong port refused             : {had(port_bad, 'VIOLATION')}")
 print(f"  IPv6 refused                   : {had(v6, 'VIOLATION')}")
-# The lease is 5s and the sleep is 60s, so a kill returns at roughly 5-7s. The 15s bound sits
-# clear of both the kill and this call's own 20s settle timeout - without that margin a socket
-# that simply gave up would score as a successful kill.
-expiry_killed = had(expiry, "EXIT") and expiry_elapsed < 15
-print(f"  expiry killed the workload     : {expiry_killed}  (returned after {expiry_elapsed:.1f}s of a 60s sleep)")
+# A killed workload exits by SIGNAL, so the daemon reports no exit code and sends -1; a sleep that
+# ran its full 60s exits 0. Both the code and the clock have to agree, because -1 is also what a
+# refused request returns - and a refusal arrives with STDERR text, which this checks for too.
+expiry_code = next((m.get("exitCode") for m in (expiry or []) if m.get("type") == "EXIT"), None)
+expiry_refused = "SPLAT refused" in text(expiry)
+expiry_killed = (
+    had(expiry, "EXIT")
+    and not expiry_refused
+    and expiry_code == -1
+    and expiry_elapsed < 30
+)
+print(f"  expiry killed the workload     : {expiry_killed}  (exit {expiry_code} after {expiry_elapsed:.1f}s of a 60s sleep)")
 
 # A run that is not recorded is not proof - the same rule the canary follows.
 import datetime
@@ -332,6 +360,7 @@ evidence = {
     "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
     "results": {
         "permitted_tool_ran": "uid=" in text(allowed),
+        "protected_inode_control_could_read_it": control_read_it,
         "protected_inode_leaked": leaked,
         "protected_inode_violation": had(shadow, "VIOLATION"),
         "unleased_second_exec_blocked": had(dpkg, "VIOLATION"),
@@ -368,6 +397,8 @@ evidence = {
 # for. Refusals alone prove the hooks fire, not that the policy is right.
 evidence["verdict"] = "PASS" if (
     evidence["results"]["permitted_tool_ran"]
+    # Without the control the protected-file result is not a measurement.
+    and evidence["results"]["protected_inode_control_could_read_it"]
     and evidence["results"]["egress_permitted_destination_allowed"]
     and not evidence["results"]["protected_inode_leaked"]
     and evidence["results"]["protected_inode_violation"]
