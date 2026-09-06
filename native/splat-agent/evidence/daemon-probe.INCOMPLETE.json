@@ -1,0 +1,26 @@
+{
+  "schema": 2,
+  "bpf_source_sha256": "8ac49790aaaa6d3ffb04dd1ae568a0508537b43c0c0d216e71d2cbc20597fd59",
+  "protocol_version": 2,
+  "recorded_utc": "2026-09-06T00:08:33Z",
+  "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
+  "results": {
+    "permitted_tool_ran": false,
+    "protected_inode_leaked": false,
+    "protected_inode_violation": false,
+    "unleased_second_exec_blocked": false,
+    "egress_permitted_destination_allowed": true,
+    "egress_unleased_destination_blocked": false,
+    "egress_denied_when_network_off": false,
+    "every_request_completed": true,
+    "workload_not_root": false,
+    "workload_uid_reported": "SPLAT refused to execute: no lease could be provisioned (write 268435456 to /sys/fs/cgroup/splat_leases/mission_probe-priv/memory.max).",
+    "concurrent_lease_isolation_held": false,
+    "unapproved_port_refused": false,
+    "ipv6_refused": false,
+    "expiry_killed_the_workload": false,
+    "expiry_elapsed_seconds": 20.0
+  },
+  "violations": [],
+  "verdict": "INCOMPLETE"
+}

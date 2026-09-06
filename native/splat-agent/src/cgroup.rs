@@ -45,6 +45,9 @@ impl EphemeralCgroup {
             fs::create_dir_all(base).context("create base splat_leases cgroup")?;
         }
 
+        // Without this the mission cgroup has no memory.max to write to.
+        Self::delegate_controllers_to_children(base)?;
+
         let path = base.join(format!("mission_{mission_id}"));
         if !path.exists() {
             fs::create_dir(&path).with_context(|| format!("create mission cgroup {}", path.display()))?;
@@ -65,6 +68,54 @@ impl EphemeralCgroup {
         };
 
         Ok(Self { path, cgroup_id, effective })
+    }
+
+    /// Delegates the resource controllers to this cgroup's CHILDREN.
+    ///
+    /// cgroup v2 draws a distinction that is easy to miss: a controller listed in
+    /// `cgroup.controllers` is available TO that cgroup, and becomes available to its CHILDREN
+    /// only once it is additionally written to `cgroup.subtree_control`. Nothing ever wrote it, so
+    /// `/sys/fs/cgroup/splat_leases` had `memory.max` while `splat_leases/mission_X` had no such
+    /// file at all - and every clamp write was `let _ = fs::write(..)`, which discarded the
+    /// resulting ENOENT.
+    ///
+    /// So no lease has ever been clamped. Not a regression in the read-back work that surfaced it:
+    /// that work is what turned a silent failure into a refusal, and the refusal is what exposed
+    /// this. The memory, CPU and PID ceilings in the recorded daemon evidence were never in force.
+    fn delegate_controllers_to_children(base: &Path) -> Result<()> {
+        const REQUIRED: [&str; 3] = ["memory", "cpu", "pids"];
+
+        let controllers_file = base.join("cgroup.controllers");
+        let available = fs::read_to_string(&controllers_file)
+            .with_context(|| format!("read {}", controllers_file.display()))?;
+        let available: Vec<&str> = available.split_whitespace().collect();
+
+        // If the PARENT has not delegated a controller to us, we cannot pass it on, and a lease
+        // that cannot be clamped must not be provisioned. Name what is missing rather than failing
+        // later on an absent interface file.
+        let missing: Vec<&str> = REQUIRED
+            .iter()
+            .copied()
+            .filter(|c| !available.contains(c))
+            .collect();
+        if !missing.is_empty() {
+            bail!(
+                "{} lacks the {} controller(s) - its parent has not delegated them, so a lease \
+                 here could not be clamped. Enable them in the parent's cgroup.subtree_control.",
+                base.display(),
+                missing.join(", ")
+            );
+        }
+
+        // Enabling an already-enabled controller is a no-op, so this is safe on every call.
+        let enable = REQUIRED
+            .iter()
+            .map(|c| format!("+{c}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let subtree = base.join("cgroup.subtree_control");
+        fs::write(&subtree, &enable)
+            .with_context(|| format!("write '{enable}' to {}", subtree.display()))
     }
 
     /// Writes each clamp and reads back what the controller actually holds.
@@ -248,6 +299,40 @@ impl Drop for EphemeralCgroup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delegation_names_the_controller_the_parent_withheld() {
+        // A cgroup whose parent delegated nothing. The failure has to say WHICH controller is
+        // missing, because the symptom without it is an ENOENT on memory.max several steps later.
+        let dir = std::env::temp_dir().join(format!("splat_cg_deleg_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("cgroup.controllers"), "cpu pids").unwrap();
+
+        let err = EphemeralCgroup::delegate_controllers_to_children(&dir).unwrap_err();
+        assert!(err.to_string().contains("memory"), "{err}");
+        assert!(err.to_string().contains("not delegated") || err.to_string().contains("delegated"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delegation_enables_every_required_controller() {
+        let dir = std::env::temp_dir().join(format!("splat_cg_deleg2_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("cgroup.controllers"), "cpuset cpu io memory hugetlb pids rdma").unwrap();
+        std::fs::write(dir.join("cgroup.subtree_control"), "").unwrap();
+
+        EphemeralCgroup::delegate_controllers_to_children(&dir).expect("delegate");
+
+        // On a real cgroupfs the kernel rewrites this file; on a plain directory it keeps what was
+        // written, which is exactly the string the kernel would have been asked to apply.
+        let written = std::fs::read_to_string(dir.join("cgroup.subtree_control")).unwrap();
+        for c in ["+memory", "+cpu", "+pids"] {
+            assert!(written.contains(c), "{c} missing from '{written}'");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn cpu_percent_round_trips_through_the_quota_encoding() {
