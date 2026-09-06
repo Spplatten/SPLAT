@@ -5,6 +5,7 @@ using MissionController.Core;
 using MissionController.Core.Brain;
 using MissionController.Core.Crew;
 using MissionController.Core.Interfaces;
+using MissionController.Core.Workflow;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Compliance;
@@ -181,6 +182,25 @@ public partial class App : Application
         services.AddSingleton<IGovernedInvestigationLoop, GovernedInvestigationLoop>();
         services.AddSingleton<IProjectExecutionEngine, ProjectExecutionEngine>();
         services.AddSingleton<IGovernedCrewEngine, GovernedCrewEngine>();
+
+        // The orchestrator. Registered here because until now it was not: the workflow engine was
+        // constructed only by its own tests, so every guarantee it grew was a guarantee no shipped
+        // code path could reach. Its mission engine and template registry are the SAME singletons
+        // the single-mission UI uses - a workflow step is one governed mission, run by the one
+        // engine that knows how, rather than a parallel execution tier that reimplements a subset.
+        services.AddSingleton<IWorkflowExecutionEngine>(sp => new WorkflowExecutionEngine(
+            dlpSanitizer: sp.GetRequiredService<IDataLossPreventionSanitizer>(),
+            processLauncher: sp.GetRequiredService<IProcessLauncher>(),
+            // Only the TransactionalScope node still launches directly; every other step goes
+            // through the mission engine. Each scope gets its own named job object.
+            sandboxFactory: () => sp.GetRequiredService<Func<string, IJobSandbox>>()(
+                $"splat-workflow-{Guid.NewGuid():N}"),
+            auditLedger: sp.GetRequiredService<IAuditLedger>(),
+            modelClient: sp.GetRequiredService<IModelStreamClient>(),
+            semanticMemoryIndex: sp.GetRequiredService<ISemanticMemoryIndex>(),
+            remediationEngine: sp.GetRequiredService<IRemediationEngine>(),
+            missionEngine: sp.GetRequiredService<IMissionExecutionEngine>(),
+            templateRegistry: sp.GetRequiredService<ITemplateRegistry>()));
 
         // ViewModels
         services.AddSingleton<WelcomeOnboardingViewModel>();

@@ -124,34 +124,41 @@ public class FailureIsNotEvidenceTests
     }
 
     [Fact]
-    public async Task AScriptNodeWithNoSandbox_FailsUnlessSimulationWasAskedFor()
+    public async Task AMissionNodeWithNoMissionEngine_FailsInsteadOfSimulating()
     {
+        // Same honesty property the old SandboxedScript version tested, transposed onto the node
+        // type that replaced it. There is deliberately no simulation escape hatch here: a script
+        // node could be demoed because nothing about it was ever contained, whereas a mission node
+        // IS its containment, so a mission with no engine behind it has nothing to pretend with.
         var graph = new WorkflowGraph(
-            WorkflowId: "flow-no-sandbox",
-            Name: "No Sandbox",
-            Description: "A script node with neither launcher nor job object wired.",
+            WorkflowId: "flow-no-engine",
+            Name: "No Mission Engine",
+            Description: "A governed step with no substrate wired underneath it.",
             Trigger: new WorkflowTriggerConfig(WorkflowTriggerType.Manual),
             Nodes: new List<WorkflowNode>
             {
-                new("probe", "Probe", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(),
-                    ScriptCommand: "Write-Output 'hello'")
+                WorkflowMissionDoubles.MissionNode("probe", "Probe", "test-probe")
             },
             Edges: new List<WorkflowEdge>());
 
-        // Default composition wires neither, and used to answer "[SIMULATED_SANDBOX] Executed
-        // script: ..." with Success=true. Containment that was never applied is not a result.
-        var strict = new WorkflowExecutionEngine();
+        // Default composition wires neither engine nor registry, and allowSimulatedExecution must
+        // not buy its way past that.
+        var strict = new WorkflowExecutionEngine(allowSimulatedExecution: true);
         var refused = await strict.ExecuteAsync(graph, new Dictionary<string, string>(), "operator");
 
         Assert.False(refused.Success);
-        Assert.Contains("nothing was executed", refused.FailureReason);
+        Assert.Contains("no mission engine is wired", refused.FailureReason);
+        Assert.DoesNotContain("SIMULATED", string.Join(" ", refused.ExecutionLogs));
 
-        // The demo still exists; it just has to be asked for, and it says so in its own output.
-        var demo = new WorkflowExecutionEngine(allowSimulatedExecution: true);
-        var simulated = await demo.ExecuteAsync(graph, new Dictionary<string, string>(), "operator");
+        // The control: the identical graph succeeds the moment a substrate is present, so the
+        // refusal above is about the missing engine and not about the graph.
+        var wired = new WorkflowExecutionEngine(
+            missionEngine: new RecordingMissionEngine("real output"),
+            templateRegistry: new StubTemplateRegistry("test-probe"));
+        var ran = await wired.ExecuteAsync(graph, new Dictionary<string, string>(), "operator");
 
-        Assert.True(simulated.Success, simulated.FailureReason);
-        Assert.Contains("SIMULATED_SANDBOX", simulated.NodeOutputs["probe"]);
+        Assert.True(ran.Success, ran.FailureReason);
+        Assert.Contains("real output", ran.NodeOutputs["probe"]);
     }
 
     [Fact]
@@ -160,17 +167,17 @@ public class FailureIsNotEvidenceTests
         // The refusals above must not cost the working path. Same graph shape, services present.
         var engine = new WorkflowExecutionEngine(
             modelClient: new SilentModelClient(),
-            allowSimulatedExecution: true);
+            missionEngine: new RecordingMissionEngine("hello"),
+            templateRegistry: new StubTemplateRegistry("test-probe"));
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-wired",
             Name: "Wired",
-            Description: "Script then analysis, both serviced.",
+            Description: "Mission then analysis, both serviced.",
             Trigger: new WorkflowTriggerConfig(WorkflowTriggerType.Manual),
             Nodes: new List<WorkflowNode>
             {
-                new("probe", "Probe", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(),
-                    ScriptCommand: "Write-Output 'hello'"),
+                WorkflowMissionDoubles.MissionNode("probe", "Probe", "test-probe"),
                 new("analyse", "Triage", WorkflowNodeType.AgentReasoning,
                     new Dictionary<string, string> { { "Prompt", "Summarise." } })
             },

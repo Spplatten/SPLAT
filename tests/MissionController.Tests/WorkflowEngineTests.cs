@@ -111,8 +111,8 @@ public class WorkflowEngineTests
             Nodes: new List<WorkflowNode>
             {
                 new("node1", "Node 1", WorkflowNodeType.Trigger, new Dictionary<string, string>()),
-                new("node2", "Node 2", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>()),
-                new("node3", "Node 3", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>())
+                new("node2", "Node 2", WorkflowNodeType.GovernedMission, new Dictionary<string, string>()),
+                new("node3", "Node 3", WorkflowNodeType.GovernedMission, new Dictionary<string, string>())
             },
             Edges: new List<WorkflowEdge>
             {
@@ -135,7 +135,7 @@ public class WorkflowEngineTests
             Nodes: new List<WorkflowNode>
             {
                 new("node1", "First Node", WorkflowNodeType.Trigger, new Dictionary<string, string>()),
-                new("node1", "Duplicate Node", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>())
+                new("node1", "Duplicate Node", WorkflowNodeType.GovernedMission, new Dictionary<string, string>())
             },
             Edges: new List<WorkflowEdge>());
 
@@ -166,7 +166,11 @@ public class WorkflowEngineTests
     public async Task WorkflowExecutionEngine_ExecutesSequentialGraph_LogsLedger()
     {
         var ledger = new InMemoryAuditLedger();
-        var engine = new WorkflowExecutionEngine(auditLedger: ledger, modelClient: new StubWorkflowModelClient(), allowSimulatedExecution: true);
+        var engine = new WorkflowExecutionEngine(
+            auditLedger: ledger,
+            modelClient: new StubWorkflowModelClient(),
+            missionEngine: new RecordingMissionEngine("hello"),
+            templateRegistry: new StubTemplateRegistry("test-probe"));
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-sequential-test",
@@ -176,7 +180,7 @@ public class WorkflowEngineTests
             Nodes: new List<WorkflowNode>
             {
                 new("trigger", "Start Trigger", WorkflowNodeType.Trigger, new Dictionary<string, string>()),
-                new("step1", "Step 1", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(), ScriptCommand: "echo hello"),
+                WorkflowMissionDoubles.MissionNode("step1", "Step 1", "test-probe"),
                 new("step2", "Step 2", WorkflowNodeType.AgentReasoning, new Dictionary<string, string> { { "Prompt", "Summarize findings" } })
             },
             Edges: new List<WorkflowEdge>
@@ -193,7 +197,7 @@ public class WorkflowEngineTests
         Assert.True(result.Success);
         Assert.Contains(ledger.Logs, l => l.Action == "WORKFLOW_INITIATED");
         Assert.Contains(ledger.Logs, l => l.Action == "NODE_COMPLETED:Trigger");
-        Assert.Contains(ledger.Logs, l => l.Action == "NODE_COMPLETED:SandboxedScript");
+        Assert.Contains(ledger.Logs, l => l.Action == "NODE_COMPLETED:GovernedMission");
         Assert.Contains(ledger.Logs, l => l.Action == "NODE_COMPLETED:AgentReasoning");
         Assert.Contains(ledger.Logs, l => l.Action == "WORKFLOW_COMPLETED");
     }
@@ -202,7 +206,15 @@ public class WorkflowEngineTests
     public async Task WorkflowExecutionEngine_SanitizesSensitiveSecretsWithDlp()
     {
         var dlp = new RegexDataLossPreventionSanitizer();
-        var engine = new WorkflowExecutionEngine(dlpSanitizer: dlp, modelClient: new StubWorkflowModelClient(), allowSimulatedExecution: true);
+
+        // The secret arrives the way one really would: in a tool's stdout, from inside a mission.
+        // Planting it in the node's own configuration would test the substitution path instead of
+        // the DLP pass that guards what one node hands the next.
+        var engine = new WorkflowExecutionEngine(
+            dlpSanitizer: dlp,
+            modelClient: new StubWorkflowModelClient(),
+            missionEngine: new RecordingMissionEngine("api_key=sk_live_secret_token_abcdef1234567890"),
+            templateRegistry: new StubTemplateRegistry("test-probe"));
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-dlp-test",
@@ -211,8 +223,7 @@ public class WorkflowEngineTests
             Trigger: new WorkflowTriggerConfig(WorkflowTriggerType.Manual),
             Nodes: new List<WorkflowNode>
             {
-                new("step1", "Leak Password", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(),
-                    ScriptCommand: "api_key=sk_live_secret_token_abcdef1234567890"),
+                WorkflowMissionDoubles.MissionNode("step1", "Leak Password", "test-probe"),
                 new("step2", "Receiver", WorkflowNodeType.AgentReasoning, new Dictionary<string, string>())
             },
             Edges: new List<WorkflowEdge> { new("step1", "step2") });
@@ -229,7 +240,9 @@ public class WorkflowEngineTests
     [Fact]
     public async Task WorkflowExecutionEngine_ConditionalBranching_SkipsInactiveBranch()
     {
-        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
+        var engine = new WorkflowExecutionEngine(
+            missionEngine: new RecordingMissionEngine(),
+            templateRegistry: new StubTemplateRegistry("test-probe"));
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-branch-test",
@@ -244,8 +257,8 @@ public class WorkflowEngineTests
                     { "Field", "trigger" },
                     { "Matches", "CriticalAlarm" }
                 }),
-                new("trueNode", "Handle Critical", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(), ScriptCommand: "handle alarm"),
-                new("falseNode", "Handle Normal", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(), ScriptCommand: "handle normal")
+                WorkflowMissionDoubles.MissionNode("trueNode", "Handle Critical", "test-probe"),
+                WorkflowMissionDoubles.MissionNode("falseNode", "Handle Normal", "test-probe")
             },
             Edges: new List<WorkflowEdge>
             {
@@ -275,7 +288,16 @@ public class WorkflowEngineTests
         Assert.Equal("flow-tiktok-oauth-ads", graph.WorkflowId);
         Assert.Equal(WorkflowTriggerType.OAuthCallback, graph.Trigger.Type);
         Assert.Contains(graph.Nodes, n => n.NodeType == WorkflowNodeType.OAuthExchange);
-        Assert.Contains(graph.Nodes, n => n.AllowedEgressFqdn == "business-api.tiktok.com");
+
+        // The old assertion demanded a node pinned to business-api.tiktok.com. Nothing in this
+        // build talks to TikTok: that node was a Write-Output of invented campaign figures wearing
+        // an egress pin, and the figures were then "analysed" downstream. What survives is the
+        // OAuth leg - which refuses, honestly - and a governed step that measures the endpoint's
+        // actual egress posture. A real TikTok connector is a catalogue template someone writes.
+        Assert.Contains(graph.Nodes, n =>
+            n.NodeType == WorkflowNodeType.GovernedMission &&
+            n.Configuration[WorkflowExecutionEngine.TemplateIdKey] == "secops-tls-cipher-audit");
+        Assert.DoesNotContain(graph.Nodes, n => n.AllowedEgressFqdn == "business-api.tiktok.com");
     }
 
     [Fact]
@@ -288,7 +310,9 @@ public class WorkflowEngineTests
         Assert.Equal("flow-log-audit-alert", graph.WorkflowId);
         Assert.Equal(WorkflowTriggerType.Schedule, graph.Trigger.Type);
         Assert.Contains(graph.Nodes, n => n.NodeType == WorkflowNodeType.Condition);
-        Assert.Contains(graph.Nodes, n => n.Name.Contains("Log Scraper"));
+        Assert.Contains(graph.Nodes, n =>
+            n.NodeType == WorkflowNodeType.GovernedMission &&
+            n.Configuration[WorkflowExecutionEngine.TemplateIdKey] == "secops-auth-inspector");
     }
 
     [Fact]
@@ -300,7 +324,13 @@ public class WorkflowEngineTests
         Assert.NotNull(graph);
         Assert.Equal("flow-email-governed-parser", graph.WorkflowId);
         Assert.Equal(WorkflowTriggerType.Webhook, graph.Trigger.Type);
-        Assert.Contains(graph.Nodes, n => n.Name.Contains("Financial Parser"));
+
+        // "Financial Parser" analysed a fabricated $3,450.00 invoice that the node above it had
+        // written out as a string literal. The mail itself arrives in the trigger payload; the part
+        // that can be governed is the endpoint that received it.
+        Assert.Contains(graph.Nodes, n =>
+            n.NodeType == WorkflowNodeType.GovernedMission &&
+            n.Configuration[WorkflowExecutionEngine.TemplateIdKey] == "endpoint-firewall-audit");
     }
 
     [Fact]
@@ -502,7 +532,10 @@ public class WorkflowEngineTests
     {
         int port = 5698;
         var registry = new InMemoryWorkflowRegistry();
-        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
+        var missions = new RecordingMissionEngine("API_EXECUTION_ACK");
+        var engine = new WorkflowExecutionEngine(
+            missionEngine: missions,
+            templateRegistry: new StubTemplateRegistry("test-probe"));
         using var listener = new EmbeddedWebhookListener(port, registry, engine);
 
         var testWorkflow = new WorkflowGraph(
@@ -512,10 +545,10 @@ public class WorkflowEngineTests
             Trigger: new WorkflowTriggerConfig(WorkflowTriggerType.Manual),
             Nodes: new List<WorkflowNode>
             {
-                new("echo-node", "Echo Node", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(),
-                    ScriptCommand: "Write-Output 'API_EXECUTION_ACK: payload={paramA}'")
+                new("trigger", "Inbound", WorkflowNodeType.Trigger, new Dictionary<string, string>()),
+                WorkflowMissionDoubles.MissionNode("echo-node", "Echo Node", "test-probe", ("payload", "{trigger.paramA}"))
             },
-            Edges: new List<WorkflowEdge>());
+            Edges: new List<WorkflowEdge> { new("trigger", "echo-node") });
 
         await registry.RegisterWorkflowAsync(testWorkflow);
 
@@ -541,6 +574,10 @@ public class WorkflowEngineTests
         string execJson = await execResponse.Content.ReadAsStringAsync();
         Assert.Contains("\"success\":true", execJson);
         Assert.Contains("flow-rest-api-target", execJson);
+
+        // The POST body reached the mission as a parameter. Without this the route could return
+        // success for a run that never carried the caller's input anywhere.
+        Assert.Equal("SuperSecretInput", Assert.Single(missions.Invocations).Parameters["payload"]);
     }
 
     [Fact]

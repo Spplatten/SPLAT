@@ -76,28 +76,42 @@ public class WorkflowGovernanceTests
         }
     }
 
-    private static WorkflowGraph SingleScriptGraph(string scriptCommand, string workflowId = "flow-under-test") =>
+    private const string ProbeTemplate = "test-probe";
+
+    /// <summary>A webhook trigger feeding one governed mission - the smallest real workflow.</summary>
+    private static WorkflowGraph SingleMissionGraph(
+        string workflowId = "flow-under-test",
+        params (string Key, string Value)[] parameters) =>
         new(
             WorkflowId: workflowId,
             Name: "Workflow Under Test",
-            Description: "Single sandboxed script node.",
+            Description: "Single governed mission node.",
             Trigger: new WorkflowTriggerConfig(WorkflowTriggerType.Webhook),
             Nodes: new List<WorkflowNode>
             {
                 new("trigger", "Inbound", WorkflowNodeType.Trigger, new Dictionary<string, string>()),
-                new("script", "Script", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(),
-                    ScriptCommand: scriptCommand)
+                WorkflowMissionDoubles.MissionNode("probe", "Probe", ProbeTemplate, parameters)
             },
-            Edges: new List<WorkflowEdge> { new("trigger", "script") });
+            Edges: new List<WorkflowEdge> { new("trigger", "probe") });
+
+    private static WorkflowExecutionEngine Engine(
+        RecordingMissionEngine missions,
+        IAuditLedger? ledger = null,
+        params string[] templateIds) =>
+        new(
+            auditLedger: ledger,
+            missionEngine: missions,
+            templateRegistry: new StubTemplateRegistry(
+                templateIds.Length > 0 ? templateIds : new[] { ProbeTemplate }));
 
     [Fact]
     public async Task TheExecutionIdOnTheResult_IsTheIdWrittenToTheLedger()
     {
         var ledger = new RecordingAuditLedger();
-        var engine = new WorkflowExecutionEngine(auditLedger: ledger, allowSimulatedExecution: true);
+        var engine = Engine(new RecordingMissionEngine(), ledger);
 
         var result = await engine.ExecuteAsync(
-            SingleScriptGraph("Write-Output 'hello'"),
+            SingleMissionGraph(),
             new Dictionary<string, string>(),
             "operator");
 
@@ -109,38 +123,115 @@ public class WorkflowGovernanceTests
     }
 
     [Fact]
-    public async Task AScriptNodeThatExitsNonZero_FailsTheWorkflow()
+    public async Task AMissionNode_RunsThroughTheMissionEngine_NotTheWorkflowsOwnLauncher()
     {
-        var ledger = new RecordingAuditLedger();
+        // The load-bearing assertion of the whole rewrite. A workflow step that reports success
+        // without reaching the mission engine has skipped the jail, the argument binder, the DLP
+        // pass and the ledger row - which is what the old SandboxedScript node did while sitting in
+        // a graph the operator was told was governed. So the test reads the delegation directly
+        // rather than believing the run's report of itself.
+        var missions = new RecordingMissionEngine("PROBE OUTPUT");
+        var launcher = new ScriptedProcessLauncher();
         var engine = new WorkflowExecutionEngine(
-            processLauncher: new ScriptedProcessLauncher(exitCode: 3),
+            processLauncher: launcher,
             sandboxFactory: () => new FakeJobSandbox(),
-            auditLedger: ledger);
+            missionEngine: missions,
+            templateRegistry: new StubTemplateRegistry(ProbeTemplate));
 
         var result = await engine.ExecuteAsync(
-            SingleScriptGraph("Write-Output 'hello'"),
+            SingleMissionGraph(),
+            new Dictionary<string, string>(),
+            "operator");
+
+        Assert.True(result.Success, result.FailureReason);
+        var invocation = Assert.Single(missions.Invocations);
+        Assert.Equal(ProbeTemplate, invocation.TemplateId);
+        Assert.Equal("operator", invocation.OperatorIdentity);
+        Assert.Contains("PROBE OUTPUT", result.NodeOutputs["probe"]);
+
+        // A launcher was wired and must have stayed idle: no second execution tier.
+        Assert.Empty(launcher.Arguments);
+    }
+
+    [Fact]
+    public async Task AMissionThatNeverCompletes_FailsTheWorkflow()
+    {
+        // The mission engine reports a failed exit contract, a timeout or a rejected analysis by
+        // ending its stream without a Completed chunk. Treating that as success would hand the
+        // partial output downstream as though it were a finished measurement.
+        var ledger = new RecordingAuditLedger();
+        var engine = Engine(RecordingMissionEngine.NeverCompletes("PARTIAL"), ledger);
+
+        var result = await engine.ExecuteAsync(
+            SingleMissionGraph(),
             new Dictionary<string, string>(),
             "operator");
 
         Assert.False(result.Success);
-        Assert.Contains("exited 3", result.FailureReason);
+        Assert.Contains("did not complete", result.FailureReason);
         Assert.Contains(ledger.Entries, e => e.Action == "WORKFLOW_FAILED");
     }
 
     [Fact]
-    public async Task AScriptNodeThatTimesOut_FailsTheWorkflow()
+    public async Task AMissionNamingATemplateTheCatalogueDoesNotHave_IsRefused()
     {
+        // Not synthesised, not defaulted. A template absent from the catalogue has no reviewed
+        // policy behind it, so there is nothing for the mission engine to enforce.
+        var missions = new RecordingMissionEngine();
         var engine = new WorkflowExecutionEngine(
-            processLauncher: new ScriptedProcessLauncher(exitCode: 0, timedOut: true),
-            sandboxFactory: () => new FakeJobSandbox());
+            missionEngine: missions,
+            templateRegistry: new StubTemplateRegistry(ProbeTemplate));
 
-        var result = await engine.ExecuteAsync(
-            SingleScriptGraph("Write-Output 'hello'"),
-            new Dictionary<string, string>(),
-            "operator");
+        var graph = new WorkflowGraph(
+            WorkflowId: "flow-unknown-template",
+            Name: "Unknown Template",
+            Description: "Names something the catalogue never reviewed.",
+            Trigger: new WorkflowTriggerConfig(WorkflowTriggerType.Manual),
+            Nodes: new List<WorkflowNode>
+            {
+                WorkflowMissionDoubles.MissionNode("probe", "Probe", "not-in-the-catalogue")
+            },
+            Edges: new List<WorkflowEdge>());
+
+        var result = await engine.ExecuteAsync(graph, new Dictionary<string, string>(), "operator");
 
         Assert.False(result.Success);
-        Assert.Contains("budget", result.FailureReason);
+        Assert.Contains("not in the governed catalogue", result.FailureReason);
+        Assert.Empty(missions.Invocations);
+    }
+
+    [Fact]
+    public async Task ASandboxedScriptNode_IsRefusedRatherThanRun()
+    {
+        // The old node type is kept in the enum so a stored graph deserialises and says why it
+        // stopped, rather than throwing an enum error the operator cannot act on. What it must
+        // never do again is launch anything - including under allowSimulatedExecution, which is
+        // wired here precisely so the refusal cannot be an artefact of a missing launcher.
+        var launcher = new ScriptedProcessLauncher();
+        var engine = new WorkflowExecutionEngine(
+            processLauncher: launcher,
+            sandboxFactory: () => new FakeJobSandbox(),
+            allowSimulatedExecution: true,
+            missionEngine: new RecordingMissionEngine(),
+            templateRegistry: new StubTemplateRegistry(ProbeTemplate));
+
+        var graph = new WorkflowGraph(
+            WorkflowId: "flow-legacy-script",
+            Name: "Legacy Script",
+            Description: "A graph saved before the mission rewrite.",
+            Trigger: new WorkflowTriggerConfig(WorkflowTriggerType.Manual),
+            Nodes: new List<WorkflowNode>
+            {
+                new("script", "Script", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(),
+                    ScriptCommand: "Write-Output 'hello'")
+            },
+            Edges: new List<WorkflowEdge>());
+
+        var result = await engine.ExecuteAsync(graph, new Dictionary<string, string>(), "operator");
+
+        Assert.False(result.Success);
+        Assert.Contains("no longer run", result.FailureReason);
+        Assert.Empty(launcher.Arguments);
     }
 
     [Fact]
@@ -174,33 +265,57 @@ public class WorkflowGovernanceTests
         Assert.Contains("[TRANSACTION_ROLLED_BACK]", result.NodeOutputs["tx"]);
     }
 
+    /// <summary>
+    /// Runs the real binder over whatever the workflow handed down, exactly as a mission does, so
+    /// the refusal under test is the shipped policy rather than a restatement of it.
+    /// </summary>
+    private static RecordingMissionEngine BindingMissionEngine() =>
+        new((templateId, parameters) =>
+        {
+            var baseTemplate = WorkflowMissionDoubles.Template(templateId);
+            var template = baseTemplate with
+            {
+                Tool = baseTemplate.Tool with
+                {
+                    ArgumentsTemplate = "-Command \"Write-Output 'received: {payload}'\""
+                }
+            };
+            MissionController.Core.GovernedArgumentBinder.Bind(template, parameters);
+            return RecordingMissionEngine.Emit("bound", complete: true);
+        });
+
     [Fact]
     public async Task AWebhookPayloadCarryingShellMetacharacters_IsRefusedNotExecuted()
     {
         var launcher = new ScriptedProcessLauncher();
         var engine = new WorkflowExecutionEngine(
             processLauncher: launcher,
-            sandboxFactory: () => new FakeJobSandbox());
+            sandboxFactory: () => new FakeJobSandbox(),
+            missionEngine: BindingMissionEngine(),
+            templateRegistry: new StubTemplateRegistry(ProbeTemplate));
 
-        // The trigger node turns the payload into "field=value" lines, and the script node used to
-        // splice those straight into powershell.exe -Command.
+        // The workflow passes the payload field down as a mission PARAMETER and never builds a
+        // command from it; the refusal comes from the binder inside the mission, which is where
+        // the boundary now lives.
         var result = await engine.ExecuteAsync(
-            SingleScriptGraph("Write-Output 'received: {trigger}'"),
+            SingleMissionGraph(parameters: ("payload", "{trigger.field}")),
             new Dictionary<string, string> { { "field", "x'; Start-Process calc.exe; '" } },
             "anonymous-webhook");
 
         Assert.False(result.Success);
         Assert.Contains("refused by the governed argument binder", result.FailureReason);
-        Assert.DoesNotContain(launcher.Arguments, a => a.Contains("calc.exe"));
+
+        // The refusal names the parameter and not its value on purpose: echoing attacker text into
+        // an audit trail an operator reads is its own injection surface.
+        Assert.DoesNotContain("calc.exe", result.FailureReason);
+        Assert.Empty(launcher.Arguments);
     }
 
     [Fact]
     public async Task ASecondOrderPlaceholderInsideAValue_IsNotReExpanded()
     {
-        var launcher = new ScriptedProcessLauncher();
-        var engine = new WorkflowExecutionEngine(
-            processLauncher: launcher,
-            sandboxFactory: () => new FakeJobSandbox());
+        var missions = new RecordingMissionEngine();
+        var engine = Engine(missions);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-second-order",
@@ -209,9 +324,8 @@ public class WorkflowGovernanceTests
             Trigger: new WorkflowTriggerConfig(WorkflowTriggerType.Manual),
             Nodes: new List<WorkflowNode>
             {
-                new("script", "Script", WorkflowNodeType.SandboxedScript,
-                    new Dictionary<string, string> { { "Outer", "{Inner}" }, { "Inner", "payload" } },
-                    ScriptCommand: "Write-Output '{Outer}'")
+                WorkflowMissionDoubles.MissionNode("probe", "Probe", ProbeTemplate,
+                    ("Outer", "{Inner}"), ("Inner", "payload"))
             },
             Edges: new List<WorkflowEdge>());
 
@@ -219,43 +333,36 @@ public class WorkflowGovernanceTests
 
         Assert.True(result.Success, result.FailureReason);
 
-        // One pass over the author's template: {Outer} resolves to the literal "{Inner}" and stops.
-        string commandLine = Assert.Single(launcher.Arguments);
-        Assert.Contains("{Inner}", commandLine);
-        Assert.DoesNotContain("payload", commandLine);
+        // One pass over the author's value: {Outer} resolves to the literal "{Inner}" and stops.
+        // A second pass would let a node output name a placeholder and have it expanded, which is
+        // the second-order injection the single-pass substitution exists to prevent.
+        Assert.Equal("{Inner}", Assert.Single(missions.Invocations).Parameters["Outer"]);
     }
 
     [Fact]
     public async Task AnAlphanumericPayloadInAQuotedLiteral_StillBinds()
     {
-        var launcher = new ScriptedProcessLauncher();
+        // The control for the refusal above, through the identical path. Without it a binder that
+        // refused everything would pass that test - and a refusal that cannot succeed is a broken
+        // feature, not a guarantee.
+        var missions = BindingMissionEngine();
         var engine = new WorkflowExecutionEngine(
-            processLauncher: launcher,
-            sandboxFactory: () => new FakeJobSandbox());
+            missionEngine: missions,
+            templateRegistry: new StubTemplateRegistry(ProbeTemplate));
 
-        var graph = new WorkflowGraph(
-            WorkflowId: "flow-legitimate-binding",
-            Name: "Legitimate Binding",
-            Description: "The guard must not cost the product its ordinary case.",
-            Trigger: new WorkflowTriggerConfig(WorkflowTriggerType.Manual),
-            Nodes: new List<WorkflowNode>
-            {
-                new("script", "Script", WorkflowNodeType.SandboxedScript,
-                    new Dictionary<string, string> { { "Host", "api.internal.example.com" } },
-                    ScriptCommand: "Test-Connection -TargetName '{Host}'")
-            },
-            Edges: new List<WorkflowEdge>());
-
-        var result = await engine.ExecuteAsync(graph, new Dictionary<string, string>(), "operator");
+        var result = await engine.ExecuteAsync(
+            SingleMissionGraph(parameters: ("payload", "{trigger.field}")),
+            new Dictionary<string, string> { { "field", "api.internal.example.com" } },
+            "anonymous-webhook");
 
         Assert.True(result.Success, result.FailureReason);
-        Assert.Contains(launcher.Arguments, a => a.Contains("api.internal.example.com"));
+        Assert.Contains("api.internal.example.com", Assert.Single(missions.Invocations).Parameters["payload"]);
     }
 
     [Fact]
     public async Task AConditionScopedToAField_IgnoresEveryOtherNodesOutput()
     {
-        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
+        var engine = Engine(new RecordingMissionEngine("all clear"));
 
         // 'probe' is the field under test and reports healthy. The trigger payload - which an
         // unauthenticated caller controls - carries the alarm text the gate looks for.
@@ -267,12 +374,10 @@ public class WorkflowGovernanceTests
             Nodes: new List<WorkflowNode>
             {
                 new("trigger", "Inbound", WorkflowNodeType.Trigger, new Dictionary<string, string>()),
-                new("probe", "Probe", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(),
-                    ScriptCommand: "Write-Output 'all clear'"),
+                WorkflowMissionDoubles.MissionNode("probe", "Probe", ProbeTemplate),
                 new("gate", "Escalation Gate", WorkflowNodeType.Condition,
                     new Dictionary<string, string> { { "Field", "probe" }, { "Matches", "CriticalAlarm" } }),
-                new("escalate", "Escalate", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(),
-                    ScriptCommand: "Write-Output 'paging secops'")
+                WorkflowMissionDoubles.MissionNode("escalate", "Escalate", ProbeTemplate)
             },
             Edges: new List<WorkflowEdge>
             {
@@ -316,7 +421,8 @@ public class WorkflowGovernanceTests
     [Fact]
     public async Task ADescendantOfASkippedNode_IsSkippedToo()
     {
-        var engine = new WorkflowExecutionEngine(allowSimulatedExecution: true);
+        var missions = new RecordingMissionEngine("all clear");
+        var engine = Engine(missions);
 
         var graph = new WorkflowGraph(
             WorkflowId: "flow-transitive-skip",
@@ -325,14 +431,11 @@ public class WorkflowGovernanceTests
             Trigger: new WorkflowTriggerConfig(WorkflowTriggerType.Manual),
             Nodes: new List<WorkflowNode>
             {
-                new("probe", "Probe", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(),
-                    ScriptCommand: "Write-Output 'all clear'"),
+                WorkflowMissionDoubles.MissionNode("probe", "Probe", ProbeTemplate),
                 new("gate", "Gate", WorkflowNodeType.Condition,
                     new Dictionary<string, string> { { "Field", "probe" }, { "Matches", "CriticalAlarm" } }),
-                new("page", "Page SecOps", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(),
-                    ScriptCommand: "Write-Output 'paging'"),
-                new("remediate", "Restart Service", WorkflowNodeType.SandboxedScript, new Dictionary<string, string>(),
-                    ScriptCommand: "Write-Output 'restarting'")
+                WorkflowMissionDoubles.MissionNode("page", "Page SecOps", ProbeTemplate),
+                WorkflowMissionDoubles.MissionNode("remediate", "Restart Service", ProbeTemplate)
             },
             Edges: new List<WorkflowEdge>
             {
@@ -346,6 +449,10 @@ public class WorkflowGovernanceTests
         Assert.True(result.Success, result.FailureReason);
         Assert.DoesNotContain("page", result.NodeOutputs.Keys);
         Assert.DoesNotContain("remediate", result.NodeOutputs.Keys);
+
+        // A skipped node must not have reached the substrate either. Asserting only the absence of
+        // an OUTPUT would pass even if the mission ran and its result was discarded.
+        Assert.Equal(new[] { ProbeTemplate }, missions.Invocations.Select(i => i.TemplateId));
     }
 
     [Fact]
@@ -399,10 +506,15 @@ public class WorkflowGovernanceTests
     }
 
     [Fact]
-    public async Task EverySynthesizedTemplate_BindsWithoutRefusal()
+    public async Task EverySynthesizedMissionNode_NamesATemplateTheCatalogueActuallyHas()
     {
-        // The shipped templates are the first thing an operator runs. A template that the governed
-        // binder refuses is a template that cannot execute, and that must fail here, not in the UI.
+        // The synthesiser composes catalogue templates by id, and a mistyped id is a workflow that
+        // synthesises cleanly, saves cleanly, and refuses the moment an operator runs it. The
+        // shipped catalogue is the authority, so it is what the ids are checked against.
+        var catalogue = new HashSet<string>(
+            MissionController.Infrastructure.Data.Catalog.GovernedTemplateCatalog.All.Select(t => t.TemplateId),
+            StringComparer.OrdinalIgnoreCase);
+
         var synthesizer = new WorkflowSynthesizerEngine();
         string[] prompts =
         {
@@ -418,8 +530,23 @@ public class WorkflowGovernanceTests
         {
             var graph = await synthesizer.SynthesizeFromNaturalLanguageAsync(prompt);
 
+            foreach (var node in graph.Nodes.Where(n => n.NodeType == WorkflowNodeType.GovernedMission))
+            {
+                Assert.True(
+                    node.Configuration.TryGetValue(WorkflowExecutionEngine.TemplateIdKey, out var templateId),
+                    $"'{node.NodeId}' in '{graph.WorkflowId}' is a mission node with no template id");
+                Assert.True(
+                    catalogue.Contains(templateId!),
+                    $"'{node.NodeId}' in '{graph.WorkflowId}' names '{templateId}', absent from the catalogue");
+            }
+
+            // A synthesised script node is one the rewrite missed: it would be refused at run time,
+            // so it fails here instead, where the author can see it.
+            Assert.DoesNotContain(graph.Nodes, n => n.NodeType == WorkflowNodeType.SandboxedScript);
+
             foreach (var node in graph.Nodes.Where(n => n.ScriptCommand is not null))
             {
+                Assert.Equal(WorkflowNodeType.TransactionalScope, node.NodeType);
                 var values = new Dictionary<string, string>(node.Configuration, StringComparer.OrdinalIgnoreCase);
                 var bound = MissionController.Core.GovernedArgumentBinder.BindWorkflowCommand(node.ScriptCommand, values);
                 Assert.NotNull(bound);

@@ -16,6 +16,23 @@ public enum WorkflowTriggerType
 public enum WorkflowNodeType
 {
     Trigger,
+
+    /// <summary>
+    /// One governed template, run as a complete 1:1:1 mission through
+    /// <see cref="MissionController.Core.Interfaces.IMissionExecutionEngine"/>.
+    ///
+    /// This is what a workflow step IS. A node names a template from the governed catalogue and
+    /// supplies its declared parameters; the mission engine then does what it always does - ACL
+    /// jail, job object, restricted token, AppContainer network denial, validated argument binding,
+    /// DLP on the way out, and its own row in the audit ledger. The workflow contributes ordering
+    /// and nothing else, which is the only arrangement in which "governed workflow" means anything.
+    /// </summary>
+    GovernedMission,
+
+    /// <summary>
+    /// Free-form shell, executed outside the mission engine. REFUSED - see
+    /// <see cref="MissionController.Core.Workflow.WorkflowExecutionEngine"/>.
+    /// </summary>
     SandboxedScript,
     AgentReasoning,
     OAuthExchange,

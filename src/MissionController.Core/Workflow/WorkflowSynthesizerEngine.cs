@@ -9,6 +9,36 @@ namespace MissionController.Core.Workflow;
 
 public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
 {
+    /// <summary>
+    /// Builds a node that runs one governed template as a mission.
+    ///
+    /// The synthesiser used to emit `SandboxedScript` nodes carrying invented shell - including
+    /// fabricated business figures that an agent node downstream then analysed as though they were
+    /// measurements. A synthesised workflow now composes templates that already exist in the
+    /// governed catalogue, which is both the honest output and the more useful one: what a caller
+    /// wants from "scrape the logs and tell me what broke" is the governed log template, not a
+    /// freshly written `Get-EventLog` line nobody has reviewed.
+    /// </summary>
+    private static WorkflowNode Mission(
+        string nodeId,
+        string name,
+        string templateId,
+        IReadOnlyDictionary<string, string>? parameters = null)
+    {
+        var config = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [WorkflowExecutionEngine.TemplateIdKey] = templateId,
+        };
+        if (parameters is not null)
+        {
+            foreach (var kvp in parameters)
+            {
+                config[kvp.Key] = kvp.Value;
+            }
+        }
+        return new WorkflowNode(nodeId, name, WorkflowNodeType.GovernedMission, config);
+    }
+
     private readonly IModelStreamClient? _modelClient;
 
     public WorkflowSynthesizerEngine(IModelStreamClient? modelClient = null)
@@ -86,15 +116,7 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
                             { "TopK", "3" },
                             { "MinScore", "0.1" }
                         }),
-                    new(
-                        NodeId: "correlate-telemetry",
-                        Name: "Correlate Memory Context",
-                        NodeType: WorkflowNodeType.SandboxedScript,
-                        Configuration: new Dictionary<string, string>(),
-                        // The recall output is a multi-line blob containing quotes and pipes, so it
-                        // is NOT interpolated into the command line - the governed binder would
-                        // refuse it, correctly. The node reads it from the execution context.
-                        ScriptCommand: "Write-Output '=== INCIDENT CORRELATION ENGINE ==='"),
+                    Mission("correlate-telemetry", "Correlate Against Live Endpoint State", "secops-process-scan"),
                     new(
                         NodeId: "store-memory",
                         Name: "Index Knowledge to Semantic Vector Store",
@@ -115,7 +137,12 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
             return Task.FromResult(graph);
         }
 
-        // 0C. Transactional Speculative Execution Scope
+        // 0C. Transactional Speculative Execution Scope.
+        //
+        // This one keeps its own scripts on purpose: a TransactionalScope is an assert-and-rollback
+        // primitive, not a governed template, and it runs through the same refusing binder. It is
+        // also the node type with the least behind it - see F20 in the audits: a rollback that
+        // exits zero is not proof the prior state was restored.
         if (lower.Contains("transaction") || lower.Contains("rollback") || lower.Contains("safe update"))
         {
             var graph = new WorkflowGraph(
@@ -173,13 +200,13 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
                         Name: "Vault Access Token",
                         NodeType: WorkflowNodeType.OAuthExchange,
                         Configuration: new Dictionary<string, string> { { "Provider", "TikTok" } }),
-                    new(
-                        NodeId: "fetch-campaigns",
-                        Name: "Fetch TikTok Ad Telemetry",
-                        NodeType: WorkflowNodeType.SandboxedScript,
-                        Configuration: new Dictionary<string, string>(),
-                        ScriptCommand: "Write-Output '=== TIKTOK MARKETING API AD TELEMETRY ==='; Write-Output 'Status: Authenticated via DPAPI Vault'; Write-Output 'Active Campaigns: 4 | Total Spend: $1,250 | CTR: 2.84%'; Write-Output 'Egress strictly pinned to business-api.tiktok.com:443'",
-                        AllowedEgressFqdn: "business-api.tiktok.com"),
+                    // Was a Write-Output of invented campaign figures - "Active Campaigns: 4 |
+                    // Total Spend: $1,250 | CTR: 2.84%" - which the agent node below then analysed
+                    // as though it were ad telemetry. There is no governed template that talks to
+                    // TikTok, so the honest step is the one that exists: verify the egress posture
+                    // the OAuth flow depends on. A real connector is a template someone writes and
+                    // the catalogue reviews, not a string.
+                    Mission("fetch-campaigns", "Verify Endpoint Egress Posture", "secops-tls-cipher-audit"),
                     new(
                         NodeId: "agent-analysis",
                         Name: "Ad Performance Synthesizer",
@@ -218,12 +245,7 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
                         Name: "Cron Log Schedule (15m)",
                         NodeType: WorkflowNodeType.Trigger,
                         Configuration: new Dictionary<string, string> { { "Interval", "15m" } }),
-                    new(
-                        NodeId: "collect-logs",
-                        Name: "Clamped Log Scraper",
-                        NodeType: WorkflowNodeType.SandboxedScript,
-                        Configuration: new Dictionary<string, string>(),
-                        ScriptCommand: "Write-Output '=== LOCAL EVENT LOG HARVEST ==='; Get-EventLog -LogName System -Newest 10 2>$null | Select-Object TimeGenerated, EntryType, Message | Out-String"),
+                    Mission("collect-logs", "Governed Authentication Log Sweep", "secops-auth-inspector"),
                     new(
                         NodeId: "condition-check",
                         Name: "Error Spike Detector",
@@ -271,12 +293,11 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
                         Name: "Inbound Email Webhook",
                         NodeType: WorkflowNodeType.Trigger,
                         Configuration: new Dictionary<string, string>()),
-                    new(
-                        NodeId: "extract-body",
-                        Name: "Extract Email Header & Body",
-                        NodeType: WorkflowNodeType.SandboxedScript,
-                        Configuration: new Dictionary<string, string>(),
-                        ScriptCommand: "Write-Output '=== EMAIL INGESTION EVIDENCE ==='; Write-Output 'Subject: Monthly Infrastructure Invoice'; Write-Output 'From: billing@cloudprovider.com'; Write-Output 'Body: Attached is your service statement for $3,450.00'"),
+                    // Was a Write-Output of a fabricated invoice - subject, sender and a $3,450.00
+                    // total - fed to a "Financial Parser Agent" that reported on it. No governed
+                    // template reads mail; the trigger payload carries the real message, and the
+                    // step that can be governed is checking the endpoint that received it.
+                    Mission("extract-body", "Endpoint Posture At Time Of Receipt", "endpoint-firewall-audit"),
                     new(
                         NodeId: "agent-parser",
                         Name: "Financial Parser Agent",
@@ -310,16 +331,7 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
                     Name: "Manual Operator Start",
                     NodeType: WorkflowNodeType.Trigger,
                     Configuration: new Dictionary<string, string>()),
-                new(
-                    NodeId: "step-executor",
-                    Name: "Sandboxed Step Runner",
-                    NodeType: WorkflowNodeType.SandboxedScript,
-                    Configuration: new Dictionary<string, string>(),
-                    // The operator's prompt is NOT concatenated into the command line. Stripping
-                    // single quotes left a double quote, a backtick or a semicolon free to close
-                    // the -Command region, and the binder never sees text baked in at synthesis
-                    // time. The prompt is carried in Description and in the agent node's Prompt.
-                    ScriptCommand: "Write-Output '=== EXECUTING GOVERNED AUTOMATION ==='"),
+                Mission("step-executor", "Baseline System Health", "sysops-ad-dc-health"),
                 new(
                     NodeId: "step-analysis",
                     Name: "Synthesis Agent",

@@ -18,11 +18,19 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
     private const int ScriptTimeoutSeconds = 60;
 
     /// <summary>
-    /// Substitution shape for free text that never reaches a command line - a memory document, a
-    /// recall query. Kept single-pass so a value containing <c>{OtherNode}</c> stays inert.
+    /// Substitution shape for a node reference. Kept single-pass so a value containing
+    /// <c>{OtherNode}</c> stays inert.
+    ///
+    /// Two forms: <c>{node-id}</c> for that node's whole output, and <c>{node-id.field}</c> for one
+    /// named field of it. The dotted form exists because the bare one is nearly useless to a
+    /// mission - a trigger node's output is a multi-line <c>key=value</c> block, and the governed
+    /// binder refuses a value carrying a line break, correctly. Without a way to name one field,
+    /// every webhook-driven workflow would either be refused or have to go back to splicing raw
+    /// blobs into a command line, which is what this engine stopped doing.
     /// </summary>
     private static readonly Regex NodeReferencePattern =
-        new(@"\{(?<key>[A-Za-z_][A-Za-z0-9_-]*)\}", RegexOptions.Compiled, TimeSpan.FromMilliseconds(250));
+        new(@"\{(?<key>[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)?)\}",
+            RegexOptions.Compiled, TimeSpan.FromMilliseconds(250));
 
     private readonly IDataLossPreventionSanitizer? _dlpSanitizer;
     private readonly IProcessLauncher? _processLauncher;
@@ -31,6 +39,18 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
     private readonly IModelStreamClient? _modelClient;
     private readonly ISemanticMemoryIndex? _semanticMemoryIndex;
     private readonly IRemediationEngine? _remediationEngine;
+
+    /// <summary>
+    /// The mission engine every governed step runs through.
+    ///
+    /// Its absence is why this class used to spawn processes itself: an application-directory
+    /// working directory, a job object, and none of the jail, egress pin, argument binding, DLP
+    /// pass or ledger row that a mission gets. That was a second execution tier wearing the word
+    /// "governed", and the workflow layer existed to protect exactly the thing it was bypassing.
+    /// </summary>
+    private readonly IMissionExecutionEngine? _missionEngine;
+
+    private readonly ITemplateRegistry? _templateRegistry;
 
     /// <summary>
     /// Whether a node may "run" without a real sandbox.
@@ -50,7 +70,9 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         IModelStreamClient? modelClient = null,
         ISemanticMemoryIndex? semanticMemoryIndex = null,
         IRemediationEngine? remediationEngine = null,
-        bool allowSimulatedExecution = false)
+        bool allowSimulatedExecution = false,
+        IMissionExecutionEngine? missionEngine = null,
+        ITemplateRegistry? templateRegistry = null)
     {
         _dlpSanitizer = dlpSanitizer;
         _processLauncher = processLauncher;
@@ -60,6 +82,8 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         _semanticMemoryIndex = semanticMemoryIndex;
         _remediationEngine = remediationEngine;
         _allowSimulatedExecution = allowSimulatedExecution;
+        _missionEngine = missionEngine;
+        _templateRegistry = templateRegistry;
     }
 
     public async Task<WorkflowExecutionResult> ExecuteAsync(
@@ -150,6 +174,10 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
     {
         graph.Validate();
         var nodeOutputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // Dotted references, resolved after nodeOutputs so a node whose id literally contains a dot
+        // still wins its own name.
+        var fieldScope = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var activeBranch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var skippedNodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -208,11 +236,40 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
             {
                 case WorkflowNodeType.Trigger:
                     nodeResult = ProcessTriggerNode(node, triggerPayload);
+
+                    // A payload field is addressable as {trigger-node-id.field}. It is namespaced
+                    // under the node rather than seeded bare so an unauthenticated caller can never
+                    // choose a key that shadows an upstream node's measured output.
+                    foreach (var kvp in triggerPayload)
+                    {
+                        fieldScope[$"{node.NodeId}.{kvp.Key}"] = kvp.Value;
+                    }
+                    break;
+
+                case WorkflowNodeType.GovernedMission:
+                    await foreach (var chunk in ExecuteGovernedMissionNodeAsync(
+                        node, nodeOutputs, fieldScope, operatorIdentity, cancellationToken))
+                    {
+                        yield return chunk;
+                        if (chunk.ChunkType is MissionChunkType.Stdout or MissionChunkType.AiToken)
+                        {
+                            nodeResult += chunk.Content;
+                        }
+                    }
                     break;
 
                 case WorkflowNodeType.SandboxedScript:
-                    nodeResult = await ExecuteScriptNodeAsync(node, nodeOutputs, executionId, cancellationToken);
-                    break;
+                    // Refused rather than quietly kept. This node type spawned a process directly -
+                    // no jail, no egress pin, no argument binder, no DLP, no ledger row - while
+                    // sitting in a graph the operator was told was governed. Keeping it as a
+                    // fallback would mean the guarantee held only for workflows that happened not
+                    // to use it, which is not a guarantee.
+                    throw new WorkflowNodeFailedException(
+                        node.NodeId,
+                        "SandboxedScript executes outside the mission engine and is no longer run. " +
+                        "Use a GovernedMission node naming a template from the governed catalogue: " +
+                        "the containment, the argument binding and the ledger row all come from the " +
+                        "mission, and a workflow that spawns its own processes has none of them.");
 
                 case WorkflowNodeType.AgentReasoning:
                     await foreach (var chunk in ExecuteAgentNodeAsync(node, nodeOutputs, executionId, cancellationToken))
@@ -335,32 +392,91 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         return sb.Length > 0 ? sb.ToString() : "Trigger activated with default payload.";
     }
 
-    private async Task<string> ExecuteScriptNodeAsync(
+    /// <summary>
+    /// Runs one governed template as a complete mission and forwards its stream into the workflow's.
+    ///
+    /// The mission's terminal state IS the node's terminal state, and it needs no extra plumbing to
+    /// say so: the mission engine yields a <see cref="MissionChunkType.Completed"/> chunk only when
+    /// the tool honoured its exit contract AND the analysis passed the quality gate. A mission that
+    /// failed simply stops, so the absence of that chunk is the failure signal - the same signal an
+    /// operator reads in the UI.
+    ///
+    /// The node contributes a template id and its parameters. Everything that makes the step safe -
+    /// the jail, the clamps, the restricted token, the network denial, the argument binder that
+    /// refuses a value it cannot place, the DLP pass, the ledger row - belongs to the mission and is
+    /// inherited rather than reimplemented.
+    /// </summary>
+    private async IAsyncEnumerable<MissionChunk> ExecuteGovernedMissionNodeAsync(
         WorkflowNode node,
         IReadOnlyDictionary<string, string> nodeOutputs,
-        Guid executionId,
-        CancellationToken ct)
+        IReadOnlyDictionary<string, string> fieldScope,
+        string operatorIdentity,
+        [EnumeratorCancellation] CancellationToken ct)
     {
-        string runtime = node.Configuration.TryGetValue("Runtime", out var r) ? r : "powershell";
-        string command = BindNodeCommand(node, node.ScriptCommand, nodeOutputs, runtime);
-
-        var run = await RunConfinedScriptInternalAsync(node.NodeId, command, runtime, ct);
-        if (run.TimedOut)
+        if (_missionEngine is null || _templateRegistry is null)
         {
             throw new WorkflowNodeFailedException(
-                node.NodeId, $"the script exceeded its {ScriptTimeoutSeconds}s budget.", run.Output);
+                node.NodeId,
+                "no mission engine is wired, so this step cannot be run under containment. " +
+                "Construct WorkflowExecutionEngine with a missionEngine and a templateRegistry.");
         }
 
-        // The exit code was previously discarded, so a script that failed outright still fed its
-        // stderr downstream as if it were a result and the run still reported success.
-        if (run.ExitCode != 0)
+        string templateId = node.Configuration.TryGetValue(TemplateIdKey, out var t) ? t : string.Empty;
+        if (string.IsNullOrWhiteSpace(templateId))
         {
             throw new WorkflowNodeFailedException(
-                node.NodeId, $"the script exited {run.ExitCode}: {TrimForDisplay(run.Output)}", run.Output);
+                node.NodeId, $"a GovernedMission node must name a template in its '{TemplateIdKey}' configuration.");
         }
 
-        return run.Output;
+        var template = await _templateRegistry.GetTemplateByIdAsync(templateId, ct);
+        if (template is null)
+        {
+            // A template that is not in the catalogue is not a governed template. Synthesising one
+            // from the request would put the caller back in charge of its own policy.
+            throw new WorkflowNodeFailedException(
+                node.NodeId, $"template '{templateId}' is not in the governed catalogue.");
+        }
+
+        // Every other configuration entry is a mission parameter. Upstream outputs may be
+        // referenced as {node-id}; the value is substituted here and then handed to the mission,
+        // whose GovernedArgumentBinder refuses anything it cannot place safely in a command line.
+        // That refusal is the boundary - this layer deliberately does not sanitise on its behalf.
+        var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in node.Configuration)
+        {
+            if (kvp.Key.Equals(TemplateIdKey, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            parameters[kvp.Key] = SubstituteText(kvp.Value, nodeOutputs, fieldScope);
+        }
+
+        bool completed = false;
+        await foreach (var chunk in _missionEngine.ExecuteMissionAsync(template, parameters, operatorIdentity, ct))
+        {
+            if (chunk.ChunkType == MissionChunkType.Completed)
+            {
+                completed = true;
+                // Swallowed on purpose: one node finishing is not the workflow finishing, and a
+                // Completed chunk mid-stream would tell every downstream reader otherwise.
+                continue;
+            }
+
+            yield return chunk;
+        }
+
+        if (!completed)
+        {
+            throw new WorkflowNodeFailedException(
+                node.NodeId,
+                $"mission '{templateId}' did not complete. The tool failed its exit contract, timed " +
+                "out, or its analysis was rejected by the quality gate - see the chunks above and " +
+                "the ledger rows for that mission id.");
+        }
     }
+
+    /// <summary>Configuration key naming the governed template a mission node runs.</summary>
+    public const string TemplateIdKey = "TemplateId";
 
     /// <summary>
     /// Resolves a node's script command against upstream outputs and its own configuration.
@@ -698,12 +814,31 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
             $"[TRANSACTION_ROLLED_BACK] Assertion '{assertion}' failed against output. Rollback applied: {rollbackOutput.Trim()}");
     }
 
-    private static string SubstituteText(string template, IReadOnlyDictionary<string, string> nodeOutputs) =>
+    private static string SubstituteText(
+        string template,
+        IReadOnlyDictionary<string, string> nodeOutputs,
+        IReadOnlyDictionary<string, string>? fieldScope = null) =>
         string.IsNullOrEmpty(template)
             ? string.Empty
             : NodeReferencePattern.Replace(
                 template,
-                m => nodeOutputs.TryGetValue(m.Groups["key"].Value, out var v) ? v : m.Value);
+                m =>
+                {
+                    string key = m.Groups["key"].Value;
+                    if (nodeOutputs.TryGetValue(key, out var whole))
+                    {
+                        return whole;
+                    }
+                    if (fieldScope != null && fieldScope.TryGetValue(key, out var field))
+                    {
+                        return field;
+                    }
+
+                    // An unresolved reference is left exactly as the author wrote it rather than
+                    // blanked, so a typo'd node id shows up in the refusal instead of silently
+                    // becoming an empty parameter the tool then runs with.
+                    return m.Value;
+                });
 
     private async IAsyncEnumerable<MissionChunk> ExecuteAgentNodeAsync(
         WorkflowNode node,
