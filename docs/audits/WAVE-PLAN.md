@@ -125,7 +125,41 @@ Two of the three problems this exercise found were tests that could not fail.
 | F11 | One versioned wire contract: explicit `argv`, and the compiled policy carried as paths the guest resolves | **done** — `protocolVersion: 2`; a v1 request is refused rather than guessed at |
 | AG-F06 | DLP gains bare-token rules (AWS, GitHub, OpenAI, Stripe, JWT) — today only `key=value` shapes redact |
 | AG-F07 | Recalled memory is wrapped in untrusted delimiters before it reaches a prompt |
-| F15 / F17 | The workflow builder either registers and runs the graph it draws, or stops advertising that it does |
+| F15 / F17 | A workflow step is a governed mission; the engine is registered against the real substrate | **done** — `87918b2` |
+
+### F15 / F17 — the subtraction
+
+A `SandboxedScript` node spawned `powershell.exe` directly: application-directory working directory,
+a job object, and none of the ACL jail, restricted token, AppContainer denial, egress pin, argument
+binder, DLP pass or ledger row a mission gets — inside a graph the operator was told was governed.
+The workflow layer existed to protect exactly the thing it bypassed. A step is now a
+`GovernedMission` naming a catalogue template; the workflow contributes ordering and nothing else.
+`SandboxedScript` stays in the enum so a stored graph deserialises and says why it stopped.
+
+Three findings surfaced doing it, and the first is the one worth keeping:
+
+**The engine was registered nowhere.** `IWorkflowExecutionEngine` had no entry in the container. It
+was constructed only by its own tests, so every guarantee it grew was a guarantee no shipped code
+path could reach — and the suite stayed green throughout, because a test composes the engine itself.
+This is the same shape as Wave 1b's unconfigured gate and Wave 3's `let _ = fs::write`: **the case
+nobody tested was the case that shipped.** `CompositionRootTests` now binds the registration as
+source text, which is the strongest assertion available from a project that cannot reference WinUI.
+
+**A trigger payload had no addressable fields.** `{trigger}` yields the whole multi-line `key=value`
+blob, which the governed binder refuses for the line break alone — correctly. Every webhook-driven
+workflow would therefore either fail outright or go back to splicing blobs into a command line.
+Fields are now `{trigger-node-id.field}`, namespaced under the node so an unauthenticated caller
+cannot choose a key that shadows a measured output.
+
+**The synthesiser emitted fabricated evidence.** One node wrote out `Active Campaigns: 4 | Total
+Spend: $1,250 | CTR: 2.84%` and a "Financial Parser Agent" analysed a $3,450.00 invoice the node
+above it had invented. Synthesised workflows now compose catalogue templates, and a test binds every
+synthesised id to the shipped catalogue so a typo fails at build time rather than at first run.
+
+What is **not** done: there is no workflow view, no persistence (`InMemoryWorkflowRegistry` is the
+only registry, so a restart loses everything), and neither `WorkflowScheduler` nor
+`EmbeddedWebhookListener` is constructed outside tests. See [the orchestration
+plan](2026-09-05-orchestration-plan.md).
 
 ## Wave 5 — Release reality
 
@@ -152,13 +186,18 @@ cheapest wave, and they are what makes every later gate measurable: with the eng
 dead sensor and a rejected analysis, a Wave 3 exit gate can be asserted on the result rather than
 inferred from a log line.
 
-**Next is Wave 3.** It is the largest remaining block, it is entirely Rust, and F04/F05/F06 are the
+**Wave 3 is done and proven.** It was the largest remaining block, it is entirely Rust, and F04/F05/F06 are the
 three findings that most directly contradict the product'''s central claim — a daemon that runs work
 without the policy it reported installing, a lease whose expiry removes enforcement but not the
 workload, and capability maps shared across missions.
 
-Wave 4's `F15/F17` is the decision the competition audit keeps circling: SPLAT will not beat n8n on
-breadth, and the workflow layer as built bypasses the mission engine it exists to protect. The
-smaller, more defensible shape is a DAG scheduler *over* `IMissionExecutionEngine`, where each node
-is a complete 1:1:1 mission that keeps its jail, egress pin, DLP pass and ledger row. That is a
-subtraction, and it should be decided before more nodes are added.
+Wave 4's `F15/F17` was the decision the competition audit kept circling, and it is taken: SPLAT does
+not beat n8n on breadth, so the workflow layer became a DAG scheduler *over* `IMissionExecutionEngine`
+where each node is a complete 1:1:1 mission. That subtraction shipped in `87918b2`.
+
+**Next is the runtime floor, and it is a deadline rather than a wave.** .NET 9 leaves support on
+2026-11-10 — nine weeks — and .NET 8 leaves the same day, so there is no LTS below 10 to fall back
+to. Windows App SDK 1.6, which this repo pins, has been out of support since 2025-09-04. Both are
+one migration: WinAppSDK 2.x targets .NET 10. Everything in Wave 5 sits behind it, and so does every
+line of the orchestration plan. See [the orchestration plan](2026-09-05-orchestration-plan.md),
+Phase 0.
