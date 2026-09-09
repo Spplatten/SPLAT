@@ -28,7 +28,7 @@ Today, most AI orchestration tools execute commands through unconstrained subshe
                            THE SPLAT GUARANTEE
   
  ┌────────────────────────────────────────────────────────────────────────┐
- │ 1. CONTROL PLANE (.NET 9 / WinUI 3)                                    │
+ │ 1. CONTROL PLANE (.NET 10 / WinUI 3)                                    │
  │    • MissionExecutionEngine: Enforces strict 1:1:1 Governed Flow       │
  │    • Merkle Audit Ledger: Cryptographically chained SOC2/HIPAA record  │
  │    • Capability Compiler: Translates tool contracts to kernel leases   │

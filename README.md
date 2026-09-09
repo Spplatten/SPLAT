@@ -2,7 +2,7 @@
 
 > **A zero-trust execution substrate for autonomous AI agents, by Platten Industries.** Agents don't get trust — they get a *lease*: a time-boxed, resource-clamped, kernel-enforced capability grant, with every action sealed in a tamper-evident cryptographic ledger.
 
-[![.NET 9](https://img.shields.io/badge/.NET-9.0-512BD4?logo=dotnet&logoColor=white)](src/)
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](src/)
 [![Rust](https://img.shields.io/badge/Rust-libbpf--rs%20%2B%20eBPF-CE412B?logo=rust&logoColor=white)](native/splat-agent/)
 [![WinUI 3](https://img.shields.io/badge/UI-WinUI%203%20%2F%20Windows%20App%20SDK-0078D6?logo=windows&logoColor=white)](src/MissionController.UI/)
 [![Tests](https://img.shields.io/badge/Tests-459%2F459%20passing-success)](tests/MissionController.Tests/)
@@ -52,7 +52,7 @@ That table is the contract: nothing above it is aspirational, and nothing below 
 
 ```mermaid
 flowchart TD
-    subgraph CP["Control plane — Windows (.NET 9)"]
+    subgraph CP["Control plane — Windows (.NET 10)"]
         UI["WinUI 3 operator console"] --> ENG["MissionExecutionEngine<br/>1:1:1 governed templates"]
         MCP["splat-mcp (MCP server)<br/>9 governed tools"] --> ENG
         ENG --> DLP["In-memory DLP sanitizer"]
@@ -140,7 +140,7 @@ Every call lands in the audit ledger attributed to a resolved principal — the 
 
 ```text
 $ dotnet test tests/MissionController.Tests/MissionController.Tests.csproj
-Passed!  - Failed: 0, Passed: 459, Skipped: 0, Total: 459, Duration: 4 s - MissionController.Tests.dll (net9.0)
+Passed!  - Failed: 0, Passed: 459, Skipped: 0, Total: 459, Duration: 27 s - MissionController.Tests.dll (net10.0)
 ```
 
 459 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.

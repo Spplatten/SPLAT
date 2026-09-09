@@ -36,7 +36,7 @@ However, **Fortune 500 CISOs and enterprise security architects are actively vet
  └──────────────────────────────────┬─────────────────────────────────────┘
                                     │ Pre-execution Filter Intercept
  ┌──────────────────────────────────▼─────────────────────────────────────┐
- │ 2. SPLAT CONTROL PLANE (.NET 9 / MissionController.Infrastructure)     │
+ │ 2. SPLAT CONTROL PLANE (.NET 10 / MissionController.Infrastructure)     │
  │    • SplatCopilotInvocationFilter: Pre-execution policy enforcement    │
  │    • Capability Lease Grant: Issues single-use, bounded execution token│
  │    • Merkle Chained Ledger: Tamper-evident cryptographic proof         │
@@ -119,7 +119,7 @@ Every Copilot tool execution—whether successful, denied by policy, or killed b
 
 ## Technical Proof of Validation
 
-The SPLAT Copilot Safety Primitive has been implemented and validated across our .NET 9 control plane:
+The SPLAT Copilot Safety Primitive has been implemented and validated across our .NET 10 control plane:
 - **185 Passing Unit and Integration Tests** covering:
   - Pre-execution CISO policy evaluation and regex heuristics
   - Win32 Job Object hardware limit clamping

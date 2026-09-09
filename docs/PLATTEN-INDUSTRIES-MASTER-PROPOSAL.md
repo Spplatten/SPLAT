@@ -47,7 +47,7 @@ SPLAT provides a local-first, dual-OS containment substrate that runs on stock, 
   └──────────────────────────────────────┬──────────────────────────────────────────┘
                                          │ Authenticated REST (:5678) / MCP Stdio
   ┌──────────────────────────────────────▼──────────────────────────────────────────┐
-  │  SPLAT CONTROL PLANE (.NET 9 / MissionController.Infrastructure)                │
+  │  SPLAT CONTROL PLANE (.NET 10 / MissionController.Infrastructure)                │
   │  • Capability Lease Compiler: Single-use, bounded seconds-scale execution lease │
   │  • In-Memory DLP Sanitizer: Pre-egress redaction of bare keys & corporate PII   │
   │  • In-Memory Egress Firewall: Pinned FQDN HTTP client filtering                 │

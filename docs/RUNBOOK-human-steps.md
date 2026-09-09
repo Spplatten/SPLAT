@@ -43,13 +43,18 @@ There is no setup left. You are one interactive `sudo` away from a real canary r
 
 ---
 
-## Part 0 — the .NET 10 SDK (the one open human step, 2026-09-09)
+## Part 0 — the .NET 10 SDK  ✅ DONE 2026-09-09
 
-This is the only thing currently blocking work, and it is an install rather than a decision. .NET 9
-leaves support on **2026-11-10**, and .NET 8 leaves the same day, so there is no LTS below 10.
+> **Installed and verified.** `10.0.401` alongside `9.0.317` in the same user-local root, and the
+> retarget it unblocked has landed: the suite runs 459/459 on `.NETCoreApp,Version=v10.0`, and the
+> frozen UI still builds on the net9 leg. Kept below because it is the procedure to repeat on
+> another machine, and because both failure modes it documents cost a 300 MB download each.
 
-Only `9.0.317` is present, and it lives in a **user-local** root
-(`%LOCALAPPDATA%\Microsoft\dotnet`). Install 10 into that same root. Do **not** use winget: it
+The reason it had to happen first: .NET 9 leaves support on **2026-11-10**, and .NET 8 leaves the
+same day, so there is no LTS below 10.
+
+`9.0.317` was already present in a **user-local** root
+(`%LOCALAPPDATA%\Microsoft\dotnet`), so 10 goes into that same root. Do **not** use winget: it
 installs under `Program Files`, and two dotnet roots means two `dotnet.exe` that disagree about
 which SDKs exist.
 
@@ -95,8 +100,14 @@ normal. `dotnet-install: Installation finished` is the last line. Confirm it lan
 Expected: **two** lines, `9.0.317` and a `10.0.x`, both under the same path. One line means the
 script chose a different `-InstallDir` or did not finish.
 
-Everything after that is ordinary editing and belongs to the agent — the eight `.csproj` edits and
-five package bumps are itemised in
+What actually came back on 2026-09-09:
+
+```
+9.0.317 [C:\Users\s_pla\AppData\Local\Microsoft\dotnet\sdk]
+10.0.401 [C:\Users\s_pla\AppData\Local\Microsoft\dotnet\sdk]
+```
+
+Everything after that was ordinary editing and is done — see
 [P0 of the plan](audits/2026-09-09-oem-subtraction-plan.md#5-sequence).
 
 ---

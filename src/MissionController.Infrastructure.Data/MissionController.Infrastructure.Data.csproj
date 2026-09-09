@@ -1,7 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Multi-targeted, not migrated. net10.0 is what ships; the net9.0 leg exists only so the frozen
+       MissionController.UI - still on net9.0-windows10.0.19041.0 and Windows App SDK 1.6 - keeps
+       compiling, since a net9 project cannot reference a net10 one. Consequence worth knowing
+       before reaching for a new API: nothing in this project may use a .NET-10-only surface while
+       that leg lives. net9.0 leaves support 2026-11-10; nothing that ships runs on it. -->
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
@@ -11,7 +16,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.2" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.20" Condition="'$(TargetFramework)' == 'net9.0'" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" Condition="'$(TargetFramework)' == 'net10.0'" />
   </ItemGroup>
 
 </Project>

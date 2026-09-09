@@ -127,7 +127,29 @@ The net9 leg is unsupported after 2026-11-10, which is fine: nothing that ships 
 
 Dates are the ordering argument, not a commitment.
 
-### P0 — the runtime floor, headless (Sep 9 → Sep 12)
+### P0 — the runtime floor, headless  ✅ DONE 2026-09-09
+
+**Landed the same day it was written, and it was smaller than the estimate.** SDK `10.0.401`
+installed beside `9.0.317`; eight `.csproj` files retargeted; **459/459 green on
+`.NETCoreApp,Version=v10.0`**; and `MissionController.UI` still builds clean on the net9 leg, which
+is the claim §4 rests on. Not one line of C# changed — the survey was right that there is no
+TFM-conditional code in the tree.
+
+Three things the build found that the plan did not:
+
+- **A high-severity advisory was shipping.** `Microsoft.Data.Sqlite` 9.0.2 pulled
+  `SQLitePCLRaw.lib.e_sqlite3` 2.1.10, which carries `GHSA-2m69-gcr7-jv3q` — surfaced as `NU1903`
+  the moment the restore graph was disturbed. It reached both legs, so it shipped in `dist\App` too.
+  This is F21 turning out to be a security item rather than a packaging one. Fixed by conditioning
+  the version per TFM: 9.0.20 on net9, 10.0.12 on net10.
+- **`System.Text.Json` was dead weight** on net10 (`NU1510`) — it is in the shared framework now.
+  Removed from `splat-mcp`.
+- **`System.IO.FileSystem.AccessControl` 5.0.0 was genuinely removable**, as suspected.
+  `NtAclJailManager` compiles without it.
+
+The build is now **zero errors, zero warnings** on both legs, which it was not before.
+
+<details><summary>The steps as originally written</summary>
 
 Surveyed 2026-09-09. There is no `global.json`, no `Directory.Build.props` and no
 `Directory.Packages.props`; no `#if NET9_0` anywhere in `src` or `tests`; the reference graph is a
@@ -156,6 +178,11 @@ plain DAG. This is eight `.csproj` edits and five package bumps, not a migration
 
 First, because everything after it would otherwise be written against a TFM that dies inside the
 first OEM contract term, and would have to be ported twice.
+
+</details>
+
+**P1 is now the front of the queue**, and with the runtime floor behind it there is nothing blocking
+it but work.
 
 ### P1 — installable and provable by a stranger (Sep 12 → Sep 26)
 
