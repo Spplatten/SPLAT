@@ -111,11 +111,11 @@ Nothing here changes state. Run them in any order.
 cd C:\C_AGENT_BUILDER && "%LOCALAPPDATA%\Microsoft\dotnet\dotnet.exe" test tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 342`. The `dotnet` on this box is not on `PATH`, which is
+**Expect:** `Passed! - Failed: 0, Passed: 459`. The `dotnet` on this box is not on `PATH`, which is
 why the full path is used.
 
 **Why it matters:** the number is not decorative. A test now fails if the README or the Field Guide
-advertise a count that disagrees with the suite, so `342` in the docs is checked, not asserted.
+advertise a count that disagrees with the suite, so `459` in the docs is checked, not asserted.
 
 ### 1.2 The documentation actually matches the code
 
@@ -123,11 +123,11 @@ advertise a count that disagrees with the suite, so `342` in the docs is checked
 "%LOCALAPPDATA%\Microsoft\dotnet\dotnet.exe" test tests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~DocumentationDrift"
 ```
 
-**Expect:** 8 passed. These check that every relative link in the README resolves on disk, that every
+**Expect:** 10 passed. These check that every relative link in the README resolves on disk, that every
 tool the MCP server exposes is documented, that retired overclaims have not crept back, and that the
 advertised test count matches reality.
 
-**Try breaking it:** change `342` to `341` in `README.md` and re-run. It should go red and name the
+**Try breaking it:** change `459` to `458` in `README.md` and re-run. It should go red and name the
 file. If it does not, the check is not doing its job — tell me.
 
 ### 1.3 The audit ledger verifies
@@ -150,22 +150,27 @@ which is where startup failures land.
 
 ## Part 2 — Gate 0, step by step
 
-Gate 0 makes the kernel enforcement provable instead of anecdotal. Today `run-canary.sh` ends by
-printing `Expected: … three -EPERM lines` for a person to read, and the loader returns success
-unconditionally — so **the harness cannot fail**, which means a green run proves nothing.
+Gate 0 made the kernel enforcement provable instead of anecdotal. It is **done**, and the section is
+kept because 0.5 is the step you re-run whenever the kernel changes.
+
+The problem it fixed: `run-canary.sh` used to end by printing `Expected: … three -EPERM lines` for a
+person to read, while the loader returned success unconditionally — so the harness could not fail,
+and a green run proved nothing.
 
 ### Who does what
 
-| Step | Who | Status |
+| Step | Who | Status (re-verified 2026-09-09) |
 | :--- | :--- | :--- |
-| 0.1 Make the canary assert and exit non-zero on a bad run | me | not started |
-| 0.2 Emit a structured evidence file | me | not started |
-| 0.3 Test that the docs match the evidence | me | not started |
-| 0.4 Bind evidence to the BPF source that produced it | me | not started |
-| **0.5 Run the canary with `sudo`** | **you** | blocked on 0.1–0.2 |
-| 0.6 Commit the evidence file | either | after 0.5 |
+| 0.1 Make the canary assert and exit non-zero on a bad run | me | **done** — `run-canary.sh` exits non-zero and prints `FAIL (exit N)` |
+| 0.2 Emit a structured evidence file | me | **done** — `evidence/canary-6.18.33.2-microsoft-standard-WSL2.json`, verdict `PASS` |
+| 0.3 Test that the docs match the evidence | me | **done** — `CommittedKernelEvidence_IsEitherAbsentOrMatchesItsBpfSource` |
+| 0.4 Bind evidence to the BPF source that produced it | me | **done** — `bpf_source_sha256` in both PASS evidence files |
+| **0.5 Run the canary with `sudo`** | **you** | **done once**; re-run per Part 3 when the kernel changes |
+| 0.6 Commit the evidence file | either | **done** |
 
-Steps 0.1–0.4 are mine and need no permissions. Step 0.5 is the one that needs your password.
+The daemon-level equivalent went further and is also done: `native/splat-agent/evidence/daemon-probe.json`,
+PASS on 15 checks under a root daemon, which is what [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md)
+cites for every claim in its enforced tables.
 
 ### Step 0.5 — running the canary (yours)
 
