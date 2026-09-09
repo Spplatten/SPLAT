@@ -105,10 +105,21 @@ Follow that through:
   six non-UI projects that have no WinAppSDK dependency at all.
 - The nine-week fuse stops being a crisis and becomes roughly two days of work.
 
-`MissionController.UI` is not deleted. It is **frozen** — left on `net9.0-windows` and WinAppSDK
-1.6, excluded from the shipping configuration, and marked in its own `.csproj` as out of support and
-not shipped. It stops gating anything. If it is ever revived, it is revived across the 2.x break
-that was always going to be required.
+`MissionController.UI` is not deleted, and — corrected 2026-09-09 after reading the reference graph
+— it is not simply frozen either, because a naive freeze does not compile. The UI references `Core`,
+`Infrastructure.Windows`, `.Network` and `.Data`; a `net9.0-windows10.0.19041.0` project cannot
+reference a `net10.0` one. Moving those four breaks the UI build the same afternoon.
+
+So the four libraries **multi-target**: `<TargetFrameworks>net9.0;net10.0</TargetFrameworks>` (and
+`net9.0-windows;net10.0-windows` for `Infrastructure.Windows`). Executables and tests single-target
+`net10.0-windows`. The UI keeps building against the net9 leg on WinAppSDK 1.6, ships nothing, and
+gates nothing.
+
+That costs one line per library — there is not a single `#if NET9_0` or TFM-conditional in the tree,
+so both legs compile from the same source — and it buys back the decision instead of spending it.
+The constraint it imposes is real and worth writing down: **no .NET-10-only API in the four shared
+libraries** until the UI is either migrated or dropped, because the net9 leg has to keep compiling.
+The net9 leg is unsupported after 2026-11-10, which is fine: nothing that ships runs on it.
 
 ---
 
@@ -118,13 +129,30 @@ Dates are the ordering argument, not a commitment.
 
 ### P0 — the runtime floor, headless (Sep 9 → Sep 12)
 
-1. Install the .NET 10 SDK. Only 9.0.317 is on this machine.
-2. Retarget `MissionController.Core`, `.Infrastructure.Data`, `.Infrastructure.Linux`,
-   `.Infrastructure.Network`, `.Infrastructure.Windows`, `splat-mcp`, `splat-bench` and the test
-   project: `net9.0` → `net10.0`, `net9.0-windows` → `net10.0-windows`.
-3. Run the suite. 459 green on .NET 10 is the exit condition.
-4. Freeze `MissionController.UI` per §4. Do not retarget it. Do not touch WinAppSDK.
-5. F21 (`SQLitePCLRaw` native bundle) lands here, while the dependency graph is already open.
+Surveyed 2026-09-09. There is no `global.json`, no `Directory.Build.props` and no
+`Directory.Packages.props`; no `#if NET9_0` anywhere in `src` or `tests`; the reference graph is a
+plain DAG. This is eight `.csproj` edits and five package bumps, not a migration.
+
+1. **Install the .NET 10 SDK — the only blocking step, and it is not code.** Only `9.0.317` is
+   present, in a *user-local* root (`%LOCALAPPDATA%\Microsoft\dotnet`), so install via
+   `dotnet-install.ps1 -Channel 10.0 -InstallDir "$env:LOCALAPPDATA\Microsoft\dotnet"` rather than
+   winget — a second dotnet root under Program Files would leave two `dotnet.exe` that disagree
+   about which SDKs exist.
+2. **Multi-target the four libraries** per §4: `Core`, `.Data`, `.Linux`, `.Network` →
+   `net9.0;net10.0`; `.Infrastructure.Windows` → `net9.0-windows;net10.0-windows`.
+3. **Single-target the executables and tests**: `splat-mcp`, `splat-bench`,
+   `MissionController.Tests` → `net10.0-windows`.
+4. **Bump the five framework-versioned packages** 9.0.2 → current 10.0.x: `Microsoft.Data.Sqlite`,
+   `System.Security.Cryptography.ProtectedData`,
+   `Microsoft.Extensions.DependencyInjection.Abstractions`,
+   `Microsoft.Extensions.DependencyInjection` (UI only — leave it), `System.Text.Json`. Bump
+   `Microsoft.NET.Test.Sdk` (17.12.0) far enough to know about `net10.0`.
+5. **Try deleting `System.IO.FileSystem.AccessControl` 5.0.0.** `NtAclJailManager` uses
+   `DirectorySecurity` and `FileSystemAccessRule`, which live in `System.Security.AccessControl`
+   in-box on `net*-windows`; that package has been a deprecated compatibility shim since .NET 5.
+   Remove it, build, and put it back only if something actually fails.
+6. **Run the suite. 459 green on .NET 10 is the exit condition** — not "it builds."
+7. F21 (`SQLitePCLRaw` native bundle) lands here, while the dependency graph is already open.
 
 First, because everything after it would otherwise be written against a TFM that dies inside the
 first OEM contract term, and would have to be ported twice.
@@ -193,7 +221,52 @@ the bundle alone what it was permitted to do and what it did.**
 
 ---
 
-## 6. Three defects in the term sheet
+## 6. What pays before OEM does
+
+The strategy note treats OEM licensing as the monetization plan. It is the *scaling* plan. It has a
+gap at the front that no amount of engineering closes: an OEM licensee is a company that has already
+decided local agent containment is worth paying for. In September 2026 that is a belief, not a
+measurement — and it is now the largest unretired risk in this project, because the technical risk
+already got retired and this one did not.
+
+**Using SPLAT on our own work does not, by itself, make money.** The usual dogfooding argument fails
+here for a specific reason: SPLAT's output is risk reduction, not speed. A tool that makes your own
+work *safer on your own machine* gives you nothing you needed, and costs you setup. There is no
+compounding loop in generic self-use.
+
+The loop exists in exactly one shape: **paid engagements whose deliverable is the containment
+evidence itself.** Then the client work and the P3 roadmap work are the same work.
+
+- **"What can your coding agent actually reach?"** A fixed-scope assessment: instrument a real dev
+  host, run the client's own agent configuration under a lease, and hand back a measured
+  reachability report — what the agent touched, what it could have touched, and a governed config
+  that closes the difference. Nobody else can produce this document, because producing it requires
+  kernel-level observation of an agent's syscalls bound to a policy. `SUPPORTED_POLICY.md` is the
+  credibility exhibit that gets the meeting.
+- **A 30-day governed pilot.** `splat-mcp` on a handful of developer machines, run records handed
+  over at the end, config handed over with it. This is P1's exit condition, sold.
+
+Both need **P1 and nothing beyond it**. That reframes P1: it is not merely the top of the OEM
+funnel, it is the first thing that can be invoiced. P2 and P3 make the engagements better; they do
+not gate the first one.
+
+**The trap, named so it can be avoided.** Services revenue is linear in one person's hours, and it
+is comfortable, and it eats roadmaps — solo founders who fund product work with client work
+routinely end up running a consultancy. So: fixed scope, fixed price, no retainers, no "while you're
+in here, could you also…", and a hard cap of **two concurrent engagements**. Every engagement must
+leave behind a reusable artifact — a template, a probe, a report generator — or it was a job rather
+than a business.
+
+**And do the LLC first.** It matters more here than it does for OEM: an assessment engagement puts
+you on someone else's host. A sole proprietorship carries that personally. LLC, IP assignment, and a
+basic general-liability/E&O policy before the first client machine, not after.
+
+Acquisition interest (`docs/PITCH-Microsoft-CorpDev-Copilot-Safety.md`) is a byproduct of a traction
+record, not a path. It becomes possible for the same reason OEM does, and not one day sooner.
+
+---
+
+## 7. Three defects in the term sheet
 
 The draft is structurally sound. These three would be found by the first licensee's counsel.
 
@@ -219,14 +292,21 @@ it converts the disclaimer from boilerplate into the reason an engineer trusts t
 
 ---
 
-## 7. The one fork
+## 8. The fork, and how much smaller it got
 
-Everything above is safe to execute except one decision, and it is not mine.
+The first draft of this document called the UI a hard either/or: freeze it or spend the nine weeks
+on a four-major-version WinAppSDK migration. Reading the reference graph made that false in the
+useful direction. Multi-targeting the four libraries (§4) keeps `MissionController.UI` compiling on
+the net9 leg for one line per project, so the choice does not have to be spent now — it is deferred,
+not taken.
 
-**Freezing `MissionController.UI` is a real either/or.** It is nine views and a meaningful share of
-the work in this tree, and §4 takes it off the road for the foreseeable future. Keeping it on the
-critical path means a WinAppSDK 1.6 → 2.x migration across four major versions, in the same nine
-weeks as the .NET 10 move, in service of a surface no OEM licensee will ever run.
+What remains open is smaller and slower-burning: **at some point the net9 leg has to go**, because
+holding it costs a real constraint (no .NET-10-only API in the shared libraries) and that constraint
+gets more expensive the longer it runs. When it does, the UI either crosses the WinAppSDK 2.x break
+or it is dropped. Nothing in P0–P3 forces that call, and it should not be made under deadline
+pressure now, when the honest answer is that no OEM licensee and no assessment client will ever run
+that surface.
 
-The recommendation is to freeze it. The subtraction is what makes the deadline survivable, and it is
-reversible — a frozen project is not a deleted one.
+The near-term recommendation is unchanged in substance: build headless, ship headless, keep the UI
+alive at the cost of one line each, and revisit after P1 has produced either an invoice or a
+licensee.
