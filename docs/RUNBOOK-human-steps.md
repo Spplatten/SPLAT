@@ -54,11 +54,23 @@ installs under `Program Files`, and two dotnet roots means two `dotnet.exe` that
 which SDKs exist.
 
 ```powershell
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://dot.net/v1/dotnet-install.ps1').Content)) -Channel 10.0 -InstallDir "$env:LOCALAPPDATA\Microsoft\dotnet"
+Invoke-WebRequest -UseBasicParsing 'https://dot.net/v1/dotnet-install.ps1' -OutFile "$env:TEMP\dotnet-install.ps1"
 ```
 
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dotnet-install.ps1" -Channel 10.0 -InstallDir "$env:LOCALAPPDATA\Microsoft\dotnet"
+```
+
+> **Download it, do not pipe it.** The obvious one-liner —
+> `& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing '...').Content))` — fails on Windows
+> PowerShell 5.1 with a wall of `Unexpected token '13'` parse errors. `-UseBasicParsing` returns
+> `.Content` as a **byte array** for this content type, so `[scriptblock]::Create()` stringifies it
+> as space-separated byte values and tries to parse *those* as PowerShell. The numbers in the error
+> are the script's own header: `35 13 10 35 32 67 111 112` decodes to the comment line the file
+> opens with. `-OutFile` writes the raw bytes to disk and sidesteps the encoding entirely.
+
 It is a large download and it prints little while it runs; several minutes of apparent silence is
-normal. Confirm it landed:
+normal. `dotnet-install: Installation finished` is the last line. Confirm it landed:
 
 ```powershell
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" --list-sdks
