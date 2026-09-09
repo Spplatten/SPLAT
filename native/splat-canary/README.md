@@ -54,8 +54,10 @@ bash run-canary.sh
 
 If `preflight.sh` prints `[FIX]` lines, apply the matching stanza from
 [`wslconfig.sample`](wslconfig.sample) (LSM list and/or cgroup v2), `wsl --shutdown`, and
-re-run. A `RED` verdict (no `CONFIG_BPF_LSM`) means a custom kernel — see
-[`docs/PLAN-kernel-substrate.md`](../../docs/PLAN-kernel-substrate.md), Phase 0.
+re-run. A `RED` verdict (no `CONFIG_BPF_LSM`) means this kernel cannot host the substrate at all:
+nothing downstream works until it is replaced, and what the substrate does and does not enforce once
+it can load is enumerated in
+[`native/splat-agent/SUPPORTED_POLICY.md`](../splat-agent/SUPPORTED_POLICY.md).
 
 ## Where this goes next
 

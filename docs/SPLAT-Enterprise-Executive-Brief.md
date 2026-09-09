@@ -1,8 +1,16 @@
 # SPLAT: Sandboxed Process Lease & Agent Telemetry
+
 ## The Kernel-Enforced Containment Substrate for Autonomous AI Agents
 
 **Executive Brief & Technical Overview**  
 *Platten Industries — Enterprise AI Infrastructure*
+
+> **Audience note, 2026-09-09.** Written for a direct enterprise buyer. That motion is no longer
+> the plan (see [the OEM subtraction plan](audits/2026-09-09-oem-subtraction-plan.md)), but this
+> stays as the long-form positioning asset: it is the document to adapt for an OEM licensee's own
+> end-customer materials, and the shortest statement of why the containment problem exists at all.
+> Do not send it as-is to an engineering buyer —
+> [the technical one-pager](BRIEF-technical-one-pager.md) is the one for them.
 
 ---
 

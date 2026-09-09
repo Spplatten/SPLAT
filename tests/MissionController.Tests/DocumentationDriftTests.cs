@@ -519,9 +519,21 @@ public class DocumentationDriftTests
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
-    /// Every documented test count, from both spellings in use: "297/297 automated tests" in the
-    /// README's status table and "340 automated tests" in the tutorial's prose. In the paired form
-    /// both halves are held to the real number, since a passing suite means run and passed are equal.
+    /// A third spelling, found 2026-09-09 during a docs sweep: the README's tree diagram said
+    /// "350 xUnit unit / integration / security tests" three lines below a correct "459 xUnit
+    /// unit, integration, and security tests". Both escaped the two regexes above because neither
+    /// says "automated tests" - so the count that drifted was the one no rule covered, which is the
+    /// same failure this class was written to stop.
+    /// </summary>
+    private static readonly Regex TestCountXunitRegex = new(
+        @"(?<first>\d+)\s+xUnit",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Every documented test count, from all three spellings in use: "297/297 automated tests" in
+    /// the README's status table, "340 automated tests" in the tutorial's prose, and "459 xUnit …"
+    /// in the README's tree diagram. In the paired form both halves are held to the real number,
+    /// since a passing suite means run and passed are equal.
     /// </summary>
     private static List<(string File, int Claimed)> FindTestCountClaims()
     {
@@ -537,7 +549,7 @@ public class DocumentationDriftTests
             }
 
             string text = File.ReadAllText(full);
-            foreach (var regex in new[] { TestCountClaimRegex, TestCountBadgeRegex })
+            foreach (var regex in new[] { TestCountClaimRegex, TestCountBadgeRegex, TestCountXunitRegex })
             {
                 foreach (Match match in regex.Matches(text))
                 {

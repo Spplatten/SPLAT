@@ -1,5 +1,12 @@
 # SPLAT competition and scope audit
 
+> **Broken links are deliberate, 2026-09-09.** The contradiction table below cites
+> `PLAN-agent-trust-layer.md` and `PLAN-versatility-paths.md`, both removed on 2026-09-09 once the
+> work they planned had shipped (the MCP facade, the synthesiser, the daemon, the transport
+> decision). Rewriting the citations would falsify the record of what actually conflicted at the
+> time, so they stand. `git log --diff-filter=D` finds the files; the decisions they forced are in
+> [the OEM subtraction plan](2026-09-09-oem-subtraction-plan.md).
+
 Research date: 2026-09-04 America/New_York / 2026-09-05 UTC. Repository base `461001b` plus the inspected working tree. Read with the [technical findings](2026-09-04-clinical-audit.md) and [delivery plan](2026-09-04-roadmap.md).
 
 **Recommendation: position SPLAT as a constrained execution and evidence layer beneath existing automation platforms. Do not make replacing n8n the next release goal.** The potential differentiator is approved native actions on managed Windows endpoints, with verifiable policy enforcement and execution outcomes. This is a product hypothesis; the current security findings prevent presenting it as an established moat.

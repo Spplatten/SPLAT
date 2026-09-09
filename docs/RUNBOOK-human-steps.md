@@ -1,8 +1,14 @@
 # Runbook — what you verify, and what only you can do
 
-Companion to [PLAN-substrate-completion.md](PLAN-substrate-completion.md). Every command here was
-run on this machine on 2026-09-02 unless marked otherwise, so the expected output is what actually
-came back, not what should theoretically happen.
+Companion to [the current plan](audits/2026-09-09-oem-subtraction-plan.md). Every command here was
+run on this machine on the date it is marked with, so the expected output is what actually came
+back, not what should theoretically happen.
+
+> **Superseded companion.** This was written against `PLAN-substrate-completion.md`, removed
+> 2026-09-09 once three of its four gates had closed (Windows egress via AppContainer and
+> `IEgressFirewall`; the gRPC/`proto` ambiguity settled by deleting the proto; kernel evidence
+> machine-checked in `daemon-probe.json`). Its one open gate — first-run provisioning — moved to
+> P1 of the plan above.
 
 Two things need a human and cannot be delegated to an agent:
 
@@ -34,6 +40,36 @@ There is no setup left. You are one interactive `sudo` away from a real canary r
 > had 1.98 installed. `rustup` puts cargo on `PATH` from `.bashrc`, which a non-login shell never
 > reads, so `command -v cargo` came back empty. Now fixed — but worth knowing that a *verification
 > script* was the thing lying to you.
+
+---
+
+## Part 0 — the .NET 10 SDK (the one open human step, 2026-09-09)
+
+This is the only thing currently blocking work, and it is an install rather than a decision. .NET 9
+leaves support on **2026-11-10**, and .NET 8 leaves the same day, so there is no LTS below 10.
+
+Only `9.0.317` is present, and it lives in a **user-local** root
+(`%LOCALAPPDATA%\Microsoft\dotnet`). Install 10 into that same root. Do **not** use winget: it
+installs under `Program Files`, and two dotnet roots means two `dotnet.exe` that disagree about
+which SDKs exist.
+
+```powershell
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://dot.net/v1/dotnet-install.ps1').Content)) -Channel 10.0 -InstallDir "$env:LOCALAPPDATA\Microsoft\dotnet"
+```
+
+It is a large download and it prints little while it runs; several minutes of apparent silence is
+normal. Confirm it landed:
+
+```powershell
+& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" --list-sdks
+```
+
+Expected: **two** lines, `9.0.317` and a `10.0.x`, both under the same path. One line means the
+script chose a different `-InstallDir` or did not finish.
+
+Everything after that is ordinary editing and belongs to the agent — the eight `.csproj` edits and
+five package bumps are itemised in
+[P0 of the plan](audits/2026-09-09-oem-subtraction-plan.md#5-sequence).
 
 ---
 

@@ -1,5 +1,10 @@
 # SPLAT remediation waves
 
+> **Record, 2026-09-09.** Waves 1, 1b, 2 and 3 are done and proven; Wave 4's F15/F17 subtraction
+> shipped in `87918b2`. This file is now history plus an open Wave 5, and its closing paragraph
+> points at the runtime floor — which is where the live plan picks up:
+> [the OEM subtraction plan](2026-09-09-oem-subtraction-plan.md).
+
 Working plan derived from the four reports in this directory. The audits say *what* is broken and
 *why*; this says **which wave it lands in and what has actually shipped**.
 

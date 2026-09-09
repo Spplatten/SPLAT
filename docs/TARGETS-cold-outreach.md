@@ -8,6 +8,22 @@
 Ordered by how fast they can say yes, not by how much they could eventually pay. Starting cold, the
 scarce resource is replies, not prospects.
 
+> **What you are selling on the first call, added 2026-09-09.** Not a licence, and not a product
+> trial. A **fixed-scope containment assessment**: instrument one of their real dev hosts, run their
+> own agent configuration under a lease, and hand back a measured report of what the agent touched,
+> what it could have touched, and a governed config that closes the difference. Fixed price, fixed
+> scope, no retainer, two engagements at a time — the reasoning, including why generic services work
+> is a trap here, is in [the OEM subtraction plan](audits/2026-09-09-oem-subtraction-plan.md), §6.
+>
+> That reframes every tier below. These are not licence prospects who might buy later; they are
+> assessment clients now, and the OEM conversation happens *after* one of them has seen their own
+> report. It also moves the send trigger earlier: the assessment needs P1 (a `splat-mcp` an outsider
+> can install, and `doctor`), not the full run-record work.
+>
+> The attachment that gets the reply is
+> [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md) — a security vendor
+> enumerating what it does *not* enforce, with a probe file behind each claim. Lead with it.
+
 ---
 
 ## Tier 1 — Engineer buyers with discretionary spend (days to decide)

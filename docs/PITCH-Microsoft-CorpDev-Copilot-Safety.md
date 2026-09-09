@@ -1,5 +1,10 @@
 # SPLAT: The Native Windows Safety Substrate for Microsoft Copilot
 
+> **Status, 2026-09-09: byproduct, not a path.** Acquisition and strategic interest become possible
+> for the same reason an OEM licence does — a traction record — and not one day sooner. Keep this
+> for the day that record exists; do not sequence work around it. See
+> [the OEM subtraction plan](audits/2026-09-09-oem-subtraction-plan.md), §6.
+
 **Transforming Autonomous Local Tool-Calling into a CISO-Approved Enterprise Primitive**  
 *Platten Industries — Strategic Architecture & CorpDev Brief*
 

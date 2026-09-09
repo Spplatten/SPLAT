@@ -1,5 +1,13 @@
 # Platten Industries: SPLAT Commercial Master Strategy & Monetization Blueprint
 
+> **Partly superseded, 2026-09-09.** Tracks A–D below are the four *direct-sales* motions —
+> technician PLG, enterprise fleet, MSP wholesale, sovereign. All four were weighed against the
+> reality of a solo operator and set aside in favour of **OEM / embedded licensing**, plus paid
+> containment assessments as the first revenue. See
+> [the OEM subtraction plan](audits/2026-09-09-oem-subtraction-plan.md), §6 and §7. What survives
+> here unchanged is the buyer-pain analysis, the unit economics, and the CISO ROI framing — the *reasons* were never the problem,
+> the go-to-market was.
+
 **Document Class:** Executive Commercial Strategy & Investment Memorandum  
 **Company:** Platten Industries  
 **Product:** SPLAT (Sandboxed Process Lease & Agent Telemetry)  

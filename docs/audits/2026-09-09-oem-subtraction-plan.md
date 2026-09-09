@@ -173,6 +173,13 @@ sign after their own engineer ran it and read `SUPPORTED_POLICY.md`.
   refuse the enforcing modes, in the same fail-closed spirit as `fail-closed-probe.json`.
 - **Distribution.** A self-contained single-file `splat-mcp` per platform, published as a `dotnet
   tool` and an `npx` shim. No MSIX, no installer, no UI.
+- **First-run provisioning.** Inherited from the retired `PLAN-substrate-completion.md`, whose other
+  three gates have closed: Windows egress landed as AppContainer network denial plus
+  `IEgressFirewall`; the gRPC/JSON ambiguity was settled by deleting `proto/`; kernel evidence is
+  machine-checked in `daemon-probe.json`. This one never got built — `WslProvisioner` does not exist
+  in the tree. Detect WSL, import the distro, health-check, and **fail loud with the specific
+  missing piece**. The failure mode that matters is a user believing they have kernel containment
+  when provisioning quietly failed, which is the same failure `doctor` exists to prevent.
 - **F24 — one capability manifest.** CLI, MCP `tools/list`, `SUPPORTED_POLICY.md` and the tests all
   read the same file. The moment an outsider can run this, drift between those four becomes a
   credibility problem rather than a tidiness problem.
@@ -207,6 +214,11 @@ contract, and a Merkle proof binding the ledger rows to a root.
 
 AG-F06 (bare-token DLP rules for AWS / GitHub / OpenAI / Stripe / JWT) lands here, because the run
 record counts redactions and a counter that misses raw tokens is a false attestation.
+
+**Do not design the schema from scratch.** `2026-09-04-roadmap.md` already carries a six-group
+policy-and-evidence contract — request identity, effective permission, enforcement state, outcome,
+cleanup, integrity — written before there was anything to attach it to. That table is the schema;
+this phase is filling it in from things that already exist.
 
 Exit condition, unchanged from the original: **someone who did not run the mission can verify from
 the bundle alone what it was permitted to do and what it did.**

@@ -162,9 +162,9 @@ SPLAT/
 ├── native/
 │   ├── splat-agent/                             # Rust eBPF daemon: lease_lsm.bpf.c + libbpf-rs loader
 │   └── splat-canary/                            # Minimal -EPERM proof harness (preflight → canary)
-├── tests/MissionController.Tests/               # 350 xUnit unit / integration / security tests
+├── tests/MissionController.Tests/               # 459 xUnit unit / integration / security tests
 ├── packaging/                                   # Signed MSIX build + Intune/SCCM silent install scripts
-└── docs/                                        # Architecture notes & briefs
+└── docs/                                        # Briefs, plans and audits - index in docs/README.md
 ```
 
 ## Compliance alignment
