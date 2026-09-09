@@ -69,6 +69,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dotnet-install.ps
 > are the script's own header: `35 13 10 35 32 67 111 112` decodes to the comment line the file
 > opens with. `-OutFile` writes the raw bytes to disk and sidesteps the encoding entirely.
 
+> **Close the build servers first.** The extract overwrites `dotnet.exe` itself, and it is the very
+> first file out of the archive — so if anything holds it, the install fails after downloading all
+> 300 MB:
+>
+> ```
+> dotnet-install: Failed to extract package. Exception: … "The process cannot access the file
+> '…\Microsoft\dotnet\dotnet.exe' because it is being used by another process."
+> ```
+>
+> The usual culprit is nobody's fault and easy to miss: `dotnet build` and `dotnet test` leave a
+> Roslyn compiler server (`VBCSCompiler`) and MSBuild worker nodes resident for about fifteen minutes
+> after they finish, and those run *as* `dotnet.exe` out of this root. Run
+> `dotnet build-server shutdown` before installing. A failed extract leaves nothing behind to clean
+> up — `dotnet.exe` is the first entry, so the SDK directory is never created — and the archive is
+> not cached, so a retry re-downloads in full.
+
 It is a large download and it prints little while it runs; several minutes of apparent silence is
 normal. `dotnet-install: Installation finished` is the last line. Confirm it landed:
 
