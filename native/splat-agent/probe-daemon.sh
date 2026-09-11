@@ -146,15 +146,16 @@ dpkg = show(call({
 print()
 print("== 5. EGRESS: allow-list, with the network switch ON ==")
 print("   allowNetwork must be true or the lease seeds NO addresses and denies everything -")
-print("   which would make the 1.1.1.1 case pass for the wrong reason. With it on, 127.0.0.1 is")
-print("   the one permitted destination (a refused connection is fine: the kernel PERMITTED the")
+print("   which would make the 1.1.1.1 case pass for the wrong reason. With it on, 127.0.0.1:80 is")
+print("   the one permitted endpoint (a refused connection is fine: the kernel PERMITTED the")
 print("   syscall), and 1.1.1.1 must be refused by the allow-list itself.")
 egress_ok = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-egress-ok",
     "command": "/usr/bin/curl",
     "argv": ["--max-time", "3", "-s", "-o", "/dev/null", "http://127.0.0.1/"],
     "allowedExecPaths": ["/usr/bin/curl"],
-    "allowNetwork": True, "leaseDurationSeconds": 20,
+    "allowNetwork": True, "allowedEgressIps": ["127.0.0.1"], "allowedEgressPorts": [80],
+    "leaseDurationSeconds": 20,
 }, "egress-allowed", settle=6.0), "egress-allowed")
 
 egress_bad = show(call({
@@ -162,18 +163,21 @@ egress_bad = show(call({
     "command": "/usr/bin/curl",
     "argv": ["--max-time", "3", "-s", "-o", "/dev/null", "http://1.1.1.1/"],
     "allowedExecPaths": ["/usr/bin/curl"],
-    "allowNetwork": True, "leaseDurationSeconds": 20,
+    "allowNetwork": True, "allowedEgressIps": ["127.0.0.1"], "allowedEgressPorts": [80],
+    "leaseDurationSeconds": 20,
 }, "egress-denied", settle=6.0), "egress-denied")
 
 print()
 print("== 6. EGRESS: the network switch OFF denies even the permitted address ==")
-print("   allowNetwork false seeds no addresses at all, so deny-by-default must hold.")
+print("   The lease names 127.0.0.1:80 and the switch is off, so deny-by-default must hold even")
+print("   for the endpoint the request declared.")
 egress_off = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-egress-off",
     "command": "/usr/bin/curl",
     "argv": ["--max-time", "3", "-s", "-o", "/dev/null", "http://127.0.0.1/"],
     "allowedExecPaths": ["/usr/bin/curl"],
-    "allowNetwork": False, "leaseDurationSeconds": 20,
+    "allowNetwork": False, "allowedEgressIps": ["127.0.0.1"], "allowedEgressPorts": [80],
+    "leaseDurationSeconds": 20,
 }, "egress-off", settle=6.0), "egress-off")
 
 print()
@@ -254,6 +258,25 @@ expiry = show(call({
     "leaseDurationSeconds": 5,
 }, "expiry", settle=25.0), "expiry")
 expiry_elapsed = time.time() - expiry_start
+
+print()
+print("== 12. UNDECLARED POLICY: a lease that names nothing is refused, not defaulted ==")
+print("   An absent allowedEgressIps used to mean 127.0.0.1 and ports 80/443, and an absent")
+print("   allowedExecPaths meant sh, ping and curl. A caller that forgot a field was handed a")
+print("   lease wider than it asked for. Both must now be refused before any lease exists.")
+undeclared_egress = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-undeclared-egress",
+    "command": "/usr/bin/curl",
+    "argv": ["--max-time", "3", "-s", "-o", "/dev/null", "http://127.0.0.1/"],
+    "allowedExecPaths": ["/usr/bin/curl"],
+    "allowNetwork": True, "leaseDurationSeconds": 20,
+}, "undeclared-egress"), "undeclared-egress")
+
+undeclared_exec = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-undeclared-exec",
+    "command": "/usr/bin/id", "argv": [],
+    "leaseDurationSeconds": 20,
+}, "undeclared-exec"), "undeclared-exec")
 
 def had(msgs, t):
     return any(m.get("type") == t for m in (msgs or []))
@@ -339,6 +362,17 @@ expiry_killed = (
 )
 print(f"  expiry killed the workload     : {expiry_killed}  (exit {expiry_code} after {expiry_elapsed:.1f}s of a 60s sleep)")
 
+# The refusal must name the field that was missing, and it must arrive INSTEAD of a run: a daemon
+# that refused and executed anyway would still show the refusal text.
+def refused_naming(msgs, field):
+    body = text(msgs)
+    return "SPLAT refused the request" in body and field in body and not had(msgs, "STDOUT")
+
+undeclared_egress_refused = refused_naming(undeclared_egress, "allowedEgressIps")
+undeclared_exec_refused = refused_naming(undeclared_exec, "allowedExecPaths")
+print(f"  undeclared egress refused      : {undeclared_egress_refused}")
+print(f"  undeclared exec list refused   : {undeclared_exec_refused}")
+
 # A run that is not recorded is not proof - the same rule the canary follows.
 import datetime
 # Hash the daemon's kernel program into the record. Without it a months-old PASS kept standing
@@ -383,6 +417,9 @@ evidence = {
         # F05: expiry kills the workload rather than unpolicing it.
         "expiry_killed_the_workload": expiry_killed,
         "expiry_elapsed_seconds": round(expiry_elapsed, 1),
+        # An absent policy key is the absence of a decision, so it is refused rather than defaulted.
+        "undeclared_egress_refused": undeclared_egress_refused,
+        "undeclared_exec_list_refused": undeclared_exec_refused,
     },
     "violations": [
         {k: m.get(k) for k in ("hook", "pid", "detail", "detailText", "comm") if k in m}
@@ -412,6 +449,8 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["unapproved_port_refused"]
     and evidence["results"]["ipv6_refused"]
     and evidence["results"]["expiry_killed_the_workload"]
+    and evidence["results"]["undeclared_egress_refused"]
+    and evidence["results"]["undeclared_exec_list_refused"]
 ) else "INCOMPLETE"
 
 out_dir = os.environ.get("SPLAT_EVIDENCE_DIR", "/mnt/c/C_AGENT_BUILDER/native/splat-agent/evidence")

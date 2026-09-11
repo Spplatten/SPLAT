@@ -586,6 +586,45 @@ async fn handle_client(
                     continue;
                 }
 
+                // 0.4 Every dimension of the lease must be DECLARED, never inherited.
+                //
+                // An absent key used to take a default this daemon chose: 127.0.0.1 and ports 80 and
+                // 443 for egress, and /bin/sh, /bin/ping and /usr/bin/curl for exec. So a caller that
+                // forgot a field - or never had one - was handed a lease wider than anything it asked
+                // for, and the kernel then enforced that faithfully. Nobody had decided; a default
+                // had. An EMPTY list is still honoured as "nothing permitted", because that is a
+                // decision. What is refused is the missing key, which is the absence of one.
+                let allow_network = parsed.get("allowNetwork").and_then(|v| v.as_bool()).unwrap_or(false);
+                let mut undeclared: Vec<&str> = Vec::new();
+                if string_list(&parsed, "allowedExecPaths").is_none() {
+                    undeclared.push("allowedExecPaths");
+                }
+                if allow_network {
+                    if string_list(&parsed, "allowedEgressIps").is_none() {
+                        undeclared.push("allowedEgressIps");
+                    }
+                    if parsed.get("allowedEgressPorts").and_then(|v| v.as_array()).is_none() {
+                        undeclared.push("allowedEgressPorts");
+                    }
+                }
+
+                if !undeclared.is_empty() {
+                    error!("Refusing to execute for mission {mission_id}: undeclared lease policy");
+                    let err_chunk = serde_json::json!({
+                        "type": "STDERR",
+                        "data": format!(
+                            "SPLAT refused the request: this lease declares no {}. A missing field is \
+                             not a default here - the daemon will not decide what a lease permits.\n",
+                            undeclared.join(", nor ")
+                        )
+                    });
+                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                    let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                    writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                    line.clear();
+                    continue;
+                }
+
                 // 0.5 Resolve the clamps.
                 //
                 // The cgroup used to be provisioned from three constants here while the request's
@@ -649,19 +688,18 @@ async fn handle_client(
                 let lease_cfg = LeaseConfig {
                     mission_id: mission_id.to_string(),
                     working_directory: work_dir.to_string(),
-                    allow_network: parsed.get("allowNetwork").and_then(|v| v.as_bool()).unwrap_or(false),
+                    allow_network,
                     // The caller's declared policy is the lease. These were hardcoded, so a governed
                     // template could name its one approved destination and the kernel would never
                     // hear about it - the 1:1:1 rule held on the Windows side and evaporated here.
-                    // An absent key keeps the old default so the local probe still works; an empty
-                    // list is honoured as "nothing permitted" rather than silently widened.
-                    allowed_egress_ips: string_list(&parsed, "allowedEgressIps")
-                        .unwrap_or_else(|| vec!["127.0.0.1".to_string()]),
+                    // Empty only where the switch is off and the keys were therefore not required:
+                    // an absent key with the network on was refused above.
+                    allowed_egress_ips: string_list(&parsed, "allowedEgressIps").unwrap_or_default(),
                     allowed_egress_ports: parsed
                         .get("allowedEgressPorts")
                         .and_then(|v| v.as_array())
                         .map(|a| a.iter().filter_map(|p| p.as_u64().map(|n| n as u32)).collect())
-                        .unwrap_or_else(|| vec![80, 443]),
+                        .unwrap_or_default(),
                     // Always false by the time we get here - a true value was refused above.
                     // Kept on the config so the shape of the lease still names the dimension.
                     read_only_fs: false,
@@ -676,31 +714,13 @@ async fn handle_client(
                         }
                         paths
                     },
-                    // The controller's list when it sends one, and only then the legacy default.
-                    //
-                    // The daemon used to append the requested command to its own allow-list and add
-                    // /bin/sh, /bin/ping and /usr/bin/curl to every lease regardless of need - so a
-                    // caller wrote its own policy, and every mission could reach a shell whether or
-                    // not it asked. An explicit list from an authenticated controller is a policy;
-                    // a list the daemon assembled from the request is a restatement of the request.
-                    allowed_exec_paths: match string_list(&parsed, "allowedExecPaths") {
-                        Some(declared) => declared,
-                        None => {
-                            warn!(
-                                "Mission {mission_id} declared no allowedExecPaths; falling back to the \
-                                 legacy default set. A controller-issued lease should name its own."
-                            );
-                            let mut paths = vec![
-                                "/bin/sh".to_string(),
-                                "/bin/ping".to_string(),
-                                "/usr/bin/curl".to_string(),
-                            ];
-                            if !paths.iter().any(|p| p == command) {
-                                paths.push(command.to_string());
-                            }
-                            paths
-                        }
-                    },
+                    // The controller's list, and nothing else. The daemon used to append the requested
+                    // command to its own allow-list and add /bin/sh, /bin/ping and /usr/bin/curl to
+                    // every lease regardless of need - so a caller wrote its own policy, and every
+                    // mission could reach a shell whether or not it asked. An explicit list from an
+                    // authenticated controller is a policy; a list the daemon assembled from the
+                    // request is a restatement of the request. Absent is refused above, not defaulted.
+                    allowed_exec_paths: string_list(&parsed, "allowedExecPaths").unwrap_or_default(),
                     lease_duration_seconds: duration_sec,
                     // Resolved above, before the cgroup existed, and already read back out of the
                     // controllers - so this records what the kernel holds, not what was requested.

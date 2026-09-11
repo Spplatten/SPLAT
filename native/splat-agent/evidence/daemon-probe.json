@@ -2,7 +2,7 @@
   "schema": 2,
   "bpf_source_sha256": "8ac49790aaaa6d3ffb04dd1ae568a0508537b43c0c0d216e71d2cbc20597fd59",
   "protocol_version": 2,
-  "recorded_utc": "2026-09-06T00:38:15Z",
+  "recorded_utc": "2026-09-11T22:44:46Z",
   "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
   "results": {
     "permitted_tool_ran": true,
@@ -20,68 +20,70 @@
     "unapproved_port_refused": true,
     "ipv6_refused": true,
     "expiry_killed_the_workload": true,
-    "expiry_elapsed_seconds": 5.3
+    "expiry_elapsed_seconds": 6.0,
+    "undeclared_egress_refused": true,
+    "undeclared_exec_list_refused": true
   },
   "violations": [
     {
       "hook": 2,
-      "pid": 9036,
+      "pid": 9094,
       "detail": 742,
       "detailText": "file_open: denied access to protected sensitive file (inode 742)",
       "comm": "cat"
     },
     {
       "hook": 1,
-      "pid": 9040,
+      "pid": 9097,
       "detail": 1633,
       "detailText": "bprm_check_security: denied execution of unleased binary (inode 1633)",
       "comm": "sh"
     },
     {
       "hook": 1,
-      "pid": 9040,
+      "pid": 9097,
       "detail": 1633,
       "detailText": "bprm_check_security: denied execution of unleased binary (inode 1633)",
       "comm": "sh"
     },
     {
       "hook": 3,
-      "pid": 9043,
+      "pid": 9099,
       "detail": 16843009,
       "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 1.1.1.1",
       "comm": "curl"
     },
     {
       "hook": 3,
-      "pid": 9044,
+      "pid": 9100,
       "detail": 16777343,
       "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 127.0.0.1",
       "comm": "curl"
     },
     {
       "hook": 1,
-      "pid": 9051,
+      "pid": 9107,
       "detail": 1585,
       "detailText": "bprm_check_security: denied execution of unleased binary (inode 1585)",
       "comm": "sh"
     },
     {
       "hook": 1,
-      "pid": 9051,
+      "pid": 9107,
       "detail": 1585,
       "detailText": "bprm_check_security: denied execution of unleased binary (inode 1585)",
       "comm": "sh"
     },
     {
       "hook": 3,
-      "pid": 9052,
+      "pid": 9108,
       "detail": 16777343,
       "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 127.0.0.1",
       "comm": "curl"
     },
     {
       "hook": 3,
-      "pid": 9053,
+      "pid": 9109,
       "detail": 0,
       "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 0.0.0.0",
       "comm": "curl"
