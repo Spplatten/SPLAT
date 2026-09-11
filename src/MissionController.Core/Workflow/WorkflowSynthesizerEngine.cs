@@ -80,7 +80,7 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
                             { "MaxSteps", "4" },
                             { "AllowedTools", "PowershellLogProbe,DiskSpaceProbe,NetworkStatusProbe,ProcessIntegrityAudit" }
                         },
-                        TargetModel: "claude-3-5-sonnet")
+                        TargetModel: "claude-sonnet-5")
                 },
                 Edges: new List<WorkflowEdge>
                 {
@@ -215,7 +215,7 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
                         {
                             { "Prompt", "You are an Elite Media Buyer. Analyze the ad campaign metrics, calculate return on ad spend (ROAS), and flag underperforming ad sets with high cost-per-click." }
                         },
-                        TargetModel: "claude-3-5-sonnet")
+                        TargetModel: "claude-sonnet-5")
                 },
                 Edges: new List<WorkflowEdge>
                 {
@@ -263,7 +263,7 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
                         {
                             { "Prompt", "You are a Senior SecOps Incident Responder. Review the scrubbed event log evidence. State root cause, affected service, and whether automated rollback or service restart is required." }
                         },
-                        TargetModel: "claude-3-5-sonnet")
+                        TargetModel: "claude-sonnet-5")
                 },
                 Edges: new List<WorkflowEdge>
                 {
@@ -306,7 +306,7 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
                         {
                             { "Prompt", "Extract invoice number, total amount, vendor, and due date. Flag whether total is within normal monthly baseline ($2,000-$5,000)." }
                         },
-                        TargetModel: "claude-3-5-sonnet")
+                        TargetModel: "claude-sonnet-5")
                 },
                 Edges: new List<WorkflowEdge>
                 {
@@ -340,7 +340,7 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
                     {
                         { "Prompt", "Synthesize findings for: " + prompt }
                     },
-                    TargetModel: "claude-3-5-sonnet")
+                    TargetModel: "claude-sonnet-5")
             },
             Edges: new List<WorkflowEdge>
             {

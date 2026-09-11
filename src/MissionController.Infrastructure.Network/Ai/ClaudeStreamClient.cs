@@ -32,7 +32,13 @@ public sealed class ClaudeStreamClient : IModelStreamClient
     private const string AnthropicHost = "api.anthropic.com";
     private const string MessagesEndpoint = "https://api.anthropic.com/v1/messages";
     private const string ApiVersion = "2023-06-01";
-    private const string DefaultModel = "claude-3-5-sonnet-20241022";
+    // Current ids, one per size. The Claude 3 snapshots these replaced are retired and answer 404,
+    // which failed every live mission's first request until the quality island escalated.
+    private const string DefaultModel = "claude-sonnet-5";
+    private const string SmallModel = "claude-haiku-4-5";
+    // The migration guide's drop-in for 3 Opus. claude-opus-5 would also want refusal handling - a
+    // "refusal" stop_reason and the fallbacks parameter - which this raw client does not have.
+    private const string LargeModel = "claude-opus-4-8";
 
     /// <summary>Vault key the onboarding wizard and Settings write the user's API key to.</summary>
     public const string ApiKeyVaultKey = "Anthropic.ApiKey";
@@ -90,7 +96,10 @@ public sealed class ClaudeStreamClient : IModelStreamClient
         var payload = new
         {
             model,
-            max_tokens = 4096,
+            // Sonnet 5 runs adaptive thinking when `thinking` is omitted, and max_tokens caps thinking
+            // and text together. 4096 was sized for a model that did not think; a diagnosis cut off
+            // mid-JSON fails the structured-output contract and costs the mission its analysis.
+            max_tokens = 16000,
             stream = true,
             system = systemPrompt,
             messages = new[] { new { role = "user", content = userPrompt } }
@@ -198,13 +207,22 @@ public sealed class ClaudeStreamClient : IModelStreamClient
         if (string.IsNullOrWhiteSpace(requestedModel))
             return DefaultModel;
 
-        string lower = requestedModel.ToLowerInvariant();
+        string requested = requestedModel.Trim();
+        string lower = requested.ToLowerInvariant();
+
+        // A current Claude id is sent as named. The family checks below used to run first, so every
+        // haiku or opus request - a valid newer id included - collapsed onto one pinned snapshot.
+        // A Claude 3 id is never current: that generation is retired, so one left in an older
+        // user-authored template falls through to its family's successor instead of into a 404.
+        if (lower.StartsWith("claude-", StringComparison.Ordinal) &&
+            !lower.StartsWith("claude-3", StringComparison.Ordinal))
+            return requested;
+
+        // Family names, another provider's included, for when this client ends up serving the request.
         if (lower.Contains("haiku") || lower.Contains("flash"))
-            return "claude-3-5-haiku-20241022";
+            return SmallModel;
         if (lower.Contains("opus"))
-            return "claude-3-opus-20240229";
-        if (lower.StartsWith("claude-"))
-            return requestedModel.Trim();
+            return LargeModel;
 
         return DefaultModel;
     }

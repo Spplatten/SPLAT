@@ -867,7 +867,7 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
                 $"{contextBuilder.Length} characters of evidence were collected but not evaluated.");
         }
 
-        var model = node.TargetModel ?? "claude-3-5-sonnet";
+        var model = node.TargetModel ?? "claude-sonnet-5";
         await foreach (var token in _modelClient.StreamAnalysisAsync(model, "You are a governed workflow specialist.", fullPrompt, ct))
         {
             yield return new MissionChunk(executionId, MissionChunkType.AiToken, token, DateTime.UtcNow);
