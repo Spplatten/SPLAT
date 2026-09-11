@@ -5,7 +5,9 @@
   three different test counts):
     1. docs/TUTORIAL.md            - the markdown mirror, linked from README.md
     2. the published Claude artifact - https://claude.ai/code/artifact/18992308-da75-4782-87b8-20b6ba7b4311
-       (republish by stripping this doctype/html/head/body wrapper; the artifact host supplies its own)
+       (republish by stripping this doctype/html/head/body wrapper; the artifact host supplies its own.
+        Cut those lines by line number. A regex for `<head` also matches `<header class="hero">`, which
+        is how the published page lost its title placard between the 342-test version and 2026-09-11.)
   DocumentationDriftTests asserts the advertised test count, so changing that number here without
   changing it everywhere fails the build - which is the intended behaviour, not an obstacle.
 
