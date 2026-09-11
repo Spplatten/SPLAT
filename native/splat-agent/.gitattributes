@@ -1,0 +1,8 @@
+# These run inside Linux — force LF so a Windows checkout doesn't hand bash CRLF (`\r`) scripts.
+# It matters twice here: src/bpf/lease_lsm.bpf.c is hashed byte for byte against the
+# bpf_source_sha256 in evidence/daemon-probe.json, and Git for Windows sets core.autocrlf=true
+# system-wide, so without this a fresh checkout rewrote it with CRLF and DocumentationDriftTests
+# withdrew the README's "Enforcing, proven under root" for want of matching evidence.
+*.sh   text eol=lf
+*.c    text eol=lf
+*.rs   text eol=lf

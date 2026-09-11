@@ -74,7 +74,11 @@ public class UiWarningSuppressionTests
     private static string RepositoryRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, ".git")))
+        // The solution file, not .git: in a git worktree .git is a file, and in a source export it is
+        // absent, so anchoring on a .git directory made this the one class in the suite that failed
+        // outside the original checkout. DocumentationDriftTests and CompositionRootTests already
+        // anchor on the solution file.
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "MissionController.sln")))
         {
             dir = dir.Parent;
         }
