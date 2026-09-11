@@ -49,8 +49,23 @@ if [ -r /sys/kernel/security/lsm ]; then
     downgrade YELLOW
   fi
 else
-  yellow "  /sys/kernel/security/lsm unreadable — securityfs not mounted?"
-  downgrade YELLOW
+  # securityfs is not mounted on a fresh WSL boot, so the active list can be unreadable while bpf is
+  # perfectly active. This used to report that observation gap as YELLOW and then send the operator
+  # to "[FIX] lines above" it had never printed. The boot command line is world-readable and is what
+  # the kernel initialised its LSMs from: a stackable LSM named in the last lsm= there, and built in,
+  # was initialised. Pure-bash tests on purpose: under pipefail, `printf "$cfg" | grep -q` loses to
+  # SIGPIPE on a config this size and reads a present option as absent.
+  req="$(tr ' ' '
+' < /proc/cmdline | sed -n 's/^lsm=//p' | tail -n1)"
+  if [[ ",$req," == *,bpf,* ]] && grep -qx 'CONFIG_BPF_LSM=y' <<<"$cfg"; then
+    green "  [ok] bpf requested on the boot command line, and built in"
+    note "active list unreadable (securityfs not mounted); boot lsm=$req"
+  else
+    red "  [FIX] cannot confirm bpf is active: securityfs is not mounted and the boot command line does not settle it"
+    note "read the active list: sudo mount -t securityfs securityfs /sys/kernel/security"
+    note "if bpf is missing from it, add it via the kernel command line (see wslconfig.sample)"
+    downgrade YELLOW
+  fi
 fi
 
 echo
@@ -85,6 +100,6 @@ done
 echo
 case "$verdict" in
   GREEN)  green  "VERDICT: GREEN — stock kernel can enforce. Run: bash setup-guest.sh && bash run-canary.sh" ;;
-  YELLOW) yellow "VERDICT: YELLOW — fixable without a custom kernel. Apply the [FIX] lines above, then re-run." ;;
-  RED)    red    "VERDICT: RED — CONFIG_BPF_LSM absent. A custom WSL2 kernel is required (see docs/PLAN-kernel-substrate.md)." ;;
+  YELLOW) yellow "VERDICT: YELLOW — fixable without a custom kernel. Every line above not marked [ok] names what to resolve; then re-run." ;;
+  RED)    red    "VERDICT: RED — CONFIG_BPF_LSM absent. This kernel cannot host the substrate; a custom WSL2 kernel is required (see README.md beside this script)." ;;
 esac
