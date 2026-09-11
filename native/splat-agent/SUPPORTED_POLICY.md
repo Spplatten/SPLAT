@@ -44,6 +44,7 @@ revoking one does not remove an entry another still holds.
 | `overlayFs.enableCow: true` | The overlay would mount in the daemon's own mount namespace, and a merged directory handed to a child as its working directory is a starting point rather than a jail — the tool can `cd /` out of it. `cow.rs` holds the mount code; what is missing is `unshare(CLONE_NEWNS)` plus `pivot_root` in the pre-exec closure. |
 | `protocolVersion` ≠ 2 | A version 1 envelope carried arguments as a pre-quoted string that the daemon then split on whitespace. There is no correct way to reconstruct it here. |
 | Any `argv` that is not an array | Same reason. |
+| A request frame over **1 MiB** | The frame is read through a cap and the connection is closed. `read_line` grows until it meets a newline, and that ran *before* the auth check — so anything that could open the socket could make a root process allocate without bound by never sending one. The tail is not re-read: parsing on from the middle of a refused frame would turn it into a series of accepted ones. |
 | A missing `allowedExecPaths`, or a missing `allowedEgressIps` / `allowedEgressPorts` while `allowNetwork` is true | These used to take a default the daemon chose — 127.0.0.1 on ports 80 and 443, and `/bin/sh`, `/bin/ping`, `/usr/bin/curl` — so a caller that omitted a field received a lease wider than it asked for, and the kernel enforced that faithfully. An **empty** list is still accepted and means "nothing permitted": that is a decision. A missing key is the absence of one. |
 
 ## Not policed, and not claimed to be

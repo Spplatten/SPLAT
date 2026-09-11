@@ -174,6 +174,51 @@ public static class Program
     }
 
     /// <summary>
+    /// The largest request this server will hold in memory, in characters, not counting the newline.
+    ///
+    /// <c>ReadLineAsync</c> grows its buffer until it meets one, so a client that never sent a
+    /// newline could make this process allocate without bound - the same defect the guest daemon
+    /// carried on its socket. 1 MiB is far above any real call, including a <c>run_code</c> script.
+    /// </summary>
+    public const int MaxFrameChars = 1024 * 1024;
+
+    /// <summary>
+    /// Reads one line, refusing one that would grow past <see cref="MaxFrameChars"/>.
+    /// </summary>
+    /// <returns>
+    /// The line, or null at end of input; <c>Oversized</c> is true when a frame was refused, in
+    /// which case the rest of it has been discarded - read past, never buffered - so the reader is
+    /// positioned at the start of the next one.
+    /// </returns>
+    private static async Task<(string? Line, bool Oversized)> ReadBoundedLineAsync(TextReader reader, CancellationToken ct)
+    {
+        var frame = new StringBuilder();
+        var one = new char[1];
+
+        while (await reader.ReadAsync(one, ct) == 1)
+        {
+            if (one[0] == '\n')
+            {
+                return (frame.ToString().TrimEnd('\r'), false);
+            }
+
+            if (frame.Length >= MaxFrameChars)
+            {
+                while (await reader.ReadAsync(one, ct) == 1 && one[0] != '\n')
+                {
+                }
+
+                return (null, true);
+            }
+
+            frame.Append(one[0]);
+        }
+
+        // End of input. A trailing frame without its newline is still a frame the client sent.
+        return (frame.Length > 0 ? frame.ToString().TrimEnd('\r') : null, false);
+    }
+
+    /// <summary>
     /// The JSON-RPC loop: one message per line in, one response per line out, until end of input or
     /// cancellation. It takes its streams so the bytes a client actually receives can be asserted,
     /// rather than inferred from what the handler returned.
@@ -191,7 +236,23 @@ public static class Program
 
         while (!ct.IsCancellationRequested)
         {
-            string? line = await reader.ReadLineAsync(ct);
+            var (line, oversized) = await ReadBoundedLineAsync(reader, ct);
+            if (oversized)
+            {
+                // The frame is gone, but the session is not: a stdio client has no second connection
+                // to fall back on, so this resynchronises on the next newline and keeps serving.
+                await writer.WriteLineAsync(JsonSerializer.Serialize(new McpJsonRpcMessage
+                {
+                    JsonRpc = "2.0",
+                    Error = new McpError
+                    {
+                        Code = -32700,
+                        Message = $"Parse error: a request may not exceed {MaxFrameChars} characters."
+                    }
+                }));
+                continue;
+            }
+
             if (line == null) break;
             if (string.IsNullOrWhiteSpace(line)) continue;
 

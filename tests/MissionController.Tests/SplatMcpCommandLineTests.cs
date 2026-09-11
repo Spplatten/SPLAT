@@ -161,6 +161,62 @@ public sealed class SplatMcpCommandLineTests : IDisposable
         Assert.True(response.RootElement.TryGetProperty("result", out _));
     }
 
+    /// <summary>A `ping` frame padded to exactly <paramref name="length"/> characters.</summary>
+    private static string PingFrameOfLength(int length)
+    {
+        const string prefix = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\",\"params\":{\"pad\":\"";
+        const string suffix = "\"}}";
+        string frame = prefix + new string('x', length - prefix.Length - suffix.Length) + suffix;
+        Assert.Equal(length, frame.Length);
+        return frame;
+    }
+
+    private async Task<List<JsonDocument>> ServeAsync(string input)
+    {
+        var handler = new McpServerHandler(
+            new NeverCalledExecutor(), new TemplatePolicyCompiler(), new SilentLedger(), workspaceRoot: _root);
+        using var output = new MemoryStream();
+
+        await Program.ServeAsync(new StringReader(input), output, handler, CancellationToken.None);
+
+        return Encoding.UTF8.GetString(output.ToArray())
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => JsonDocument.Parse(line))
+            .ToList();
+    }
+
+    /// <summary>
+    /// The cap is the frame, not the frame plus its newline: one of exactly this size is served.
+    /// </summary>
+    [Fact]
+    public async Task AFrameAtTheLimit_IsAnswered()
+    {
+        var responses = await ServeAsync(PingFrameOfLength(Program.MaxFrameChars) + "\n");
+
+        var response = Assert.Single(responses);
+        Assert.True(response.RootElement.TryGetProperty("result", out _));
+    }
+
+    /// <summary>
+    /// One character more is refused without being buffered, and the session survives it. A stdio
+    /// client has no second connection to fall back on, so the reader skips to the next newline
+    /// rather than hanging up - and the frame after the bad one is still answered, which is what
+    /// proves the tail of the refused frame was not parsed as requests of its own.
+    /// </summary>
+    [Fact]
+    public async Task AFrameOverTheLimit_IsRefusedAndTheSessionContinues()
+    {
+        string oversized = new string('x', Program.MaxFrameChars + 1);
+
+        var responses = await ServeAsync(oversized + "\n" + PingFrameOfLength(200) + "\n");
+
+        Assert.Equal(2, responses.Count);
+        var error = responses[0].RootElement.GetProperty("error");
+        Assert.Equal(-32700, error.GetProperty("code").GetInt32());
+        Assert.Contains("may not exceed", error.GetProperty("message").GetString());
+        Assert.True(responses[1].RootElement.TryGetProperty("result", out _));
+    }
+
     private sealed class NeverCalledExecutor : ILeasedExecutor
     {
         public Task<ProcessExecutionResult> ExecuteLeasedAsync(

@@ -19,7 +19,9 @@ its client and spoken to over stdio.
 comparison with the console is in [ARCHITECTURE.md](ARCHITECTURE.md#two-hosts-one-pipeline) — then
 reads one JSON-RPC message per line from stdin and writes one response per line to stdout. It
 answers `initialize`, `notifications/initialized`, `ping`, `tools/list` and `tools/call`; an
-unparseable line gets `-32700` and an unknown method `-32601`. `Main` settles its command line
+unparseable line gets `-32700` and an unknown method `-32601`; a line over 1 MiB gets `-32700` too,
+refused before it is buffered, after which the reader skips to the next newline and the session
+carries on — a stdio client has no second connection to reopen. `Main` settles its command line
 before it builds anything ([`McpServerCommand`](../src/splat-mcp/McpServerCommand.cs)):
 `--workspace <dir>` names the one directory `fs_read` and `fs_write` may touch, which must already
 exist and is never created; without it the root is `%LOCALAPPDATA%\SPLAT\mcp-workspace`, named on

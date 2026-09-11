@@ -6,11 +6,11 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::Parser;
 use libbpf_rs::skel::{OpenSkel, Skel, SkelBuilder};
 use libbpf_rs::{MapCore, MapFlags, MapHandle, RingBufferBuilder};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc};
@@ -423,6 +423,30 @@ struct WorkloadIdentity {
     gid: u32,
 }
 
+/// The largest request frame this daemon will hold in memory, not counting the newline.
+///
+/// `read_line` grows a String until it meets one, and this loop ran it BEFORE the auth check - so
+/// anything that could open the socket could make a root process allocate without bound simply by
+/// never sending a newline. 1 MiB is orders of magnitude above the largest real envelope (a lease
+/// with its argv and its path lists) and far below anything this host would notice.
+const MAX_FRAME_BYTES: usize = 1024 * 1024;
+
+/// Reads one newline-delimited frame into `line`, refusing one that would grow past
+/// [`MAX_FRAME_BYTES`]. Returns the number of bytes read; 0 means the peer is done.
+///
+/// The cap is read through `take`, so an oversized frame is never accumulated: the reader stops one
+/// byte past the limit and that byte is what proves the frame was too long. A frame of exactly the
+/// limit still parses, because the extra byte it stops on is the delimiter.
+async fn read_frame(reader: &mut (impl AsyncBufRead + Unpin), line: &mut String) -> Result<usize> {
+    line.clear();
+    let read = reader.take(MAX_FRAME_BYTES as u64 + 1).read_line(line).await?;
+    if read > MAX_FRAME_BYTES && !line.ends_with('\n') {
+        bail!("a request frame may not exceed {MAX_FRAME_BYTES} bytes");
+    }
+
+    Ok(read)
+}
+
 async fn handle_client(
     socket: TcpStream,
     lease_mgr: LeaseManager,
@@ -434,7 +458,24 @@ async fn handle_client(
     let mut buf_reader = BufReader::new(reader);
     let mut line = String::new();
 
-    while buf_reader.read_line(&mut line).await? > 0 {
+    loop {
+        match read_frame(&mut buf_reader, &mut line).await {
+            Ok(0) => break, // Peer closed.
+            Ok(_) => {}
+            Err(e) => {
+                // Say so, then hang up. The rest of an oversized frame is still in the stream, and
+                // reading on from the middle of it would turn one refused request into a series of
+                // accepted ones assembled out of its tail. A legitimate caller reconnects.
+                warn!("Closing connection: {e}");
+                let err_resp = serde_json::json!({
+                    "type": "STDERR",
+                    "data": format!("SPLAT refused the request: {e}.\n")
+                });
+                let _ = writer.write_all(format!("{err_resp}\n").as_bytes()).await;
+                break;
+            }
+        }
+
         let trimmed = line.trim();
         if trimmed.is_empty() {
             line.clear();
@@ -1075,6 +1116,53 @@ async fn handle_client(
 
     Ok(())
 }
+#[cfg(test)]
+mod frame_tests {
+    use super::{read_frame, MAX_FRAME_BYTES};
+    use anyhow::Result;
+    use std::io::Cursor;
+    use tokio::io::BufReader;
+
+    async fn read_one(input: Vec<u8>) -> Result<(usize, String)> {
+        let mut reader = BufReader::new(Cursor::new(input));
+        let mut line = String::new();
+        let read = read_frame(&mut reader, &mut line).await?;
+        Ok((read, line))
+    }
+
+    /// The limit is the frame, not the frame plus its delimiter: one of exactly this size is legal.
+    #[tokio::test]
+    async fn a_frame_at_the_limit_is_read_whole() {
+        let payload = "a".repeat(MAX_FRAME_BYTES);
+        let (read, line) = read_one(format!("{payload}\n").into_bytes()).await.unwrap();
+
+        assert_eq!(read, MAX_FRAME_BYTES + 1);
+        assert_eq!(line.trim_end(), payload);
+    }
+
+    /// One byte more is refused, and the refusal happens before the rest can be buffered: the ten
+    /// megabytes trailing this frame are never read, which is the property the auth check needed.
+    #[tokio::test]
+    async fn a_frame_over_the_limit_is_refused_before_it_grows() {
+        let mut input = "a".repeat(MAX_FRAME_BYTES + 1).into_bytes();
+        input.extend(std::iter::repeat(b'a').take(10 * 1024 * 1024));
+        input.push(b'\n');
+
+        let err = read_one(input).await.unwrap_err();
+
+        assert!(err.to_string().contains("may not exceed"), "{err}");
+    }
+
+    /// A peer that closes without sending a newline ends the loop rather than holding the frame.
+    #[tokio::test]
+    async fn end_of_stream_reads_nothing() {
+        let (read, line) = read_one(Vec::new()).await.unwrap();
+
+        assert_eq!(read, 0);
+        assert!(line.is_empty());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::CString;
