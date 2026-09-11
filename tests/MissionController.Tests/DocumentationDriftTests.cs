@@ -557,7 +557,10 @@ public class DocumentationDriftTests
         string root = RepositoryRoot();
         var claims = new List<(string, int)>();
 
-        foreach (string relative in new[] { "README.md", Path.Combine("docs", "TUTORIAL.md") })
+        // The Field Guide is the source TUTORIAL.md is derived from, and its header said this test
+        // enforced the count there. It was never read: it said 387 automated tests while its own
+        // copy said 459 and the suite ran 459.
+        foreach (string relative in new[] { "README.md", Path.Combine("docs", "TUTORIAL.md"), Path.Combine("docs", "SPLAT-Field-Guide.html") })
         {
             string full = Path.Combine(root, relative);
             if (!File.Exists(full))
