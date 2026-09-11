@@ -408,6 +408,69 @@ public class DocumentationDriftTests
                   + "Run native/splat-agent/probe-daemon.sh against a root daemon, or withdraw the claim.");
     }
 
+    /// <summary>
+    /// The daemon probe proves the daemon; this proves the road into it. They are separate claims —
+    /// the daemon enforced under root for days while nothing had yet travelled from an MCP client
+    /// through the C# bridge to reach it — so the README's wording is bound to its own evidence, in
+    /// both directions, and to the kernel program that evidence ran against.
+    /// </summary>
+    [Fact]
+    public void TheLastHopClaim_MatchesItsProbeEvidence()
+    {
+        string readme = ReadmeText();
+        string file = Path.Combine(RepositoryRoot(), "native", "splat-agent", "evidence", "last-hop-probe.json");
+
+        bool claimsDemonstrated = readme.Contains("Demonstrated end to end", StringComparison.OrdinalIgnoreCase);
+        bool proven = false;
+
+        if (File.Exists(file))
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(file));
+            var root = doc.RootElement;
+            proven =
+                string.Equals(root.TryGetProperty("verdict", out var v) ? v.GetString() : null, "PASS", StringComparison.OrdinalIgnoreCase)
+                && root.TryGetProperty("bpf_source_sha256", out var sha)
+                && string.Equals(sha.GetString(), AgentBpfSourceSha256(), StringComparison.OrdinalIgnoreCase);
+
+            if (proven && root.TryGetProperty("results", out var results))
+            {
+                // The refusals AND the controls. Refusals alone are also what a chain that never
+                // reached the guest would produce, which is why the permitted run is required here:
+                // the first recorded attempt scored every refusal against a stale binary.
+                foreach (var required in new[]
+                         {
+                             "permitted_command_ran_as_nobody",
+                             "permitted_endpoint_reached_the_syscall",
+                             "unleased_second_exec_blocked_by_kernel",
+                             "egress_outside_the_lease_blocked_by_kernel",
+                         })
+                {
+                    if (!results.TryGetProperty(required, out var r) || !r.GetBoolean())
+                    {
+                        proven = false;
+                    }
+                }
+
+                if (results.TryGetProperty("unleased_exec_output_leaked", out var leaked) && leaked.GetBoolean())
+                {
+                    proven = false;
+                }
+            }
+            else
+            {
+                proven = false;
+            }
+        }
+
+        Assert.True(
+            claimsDemonstrated == proven,
+            proven
+                ? $"{file} records a passing last-hop run, but the README does not say the hop is demonstrated end to end."
+                : $"The README says the last hop is demonstrated end to end, but {file} does not record a passing run "
+                  + "against the BPF source that ships. Run native/splat-agent/probe-last-hop.ps1 against a root "
+                  + "daemon, or withdraw the claim.");
+    }
+
     // ---------------------------------------------------------------- evidence helpers
 
     private sealed record KernelProof(string File, string Verdict, string KernelRelease);

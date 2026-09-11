@@ -88,10 +88,10 @@ qualification when it does not — in both directions. 455 automated tests curre
 
 ## What is NOT proven — stated plainly
 
-- **The last hop.** The C# bridge now round-trips a real tool to the daemon and returns its output,
-  with four wire tests pinning the behaviour. What has *not* been demonstrated is a request
-  originating from the MCP tools — `run_command` / `run_code` — travelling that path. Treat those
-  two tools as uncontained until one does.
+- **~~The last hop.~~** Recorded on 2026-09-11: a `run_command` from an MCP client travelled the
+  bridge into the daemon and the kernel refused an undeclared exec and an out-of-lease connect,
+  with the permitted command and endpoint as controls. What is still *not* demonstrated is a
+  **governed mission** on that path — the console never routes one through the daemon.
 - **The audit ledger is unkeyed.** Editing a historical row breaks the hash chain verifiably. It does
   **not** stop a determined local administrator from deleting the tail and recomputing. This is
   integrity against accident and casual editing, not against an adversary with write access.

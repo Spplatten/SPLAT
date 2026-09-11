@@ -15,9 +15,9 @@ below.
 
 **Status.** The program is proven in operation on a stock WSL2 kernel — standalone, and through the
 daemon under root — with evidence bound to the source it ran. The last hop, an agent's request
-travelling from `splat-mcp` through the C# bridge into the daemon, is wired but has no recorded
-run. The README's status table is the test-bound statement of this; where it and this paragraph
-disagree, trust the README.
+travelling from `splat-mcp` through the C# bridge into the daemon, is recorded as of 2026-09-11 in
+[`last-hop-probe.json`](../native/splat-agent/evidence/last-hop-probe.json). The README's status
+table is the test-bound statement of this; where it and this paragraph disagree, trust the README.
 
 ## The pieces, and where they run
 
@@ -192,6 +192,7 @@ bridge does. A transport that carries peer identity — AF_VSOCK with a guest-si
 | --- | --- | --- |
 | [`canary-6.18.33.2-microsoft-standard-WSL2.json`](../native/splat-canary/evidence/canary-6.18.33.2-microsoft-standard-WSL2.json) | Standalone: a permitted connect succeeds while exec, open and connect outside the lease return `-EPERM` | Yes — the canary's BPF source |
 | [`daemon-probe.json`](../native/splat-agent/evidence/daemon-probe.json) | Through the daemon, under root: every row of SUPPORTED_POLICY's two enforced tables | Yes — the daemon's BPF source, plus two result fields re-checked |
+| [`last-hop-probe.json`](../native/splat-agent/evidence/last-hop-probe.json) | The whole road: a `run_command` from an MCP client, through `splat-mcp` and the bridge, refused in the kernel — with the permitted command and the permitted endpoint as controls | Yes — the daemon's BPF source, plus four result fields re-checked |
 | [`fail-closed-probe.json`](../native/splat-agent/evidence/fail-closed-probe.json) | The daemon refuses to run without live enforcement | No |
 | [`peer-auth-probe.json`](../native/splat-agent/evidence/peer-auth-probe.json) | An unauthenticated caller cannot execute | No |
 | [`wire-contract-probe.json`](../native/splat-agent/evidence/wire-contract-probe.json) | Arguments survive the wire byte for byte | No |

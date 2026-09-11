@@ -291,6 +291,12 @@ public class WslLeasedExecutor : ILeasedExecutor
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                // And stdin, which this child has no use for. Without the redirect it INHERITS the
+                // host's stdin - and in splat-mcp that is the JSON-RPC channel: wsl.exe pumps
+                // whatever it finds there into the guest, eating bytes the client had already sent.
+                // Recorded on 2026-09-11 by the last-hop probe, whose sixth request reached the
+                // server as a lone "{" and came back as a parse error.
+                RedirectStandardInput = true,
                 CreateNoWindow = true
             };
 
@@ -299,6 +305,8 @@ public class WslLeasedExecutor : ILeasedExecutor
             {
                 return null;
             }
+
+            proc.StandardInput.Close();
 
             string output = await proc.StandardOutput.ReadToEndAsync(ct);
             await proc.WaitForExitAsync(ct);
@@ -364,11 +372,15 @@ public class WslLeasedExecutor : ILeasedExecutor
                     "[ -x \\\"$d\\\" ] && { \\\"$d\\\" --listen 127.0.0.1:50051 >/tmp/splat-agent.log 2>&1 & break; }; " +
                     "done; fi\"",
                 UseShellExecute = false,
+                // Same reason as the token read: an inherited stdin is the caller's protocol stream,
+                // and this runs on EVERY leased execution.
+                RedirectStandardInput = true,
                 CreateNoWindow = true
             };
             using var proc = Process.Start(psi);
             if (proc != null)
             {
+                proc.StandardInput.Close();
                 await proc.WaitForExitAsync(ct);
                 await Task.Delay(400, ct);
             }

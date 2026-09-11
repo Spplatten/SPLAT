@@ -67,7 +67,9 @@ enforcement while the hash does not match what ships — so the proof cannot out
 
 | Claim | Evidence |
 | --- | --- |
-| Out-of-lease exec, open and connect are vetoed **through the daemon**, under root | `evidence/daemon-probe.json` (verdict PASS, 15 checks) |
+| Out-of-lease exec, open and connect are vetoed **through the daemon**, under root | `evidence/daemon-probe.json` (verdict PASS, 17 checks) |
+| The same holds for a request that entered through the product: an MCP client's `run_command`, through `splat-mcp` and the C# bridge | `evidence/last-hop-probe.json` (verdict PASS) — an undeclared exec and a connect outside the lease refused, with the permitted command and the permitted endpoint as controls |
+| A lease dimension nobody declared is refused rather than defaulted | `evidence/daemon-probe.json` — a missing `allowedExecPaths`, and a missing egress list with the network on, are both turned away before a cgroup exists |
 | A protected file is denied by the LEASE, not by file permissions | same run — a control reads `/etc/hostname` (644) unprotected, the leased run is refused with a kernel violation |
 | Two concurrent leases do not lend each other permissions | same run — B is denied an executable A holds live |
 | An approved host is not approved on every port | same run — `:9999` refused on a lease naming `:80` |

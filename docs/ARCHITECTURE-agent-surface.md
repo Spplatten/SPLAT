@@ -43,7 +43,7 @@ fails refuses the call with `-32001` rather than falling back to an anonymous ro
 
 | Tool | Runs | Enforced by |
 | --- | --- | --- |
-| `run_command` | Builds a lease inline and calls `ILeasedExecutor` | The Linux lease daemon — see [who authors which half of the lease](ARCHITECTURE-linux-substrate.md#who-authors-a-lease-today). No recorded run has carried a request from here into the daemon |
+| `run_command` | Builds a lease inline and calls `ILeasedExecutor` | The Linux lease daemon — see [who authors which half of the lease](ARCHITECTURE-linux-substrate.md#who-authors-a-lease-today). A run from here into the daemon is recorded in [`last-hop-probe.json`](../native/splat-agent/evidence/last-hop-probe.json) |
 | `run_code` | A pattern pre-flight, then `run_command` with `/usr/bin/python3`, `/bin/sh` or `/bin/bash` and `argv = ["-c", code]` | As `run_command`. The pre-flight, [`DynamicCodeAstValidator`](../src/MissionController.Core/DynamicCodeAstValidator.cs), is regular expressions despite its name — a filter, not a boundary |
 | `fs_read`, `fs_write` | [`WorkspaceGuard`](../src/splat-mcp/WorkspaceGuard.cs) | User space. Containment is judged on the path the kernel reports for the opened **handle**, and that same handle does the read or write, so a junction or symlink inside the workspace cannot redirect it. Refusals say they are a policy check, not a kernel denial |
 | `diagnose_system` | `IMissionExecutionEngine` | The full Windows pipeline — [control plane](ARCHITECTURE-control-plane.md), [Windows substrate](ARCHITECTURE-windows-substrate.md) |

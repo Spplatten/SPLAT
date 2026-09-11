@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -28,6 +29,54 @@ public class WslLeasedExecutorWireTests
     /// `wsl.exe -u root`, which is neither available nor relevant here.
     /// </summary>
     private const string TestToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    /// <summary>
+    /// Every child this bridge starts must be handed its own standard input.
+    ///
+    /// Without the redirect, `wsl.exe` INHERITS the host's stdin - and in `splat-mcp` that is the
+    /// JSON-RPC channel, so the child pumps the client's own bytes into the guest and the next
+    /// request arrives truncated. Found on 2026-09-11 by probe-last-hop.ps1, whose sixth request
+    /// reached the server as a lone "{" and came back as a parse error. Both call sites did it, and
+    /// the daemon-liveness one runs on EVERY leased execution.
+    ///
+    /// Asserted on the source, because reproducing it needs a real WSL and a real daemon, and this
+    /// suite has to pass on a fresh checkout with neither.
+    /// </summary>
+    [Fact]
+    public void EveryChildProcessTheBridgeStarts_GetsItsOwnStdin()
+    {
+        string path = Path.Combine(
+            RepositoryRoot(), "src", "MissionController.Infrastructure.Linux", "WslLeasedExecutor.cs");
+        var declarations = File.ReadAllText(path)
+            .Split("new ProcessStartInfo")
+            .Skip(1)
+            // Up to the Process.Start that consumes it. Not to the closing brace: one of these
+            // initializers carries a shell snippet containing "};" inside a string literal.
+            .Select(block => block[..Math.Max(0, block.IndexOf("Process.Start", StringComparison.Ordinal))])
+            .ToList();
+
+        Assert.NotEmpty(declarations);
+        foreach (string declaration in declarations)
+        {
+            Assert.True(
+                declaration.Contains("RedirectStandardInput = true", StringComparison.Ordinal),
+                "A ProcessStartInfo in WslLeasedExecutor.cs does not redirect standard input, so the child "
+                + "inherits the host's. Under splat-mcp that is the MCP client's JSON-RPC stream, and wsl.exe "
+                + "consumes it:\n" + declaration);
+        }
+    }
+
+    private static string RepositoryRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "MissionController.sln")))
+        {
+            dir = dir.Parent;
+        }
+
+        Assert.NotNull(dir);
+        return dir!.FullName;
+    }
 
     private static LeaseSpec SampleLease() => new(
         MissionId: Guid.NewGuid(),

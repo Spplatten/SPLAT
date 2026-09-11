@@ -131,12 +131,12 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 499`, on a line ending `(net10.0)`. The `dotnet` on this
+**Expect:** `Passed! - Failed: 0, Passed: 501`, on a line ending `(net10.0)`. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
 
 **Why it matters:** the number is not decorative. A test now fails if the README or the Field Guide
-advertise a count that disagrees with the suite, so `499` in the docs is checked, not asserted.
+advertise a count that disagrees with the suite, so `501` in the docs is checked, not asserted.
 
 ### 1.2 The documentation actually matches the code
 
@@ -148,7 +148,7 @@ advertise a count that disagrees with the suite, so `499` in the docs is checked
 disk, that every tool the MCP server exposes is documented, that retired overclaims have not crept
 back, and that the advertised test count matches reality.
 
-**Try breaking it:** change `499` to `498` in `README.md` and re-run. It should go red and name the
+**Try breaking it:** change `501` to `500` in `README.md` and re-run. It should go red and name the
 file. If it does not, the check is not doing its job — tell me.
 
 ### 1.3 The audit ledger verifies
@@ -232,8 +232,10 @@ and a green run proved nothing.
 | 0.6 Commit the evidence file | either | **done** |
 
 The daemon-level equivalent went further and is also done: `native/splat-agent/evidence/daemon-probe.json`,
-PASS on 15 checks under a root daemon, which is what [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md)
-cites for every claim in its enforced tables.
+PASS on 17 checks under a root daemon, which is what [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md)
+cites for every claim in its enforced tables. The hop into it from a real MCP client is recorded
+separately, in `evidence/last-hop-probe.json`; `native/splat-agent/probe-last-hop.ps1` re-runs that
+one from Windows against the same root daemon, and needs no `sudo` of its own.
 
 ### Step 0.5 — running the canary (yours)
 
