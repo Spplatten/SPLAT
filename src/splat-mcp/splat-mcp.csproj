@@ -8,6 +8,24 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!--
+    Distribution is one self-contained single file, produced by packaging/publish-splat-mcp.ps1.
+
+    NOT a `dotnet tool`, and not by preference: `PackAsTool` refuses a platform TFM outright -
+    NETSDK1146, "PackAsTool does not support TargetPlatformIdentifier being set" - and this project
+    must target net10.0-windows because it references MissionController.Infrastructure.Windows for
+    the job object, the restricted token and the ACL jail. Shipping a tool package would mean a
+    second, platform-neutral wrapper project carrying the real executable as payload; that is a
+    moving part P1 does not need, since the single file already requires nothing of the machine.
+
+    The native SQLite the ledger uses is a loose DLL beside the exe unless it is packed inside, and a
+    "single file" that needs a file next to it is not one - so IncludeNativeLibrariesForSelfExtract
+    stays on, and a test holds this file to it.
+  -->
+  <PropertyGroup>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\MissionController.Core\MissionController.Core.csproj" />
     <ProjectReference Include="..\MissionController.Infrastructure.Linux\MissionController.Infrastructure.Linux.csproj" />

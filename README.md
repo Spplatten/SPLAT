@@ -5,7 +5,7 @@
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](src/)
 [![Rust](https://img.shields.io/badge/Rust-libbpf--rs%20%2B%20eBPF-CE412B?logo=rust&logoColor=white)](native/splat-agent/)
 [![WinUI 3](https://img.shields.io/badge/UI-WinUI%203%20%2F%20Windows%20App%20SDK-0078D6?logo=windows&logoColor=white)](src/MissionController.UI/)
-[![Tests](https://img.shields.io/badge/Tests-503%2F503%20passing-success)](tests/MissionController.Tests/)
+[![Tests](https://img.shields.io/badge/Tests-505%2F505%20passing-success)](tests/MissionController.Tests/)
 [![Build](https://img.shields.io/badge/Build-0%20errors-success)](src/)
 
 **New here, or allergic to jargon?** Start with **[The SPLAT Field Guide](docs/TUTORIAL.md)** — the whole system explained in plain English.
@@ -39,7 +39,7 @@ Technical evaluations of agent sandboxes tend to blur together into generic "iso
 | Component | State |
 | :--- | :--- |
 | Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
-| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 503/503 automated tests passing |
+| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 505/505 automated tests passing |
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 12 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining ten run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
 | Linux lease daemon (`splat-agent`) | **Enforcing, proven under root** — seventeen checks in one run against a root daemon on kernel 6.18.33.2, recorded in [evidence/daemon-probe.json](native/splat-agent/evidence/daemon-probe.json) and bound to the SHA-256 of the BPF source that ships, so the proof cannot outlive the program it tested. All three hooks: a protected file the workload *could* read (`/etc/hostname`, 644 — a control run reads it, the leased run is denied, so only the lease accounts for the difference), an unleased second exec refused mid-`sh`, and egress held to one address and one port. Two concurrent leases proven not to lend each other permissions. The tool runs as `uid=65534(nobody)` with supplementary groups cleared, not as the daemon's root. IPv6 denied outright. An overrunning workload killed by the reaper 5.3s into a 60s sleep rather than merely unpoliced. A lease dimension the caller did not declare refused rather than defaulted. The daemon refuses to start at all unless enforcement is live |
@@ -123,6 +123,31 @@ Policy matches on inode identity, not path strings — full-path resolution in B
 
 Run it as `splat-mcp --workspace <dir>`. `fs_read` and `fs_write` are confined to that directory, which must already exist — it is never created for you. Without the flag they fall back to a private folder under `%LOCALAPPDATA%\SPLAT\mcp-workspace`, and the server names it on stderr at startup; stdout carries nothing but JSON-RPC. A bad option exits with status 2 before anything is built. `splat-mcp --help` prints the rest.
 
+**Installing it.** One self-contained file; the target machine needs no .NET:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\publish-splat-mcp.ps1
+```
+
+That produces `dist\splat-mcp.exe` (~74 MB, with its native SQLite packed inside) and
+`dist\splat-mcp.exe.sha256`. It refuses to report success if the publish returns non-zero, produces
+nothing, leaves a file beside the executable, or yields something that cannot print its own usage.
+Point an MCP client at the file:
+
+```json
+{
+  "mcpServers": {
+    "splat": {
+      "command": "C:\\tools\\splat-mcp.exe",
+      "args": ["--workspace", "C:\\path\\to\\your\\project"]
+    }
+  }
+}
+```
+
+There is no `dotnet tool` package: `PackAsTool` rejects a platform target framework (NETSDK1146), and
+this server targets `net10.0-windows` because its containment primitives are Win32.
+
 `splat-mcp doctor` answers the question that comes before trusting it with an agent: what will this host actually enforce? It reports the kernel, whether `bpf` is on its boot command line, whether the daemon is reachable *and* holding live BPF maps, and whether its token is in place — then what a lease enforces, refuses and does not police, copied from [`SUPPORTED_POLICY.md`](native/splat-agent/SUPPORTED_POLICY.md) and held to it by a test. It exits 0 only when a lease on this host would reach the kernel, so a setup script can gate on it. It serves nothing and creates nothing.
 
 `--egress a.b.c.d:port,...` names the only endpoints a `run_command` or `run_code` lease may connect to. A calling agent may ask for some of them and never for others, and without the flag both tools get no network: the agent's own request used to write the network half of its lease, so the kernel would faithfully enforce whatever an injected prompt had talked it into asking for.
@@ -150,10 +175,10 @@ Every call lands in the audit ledger attributed to a resolved principal — the 
 
 ```text
 $ dotnet test tests/MissionController.Tests/MissionController.Tests.csproj
-Passed!  - Failed: 0, Passed: 503, Skipped: 0, Total: 503, Duration: 25 s - MissionController.Tests.dll (net10.0)
+Passed!  - Failed: 0, Passed: 505, Skipped: 0, Total: 505, Duration: 25 s - MissionController.Tests.dll (net10.0)
 ```
 
-503 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
+505 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
 
 **On the warning count.** An incremental `dotnet build` reports zero warnings, but that is an artifact of caching rather than a property of the source: a cold `--no-incremental` build re-runs the CommunityToolkit source generators and emits **186 `MVVMTK0045` warnings**, one per `[ObservableProperty]` field that should be declared as a partial property for WinRT marshalling. They are cosmetic and confined to the view models, but a "zero warnings" claim would only have been true on the build nobody runs from clean. Converting the fields is tracked work; the badge above claims zero *errors*, which holds either way.
 
@@ -172,7 +197,7 @@ SPLAT/
 ├── native/
 │   ├── splat-agent/                             # Rust eBPF daemon: lease_lsm.bpf.c + libbpf-rs loader
 │   └── splat-canary/                            # Minimal -EPERM proof harness (preflight → canary)
-├── tests/MissionController.Tests/               # 503 xUnit unit / integration / security tests
+├── tests/MissionController.Tests/               # 505 xUnit unit / integration / security tests
 ├── packaging/                                   # Signed MSIX build + Intune/SCCM silent install scripts
 └── docs/                                        # Architecture, context and module maps; briefs, plans, audits - index in docs/README.md
 ```

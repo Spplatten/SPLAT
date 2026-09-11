@@ -31,7 +31,12 @@ without it neither tool gets network. A bad option or a malformed list exits 2 w
 written without the UTF-8 byte order mark it carried until 2026-09-11. `splat-mcp doctor` reports what this host will enforce — kernel, boot command line, daemon,
 token — and exits 0 only when a lease would reach the kernel; its summary of a lease is copied
 from [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md) and bound to it by a
-test. Packaged distribution is the rest of P1 in [the roadmap](ROADMAP.md).
+test. It ships as one self-contained executable from
+[`packaging/publish-splat-mcp.ps1`](../packaging/publish-splat-mcp.ps1), which refuses to report
+success on a non-zero publish, a missing output, a stray file beside the executable, or a result
+that cannot print its usage. There is no `dotnet tool` package: `PackAsTool` rejects the platform
+target framework this project needs (NETSDK1146). First-run provisioning is the rest of P1 in
+[the roadmap](ROADMAP.md).
 
 **Identity before effects.** `HandleToolsCallAsync` resolves the actor before it dispatches, so a
 refused credential reaches no executor and no file.
