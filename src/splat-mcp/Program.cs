@@ -28,10 +28,35 @@ namespace SplatMcp;
 
 public static class Program
 {
-    public static async Task Main(string[] args)
+    public static async Task<int> Main(string[] args)
     {
+        // Decided before anything is built: a bad invocation must not create the ledger database,
+        // seed the catalog or reach for the daemon. stdout is the JSON-RPC channel, so everything that
+        // is not a protocol message - errors, and the startup note - goes to stderr.
+        var command = McpServerCommand.Parse(args);
+        if (command is McpServerCommand.ShowHelp)
+        {
+            Console.Out.Write(McpServerCommand.Usage);
+            return 0;
+        }
+
+        if (command is McpServerCommand.UsageError error)
+        {
+            Console.Error.WriteLine($"splat-mcp: {error.Message}");
+            Console.Error.WriteLine("Run 'splat-mcp --help' for usage.");
+            return McpServerCommand.UsageExitCode;
+        }
+
+        // Configured only for serving. The help and usage paths need nothing from the console's code
+        // page, and leaving it alone keeps them safe to call from a host - a test runner - that may
+        // have no console to configure.
         Console.OutputEncoding = Encoding.UTF8;
         Console.InputEncoding = Encoding.UTF8;
+
+        string? workspaceRoot = ((McpServerCommand.Serve)command).WorkspaceRoot;
+        Console.Error.WriteLine(workspaceRoot is null
+            ? $"splat-mcp: no --workspace given; fs_read and fs_write are confined to {McpServerHandler.DefaultWorkspaceRoot}"
+            : $"splat-mcp: workspace {workspaceRoot}");
 
         // 1. Data & Storage Layer
         string dbPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SPLAT", "audit_ledger.db");
@@ -123,7 +148,8 @@ public static class Program
             identityProvider: new McpOperatorIdentityProvider(
                 new WindowsOperatorIdentityProvider(),
                 new JwtTokenValidator(),
-                new ApiKeyValidator()));
+                new ApiKeyValidator()),
+            workspaceRoot: workspaceRoot);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (s, e) =>
@@ -133,11 +159,29 @@ public static class Program
         };
 
         using var reader = new StreamReader(Console.OpenStandardInput(), Encoding.UTF8);
-        using var writer = new StreamWriter(Console.OpenStandardOutput(), Encoding.UTF8) { AutoFlush = true };
+        await ServeAsync(reader, Console.OpenStandardOutput(), handler, cts.Token);
+        return 0;
+    }
 
-        while (!cts.Token.IsCancellationRequested)
+    /// <summary>
+    /// The JSON-RPC loop: one message per line in, one response per line out, until end of input or
+    /// cancellation. It takes its streams so the bytes a client actually receives can be asserted,
+    /// rather than inferred from what the handler returned.
+    /// </summary>
+    public static async Task ServeAsync(TextReader reader, Stream output, McpServerHandler handler, CancellationToken ct)
+    {
+        // UTF-8 WITHOUT a byte order mark. With Encoding.UTF8, StreamWriter writes EF BB BF at its first
+        // flush, so every client's first response - the answer to `initialize` - began with three bytes
+        // a strict JSON parser rejects before it reaches the opening brace. WslLeasedExecutor fixed the
+        // same defect on the daemon socket; stdout had it too, found 2026-09-11 by reading the bytes.
+        using var writer = new StreamWriter(output, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), leaveOpen: true)
         {
-            string? line = await reader.ReadLineAsync(cts.Token);
+            AutoFlush = true
+        };
+
+        while (!ct.IsCancellationRequested)
+        {
+            string? line = await reader.ReadLineAsync(ct);
             if (line == null) break;
             if (string.IsNullOrWhiteSpace(line)) continue;
 
@@ -146,7 +190,7 @@ public static class Program
                 var message = JsonSerializer.Deserialize<McpJsonRpcMessage>(line);
                 if (message != null)
                 {
-                    var response = await handler.ProcessMessageAsync(message, cts.Token);
+                    var response = await handler.ProcessMessageAsync(message, ct);
                     string jsonResponse = JsonSerializer.Serialize(response);
                     await writer.WriteLineAsync(jsonResponse);
                 }

@@ -73,6 +73,16 @@ public class McpServerHandler
     /// write into C:\Windows. Confining them to one governed root is what makes the tool
     /// descriptions true; <see cref="ResolveWithinWorkspace"/> is what enforces it.
     /// </summary>
+    /// <summary>
+    /// Where fs_read and fs_write are confined when the host names no workspace. Defined once, so the
+    /// help text and the startup note on stderr cannot describe a different folder from the one the
+    /// guard actually uses.
+    /// </summary>
+    public static string DefaultWorkspaceRoot { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "SPLAT",
+        "mcp-workspace");
+
     private readonly string _workspaceRoot;
 
     /// <summary>
@@ -112,10 +122,7 @@ public class McpServerHandler
         _crewRegistry = crewRegistry;
         _identityProvider = identityProvider ?? new McpOperatorIdentityProvider(
             new StaticOperatorIdentityProvider(OperatorIdentity.Unknown("mcp-stdio")));
-        _workspace = new WorkspaceGuard(workspaceRoot ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SPLAT",
-            "mcp-workspace"));
+        _workspace = new WorkspaceGuard(workspaceRoot ?? DefaultWorkspaceRoot);
         _workspaceRoot = _workspace.Root;
     }
 

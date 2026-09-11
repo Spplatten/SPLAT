@@ -196,7 +196,10 @@ sign after their own engineer ran it and read `SUPPORTED_POLICY.md`.
 - **Give `splat-mcp` a CLI.** `Main` currently ignores `args` entirely, so the
   `--workspace ./my-project` stanza in the strategy note does nothing today. Parse it, bind it to
   `WorkspaceGuard`'s root, and refuse to start without one rather than defaulting somewhere
-  surprising.
+  surprising. *Landed 2026-09-11 with one change: the flag is optional. Without it the file tools
+  stay confined to SPLAT's own private folder, which fails safe rather than open, and the server
+  names that folder on stderr; requiring it would have broken every existing launcher for no
+  containment gain.*
 - **`splat-mcp doctor`.** One command that reports kernel version, BPF-LSM availability, daemon
   binary and token state, and then prints what will and will not be enforced on *this* host — read
   out of the policy tables, never hardcoded. A host where the substrate is absent must say so and

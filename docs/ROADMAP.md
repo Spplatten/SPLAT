@@ -21,6 +21,7 @@ a decision. Where both appear, the agent does the work and you do the one step i
 
 | Item | Evidence |
 | --- | --- |
+| The server's first byte is the JSON | Every MCP client's first response began with a UTF-8 byte order mark — `ef bb bf` before `{` — which strict JSON parsers reject. Found by reading the bytes, fixed with 1.1, and pinned by a test on the stream itself |
 | P0 — the shipping tree on .NET 10 | `0027e57`: 459/459 on `.NETCoreApp,Version=v10.0`, and the frozen console still builds on the net9 leg |
 | F21, SQLite half — a high-severity advisory was shipping | `0027e57`: `SQLitePCLRaw` 2.1.10 → 2.1.12, clearing `GHSA-2m69-gcr7-jv3q`. `dist\App` republished, and the patched `e_sqlite3.dll` confirmed loaded in the running app |
 | A cold build is warning-free on both legs | 2026-09-10, `--no-incremental`: the console and the net9 legs, 0 warnings; the net10 legs, 0 code warnings and one `MSB3061` — a file lock during the rebuild's delete step, not the code |
@@ -39,7 +40,7 @@ and nothing after it.
 
 | # | Item | Owner | State, 2026-09-10 | Done when |
 | --- | --- | --- | --- | --- |
-| 1.1 | A `splat-mcp` command line — `--workspace`, help, refusal of unknown options — validated **before** any startup effect | agent | Not started. `Main(string[] args)` never reads `args`, and builds the database and the catalog before it serves anything | The selected root reaches `WorkspaceGuard`, and a bad option exits without creating a database |
+| 1.1 | A `splat-mcp` command line — `--workspace`, help, refusal of unknown options — validated **before** any startup effect | agent | **Done 2026-09-11.** Parsed before anything is built: a bad option or a missing workspace exits 2 with the ledger untouched, and a workspace is never created. `--workspace` is optional on purpose — without it the file tools stay in SPLAT's private folder, which fails safe, and the server names that folder on stderr | The selected root reaches `WorkspaceGuard`, and a bad option exits without creating a database — both shown on the real exe, not only in tests |
 | 1.2 | `splat-mcp doctor` | agent | Not started | It reports this host's kernel, BPF-LSM state, daemon and token, then what will and will not be enforced — read from the policy tables, never hardcoded — and refuses the enforcing modes when the substrate is absent |
 | 1.3 | First-run WSL provisioning | agent; `wsl --install` is yours | Not started — there is no `WslProvisioner` | A clean machine reaches a kernel-contained mission with no manual shell step, and a broken provision names the missing piece instead of falling back silently |
 | 1.4 | Distribution: single-file `splat-mcp`, a `dotnet tool`, an `npx` shim | agent | Not started — no `PackAsTool` | `dotnet tool install` plus one config stanza is the whole setup |

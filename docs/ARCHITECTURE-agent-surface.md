@@ -19,10 +19,13 @@ its client and spoken to over stdio.
 comparison with the console is in [ARCHITECTURE.md](ARCHITECTURE.md#two-hosts-one-pipeline) — then
 reads one JSON-RPC message per line from stdin and writes one response per line to stdout. It
 answers `initialize`, `notifications/initialized`, `ping`, `tools/list` and `tools/call`; an
-unparseable line gets `-32700` and an unknown method `-32601`. `Main` does not read its arguments.
-There is no CLI yet, so the workspace root is fixed at `%LOCALAPPDATA%\SPLAT\mcp-workspace`; a CLI,
-a `doctor` command and packaged distribution are P1 of
-[the live plan](audits/2026-09-09-oem-subtraction-plan.md).
+unparseable line gets `-32700` and an unknown method `-32601`. `Main` settles its command line
+before it builds anything ([`McpServerCommand`](../src/splat-mcp/McpServerCommand.cs)):
+`--workspace <dir>` names the one directory `fs_read` and `fs_write` may touch, which must already
+exist and is never created; without it the root is `%LOCALAPPDATA%\SPLAT\mcp-workspace`, named on
+stderr at startup. A bad option exits 2 with nothing built, and stdout carries only JSON-RPC —
+written without the UTF-8 byte order mark it carried until 2026-09-11. A `doctor` command and
+packaged distribution are the rest of P1 in [the roadmap](ROADMAP.md).
 
 **Identity before effects.** `HandleToolsCallAsync` resolves the actor before it dispatches, so a
 refused credential reaches no executor and no file.
