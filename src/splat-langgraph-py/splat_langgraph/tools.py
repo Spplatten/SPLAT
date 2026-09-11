@@ -43,8 +43,8 @@ class RunCommandArgs(BaseModel):
     command: str = Field(..., description="Executable path inside the sandbox (e.g. /bin/ls, /usr/bin/curl).")
     arguments: str = Field(default="", description="Command arguments.")
     working_directory: str = Field(default="/tmp", description="Working directory inside the sandbox.")
-    allow_network: bool = Field(default=False, description="Whether kernel egress is permitted at all.")
-    allowed_egress_ips: list[str] = Field(default_factory=list, description="Allow-listed egress IPv4 addresses.")
+    allow_network: bool = Field(default=False, description="Request network egress. Granted only inside the operator's splat-mcp --egress policy, and refused when the host has none.")
+    allowed_egress_ips: list[str] = Field(default_factory=list, description="IPv4 addresses to request, each of which must be in the operator's egress policy; empty requests every address it approves. Refused without allow_network.")
     timeout_seconds: int = Field(default=30, ge=5, le=300, description="Kernel lease lifespan in seconds.")
     read_only_fs: bool = Field(default=False, description="Mount the sandbox root read-only.")
 
@@ -52,7 +52,7 @@ class RunCommandArgs(BaseModel):
 class RunCodeArgs(BaseModel):
     code: str = Field(..., description="Script source to execute.")
     language: str = Field(default="bash", description="bash, sh, or python3.")
-    allow_network: bool = Field(default=False, description="Whether kernel egress is permitted.")
+    allow_network: bool = Field(default=False, description="Request network egress, under the same operator egress policy as run_command.")
     timeout_seconds: int = Field(default=30, ge=5, le=300, description="Kernel lease lifespan in seconds.")
 
 

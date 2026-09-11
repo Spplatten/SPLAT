@@ -53,10 +53,14 @@ public static class Program
         Console.OutputEncoding = Encoding.UTF8;
         Console.InputEncoding = Encoding.UTF8;
 
-        string? workspaceRoot = ((McpServerCommand.Serve)command).WorkspaceRoot;
+        var serve = (McpServerCommand.Serve)command;
+        string? workspaceRoot = serve.WorkspaceRoot;
         Console.Error.WriteLine(workspaceRoot is null
             ? $"splat-mcp: no --workspace given; fs_read and fs_write are confined to {McpServerHandler.DefaultWorkspaceRoot}"
             : $"splat-mcp: workspace {workspaceRoot}");
+        Console.Error.WriteLine(serve.Egress.IsEmpty
+            ? "splat-mcp: no --egress given; run_command and run_code get no network"
+            : $"splat-mcp: run_command and run_code may connect only to {serve.Egress}");
 
         // 1. Data & Storage Layer
         string dbPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SPLAT", "audit_ledger.db");
@@ -149,7 +153,8 @@ public static class Program
                 new WindowsOperatorIdentityProvider(),
                 new JwtTokenValidator(),
                 new ApiKeyValidator()),
-            workspaceRoot: workspaceRoot);
+            workspaceRoot: workspaceRoot,
+            egressPolicy: serve.Egress);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (s, e) =>

@@ -23,7 +23,9 @@ unparseable line gets `-32700` and an unknown method `-32601`. `Main` settles it
 before it builds anything ([`McpServerCommand`](../src/splat-mcp/McpServerCommand.cs)):
 `--workspace <dir>` names the one directory `fs_read` and `fs_write` may touch, which must already
 exist and is never created; without it the root is `%LOCALAPPDATA%\SPLAT\mcp-workspace`, named on
-stderr at startup. A bad option exits 2 with nothing built, and stdout carries only JSON-RPC —
+stderr at startup. `--egress a.b.c.d:port,...` names the only endpoints a `run_command` or
+`run_code` lease may connect to, checked by [`McpEgressPolicy`](../src/splat-mcp/McpEgressPolicy.cs);
+without it neither tool gets network. A bad option or a malformed list exits 2 with nothing built, and stdout carries only JSON-RPC —
 written without the UTF-8 byte order mark it carried until 2026-09-11. A `doctor` command and
 packaged distribution are the rest of P1 in [the roadmap](ROADMAP.md).
 

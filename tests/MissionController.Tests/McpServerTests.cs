@@ -234,7 +234,9 @@ public class McpServerTests
         var executor = new MockLeasedExecutor();
         var compiler = new TemplatePolicyCompiler();
         var ledger = new MockAuditLedger();
-        var handler = new McpServerHandler(executor, compiler, ledger);
+        // Both addresses are inside the operator's policy, so the request is granted as sent.
+        var handler = new McpServerHandler(executor, compiler, ledger,
+            egressPolicy: McpEgressPolicy.Parse("127.0.0.1:443, 192.168.1.1:443"));
 
         var request = new McpJsonRpcMessage
         {
@@ -269,6 +271,8 @@ public class McpServerTests
         Assert.True(executor.LastLease.AllowNetwork);
         Assert.Contains("127.0.0.1", executor.LastLease.AllowedEgressIps);
         Assert.Contains("192.168.1.1", executor.LastLease.AllowedEgressIps);
+        // Only the port the operator approved for both addresses - not the 80 and 443 once added to every lease.
+        Assert.Equal(new uint[] { 443 }, executor.LastLease.AllowedEgressPorts);
         Assert.Equal(45u, executor.LastLease.LeaseDurationSeconds);
 
         Assert.Single(ledger.Logs);
@@ -717,7 +721,8 @@ public class McpServerTests
         var executor = new MockLeasedExecutor();
         var compiler = new TemplatePolicyCompiler();
         var ledger = new MockAuditLedger();
-        var handler = new McpServerHandler(executor, compiler, ledger);
+        var handler = new McpServerHandler(executor, compiler, ledger,
+            egressPolicy: McpEgressPolicy.Parse("127.0.0.1:443"));
 
         // Send timeoutSeconds as string "45" and allowNetwork as string "true"
         var request = new McpJsonRpcMessage
@@ -742,5 +747,132 @@ public class McpServerTests
         Assert.NotNull(executor.LastLease);
         Assert.Equal(45u, executor.LastLease.LeaseDurationSeconds);
         Assert.True(executor.LastLease.AllowNetwork);
+    }
+
+    /// <summary>
+    /// The network half of a run_command lease used to be whatever the caller sent: allowNetwork and
+    /// allowedEgressIps went into the lease as they came, with 80 and 443 added for every address.
+    /// This and the three tests after it fail against the parent commit, where each request reached
+    /// the executor.
+    /// </summary>
+    [Fact]
+    public async Task RunCommand_RefusesNetwork_WhenTheHostHasNoEgressPolicy()
+    {
+        var executor = new MockLeasedExecutor();
+        var ledger = new MockAuditLedger();
+        var handler = new McpServerHandler(executor, new TemplatePolicyCompiler(), ledger);
+
+        var response = await handler.ProcessMessageAsync(FsCall(20, "run_command", new
+        {
+            command = "/usr/bin/curl",
+            args = new[] { "http://203.0.113.7/" },
+            allowNetwork = true,
+            allowedEgressIps = new[] { "203.0.113.7" }
+        }));
+
+        var doc = JsonDocument.Parse(response.Result!.Value.GetRawText());
+        Assert.True(doc.RootElement.GetProperty("isError").GetBoolean());
+        Assert.Contains("[SPLAT POLICY]", doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.Null(executor.LastLease);
+        Assert.Contains(ledger.Logs, log => log.action == "EGRESS_REQUEST_REFUSED");
+    }
+
+    [Fact]
+    public async Task RunCommand_RefusesAnAddressTheEgressPolicyDoesNotName()
+    {
+        var executor = new MockLeasedExecutor();
+        var handler = new McpServerHandler(executor, new TemplatePolicyCompiler(), new MockAuditLedger(),
+            egressPolicy: McpEgressPolicy.Parse("127.0.0.1:443"));
+
+        var response = await handler.ProcessMessageAsync(FsCall(21, "run_command", new
+        {
+            command = "/usr/bin/curl",
+            allowNetwork = true,
+            allowedEgressIps = new[] { "127.0.0.1", "203.0.113.7" }
+        }));
+
+        var doc = JsonDocument.Parse(response.Result!.Value.GetRawText());
+        Assert.True(doc.RootElement.GetProperty("isError").GetBoolean());
+        Assert.Contains("203.0.113.7", doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.Null(executor.LastLease);
+    }
+
+    [Fact]
+    public async Task RunCommand_RefusesAddressesSentWithoutAllowNetwork()
+    {
+        // The daemon installs endpoints only when allowNetwork is set, so these addresses used to ride
+        // in the lease and be ignored - a request that read back to its caller as accepted.
+        var executor = new MockLeasedExecutor();
+        var handler = new McpServerHandler(executor, new TemplatePolicyCompiler(), new MockAuditLedger(),
+            egressPolicy: McpEgressPolicy.Parse("203.0.113.7:443"));
+
+        var response = await handler.ProcessMessageAsync(FsCall(22, "run_command", new
+        {
+            command = "/usr/bin/curl",
+            allowedEgressIps = new[] { "203.0.113.7" }
+        }));
+
+        var doc = JsonDocument.Parse(response.Result!.Value.GetRawText());
+        Assert.True(doc.RootElement.GetProperty("isError").GetBoolean());
+        Assert.Null(executor.LastLease);
+    }
+
+    [Fact]
+    public async Task RunCode_IsHeldToTheSameEgressPolicy()
+    {
+        var executor = new MockLeasedExecutor();
+        var handler = new McpServerHandler(executor, new TemplatePolicyCompiler(), new MockAuditLedger());
+
+        var response = await handler.ProcessMessageAsync(FsCall(23, "run_code", new
+        {
+            language = "sh",
+            code = "echo hello",
+            allowNetwork = true
+        }));
+
+        var doc = JsonDocument.Parse(response.Result!.Value.GetRawText());
+        Assert.True(doc.RootElement.GetProperty("isError").GetBoolean());
+        Assert.Null(executor.LastLease);
+    }
+
+    /// <summary>
+    /// The negative control, and a second attack. The legitimate request still runs, and its lease
+    /// names only what the operator approved for that address: the parent commit leased 80 and 443 to
+    /// every address, so approving 203.0.113.7:443 also opened 203.0.113.7:80.
+    /// </summary>
+    [Fact]
+    public async Task RunCommand_LeasesOnlyTheEndpointsTheOperatorApproved()
+    {
+        var executor = new MockLeasedExecutor();
+        var handler = new McpServerHandler(executor, new TemplatePolicyCompiler(), new MockAuditLedger(),
+            egressPolicy: McpEgressPolicy.Parse("203.0.113.7:443, 127.0.0.1:80"));
+
+        var response = await handler.ProcessMessageAsync(FsCall(24, "run_command", new
+        {
+            command = "/usr/bin/curl",
+            allowNetwork = true,
+            allowedEgressIps = new[] { "203.0.113.7" }
+        }));
+
+        var doc = JsonDocument.Parse(response.Result!.Value.GetRawText());
+        Assert.False(doc.RootElement.GetProperty("isError").GetBoolean());
+        Assert.NotNull(executor.LastLease);
+        Assert.True(executor.LastLease!.AllowNetwork);
+        Assert.Equal(new[] { "203.0.113.7" }, executor.LastLease.AllowedEgressIps);
+        Assert.Equal(new uint[] { 443 }, executor.LastLease.AllowedEgressPorts);
+    }
+
+    /// <summary>
+    /// A policy that is half understood is not a policy, so one malformed entry refuses the list.
+    /// "1:443" is the entry a loose parser gets wrong: IPAddress.TryParse reads "1" as 0.0.0.1.
+    /// </summary>
+    [Theory]
+    [InlineData("example.com:443")]
+    [InlineData("203.0.113.7")]
+    [InlineData("203.0.113.7:0")]
+    [InlineData("1:443")]
+    public void EgressPolicy_RefusesAMalformedEntry(string spec)
+    {
+        Assert.Throws<FormatException>(() => McpEgressPolicy.Parse(spec));
     }
 }

@@ -19,7 +19,7 @@ public abstract record McpServerCommand
     public const int UsageExitCode = 2;
 
     public static string Usage => $"""
-        Usage: splat-mcp [--workspace <dir>]
+        Usage: splat-mcp [--workspace <dir>] [--egress <a.b.c.d:port,...>]
 
         Serves SPLAT's governed tools to an MCP client: JSON-RPC, one message per line, on stdin
         and stdout. Diagnostics go to stderr, never stdout.
@@ -27,6 +27,10 @@ public abstract record McpServerCommand
           --workspace <dir>   The one directory fs_read and fs_write may touch. It must already
                               exist; it is never created. Without it, both are confined to
                               {McpServerHandler.DefaultWorkspaceRoot}
+          --egress <list>     The only endpoints run_command and run_code leases may connect
+                              to, as IPv4 a.b.c.d:port separated by commas. A caller may ask
+                              for some of them and never for others. Without it, neither tool
+                              gets any network.
           -h, --help          Show this and exit.
 
         """;
@@ -45,47 +49,67 @@ public abstract record McpServerCommand
             }
         }
 
-        string? workspace = null;
+        // Each option may be given once: were a second value to win silently, what the server confines
+        // would depend on the order a client's config happened to list them.
+        var given = new Dictionary<string, string>(StringComparer.Ordinal);
         for (int i = 0; i < args.Count; i++)
         {
             string arg = args[i];
+            int equals = arg.IndexOf('=');
+            string option = equals < 0 ? arg : arg[..equals];
             string? value;
 
-            if (arg == "--workspace")
+            if (option is not ("--workspace" or "--egress"))
             {
-                // `--workspace --other` is a forgotten path, not a directory named "--other".
-                value = i + 1 < args.Count && !args[i + 1].StartsWith('-') ? args[++i] : null;
+                return arg.StartsWith('-')
+                    ? new UsageError($"unknown option '{arg}'.")
+                    : new UsageError($"unexpected argument '{arg}'. Each value follows its option, as in --workspace <dir> or --egress <list>.");
             }
-            else if (arg.StartsWith("--workspace=", StringComparison.Ordinal))
+
+            if (equals >= 0)
             {
-                value = arg["--workspace=".Length..];
-            }
-            else if (arg.StartsWith('-'))
-            {
-                return new UsageError($"unknown option '{arg}'.");
+                value = arg[(equals + 1)..];
             }
             else
             {
-                return new UsageError($"unexpected argument '{arg}'. A workspace is given as --workspace <dir>.");
+                // `--workspace --egress` is a forgotten value, not a directory named "--egress".
+                value = i + 1 < args.Count && !args[i + 1].StartsWith('-') ? args[++i] : null;
             }
 
             if (string.IsNullOrWhiteSpace(value))
             {
-                return new UsageError("--workspace needs a directory.");
+                return new UsageError(option == "--workspace"
+                    ? "--workspace needs a directory."
+                    : "--egress needs a list of a.b.c.d:port endpoints.");
             }
 
-            if (workspace is not null)
+            if (!given.TryAdd(option, value))
             {
-                return new UsageError("--workspace was given more than once.");
+                return new UsageError($"{option} was given more than once.");
             }
-
-            workspace = value;
         }
 
-        return workspace is null ? new Serve(null) : ValidateWorkspace(workspace);
+        var egress = McpEgressPolicy.None;
+        if (given.TryGetValue("--egress", out string? list))
+        {
+            try
+            {
+                egress = McpEgressPolicy.Parse(list);
+            }
+            catch (FormatException ex)
+            {
+                // Refused like a missing workspace, not served on with no network: the agent would meet
+                // refusals it cannot explain, and the operator who wrote the list would hear nothing.
+                return new UsageError($"--egress: {ex.Message}");
+            }
+        }
+
+        return given.TryGetValue("--workspace", out string? workspace)
+            ? ValidateWorkspace(workspace, egress)
+            : new Serve(null, egress);
     }
 
-    private static McpServerCommand ValidateWorkspace(string workspace)
+    private static McpServerCommand ValidateWorkspace(string workspace, McpEgressPolicy egress)
     {
         string full;
         try
@@ -107,11 +131,14 @@ public abstract record McpServerCommand
             return new UsageError($"--workspace '{full}' does not exist. It is never created for you.");
         }
 
-        return new Serve(full);
+        return new Serve(full, egress);
     }
 
-    /// <summary>Run the server. <see cref="WorkspaceRoot"/> is null when no --workspace was given.</summary>
-    public sealed record Serve(string? WorkspaceRoot) : McpServerCommand;
+    /// <summary>
+    /// Run the server. <see cref="WorkspaceRoot"/> is null when no --workspace was given, and
+    /// <see cref="Egress"/> is <see cref="McpEgressPolicy.None"/> when no --egress was.
+    /// </summary>
+    public sealed record Serve(string? WorkspaceRoot, McpEgressPolicy Egress) : McpServerCommand;
 
     public sealed record ShowHelp : McpServerCommand;
 

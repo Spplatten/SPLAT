@@ -167,12 +167,16 @@ The handler builds the `LeaseSpec` inline, in `McpServerHandler.ExecuteRunComman
 | --- | --- |
 | Exec allow-list | **The server** — pinned to the requested command and nothing else, so a request cannot authorize a second binary |
 | Protected files | Fixed — `/etc/shadow`, `/etc/sudoers` — and unioned with the daemon's defaults |
-| Network on or off, allowed IPv4 addresses | **The caller** — `allowNetwork`, `allowedEgressIps`; with the network on and no address given, loopback |
-| Ports | Fixed: 80 and 443 |
+| Network on or off, allowed IPv4 addresses | **The operator** — the endpoints given to `splat-mcp --egress`. The caller may request a subset with `allowNetwork` and `allowedEgressIps`; asking outside the policy, asking with no policy, or naming addresses without `allowNetwork` is refused before any lease is requested |
+| Ports | **The operator** — only the ports the policy approves for every granted address, because the kernel installs addresses × ports |
 | Duration | The caller's `timeoutSeconds`, clamped to 5–300 |
 | Clamps | Fixed in the handler; the daemon can only lower them |
 
-So the network half of a `run_command` lease is written by the agent that asked for it.
+The network half used to be written by the agent that asked for it: its addresses as sent, loopback
+when it named none, 80 and 443 for all of them. [`McpEgressPolicy`](../src/splat-mcp/McpEgressPolicy.cs)
+is the check that replaced that. It runs in the MCP host, so a refusal from it is SPLAT's policy and
+is labelled `[SPLAT POLICY]`, never reported as a kernel denial, and ledgered as
+`EGRESS_REQUEST_REFUSED`.
 
 ## The transport's trust boundary
 

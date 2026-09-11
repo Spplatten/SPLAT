@@ -40,6 +40,11 @@ public sealed class SplatMcpCommandLineTests : IDisposable
     [InlineData(new[] { "--workspace", "--no-such-option" }, "--workspace needs a directory")]
     [InlineData(new[] { "--workspace=" }, "--workspace needs a directory")]
     [InlineData(new[] { "--workspace", "   " }, "--workspace needs a directory")]
+    [InlineData(new[] { "--egress" }, "--egress needs a list")]
+    [InlineData(new[] { "--egress", "example.com:443" }, "is not an IPv4 endpoint")]
+    [InlineData(new[] { "--egress", "203.0.113.7:443", "--egress=127.0.0.1:80" }, "--egress was given more than once")]
+    [InlineData(new[] { "--egress", ", ;" }, "names no endpoints")]
+    [InlineData(new[] { "--egress", "203.0.113.7:443,", "127.0.0.1:80" }, "unexpected argument '127.0.0.1:80'")]
     public void ABadInvocation_IsRefusedWithItsReason(string[] args, string reason)
     {
         var error = Assert.IsType<McpServerCommand.UsageError>(McpServerCommand.Parse(args));
@@ -60,6 +65,22 @@ public sealed class SplatMcpCommandLineTests : IDisposable
         var serve = Assert.IsType<McpServerCommand.Serve>(McpServerCommand.Parse(Array.Empty<string>()));
         Assert.Null(serve.WorkspaceRoot);
         Assert.Contains(McpServerHandler.DefaultWorkspaceRoot, McpServerCommand.Usage);
+        Assert.True(serve.Egress.IsEmpty);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnEgressList_ReachesTheServerAsTheOperatorWroteIt(bool equalsForm)
+    {
+        const string list = "203.0.113.7:443, 127.0.0.1:80";
+        string[] args = equalsForm ? new[] { "--egress=" + list, "--workspace", _root } : new[] { "--egress", list };
+
+        var serve = Assert.IsType<McpServerCommand.Serve>(McpServerCommand.Parse(args));
+
+        // Canonical and in a stable order: this is the line an operator reads on stderr at startup.
+        Assert.Equal("127.0.0.1:80, 203.0.113.7:443", serve.Egress.ToString());
+        Assert.Equal(new uint[] { 443 }, serve.Egress.Authorize(new[] { "203.0.113.7" }).Ports);
     }
 
     [Theory]

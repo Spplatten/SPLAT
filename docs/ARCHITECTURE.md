@@ -89,6 +89,7 @@ Two things the picture says on purpose.
 | Linux workload identity | `pre_exec`: `setgroups`, `setresgid`, `setresuid` to `nobody` | Kernel (credentials) | The workload keeping or regaining root |
 | Linux lease lifetime | Daemon reaper — kill inside the policy, then withdraw it | Daemon | An overrunning workload |
 | Who may request a lease | Root-owned 0600 shared secret, loopback TCP | Daemon check | Unprivileged guest processes — **not** another Windows process running as the same user |
+| Which endpoints a `run_command` / `run_code` lease names | [`McpEgressPolicy`](../src/splat-mcp/McpEgressPolicy.cs) — the operator's `--egress` list; a caller may request part of it, never more | Check in `splat-mcp` | An agent writing its own destinations into the lease the kernel then enforces |
 | MCP `fs_read` / `fs_write` | [`WorkspaceGuard`](../src/splat-mcp/WorkspaceGuard.cs) — the final path of the opened handle | Check in `splat-mcp` | `..`, string-prefix tricks, junctions, symlinks |
 | Who acted | Windows logon session; in `splat-mcp`, optionally a validated credential | Check in SPLAT's process | Caller-supplied names |
 | The record of what happened | [`SqliteChainedAuditLedger`](../src/MissionController.Infrastructure.Data/SqliteChainedAuditLedger.cs) — SHA-256 chain over salted commitments | Tamper evidence | Editing a row in place — **not** a rewrite by anyone who can write the database file, because no shipped code provisions the ledger's HMAC key |

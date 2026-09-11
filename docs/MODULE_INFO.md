@@ -215,13 +215,16 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 - **References:** Core, Linux, Data, Network, Windows. **Packages:** none.
 - **Referenced by:** the tests.
 - **Owns:** [`Program.cs`](../src/splat-mcp/Program.cs) — composition and the stdio loop;
+  [`McpServerCommand.cs`](../src/splat-mcp/McpServerCommand.cs) — the command line, decided before
+  anything is built;
   [`McpServerHandler.cs`](../src/splat-mcp/McpServerHandler.cs) — dispatch and the twelve tools;
   [`McpProtocol.cs`](../src/splat-mcp/McpProtocol.cs) — the JSON-RPC and MCP records;
+  [`McpEgressPolicy.cs`](../src/splat-mcp/McpEgressPolicy.cs) — the operator's egress endpoints;
   [`McpOperatorIdentityProvider.cs`](../src/splat-mcp/McpOperatorIdentityProvider.cs);
   [`WorkspaceGuard.cs`](../src/splat-mcp/WorkspaceGuard.cs).
 - **Tests:** `AuditPayloadAndPreExecutionAuthTests`, `McpServerTests`, `McpTraceAnchorTests`,
-  `OperatorAttributionTests`, `WorkspaceConfinementTests`, and `DocumentationDriftTests`, which
-  holds `tools/list` to the README.
+  `OperatorAttributionTests`, `SplatMcpCommandLineTests`, `WorkspaceConfinementTests`, and
+  `DocumentationDriftTests`, which holds `tools/list` to the README.
 - **Detail:** [ARCHITECTURE-agent-surface.md](ARCHITECTURE-agent-surface.md#splat-mcp).
 
 ## splat-bench

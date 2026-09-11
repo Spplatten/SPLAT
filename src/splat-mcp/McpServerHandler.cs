@@ -92,6 +92,9 @@ public class McpServerHandler
     /// </summary>
     private readonly WorkspaceGuard _workspace;
 
+    /// <summary>The endpoints a run_command lease may name. See <see cref="McpEgressPolicy"/>.</summary>
+    private readonly McpEgressPolicy _egressPolicy;
+
     public McpServerHandler(
         ILeasedExecutor leasedExecutor,
         ITemplatePolicyCompiler policyCompiler,
@@ -106,7 +109,8 @@ public class McpServerHandler
         IGovernedCrewEngine? crewEngine = null,
         IGovernedCrewRegistry? crewRegistry = null,
         IOperatorIdentityProvider? identityProvider = null,
-        string? workspaceRoot = null)
+        string? workspaceRoot = null,
+        McpEgressPolicy? egressPolicy = null)
     {
         _leasedExecutor = leasedExecutor ?? throw new ArgumentNullException(nameof(leasedExecutor));
         _policyCompiler = policyCompiler ?? throw new ArgumentNullException(nameof(policyCompiler));
@@ -124,6 +128,8 @@ public class McpServerHandler
             new StaticOperatorIdentityProvider(OperatorIdentity.Unknown("mcp-stdio")));
         _workspace = new WorkspaceGuard(workspaceRoot ?? DefaultWorkspaceRoot);
         _workspaceRoot = _workspace.Root;
+        // No policy means no network for run_command, not the caller's choice of network.
+        _egressPolicy = egressPolicy ?? McpEgressPolicy.None;
     }
 
     /// <summary>
@@ -213,7 +219,7 @@ public class McpServerHandler
             new()
             {
                 Name = "run_command",
-                Description = "Execute a command inside an in-kernel BPF-LSM capability lease with hardware isolation, memory/CPU clamps, and egress filtering.",
+                Description = "Execute a command in the WSL2 guest under an in-kernel BPF-LSM capability lease: exec limited to exactly this command, memory/CPU/PID clamps, and network only to endpoints this host's operator approved.",
                 InputSchema = JsonSerializer.Deserialize<JsonElement>(@"
                 {
                     ""type"": ""object"",
@@ -222,8 +228,8 @@ public class McpServerHandler
                         ""args"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Arguments as a vector, already separated. Preferred: nothing re-splits it, so spaces and quotes inside an argument survive intact."" },
                         ""arguments"": { ""type"": ""string"", ""description"": ""Legacy shell-style argument string. Split POSIX-style on this side before it reaches the guest; an unterminated quote is refused rather than guessed. Prefer 'args'."" },
                         ""workingDirectory"": { ""type"": ""string"", ""description"": ""Working directory inside sandbox"", ""default"": ""/tmp"" },
-                        ""allowNetwork"": { ""type"": ""boolean"", ""description"": ""Whether network egress is permitted"", ""default"": false },
-                        ""allowedEgressIps"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Allow-listed egress IPv4 addresses (e.g. 127.0.0.1)"" },
+                        ""allowNetwork"": { ""type"": ""boolean"", ""description"": ""Request network egress. Granted only inside this host's operator egress policy (splat-mcp --egress a.b.c.d:port,...), and refused when the host has none. The ports come from that policy, not from the caller."", ""default"": false },
+                        ""allowedEgressIps"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""IPv4 addresses to request, each of which must be in the operator's egress policy; omit to request every address it approves. Refused if sent without allowNetwork."" },
                         ""timeoutSeconds"": { ""type"": ""integer"", ""description"": ""Lease lifespan in seconds (5-300)"", ""default"": 30 },
                         ""readOnlyFs"": { ""type"": ""boolean"", ""description"": ""NOT ENFORCED - the guest daemon establishes no mount namespace for the workload, so it REFUSES this request rather than accepting a boundary it cannot impose. Leave false."", ""default"": false },
                         ""traceId"": { ""type"": ""string"", ""description"": ""Optional external orchestrator trace id (LangSmith/OpenTelemetry run id). Correlated into the chained audit ledger and echoed in the auditAnchor result item."" },
@@ -243,7 +249,7 @@ public class McpServerHandler
                         ""language"": { ""type"": ""string"", ""description"": ""Script language (bash, sh, python3)"", ""default"": ""bash"" },
                         ""code"": { ""type"": ""string"", ""description"": ""The source code script content to execute"" },
                         ""workingDirectory"": { ""type"": ""string"", ""description"": ""Working directory"", ""default"": ""/tmp"" },
-                        ""allowNetwork"": { ""type"": ""boolean"", ""description"": ""Allow network egress"", ""default"": false },
+                        ""allowNetwork"": { ""type"": ""boolean"", ""description"": ""Request network egress, under the same operator egress policy as run_command."", ""default"": false },
                         ""timeoutSeconds"": { ""type"": ""integer"", ""description"": ""Timeout in seconds"", ""default"": 30 },
                         ""traceId"": { ""type"": ""string"", ""description"": ""Optional external orchestrator trace id (LangSmith/OpenTelemetry run id). Correlated into the chained audit ledger and echoed in the auditAnchor result item."" },
                         ""clientName"": { ""type"": ""string"", ""description"": ""Optional calling framework name (e.g. langgraph, copilot-studio), recorded with the trace correlation."" }
@@ -583,18 +589,61 @@ public class McpServerHandler
                 }
             }
         }
-        if (allowNetwork && egressIps.Count == 0)
+        var missionId = Guid.NewGuid();
+
+        // The network half of the lease is the operator's. allowNetwork and allowedEgressIps used to
+        // go into it as sent, loopback filled in and 80 and 443 added for every address, so an agent
+        // could author its own egress to any address it named - the same request-as-its-own-
+        // authorization the exec allow-list below was pinned to close. A caller may now ask only for
+        // part of the operator's policy, and anything else is refused before a lease is requested.
+        IReadOnlyList<string> leaseAddresses = Array.Empty<string>();
+        IReadOnlyList<uint> leasePorts = Array.Empty<uint>();
+        string? egressRefusal = null;
+        if (allowNetwork)
         {
-            egressIps.Add("127.0.0.1");
+            var egress = _egressPolicy.Authorize(egressIps);
+            egressRefusal = egress.Refusal;
+            leaseAddresses = egress.Addresses;
+            leasePorts = egress.Ports;
+        }
+        else if (egressIps.Count > 0)
+        {
+            // The daemon installs endpoints only when allowNetwork is set, so these used to ride in the
+            // lease and be ignored - a request that read back to its caller as accepted.
+            egressRefusal = "allowedEgressIps names addresses, but allowNetwork is false. Set allowNetwork to request them.";
         }
 
-        var missionId = Guid.NewGuid();
+        if (egressRefusal is not null)
+        {
+            await _auditLedger.AppendLogAsync(
+                missionId,
+                "mcp-tool-run_command",
+                "EGRESS_REQUEST_REFUSED",
+                $"Command='{command}' RequestedEgress='{string.Join(",", egressIps)}' | {egressRefusal}",
+                await ResolveActorAsync(ct),
+                ct);
+
+            return new McpToolCallResult
+            {
+                IsError = true,
+                Content = new List<McpContentItem>
+                {
+                    new()
+                    {
+                        Type = "text",
+                        Text = $"[SPLAT POLICY] run_command was refused before any lease was requested: {egressRefusal} " +
+                               "This is a check in the MCP host, not a kernel denial."
+                    }
+                }
+            };
+        }
+
         var lease = new LeaseSpec(
             MissionId: missionId,
             WorkingDirectory: workDir,
             AllowNetwork: allowNetwork,
-            AllowedEgressIps: egressIps,
-            AllowedEgressPorts: new List<uint> { 80, 443 },
+            AllowedEgressIps: leaseAddresses,
+            AllowedEgressPorts: leasePorts,
             ReadOnlyFs: readOnlyFs,
             // Inode NUMBERS are not knowable here - this process runs on Windows and the files
             // live in the guest - so the zeros say so rather than the 1 and 2 that used to sit

@@ -84,7 +84,7 @@ forked child of a multithreaded process. `cow.rs` already says so. Budget it as 
 
 **Reject the note's proposed fix for gap 2.** "Inherit execution rights for files generated inside a
 leased scratch directory" reintroduces exactly the hole the current design closes on purpose: it
-lets the workload author its own permission. The comment at `McpServerHandler.cs:601` records why
+lets the workload author its own permission. The comment in `McpServerHandler.ExecuteRunCommandAsync` records why
 `AllowedExecInodes` is pinned to the requested command — an empty list meant the daemon assembled
 its own, "which made the request its own authorization." The namespace fix keeps that property; the
 inheritance fix trades it away.
