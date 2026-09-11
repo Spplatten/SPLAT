@@ -43,7 +43,7 @@ Technical evaluations of agent sandboxes tend to blur together into generic "iso
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 12 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining ten run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
 | Linux lease daemon (`splat-agent`) | **Enforcing, proven under root** — fifteen checks in one run against a root daemon on kernel 6.18.33.2, recorded in [evidence/daemon-probe.json](native/splat-agent/evidence/daemon-probe.json) and bound to the SHA-256 of the BPF source that ships, so the proof cannot outlive the program it tested. All three hooks: a protected file the workload *could* read (`/etc/hostname`, 644 — a control run reads it, the leased run is denied, so only the lease accounts for the difference), an unleased second exec refused mid-`sh`, and egress held to one address and one port. Two concurrent leases proven not to lend each other permissions. The tool runs as `uid=65534(nobody)` with supplementary groups cleared, not as the daemon's root. IPv6 denied outright. An overrunning workload killed by the reaper 5.3s into a 60s sleep rather than merely unpoliced. The daemon refuses to start at all unless enforcement is live |
-| VSOCK low-latency RPC transport | **Roadmap** — design notes in internal docs |
+| Host↔guest caller identity | **Not built** — the bridge speaks a versioned JSON envelope over loopback TCP, gated by a root-owned shared secret. That stops an unprivileged process inside the guest; it does not stop another process running as the same Windows user. The code's own notes name AF_VSOCK, or `SO_PEERCRED` over a Unix socket, as the way to identify the peer instead — which callers either would actually exclude is not yet worked out. See the [roadmap](docs/ROADMAP.md) |
 | Launch-overhead benchmark ([`src/splat-bench`](src/splat-bench)) | **Recorded** — the governed Windows path adds **4.12 ms p50 / 9.88 ms p95** over the same tool run bare, on Windows `10.0.26200`, 50 alternating iterations ([evidence](src/splat-bench/evidence)). The locks account for ~2.4 ms; the rest is process creation both arms pay. This retired the inherited `<1ms` marketing figure, which the measurement missed by about 4× |
 
 That table is the contract: nothing above it is aspirational, and nothing below it is hidden.
@@ -183,10 +183,23 @@ These are the controls the architecture is *built against*; they are not an atte
 
 ## Roadmap
 
-1. **Canary `-EPERM` run** — record the observable kernel-enforcement proof on the verified WSL2 substrate.
-2. **VSOCK RPC transport** — low-latency host↔guest streaming path.
-3. **Auto-provisioned WSL substrate** — zero-touch guest lifecycle from the Windows control plane.
-4. **Substrate-gated autonomy** — expand multi-step investigation depth only where kernel-lease enforcement is active.
+Every open item — who can do it, what "done" means, and the evidence for its current state — is in
+[docs/ROADMAP.md](docs/ROADMAP.md), checked against the tree rather than carried forward from older
+plans. In order:
+
+1. **Installable and provable by a stranger** (next) — a `splat-mcp` command line with an explicit
+   workspace, a `doctor` command that prints what this host will and will not enforce, first-run
+   WSL provisioning, single-file distribution, and one recorded end-to-end run of an MCP client's
+   command being refused by the kernel.
+2. **The workload's own mount namespace** — makes read-only roots and copy-on-write scratch
+   enforceable, lets an agent run code it just wrote without authorizing itself to, and closes the
+   largest gap the lease does not police today.
+3. **Caller identity on the bridge** — AF_VSOCK or `SO_PEERCRED`, so the daemon identifies its peer
+   rather than trusting a secret. Which callers that actually excludes has to be worked out before
+   it is claimed.
+4. **The per-mission run record** — a bundle from which someone who did not run a mission can verify
+   what it was permitted to do and what it did. It needs a keyed ledger first; the chain is unkeyed
+   today, as the compliance note above says.
 
 ## License
 

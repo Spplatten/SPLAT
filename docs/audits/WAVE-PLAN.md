@@ -3,7 +3,9 @@
 > **Record, 2026-09-09.** Waves 1, 1b, 2 and 3 are done and proven; Wave 4's F15/F17 subtraction
 > shipped in `87918b2`. This file is now history plus an open Wave 5, and its closing paragraph
 > points at the runtime floor — which is where the live plan picks up:
-> [the OEM subtraction plan](2026-09-09-oem-subtraction-plan.md).
+> [the OEM subtraction plan](2026-09-09-oem-subtraction-plan.md). The state of every finding still
+> open below is tracked in [the roadmap](../ROADMAP.md); this file keeps what each wave contained and
+> which commit closed it.
 
 Working plan derived from the four reports in this directory. The audits say *what* is broken and
 *why*; this says **which wave it lands in and what has actually shipped**.
@@ -170,7 +172,7 @@ plan](2026-09-05-orchestration-plan.md).
 
 | Finding | Change |
 | --- | --- |
-| F21 | Replace the affected `SQLitePCLRaw` native bundle; plan the Windows App SDK 1.6 exit |
+| F21 | Replace the affected `SQLitePCLRaw` native bundle — **done** in `0027e57`, 2.1.10 → 2.1.12, which cleared a high-severity advisory (`GHSA-2m69-gcr7-jv3q`) that was shipping in `dist\App`; plan the Windows App SDK 1.6 exit — deferred with the frozen console |
 | F22 | Packaging fails on missing assets, missing signing tools and nonzero native exit codes |
 | F19 | Revocation survives restart and is consulted by every entrypoint |
 | F23 | Retention inspects checkpoint results and states what erasure does and does not cover |

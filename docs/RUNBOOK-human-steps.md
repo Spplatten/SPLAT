@@ -7,8 +7,9 @@ back, not what should theoretically happen.
 > **Superseded companion.** This was written against `PLAN-substrate-completion.md`, removed
 > 2026-09-09. Two of its four gates had closed — the gRPC/`proto` ambiguity settled by deleting the
 > proto, and kernel evidence machine-checked in `daemon-probe.json`. First-run provisioning moved to
-> P1 of the plan above. Windows egress is only half closed, and was recorded here as closed until
-> 2026-09-10; the last section says exactly which half.
+> P1 of the plan above. Windows network denial is not closed — 33 of 49 catalog templates run with
+> it and 16 without — and was recorded here first as closed, then as half closed; the last section
+> has the detail.
 
 Two things need a human and cannot be delegated to an agent:
 
@@ -320,12 +321,16 @@ distro and anything else using WSL, including Docker Desktop.
 - **Building the MSIX package** — deferred. Before reviving it: `packaging/build-msix.ps1` publishes
   `--self-contained true`, a different artifact from the framework-dependent build `dist\App`
   actually holds. Reconcile the two first.
-- **Windows egress for tools that need the network** — still open, and a design decision before it
-  is anything to run. A tool that needs no network launches in an AppContainer with none, so its
-  denial is enforced. The four `EgressScope.ToolProcess` catalog templates open their own
-  connections; an AppContainer can only choose network or no network, so they get a network stack
-  and their destination is a claim, not a control. Closing it means a loopback broker or a WFP
-  filter. `IEgressFirewall` does not cover it — it guards SPLAT's own model-API client.
+- **Windows network denial for the sixteen templates without it** — still open, and a design
+  decision before it is anything to run. Of the 49 catalog templates, 33 launch their tool in an
+  AppContainer with no capabilities, so their network denial is enforced. One needs the network
+  (Grant Opportunity Ingestion, `EgressScope.ToolProcess`); an AppContainer chooses network or none,
+  not a host, so its destination is a claim, not a control. Fifteen are built on WMI, the Event Log
+  service, Defender or the service manager, which the container would also cut off, so they keep a
+  network stack they do not need. Closing both needs an egress control that is not also an RPC
+  wall — a WFP filter is the candidate. `IEgressFirewall` covers neither; it guards SPLAT's own
+  model-API client. Counted from the shipped catalog on 2026-09-10, and corrected here from "four"
+  and from "every tool that needs no network is denied".
 - **The rest of the plan** — P1 (the `splat-mcp` CLI, `doctor`, first-run provisioning) has no
   human-only step. P2, the mount namespace, will: its proof comes from the daemon probe, which needs
   a root daemon and a `sudo` read of its token — the same hand-off as Step 0.5. It gets a section

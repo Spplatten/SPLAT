@@ -15,6 +15,7 @@ change the code rather than the plan, start with [CONTEXT.md](CONTEXT.md).
 
 | Document | What it is |
 | --- | --- |
+| [ROADMAP.md](ROADMAP.md) | **The status record.** Every open item, who can do it, what "done" means, and the evidence for its current state — checked against the tree, not carried forward from older plans. |
 | [audits/2026-09-09-oem-subtraction-plan.md](audits/2026-09-09-oem-subtraction-plan.md) | **The current plan.** Phases P0–P3, the monetization argument, the term-sheet defects. Supersedes every plan document below it. |
 | [RUNBOOK-human-steps.md](RUNBOOK-human-steps.md) | What only a human can do — the `sudo` steps, the SDK installs, the reboots. Nothing in it is open right now — Part 0, the .NET 10 SDK, closed 2026-09-09. |
 | [audits/2026-09-05-orchestration-plan.md](audits/2026-09-05-orchestration-plan.md) | Re-sequenced, not retired. Its Phase 1 was subtracted and its Phase 2 rescoped, but its ordering argument still holds. |
@@ -77,7 +78,7 @@ Five build plans for work that has since shipped. Git has them —
 | --- | --- |
 | `PLAN-kernel-substrate.md` | Opened with "there is no Rust, no eBPF, no vsock, no WSL code." All four now exist and are proven under root. |
 | `PLAN-agent-trust-layer.md` | Eight phases productizing the substrate. Phases 0, 1, 2 and 6 shipped; 3, 4 and 7 are now P2, P3 and §7 of the live plan. Its successor already recorded that it stated falsehoods about the tree. |
-| `PLAN-substrate-completion.md` | Two of four gates closed — the transport ambiguity settled by deleting `proto/`, kernel evidence machine-checked. Windows egress is only half closed: enforced for tools that need no network, a governance claim for the four `EgressScope.ToolProcess` templates (recorded here as closed until 2026-09-10). First-run provisioning moved to P1. |
+| `PLAN-substrate-completion.md` | Two of four gates closed — the transport ambiguity settled by deleting `proto/`, kernel evidence machine-checked. Windows egress is not closed: 33 of 49 catalog templates run network-denied and 16 keep a network stack — see [the roadmap](ROADMAP.md). This row said "closed", then "half closed, four templates", until 2026-09-11. First-run provisioning moved to P1. |
 | `PLAN-versatility-paths.md` | Both paths built: `WorkflowSynthesizerEngine` for Path A, `splat-mcp` for Path B. |
 | `AGENT-BUILD-BRIEF.md` | A seed prompt for a session that would build the kernel substrate. That substrate is built, and its "ground truth already established" block had gone stale in the dangerous direction. |
 

@@ -3,6 +3,9 @@
 Written 2026-09-09, against a strategy note that picked OEM/embedded licensing as the commercial
 path and listed four engineering gaps to close before it is sellable.
 
+> **The state of every item lives in [the roadmap](../ROADMAP.md).** This document is the argument
+> for the order. When an item moves, update the roadmap; update this only when the argument does.
+
 The positioning in that note is right, and the repo's own audits already agreed with it
 (`2026-09-04-competition-and-scope.md`, `2026-09-05-antigravity-deep-audit.md`): SPLAT is an
 execution substrate, not an orchestrator, and competing with n8n on connector breadth is a category
@@ -202,14 +205,14 @@ sign after their own engineer ran it and read `SUPPORTED_POLICY.md`.
   tool` and an `npx` shim. No MSIX, no installer, no UI.
 - **First-run provisioning.** Inherited from the retired `PLAN-substrate-completion.md`. Two of its
   other three gates closed: the gRPC/JSON ambiguity was settled by deleting `proto/`, and kernel
-  evidence is machine-checked in `daemon-probe.json`. The third, Windows egress, is **only half
-  closed** (corrected 2026-09-10 — this bullet first recorded it as closed). A tool that needs no
-  network launches in an AppContainer with none, so its denial is enforced. The four catalog
-  templates marked `EgressScope.ToolProcess` open their own connections: an AppContainer can only
-  choose network or no network, so they get a network stack and their destination stays a
-  governance claim on Windows until a loopback broker or WFP filter exists. `IEgressFirewall` does
-  not cover them — it guards SPLAT's own model-API client. That gap is open and unscheduled.
-  Provisioning never got built at all — `WslProvisioner` does not exist in the tree. Detect WSL, import the distro, health-check, and **fail loud with the specific
+  evidence is machine-checked in `daemon-probe.json`. The third, Windows egress, is **not closed**
+  — corrected twice: this bullet first recorded it as closed, then as closed for every tool that
+  needs no network. Of the 49 catalog templates, 33 launch their tool network-denied in an
+  AppContainer. Sixteen do not: one needs the network, and its destination stays a governance claim
+  until a broker or WFP filter exists; fifteen are built on WMI, the Event Log service, Defender or
+  the service manager, which the container would also cut off, so they keep a network stack they do
+  not need. The state is tracked in [the roadmap](../ROADMAP.md). Provisioning never got built at
+  all — `WslProvisioner` does not exist in the tree. Detect WSL, import the distro, health-check, and **fail loud with the specific
   missing piece**. The failure mode that matters is a user believing they have kernel containment
   when provisioning quietly failed, which is the same failure `doctor` exists to prevent.
 - **F24 — one capability manifest.** CLI, MCP `tools/list`, `SUPPORTED_POLICY.md` and the tests all
