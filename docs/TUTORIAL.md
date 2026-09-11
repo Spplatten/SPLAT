@@ -67,7 +67,7 @@ Those tasks belong to **Robotic Process Automation (RPA)** — unconstrained bot
 
 > **SPLAT is an execution containment substrate and governance zone.** It does not send bots wandering across the web; it locks down execution on your machine.
 
-- **How SPLAT runs native tasks:** When a specialist runs a task (such as inspecting local event logs, diagnosing network drops, or auditing OAuth configurations), it runs a single pre-vetted tool inside an OS-enforced sandbox. Privileges are stripped, filesystem access is jailed, DLP scrubs secrets, and network egress is locked to one pre-declared destination. It audits, diagnoses, and drafts — it never roams the web unchecked.
+- **How SPLAT runs native tasks:** When a specialist runs a task (such as inspecting local event logs, diagnosing network drops, or auditing OAuth configurations), it runs a single pre-vetted tool inside an OS-enforced sandbox. Privileges are stripped, filesystem access is jailed, DLP scrubs secrets, and about two-thirds of the specialists run with no network at all — the glossary entry for network denial says which ones do not, and why. It audits, diagnoses, and drafts — it never roams the web unchecked.
 - **Locked rooms for external agents:** If you use external general agents (like Claude Code, Cursor, or LangGraph) that need to run commands or manipulate files, they plug into SPLAT via `splat-mcp`. The external agent provides the reasoning; SPLAT provides the bouncer, ensuring out-of-bounds actions die before touching your system.
 
 ## Part 4 — What actually happens when you press the button
