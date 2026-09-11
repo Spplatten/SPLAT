@@ -200,11 +200,16 @@ sign after their own engineer ran it and read `SUPPORTED_POLICY.md`.
   refuse the enforcing modes, in the same fail-closed spirit as `fail-closed-probe.json`.
 - **Distribution.** A self-contained single-file `splat-mcp` per platform, published as a `dotnet
   tool` and an `npx` shim. No MSIX, no installer, no UI.
-- **First-run provisioning.** Inherited from the retired `PLAN-substrate-completion.md`, whose other
-  three gates have closed: Windows egress landed as AppContainer network denial plus
-  `IEgressFirewall`; the gRPC/JSON ambiguity was settled by deleting `proto/`; kernel evidence is
-  machine-checked in `daemon-probe.json`. This one never got built — `WslProvisioner` does not exist
-  in the tree. Detect WSL, import the distro, health-check, and **fail loud with the specific
+- **First-run provisioning.** Inherited from the retired `PLAN-substrate-completion.md`. Two of its
+  other three gates closed: the gRPC/JSON ambiguity was settled by deleting `proto/`, and kernel
+  evidence is machine-checked in `daemon-probe.json`. The third, Windows egress, is **only half
+  closed** (corrected 2026-09-10 — this bullet first recorded it as closed). A tool that needs no
+  network launches in an AppContainer with none, so its denial is enforced. The four catalog
+  templates marked `EgressScope.ToolProcess` open their own connections: an AppContainer can only
+  choose network or no network, so they get a network stack and their destination stays a
+  governance claim on Windows until a loopback broker or WFP filter exists. `IEgressFirewall` does
+  not cover them — it guards SPLAT's own model-API client. That gap is open and unscheduled.
+  Provisioning never got built at all — `WslProvisioner` does not exist in the tree. Detect WSL, import the distro, health-check, and **fail loud with the specific
   missing piece**. The failure mode that matters is a user believing they have kernel containment
   when provisioning quietly failed, which is the same failure `doctor` exists to prevent.
 - **F24 — one capability manifest.** CLI, MCP `tools/list`, `SUPPORTED_POLICY.md` and the tests all

@@ -5,10 +5,10 @@ run on this machine on the date it is marked with, so the expected output is wha
 back, not what should theoretically happen.
 
 > **Superseded companion.** This was written against `PLAN-substrate-completion.md`, removed
-> 2026-09-09 once three of its four gates had closed (Windows egress via AppContainer and
-> `IEgressFirewall`; the gRPC/`proto` ambiguity settled by deleting the proto; kernel evidence
-> machine-checked in `daemon-probe.json`). Its one open gate — first-run provisioning — moved to
-> P1 of the plan above.
+> 2026-09-09. Two of its four gates had closed — the gRPC/`proto` ambiguity settled by deleting the
+> proto, and kernel evidence machine-checked in `daemon-probe.json`. First-run provisioning moved to
+> P1 of the plan above. Windows egress is only half closed, and was recorded here as closed until
+> 2026-09-10; the last section says exactly which half.
 
 Two things need a human and cannot be delegated to an agent:
 
@@ -21,25 +21,27 @@ Two things need a human and cannot be delegated to an agent:
 
 ## Your machine's actual state
 
-Verified 2026-09-02. This is better than the plan documents assume — the kernel work is already done.
+Re-verified 2026-09-10 by re-running preflight and `dotnet --list-sdks`; first recorded 2026-09-02.
 
 | Thing | State |
 | :--- | :--- |
-| WSL2 + Ubuntu | Installed, running |
-| `.wslconfig` with `bpf` in the LSM list | **Already applied** |
+| WSL2 + Ubuntu | Installed; systemd is PID 1 |
+| Kernel | `6.18.33.2-microsoft-standard-WSL2` — the one the committed canary evidence was recorded on |
+| `.wslconfig` kernel command line | `lsm=landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,apparmor,tomoyo,bpf` |
 | `CONFIG_BPF_LSM`, `CONFIG_BPF_SYSCALL`, `CONFIG_DEBUG_INFO_BTF` | All `=y` on the running kernel |
-| `bpf` in the *active* LSM list | Yes — `capability,landlock,yama,safesetid,selinux,bpf,ima` |
+| `bpf` active as an LSM | Yes. Read straight from securityfs on 2026-09-02 as `capability,landlock,yama,safesetid,selinux,bpf,ima`. On 2026-09-10 securityfs was unmounted after a cold boot, so it was confirmed from the boot command line instead — see Part 3 |
 | Runtime BTF, cgroup v2 unified | Both present |
 | clang 21.1.8, bpftool 7.7.0, cargo/rustc 1.98.0 | All installed |
 | `vmlinux.h` for both crates | Generated 2026-08-29, 3.6 MB |
+| .NET SDKs (Windows side) | `9.0.317` and `10.0.401`, both in `%LOCALAPPDATA%\Microsoft\dotnet` |
 | **Preflight verdict** | **GREEN** |
 
-There is no setup left. You are one interactive `sudo` away from a real canary run.
+There is no setup left, and the canary has run and passed — see Part 2.
 
-> Preflight reported YELLOW until today, claiming cargo and rustc were missing on a machine that
+> Preflight reported YELLOW until 2026-09-02, claiming cargo and rustc were missing on a machine that
 > had 1.98 installed. `rustup` puts cargo on `PATH` from `.bashrc`, which a non-login shell never
-> reads, so `command -v cargo` came back empty. Now fixed — but worth knowing that a *verification
-> script* was the thing lying to you.
+> reads, so `command -v cargo` came back empty. Fixed then — but worth knowing that a *verification
+> script* was the thing lying to you. It happened a second time on 2026-09-10; Part 3 has that one.
 
 ---
 
@@ -116,22 +118,29 @@ Everything after that was ordinary editing and is done — see
 
 Nothing here changes state. Run them in any order.
 
+> **PowerShell, because that is what your terminal is.** Until 2026-09-10 this part gave `cmd.exe`
+> syntax — `cd … && "%LOCALAPPDATA%\…"` — inside `bash` fences, and it ran in neither. Windows
+> PowerShell 5.1 rejects `&&` as a statement separator and never expands `%VAR%`; bash treats
+> `%LOCALAPPDATA%` as a literal directory name. Both were confirmed by parsing the old lines, not
+> assumed. Commands that run *inside* WSL stay `bash`.
+
 ### 1.1 The test suite
 
-```bash
-cd C:\C_AGENT_BUILDER && "%LOCALAPPDATA%\Microsoft\dotnet\dotnet.exe" test tests\MissionController.Tests\MissionController.Tests.csproj
+```powershell
+& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 459`. The `dotnet` on this box is not on `PATH`, which is
-why the full path is used.
+**Expect:** `Passed! - Failed: 0, Passed: 459`, on a line ending `(net10.0)`. The `dotnet` on this
+box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
+operator, without which a quoted path followed by arguments is a parse error.
 
 **Why it matters:** the number is not decorative. A test now fails if the README or the Field Guide
 advertise a count that disagrees with the suite, so `459` in the docs is checked, not asserted.
 
 ### 1.2 The documentation actually matches the code
 
-```bash
-"%LOCALAPPDATA%\Microsoft\dotnet\dotnet.exe" test tests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~DocumentationDrift"
+```powershell
+& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~DocumentationDrift"
 ```
 
 **Expect:** 10 passed. These check that every relative link in the README resolves on disk, that every
@@ -150,12 +159,52 @@ your real database rather than a test fixture, open the app's **Security Audit**
 
 ### 1.4 The app runs
 
-```bash
-C:\C_AGENT_BUILDER\dist\App\MissionController.UI.exe
+```powershell
+Start-Process C:\C_AGENT_BUILDER\dist\App\MissionController.UI.exe -WorkingDirectory C:\C_AGENT_BUILDER\dist\App
 ```
 
-**If it exits silently,** the publish output is stale — check `%LOCALAPPDATA%\SPLAT\crash.log`,
-which is where startup failures land.
+Give it ten seconds, then:
+
+```powershell
+(Get-Process MissionController.UI).MainWindowTitle
+```
+
+**Expect:** `SPLAT — Autonomous AI Agent Fleet & System Appliance`. Seen on 2026-09-09 right after
+the refresh below, with the process at about 247 MB, responding, and no new crash log.
+
+**Why the title and not "is it running":** a startup failure in this app does not exit.
+`App.OnUnhandledException` marks every unhandled exception handled, so a bad start leaves a **live
+process with no window** and a blank title. Note the timestamp on `%LOCALAPPDATA%\SPLAT\crash.log`
+*before* launching: a newer one afterwards names the failure — usually a XAML resource that did not
+load — and an old one proves nothing either way. The working directory is set explicitly so the
+launch does not depend on where your shell happens to be.
+
+#### Refreshing `dist\App`
+
+After pulling changes, or when the crash log names something the source has already fixed.
+`dist\App` is a publish output, not a build copy, and **`dist/` is gitignored — git cannot give it
+back.** Back it up first:
+
+```powershell
+robocopy C:\C_AGENT_BUILDER\dist\App "C:\C_AGENT_BUILDER\dist\App.backup-$(Get-Date -Format yyyyMMdd)" /E
+```
+
+Publish framework-dependent — the shape `dist\App` has always held, with the .NET runtime coming
+from the machine rather than the folder:
+
+```powershell
+& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" publish C:\C_AGENT_BUILDER\src\MissionController.UI\MissionController.UI.csproj -c Release -r win-x64 --self-contained false -p:Platform=x64 -p:WindowsPackageType=None
+```
+
+Then mirror the result in:
+
+```powershell
+robocopy C:\C_AGENT_BUILDER\src\MissionController.UI\bin\x64\Release\net9.0-windows10.0.19041.0\win-x64\publish C:\C_AGENT_BUILDER\dist\App /MIR
+```
+
+`robocopy` reports success as exit codes 0–7 — `1` means "files copied" — so a red exit status from
+it is not a failure; 8 and above is. Then repeat the launch check. This sequence ran on 2026-09-09 to
+ship the patched `e_sqlite3.dll`; the folder held 290 files before and after.
 
 ---
 
@@ -232,31 +281,51 @@ it is the first honest datapoint about this kernel either way.
 
 ### Step 0.6 — commit the evidence
 
-Once 0.1–0.2 land, the run writes `native/splat-canary/evidence/canary-<kernel>.json` carrying the
-kernel release, the LSM list, the four outcomes, and the git SHA of the BPF source that produced
-them. Commit it. From then on the suite fails if the documents claim more than that file supports,
-and fails again if the BPF program changes without a fresh run.
+The run writes `native/splat-canary/evidence/canary-<kernel>.json`, carrying the kernel release, the
+active LSM list, the violations and failures it observed, the verdict, and `bpf_source_sha256` — a
+SHA-256 of the BPF source file that produced them, not a git commit. Commit it. The suite then fails
+if the documents claim more than that file supports, and fails again if the BPF program changes
+without a fresh run.
 
 ---
 
 ## Part 3 — Re-running preflight whenever the kernel changes
 
-Windows updates WSL's kernel without asking. When it does, the LSM list can change under you.
+Windows updates WSL's kernel without asking. When it does, the LSM list can change under you. From
+your PowerShell terminal:
 
-```bash
+```powershell
 wsl bash -lc "cd /mnt/c/C_AGENT_BUILDER/native/splat-canary && bash preflight.sh"
 ```
 
-**Expect:** `VERDICT: GREEN`. If it drops to YELLOW after a Windows update, the `[FIX]` lines name
-the exact cause — usually the `.wslconfig` kernel command line needing to be re-applied, followed by
-`wsl --shutdown`. That shutdown is yours to run: it stops every distro and anything else using WSL,
-including Docker Desktop.
+**Expect:** `VERDICT: GREEN`, last seen 2026-09-10. If it drops to YELLOW, every line not marked
+`[ok]` names what to resolve — after a Windows update, usually the `.wslconfig` kernel command line
+needing to be re-applied, followed by `wsl --shutdown`. That shutdown is yours to run: it stops every
+distro and anything else using WSL, including Docker Desktop.
+
+> **A YELLOW that wasn't, fixed 2026-09-10.** A fresh WSL boot does not mount securityfs, so
+> `/sys/kernel/security/lsm` does not exist and preflight could not read the active LSM list. It
+> reported that as YELLOW — on an unchanged kernel with `bpf` fully active — and then told you to
+> apply `[FIX]` lines it had never printed. It now falls back to the boot command line
+> (`/proc/cmdline`), which is world-readable and is what the kernel initialised its LSMs from: a
+> `bpf` named there, with `CONFIG_BPF_LSM=y`, was initialised. When neither source settles it, it
+> prints a real `[FIX]` — how to mount securityfs and read the list yourself.
 
 ---
 
 ## What is deliberately not in this runbook
 
-- **Building the MSIX package** — deferred.
-- **Gates 1–4** — none of them are runnable yet; they are design decisions first. Gate 1 (the Windows
-  egress gap) needs a choice between three approaches before anyone runs anything.
+- **Building the MSIX package** — deferred. Before reviving it: `packaging/build-msix.ps1` publishes
+  `--self-contained true`, a different artifact from the framework-dependent build `dist\App`
+  actually holds. Reconcile the two first.
+- **Windows egress for tools that need the network** — still open, and a design decision before it
+  is anything to run. A tool that needs no network launches in an AppContainer with none, so its
+  denial is enforced. The four `EgressScope.ToolProcess` catalog templates open their own
+  connections; an AppContainer can only choose network or no network, so they get a network stack
+  and their destination is a claim, not a control. Closing it means a loopback broker or a WFP
+  filter. `IEgressFirewall` does not cover it — it guards SPLAT's own model-API client.
+- **The rest of the plan** — P1 (the `splat-mcp` CLI, `doctor`, first-run provisioning) has no
+  human-only step. P2, the mount namespace, will: its proof comes from the daemon probe, which needs
+  a root daemon and a `sudo` read of its token — the same hand-off as Step 0.5. It gets a section
+  here when it is ready to run.
 - **`wsl --install` and reboots** — already done on this machine, and not needed again.
