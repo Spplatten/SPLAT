@@ -28,10 +28,11 @@ workload are untouched — that is the "blast radius, not detection" framing.
 - **Containment, not injection-proofing.** If a task's lease *allows* `api.github.com`, an
   injected agent can still exfiltrate *there*. The kernel bounds the blast radius; it does
   not detect that the agent was hijacked. Caption demos accordingly.
-- **Not yet compiled here.** These files were authored before WSL was installed on this
-  machine. Nothing in this directory has been run. The **first real verification is
-  `preflight.sh` followed by `run-canary.sh`** — treat any claim of "it works" as unproven
-  until you see the `-EPERM` lines yourself.
+- **Run, and recorded.** The first run passed on stock WSL2 `6.18.33.2` on 2026-09-03.
+  [`evidence/`](evidence) holds the verdict, the kernel release, the three violations and the
+  SHA-256 of the BPF source that produced them, and `DocumentationDriftTests` stops accepting that
+  file if the source changes. On any other kernel, treat "it works" as unproven until you see the
+  `-EPERM` lines yourself.
 - **libbpf-rs 0.24 API.** The Rust loader and `build.rs` target that version; the skeleton,
   map, and ringbuf call shapes drift between releases. If the build errors in `main.rs`,
   reconcile against your installed `libbpf-rs` version first.
@@ -59,8 +60,11 @@ nothing downstream works until it is replaced, and what the substrate does and d
 it can load is enumerated in
 [`native/splat-agent/SUPPORTED_POLICY.md`](../splat-agent/SUPPORTED_POLICY.md).
 
-## Where this goes next
+## Where this went
 
-This single-shot loader is the embryo of the Layer-2 Rust daemon. The plan doc covers the
-path from here to leases over vsock/gRPC, kernel-keyring-gated capabilities, CoW rollback,
-and the tool-contract → policy compiler.
+This single-shot loader was the embryo of the resident daemon, which now exists as
+[`../splat-agent`](../splat-agent) with its own, deliberately forked copy of the BPF program. This
+harness stays frozen at the shape its evidence was produced against. What the daemon enforces,
+refuses and does not police is in [`SUPPORTED_POLICY.md`](../splat-agent/SUPPORTED_POLICY.md); how
+the pieces fit together is in
+[`docs/ARCHITECTURE-linux-substrate.md`](../../docs/ARCHITECTURE-linux-substrate.md).

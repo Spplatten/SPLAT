@@ -4,9 +4,10 @@
 
 # docs/ — what is in here, and which of it is still true
 
-Last reconciled **2026-09-09**, when five superseded plan documents were removed. Read
-[the OEM subtraction plan](audits/2026-09-09-oem-subtraction-plan.md) first; everything else is
-either an input to it, an artifact it produces, or a record of how the project got here.
+Last reconciled **2026-09-10**, when the architecture, context and module reference was added.
+Read [the OEM subtraction plan](audits/2026-09-09-oem-subtraction-plan.md) first; everything else
+is either an input to it, an artifact it produces, or a record of how the project got here. To
+change the code rather than the plan, start with [CONTEXT.md](CONTEXT.md).
 
 ---
 
@@ -18,10 +19,25 @@ either an input to it, an artifact it produces, or a record of how the project g
 | [RUNBOOK-human-steps.md](RUNBOOK-human-steps.md) | What only a human can do — the `sudo` steps, the SDK installs, the reboots. Nothing in it is open right now — Part 0, the .NET 10 SDK, closed 2026-09-09. |
 | [audits/2026-09-05-orchestration-plan.md](audits/2026-09-05-orchestration-plan.md) | Re-sequenced, not retired. Its Phase 1 was subtracted and its Phase 2 rescoped, but its ordering argument still holds. |
 
+## How the code is put together
+
+Reference, not plan: these describe the tree as it is, and are corrected when the code moves.
+
+| Document | What it is |
+| --- | --- |
+| [CONTEXT.md](CONTEXT.md) | **Start here to change the code.** What SPLAT is for, where it stands, the rules this repository holds itself to, its vocabulary, and the traps. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | The map: which layer enforces each boundary, how the two hosts differ, the life of a mission, and what is built but not wired. |
+| [ARCHITECTURE-control-plane.md](ARCHITECTURE-control-plane.md) | Core, Network and Data: the 1:1:1 template, the mission pipeline, the model leg, the engines that compose missions, the ledger and memory. |
+| [ARCHITECTURE-windows-substrate.md](ARCHITECTURE-windows-substrate.md) | What a Windows sensor process experiences — jail, job object, restricted token, AppContainer — and which apply when. |
+| [ARCHITECTURE-linux-substrate.md](ARCHITECTURE-linux-substrate.md) | The BPF-LSM lease, the `splat-agent` daemon, the bridge on Windows, who authors a lease, and the evidence behind it. |
+| [ARCHITECTURE-agent-surface.md](ARCHITECTURE-agent-surface.md) | How an external agent gets in: `splat-mcp`, the LangGraph adapter, the Copilot / Semantic Kernel adapter. |
+| [MODULE_INFO.md](MODULE_INFO.md) | Every buildable unit: target, references, packages, what it owns, its tests, and whether it ships. |
+
 ## Prospect-facing
 
 Machine-checked: `DocumentationDriftTests` reads every non-`PLAN-` file in this directory and fails
-the build if one promises latency the benchmark did not measure. Write accordingly.
+the build if one promises latency the benchmark did not measure, or links to a path that does not
+exist. Write accordingly.
 
 | Document | Audience | Status |
 | --- | --- | --- |

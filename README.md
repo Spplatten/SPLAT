@@ -40,7 +40,7 @@ Technical evaluations of agent sandboxes tend to blur together into generic "iso
 | :--- | :--- |
 | Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
 | Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 459/459 automated tests passing |
-| `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 9 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining seven run on the Windows control plane today |
+| `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 12 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining ten run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
 | Linux lease daemon (`splat-agent`) | **Enforcing, proven under root** — fifteen checks in one run against a root daemon on kernel 6.18.33.2, recorded in [evidence/daemon-probe.json](native/splat-agent/evidence/daemon-probe.json) and bound to the SHA-256 of the BPF source that ships, so the proof cannot outlive the program it tested. All three hooks: a protected file the workload *could* read (`/etc/hostname`, 644 — a control run reads it, the leased run is denied, so only the lease accounts for the difference), an unleased second exec refused mid-`sh`, and egress held to one address and one port. Two concurrent leases proven not to lend each other permissions. The tool runs as `uid=65534(nobody)` with supplementary groups cleared, not as the daemon's root. IPv6 denied outright. An overrunning workload killed by the reaper 5.3s into a 60s sleep rather than merely unpoliced. The daemon refuses to start at all unless enforcement is live |
 | VSOCK low-latency RPC transport | **Roadmap** — design notes in internal docs |
@@ -54,7 +54,7 @@ That table is the contract: nothing above it is aspirational, and nothing below 
 flowchart TD
     subgraph CP["Control plane — Windows (.NET 10)"]
         UI["WinUI 3 operator console"] --> ENG["MissionExecutionEngine<br/>1:1:1 governed templates"]
-        MCP["splat-mcp (MCP server)<br/>9 governed tools"] --> ENG
+        MCP["splat-mcp (MCP server)<br/>12 governed tools"] --> ENG
         ENG --> DLP["In-memory DLP sanitizer"]
         DLP --> FW["Egress firewall<br/>strict FQDN allow-list"]
         FW --> AI["Streaming reasoning cores<br/>Claude / Gemini, key-routed"]
@@ -73,8 +73,12 @@ flowchart TD
         AGENT --> LSM --> EPERM
     end
     ENG --> JO
-    ENG -.->|WslLeasedExecutor +<br/>TemplatePolicyCompiler| AGENT
+    MCP -.->|run_command / run_code<br/>via WslLeasedExecutor| AGENT
 ```
+
+The code-level map — which assembly owns each box, how a mission moves between them, and which
+boundaries a kernel enforces rather than SPLAT's own process — is
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Windows containment substrate (shipped)
 
@@ -164,7 +168,7 @@ SPLAT/
 │   └── splat-canary/                            # Minimal -EPERM proof harness (preflight → canary)
 ├── tests/MissionController.Tests/               # 459 xUnit unit / integration / security tests
 ├── packaging/                                   # Signed MSIX build + Intune/SCCM silent install scripts
-└── docs/                                        # Briefs, plans and audits - index in docs/README.md
+└── docs/                                        # Architecture, context and module maps; briefs, plans, audits - index in docs/README.md
 ```
 
 ## Compliance alignment

@@ -47,25 +47,42 @@ public class DocumentationDriftTests
     /// would have caught the namespace/folder drift from the documentation side long before an
     /// audit did: the paths were written from the C# namespaces (<c>.Jails</c>, <c>.Process</c>,
     /// <c>.Vault</c>) while the files sat flat at the project root.
+    ///
+    /// Widened on 2026-09-10 from the README to every document <see cref="DocumentationFiles"/>
+    /// returns, when the architecture, context and module maps landed in docs/: those documents are
+    /// mostly paths into this tree, and a path is the claim that breaks on the first rename. Each
+    /// link resolves against its own document's directory, the way a reader's browser follows it.
     /// </summary>
     [Fact]
-    public void EveryRelativeLinkInTheReadme_ResolvesOnDisk()
+    public void EveryRelativeLinkInTheDocs_ResolvesOnDisk()
     {
-        string root = RepositoryRoot();
         var broken = new List<string>();
 
-        foreach (Match match in Regex.Matches(ReadmeText(), @"\]\((?<path>(?:src|native|tests|packaging|docs)[^)]*)\)"))
+        foreach (string document in DocumentationFiles())
         {
-            string relative = match.Groups["path"].Value.Split('#')[0].TrimEnd('/');
-            if (relative.Length == 0)
-            {
-                continue;
-            }
+            string directory = Path.GetDirectoryName(document)!;
 
-            string full = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(full) && !Directory.Exists(full))
+            foreach (Match match in Regex.Matches(File.ReadAllText(document), @"\]\((?<path>[^)\s]+)\)"))
             {
-                broken.Add(relative);
+                string target = match.Groups["path"].Value;
+
+                // A scheme (https:, mailto:, file:) or an in-page anchor is not a path into this tree.
+                if (target.StartsWith('#') || Regex.IsMatch(target, @"^[A-Za-z][A-Za-z0-9+.-]*:"))
+                {
+                    continue;
+                }
+
+                string relative = target.Split('#')[0].TrimEnd('/');
+                if (relative.Length == 0)
+                {
+                    continue;
+                }
+
+                string full = Path.Combine(directory, relative.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(full) && !Directory.Exists(full))
+                {
+                    broken.Add($"{Path.GetFileName(document)} -> {relative}");
+                }
             }
         }
 

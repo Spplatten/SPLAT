@@ -143,9 +143,9 @@ advertise a count that disagrees with the suite, so `459` in the docs is checked
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~DocumentationDrift"
 ```
 
-**Expect:** 10 passed. These check that every relative link in the README resolves on disk, that every
-tool the MCP server exposes is documented, that retired overclaims have not crept back, and that the
-advertised test count matches reality.
+**Expect:** 10 passed. These check that every relative link in the README and in `docs/` resolves on
+disk, that every tool the MCP server exposes is documented, that retired overclaims have not crept
+back, and that the advertised test count matches reality.
 
 **Try breaking it:** change `459` to `458` in `README.md` and re-run. It should go red and name the
 file. If it does not, the check is not doing its job — tell me.
@@ -154,8 +154,10 @@ file. If it does not, the check is not doing its job — tell me.
 
 The ledger is a hash chain: every entry commits to the one before it. `VerifyLedgerIntegrityAsync`
 recomputes the chain and fails on any edit. It is exercised by the suite above; to see it against
-your real database rather than a test fixture, open the app's **Security Audit** screen, which reads
-`%LOCALAPPDATA%\SPLAT\audit_ledger.db`.
+your real database rather than a test fixture, open the app's **Security Audit** screen, which
+verifies the console's own chain in `%LOCALAPPDATA%\MissionController\Data\missioncontroller.db`.
+`splat-mcp` keeps a separate chain in `%LOCALAPPDATA%\SPLAT\audit_ledger.db`, which that screen does
+not read.
 
 ### 1.4 The app runs
 
