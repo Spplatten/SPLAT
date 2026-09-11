@@ -53,6 +53,11 @@ public static class Program
         Console.OutputEncoding = Encoding.UTF8;
         Console.InputEncoding = Encoding.UTF8;
 
+        if (command is McpServerCommand.Doctor doctor)
+        {
+            return await SubstrateDoctor.RunAsync(doctor, Console.Out);
+        }
+
         var serve = (McpServerCommand.Serve)command;
         string? workspaceRoot = serve.WorkspaceRoot;
         Console.Error.WriteLine(workspaceRoot is null

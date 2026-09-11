@@ -173,7 +173,7 @@ Open, and written down, so that nobody rediscovers them as news.
 | The ledger runs unkeyed, so a rewrite is undetectable | [Control plane](ARCHITECTURE-control-plane.md#evidence-and-memory); the README |
 | No bare-token DLP rules for AWS, GitHub, OpenAI, Stripe or JWT | AG-F06, planned with P3 |
 | The console and `splat-mcp` keep separate ledgers and memories | [ARCHITECTURE.md](ARCHITECTURE.md#two-hosts-one-pipeline) |
-| `splat-mcp`'s command line has only `--workspace`, `--egress` and `--help` — no `doctor` yet | P1 |
+| `splat-mcp` has `--workspace`, `--egress`, `--help` and `doctor`; packaged distribution and first-run provisioning are still missing | P1 |
 
 ## Read next
 

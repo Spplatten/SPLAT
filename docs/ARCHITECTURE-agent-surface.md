@@ -26,8 +26,10 @@ exist and is never created; without it the root is `%LOCALAPPDATA%\SPLAT\mcp-wor
 stderr at startup. `--egress a.b.c.d:port,...` names the only endpoints a `run_command` or
 `run_code` lease may connect to, checked by [`McpEgressPolicy`](../src/splat-mcp/McpEgressPolicy.cs);
 without it neither tool gets network. A bad option or a malformed list exits 2 with nothing built, and stdout carries only JSON-RPC —
-written without the UTF-8 byte order mark it carried until 2026-09-11. A `doctor` command and
-packaged distribution are the rest of P1 in [the roadmap](ROADMAP.md).
+written without the UTF-8 byte order mark it carried until 2026-09-11. `splat-mcp doctor` reports what this host will enforce — kernel, boot command line, daemon,
+token — and exits 0 only when a lease would reach the kernel; its summary of a lease is copied
+from [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md) and bound to it by a
+test. Packaged distribution is the rest of P1 in [the roadmap](ROADMAP.md).
 
 **Identity before effects.** `HandleToolsCallAsync` resolves the actor before it dispatches, so a
 refused credential reaches no executor and no file.
