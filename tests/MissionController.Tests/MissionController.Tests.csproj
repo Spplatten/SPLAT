@@ -5,6 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Required by [LibraryImport]: the generated marshalling stubs are unsafe code (SYSLIB1062).
+         Matches MissionController.Infrastructure.Windows, whose interop surface this suite covers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>

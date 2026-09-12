@@ -56,7 +56,7 @@ public sealed class Win32JobSandbox : IJobSandbox
         extendedLimits.BasicLimitInformation.LimitFlags = ContainmentLimitFlags;
         extendedLimits.BasicLimitInformation.ActiveProcessLimit = MaxActiveProcesses;
 
-        int length = Marshal.SizeOf(typeof(Win32Interop.JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+        int length = Marshal.SizeOf<Win32Interop.JOBOBJECT_EXTENDED_LIMIT_INFORMATION>();
         IntPtr pLimits = Marshal.AllocHGlobal(length);
         try
         {
@@ -95,7 +95,7 @@ public sealed class Win32JobSandbox : IJobSandbox
             extendedLimits.ProcessMemoryLimit = new UIntPtr((ulong)maxMemoryBytes);
         }
 
-        int length = Marshal.SizeOf(typeof(Win32Interop.JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+        int length = Marshal.SizeOf<Win32Interop.JOBOBJECT_EXTENDED_LIMIT_INFORMATION>();
         IntPtr pLimits = Marshal.AllocHGlobal(length);
         try
         {
@@ -123,7 +123,7 @@ public sealed class Win32JobSandbox : IJobSandbox
                 CpuRate = (uint)(maxCpuPercent * 100) // 100 = 1% in Win32
             };
 
-            int cpuLength = Marshal.SizeOf(typeof(Win32Interop.JOBOBJECT_CPU_RATE_CONTROL_INFORMATION));
+            int cpuLength = Marshal.SizeOf<Win32Interop.JOBOBJECT_CPU_RATE_CONTROL_INFORMATION>();
             IntPtr pCpu = Marshal.AllocHGlobal(cpuLength);
             try
             {
@@ -154,7 +154,7 @@ public sealed class Win32JobSandbox : IJobSandbox
     {
         ThrowIfDisposed();
 
-        int length = Marshal.SizeOf(typeof(Win32Interop.JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION));
+        int length = Marshal.SizeOf<Win32Interop.JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION>();
         IntPtr pInfo = Marshal.AllocHGlobal(length);
         try
         {

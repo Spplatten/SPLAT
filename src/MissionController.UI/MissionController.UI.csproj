@@ -15,6 +15,9 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Required by [LibraryImport]: the generated marshalling stubs are unsafe code (SYSLIB1062).
+         This project's user32 declarations are source-generated, so the flag is not optional. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!--
       MVVMTK0045: [ObservableProperty] on a field is not AOT-safe for WinRT. It fires 93 times here,

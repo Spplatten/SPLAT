@@ -63,7 +63,7 @@ public sealed class RestrictedTokenProvider : IRestrictedTokenProvider
                 // its own token is authority the sandbox never intended to grant.
                 var sa = new Win32Interop.SECURITY_ATTRIBUTES
                 {
-                    nLength = Marshal.SizeOf(typeof(Win32Interop.SECURITY_ATTRIBUTES)),
+                    nLength = Marshal.SizeOf<Win32Interop.SECURITY_ATTRIBUTES>(),
                     bInheritHandle = 0
                 };
 

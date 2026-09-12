@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace MissionController.Infrastructure.Windows.Native;
 
-internal static class Win32Interop
+internal static partial class Win32Interop
 {
     // Process Creation Flags
     public const uint CREATE_SUSPENDED = 0x00000004;
@@ -137,13 +137,20 @@ internal static class Win32Interop
         public uint CpuRate;
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    // Blittable by construction. The three reserved LPWSTR fields are raw pointers rather than
+    // managed strings, which is what lets the source generator marshal this struct at all - a struct
+    // holding managed references is rejected outright (SYSLIB1051). Nothing in this project ever
+    // assigns them, so always-null pointers preserve the existing behaviour exactly, and the native
+    // size (104 on x64) and every field offset stay byte-identical to the old marshalled form. That
+    // equality is load-bearing, not incidental: cb is what tells the kernel to read the EXTENDED
+    // struct, and a short cb silently restores full network access to a contained sensor.
+    [StructLayout(LayoutKind.Sequential)]
     public struct STARTUPINFO
     {
         public int cb;
-        public string lpReserved;
-        public string lpDesktop;
-        public string lpTitle;
+        public nint lpReserved;
+        public nint lpDesktop;
+        public nint lpTitle;
         public int dwX;
         public int dwY;
         public int dwXSize;
@@ -191,92 +198,96 @@ internal static class Win32Interop
         public SID_AND_ATTRIBUTES Label;
     }
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    public static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string? lpName);
+    // EntryPoint is spelled out because LibraryImport is always exact-spelling: unlike DllImport with
+    // CharSet.Unicode it never probes for the W-suffixed export, and kernel32 exports CreateJobObjectW
+    // only. Dropping this attribute compiles clean and throws EntryPointNotFoundException the first
+    // time a sandbox is built - the one failure in this migration the compiler cannot catch.
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateJobObjectW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    public static partial IntPtr CreateJobObject(IntPtr lpJobAttributes, string? lpName);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool SetInformationJobObject(
+    public static partial bool SetInformationJobObject(
         IntPtr hJob,
         JobObjectInfoClass JobObjectInformationClass,
         IntPtr lpJobObjectInformation,
         uint cbJobObjectInformationLength);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool QueryInformationJobObject(
+    public static partial bool QueryInformationJobObject(
         IntPtr hJob,
         JobObjectInfoClass JobObjectInformationClass,
         IntPtr lpJobObjectInformation,
         uint cbJobObjectInformationLength,
         out uint lpReturnLength);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+    public static partial bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool TerminateJobObject(IntPtr hJob, uint uExitCode);
+    public static partial bool TerminateJobObject(IntPtr hJob, uint uExitCode);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool CloseHandle(IntPtr hObject);
+    public static partial bool CloseHandle(IntPtr hObject);
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateProcessW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool CreateProcessW(
+    public static partial bool CreateProcessW(
         string? lpApplicationName,
         string? lpCommandLine,
         ref SECURITY_ATTRIBUTES lpProcessAttributes,
         ref SECURITY_ATTRIBUTES lpThreadAttributes,
-        bool bInheritHandles,
+        [MarshalAs(UnmanagedType.Bool)] bool bInheritHandles,
         uint dwCreationFlags,
         IntPtr lpEnvironment,
         string? lpCurrentDirectory,
         ref STARTUPINFO lpStartupInfo,
         out PROCESS_INFORMATION lpProcessInformation);
 
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [LibraryImport("advapi32.dll", EntryPoint = "CreateProcessAsUserW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool CreateProcessAsUserW(
+    public static partial bool CreateProcessAsUserW(
         IntPtr hToken,
         string? lpApplicationName,
         string? lpCommandLine,
         ref SECURITY_ATTRIBUTES lpProcessAttributes,
         ref SECURITY_ATTRIBUTES lpThreadAttributes,
-        bool bInheritHandles,
+        [MarshalAs(UnmanagedType.Bool)] bool bInheritHandles,
         uint dwCreationFlags,
         IntPtr lpEnvironment,
         string? lpCurrentDirectory,
         ref STARTUPINFO lpStartupInfo,
         out PROCESS_INFORMATION lpProcessInformation);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern uint ResumeThread(IntPtr hThread);
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    public static partial uint ResumeThread(IntPtr hThread);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    public static partial uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+    public static partial bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool CreatePipe(out IntPtr hReadPipe, out IntPtr hWritePipe, ref SECURITY_ATTRIBUTES lpPipeAttributes, uint nSize);
+    public static partial bool CreatePipe(out IntPtr hReadPipe, out IntPtr hWritePipe, ref SECURITY_ATTRIBUTES lpPipeAttributes, uint nSize);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool SetHandleInformation(IntPtr hObject, uint dwMask, uint dwFlags);
+    public static partial bool SetHandleInformation(IntPtr hObject, uint dwMask, uint dwFlags);
 
-    [DllImport("advapi32.dll", SetLastError = true)]
+    [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+    public static partial bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
 
-    [DllImport("advapi32.dll", SetLastError = true)]
+    [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool CreateRestrictedToken(
+    public static partial bool CreateRestrictedToken(
         IntPtr ExistingTokenHandle,
         uint Flags,
         uint DisableSidCount,
@@ -287,9 +298,9 @@ internal static class Win32Interop
         IntPtr SidsToRestrict,
         out IntPtr NewTokenHandle);
 
-    [DllImport("advapi32.dll", SetLastError = true)]
+    [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool DuplicateTokenEx(
+    public static partial bool DuplicateTokenEx(
         IntPtr hExistingToken,
         uint dwDesiredAccess,
         ref SECURITY_ATTRIBUTES lpTokenAttributes,
@@ -297,9 +308,9 @@ internal static class Win32Interop
         int TokenType,
         out IntPtr phNewToken);
 
-    [DllImport("advapi32.dll", SetLastError = true)]
+    [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool SetTokenInformation(
+    public static partial bool SetTokenInformation(
         IntPtr TokenHandle,
         int TokenInformationClass,
         IntPtr TokenInformation,
@@ -314,7 +325,7 @@ internal static class Win32Interop
     /// The trailing <c>lpAttributeList</c> is what distinguishes this from STARTUPINFO. The struct
     /// must be passed with <see cref="EXTENDED_STARTUPINFO_PRESENT"/> or the extra field is ignored.
     /// </summary>
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    [StructLayout(LayoutKind.Sequential)]
     public struct STARTUPINFOEX
     {
         public STARTUPINFO StartupInfo;
@@ -330,17 +341,17 @@ internal static class Win32Interop
         public uint Reserved;
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool InitializeProcThreadAttributeList(
+    public static partial bool InitializeProcThreadAttributeList(
         IntPtr lpAttributeList,
         int dwAttributeCount,
         int dwFlags,
         ref IntPtr lpSize);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool UpdateProcThreadAttribute(
+    public static partial bool UpdateProcThreadAttribute(
         IntPtr lpAttributeList,
         uint dwFlags,
         IntPtr Attribute,
@@ -349,32 +360,32 @@ internal static class Win32Interop
         IntPtr lpPreviousValue,
         IntPtr lpReturnSize);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern void DeleteProcThreadAttributeList(IntPtr lpAttributeList);
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    public static partial void DeleteProcThreadAttributeList(IntPtr lpAttributeList);
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateProcessW")]
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateProcessW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool CreateProcessExtendedW(
+    public static partial bool CreateProcessExtendedW(
         string? lpApplicationName,
         string? lpCommandLine,
         ref SECURITY_ATTRIBUTES lpProcessAttributes,
         ref SECURITY_ATTRIBUTES lpThreadAttributes,
-        bool bInheritHandles,
+        [MarshalAs(UnmanagedType.Bool)] bool bInheritHandles,
         uint dwCreationFlags,
         IntPtr lpEnvironment,
         string? lpCurrentDirectory,
         ref STARTUPINFOEX lpStartupInfo,
         out PROCESS_INFORMATION lpProcessInformation);
 
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateProcessAsUserW")]
+    [LibraryImport("advapi32.dll", EntryPoint = "CreateProcessAsUserW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool CreateProcessAsUserExtendedW(
+    public static partial bool CreateProcessAsUserExtendedW(
         IntPtr hToken,
         string? lpApplicationName,
         string? lpCommandLine,
         ref SECURITY_ATTRIBUTES lpProcessAttributes,
         ref SECURITY_ATTRIBUTES lpThreadAttributes,
-        bool bInheritHandles,
+        [MarshalAs(UnmanagedType.Bool)] bool bInheritHandles,
         uint dwCreationFlags,
         IntPtr lpEnvironment,
         string? lpCurrentDirectory,
@@ -382,8 +393,8 @@ internal static class Win32Interop
         out PROCESS_INFORMATION lpProcessInformation);
 
     /// <summary>Returns S_OK, or HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) when the profile is reusable.</summary>
-    [DllImport("userenv.dll", CharSet = CharSet.Unicode)]
-    public static extern int CreateAppContainerProfile(
+    [LibraryImport("userenv.dll", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial int CreateAppContainerProfile(
         string pszAppContainerName,
         string pszDisplayName,
         string pszDescription,
@@ -391,11 +402,11 @@ internal static class Win32Interop
         uint dwCapabilityCount,
         out IntPtr ppSidAppContainerSid);
 
-    [DllImport("userenv.dll", CharSet = CharSet.Unicode)]
-    public static extern int DeriveAppContainerSidFromAppContainerName(
+    [LibraryImport("userenv.dll", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial int DeriveAppContainerSidFromAppContainerName(
         string pszAppContainerName,
         out IntPtr ppsidAppContainerSid);
 
-    [DllImport("advapi32.dll")]
-    public static extern IntPtr FreeSid(IntPtr pSid);
+    [LibraryImport("advapi32.dll")]
+    public static partial IntPtr FreeSid(IntPtr pSid);
 }

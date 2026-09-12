@@ -37,7 +37,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
     {
         var sa = new Win32Interop.SECURITY_ATTRIBUTES
         {
-            nLength = Marshal.SizeOf(typeof(Win32Interop.SECURITY_ATTRIBUTES)),
+            nLength = Marshal.SizeOf<Win32Interop.SECURITY_ATTRIBUTES>(),
             bInheritHandle = 1,
             lpSecurityDescriptor = IntPtr.Zero
         };
@@ -69,7 +69,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
 
             var si = new Win32Interop.STARTUPINFO
             {
-                cb = Marshal.SizeOf(typeof(Win32Interop.STARTUPINFO)),
+                cb = Marshal.SizeOf<Win32Interop.STARTUPINFO>(),
                 dwFlags = (int)Win32Interop.STARTF_USESTDHANDLES,
                 hStdOutput = hStdOutWrite,
                 hStdError = hStdErrWrite,
