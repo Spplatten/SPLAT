@@ -135,9 +135,22 @@ public class DocumentationDriftTests
     // fs_read/fs_write run on the Windows control plane, and run_command depends on a substrate
     // whose enforcement proof is still pending.
     [InlineData("every tool call resolves to a lease")]
+    // An underclaim, which rots exactly the same way and is just as wrong to print. The Field Guide
+    // told a non-engineer this for weeks while 33 of the 49 catalog templates launched in an
+    // AppContainer with no network capability at all. Windows constrains whether, not where - the
+    // honest sentence is longer than both the boast and the disclaimer.
+    [InlineData("do not filter network sockets")]
+    [InlineData("do <strong>not</strong> filter network sockets")]
     public void RetiredOverclaims_DoNotReappear(string phrase)
     {
-        Assert.DoesNotContain(phrase, ReadmeText(), StringComparison.OrdinalIgnoreCase);
+        // Widened past the README deliberately. Every phrase above was retired from the README, and
+        // the guard was written there - but the claim a reader actually acts on lives in the Field
+        // Guide, which nothing was watching. A retired claim is retired everywhere or nowhere.
+        foreach (string doc in new[] { "README.md", Path.Combine("docs", "TUTORIAL.md"), Path.Combine("docs", "SPLAT-Field-Guide.html") })
+        {
+            string text = File.ReadAllText(Path.Combine(RepositoryRoot(), doc));
+            Assert.DoesNotContain(phrase, text, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     /// <summary>
