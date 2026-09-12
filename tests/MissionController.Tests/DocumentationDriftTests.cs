@@ -563,10 +563,67 @@ public class DocumentationDriftTests
     /// no data source the runner expands but reflection cannot enumerate, so
     /// <see cref="NoDataSourceEscapesTheTestCounter"/> fails the moment one is introduced.
     /// </summary>
+    /// <summary>
+    /// Set <c>SPLAT_SYNC_TEST_COUNT=1</c> to make this test rewrite the documented counts instead of
+    /// asserting them. The count cannot be computed before the suite is built - it comes from
+    /// reflecting over the compiled assembly - so there is no earlier point at which a build step
+    /// could derive it. This is the next best thing: the number is still derived rather than typed,
+    /// and by the same four regexes that detect the drift, so a spelling the detector can see is
+    /// necessarily one the writer can fix.
+    /// </summary>
+    private const string SyncEnvironmentVariable = "SPLAT_SYNC_TEST_COUNT";
+
+    /// <summary>
+    /// The sync path only earns its keep if it can write every spelling the detector can read. This
+    /// covers all four in one string - prose, shields badge, tree diagram, pasted run output - and
+    /// asserts the rewrite is exact, so a fifth spelling added to the detector without a matching
+    /// group name fails here rather than silently leaving one document behind.
+    /// </summary>
+    [Fact]
+    public void TheCountRewriter_WritesEverySpellingTheDetectorReads()
+    {
+        const string before =
+            "[![Tests](https://img.shields.io/badge/Tests-11%2F11%20passing-success)](x)\n" +
+            "| Governance plane | Shipped - 11/11 automated tests passing |\n" +
+            "Backed by 11 automated tests, all passing.\n" +
+            "Passed!  - Failed: 0, Passed: 11, Skipped: 0, Total: 11, Duration: 25 s\n" +
+            "  # 11 xUnit unit / integration / security tests\n";
+
+        string after = RewriteCounts(before, 4242);
+
+        Assert.DoesNotContain("11", after, StringComparison.Ordinal);
+
+        // Eight digit spans across the five lines: the badge and the paired prose, run output and
+        // "N/N" forms each carry two. Counted without a word boundary on purpose - the badge's
+        // second number is preceded by the F of %2F, so \b would miss it, which is the exact trap
+        // that left the README badge reading 522/521 during an earlier hand-edit.
+        Assert.Equal(8, Regex.Matches(after, "4242").Count);
+
+        // Surrounding text must survive untouched; only the digits move.
+        Assert.Contains("Tests-4242%2F4242%20passing", after, StringComparison.Ordinal);
+        Assert.Contains("Failed: 0, Passed: 4242, Skipped: 0, Total: 4242", after, StringComparison.Ordinal);
+        Assert.Contains("4242 xUnit unit / integration / security tests", after, StringComparison.Ordinal);
+
+        // Idempotent: syncing an already-correct document must be a no-op, or every build would
+        // report the docs as dirty.
+        Assert.Equal(after, RewriteCounts(after, 4242), StringComparer.Ordinal);
+    }
+
     [Fact]
     public void TheAdvertisedTestCount_MatchesTheSuite()
     {
         int actual = CountTestCases();
+
+        if (Environment.GetEnvironmentVariable(SyncEnvironmentVariable) == "1")
+        {
+            var rewritten = SyncTestCountIntoDocs(actual);
+            Assert.True(
+                FindTestCountClaims().All(claim => claim.Claimed == actual),
+                "Sync ran but left a claim disagreeing with the suite, which means a spelling is " +
+                "readable by FindTestCountClaims and not writable by RewriteCounts.");
+            return;
+        }
+
         var claims = FindTestCountClaims();
 
         // A claim that has simply been deleted must not read as agreement.
@@ -580,7 +637,10 @@ public class DocumentationDriftTests
         Assert.True(
             wrong.Count == 0,
             $"The suite contains {actual} test cases, but {string.Join("; ", wrong)}. " +
-            "Update the documented count in those files to match.");
+            "Do not edit these by hand - four documents state the count in four different " +
+            "spellings and hand-editing is what put them out of step before. Re-derive them with:" +
+            Environment.NewLine +
+            $"    {SyncEnvironmentVariable}=1 dotnet test --filter TheAdvertisedTestCount_MatchesTheSuite");
     }
 
 
@@ -685,24 +745,71 @@ public class DocumentationDriftTests
     /// in the README's tree diagram. In the paired form both halves are held to the real number,
     /// since a passing suite means run and passed are equal.
     /// </summary>
-    private static List<(string File, int Claimed)> FindTestCountClaims()
+    /// <summary>
+    /// Every document that states the count, and every spelling it is stated in. Both lists are
+    /// shared by the reader (<see cref="FindTestCountClaims"/>) and the writer
+    /// (<see cref="RewriteCounts"/>) so a claim cannot be detectable but unfixable - the failure
+    /// mode that would put a human back to hand-editing four files.
+    ///
+    /// The Field Guide is the source TUTORIAL.md is derived from, and its header once said this test
+    /// enforced the count there. It was never read: it said 387 automated tests while its own copy
+    /// said 459 and the suite ran 459. The runbook tells a human what to expect from the run they are
+    /// about to do, so a stale number there is a verification step that fails for the wrong reason.
+    /// </summary>
+    private static readonly string[] DocumentsStatingTheTestCount =
+    {
+        "README.md",
+        Path.Combine("docs", "TUTORIAL.md"),
+        Path.Combine("docs", "SPLAT-Field-Guide.html"),
+        Path.Combine("docs", "RUNBOOK-human-steps.md"),
+    };
+
+    private static readonly Regex[] TestCountRegexes =
+    {
+        TestCountClaimRegex, TestCountBadgeRegex, TestCountXunitRegex, TestCountRunOutputRegex,
+    };
+
+    /// <summary>
+    /// Rewrites every digit span the four spellings identify to <paramref name="actual"/>. Spans are
+    /// applied right-to-left so that changing a number's width cannot invalidate the offsets of the
+    /// ones not yet written, and an overlapping span is skipped rather than allowed to corrupt a
+    /// neighbour - two regexes can legitimately match the same digits.
+    /// </summary>
+    internal static string RewriteCounts(string text, int actual)
+    {
+        var spans = TestCountRegexes
+            .SelectMany(regex => regex.Matches(text).Cast<Match>())
+            .SelectMany(match => new[] { match.Groups["first"], match.Groups["second"] })
+            .Where(group => group.Success)
+            .Select(group => (group.Index, group.Length))
+            .Distinct()
+            .OrderByDescending(span => span.Index)
+            .ToList();
+
+        var builder = new System.Text.StringBuilder(text);
+        int lowestWritten = int.MaxValue;
+        foreach (var (index, length) in spans)
+        {
+            if (index + length > lowestWritten)
+            {
+                continue; // overlaps a span already rewritten
+            }
+
+            builder.Remove(index, length);
+            builder.Insert(index, actual.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            lowestWritten = index;
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>Writes the derived count into every document that states it. Returns those changed.</summary>
+    private static List<string> SyncTestCountIntoDocs(int actual)
     {
         string root = RepositoryRoot();
-        var claims = new List<(string, int)>();
+        var changed = new List<string>();
 
-        // The Field Guide is the source TUTORIAL.md is derived from, and its header said this test
-        // enforced the count there. It was never read: it said 387 automated tests while its own
-        // copy said 459 and the suite ran 459.
-        foreach (string relative in new[]
-                 {
-                     "README.md",
-                     Path.Combine("docs", "TUTORIAL.md"),
-                     Path.Combine("docs", "SPLAT-Field-Guide.html"),
-                     // The runbook tells a human what to expect from the run they are about to do,
-                     // so a stale number there is a verification step that fails for the wrong
-                     // reason - and it went stale the first time someone else moved the count.
-                     Path.Combine("docs", "RUNBOOK-human-steps.md"),
-                 })
+        foreach (string relative in DocumentsStatingTheTestCount)
         {
             string full = Path.Combine(root, relative);
             if (!File.Exists(full))
@@ -711,7 +818,32 @@ public class DocumentationDriftTests
             }
 
             string text = File.ReadAllText(full);
-            foreach (var regex in new[] { TestCountClaimRegex, TestCountBadgeRegex, TestCountXunitRegex, TestCountRunOutputRegex })
+            string rewritten = RewriteCounts(text, actual);
+            if (!string.Equals(text, rewritten, StringComparison.Ordinal))
+            {
+                File.WriteAllText(full, rewritten);
+                changed.Add(relative);
+            }
+        }
+
+        return changed;
+    }
+
+    private static List<(string File, int Claimed)> FindTestCountClaims()
+    {
+        string root = RepositoryRoot();
+        var claims = new List<(string, int)>();
+
+        foreach (string relative in DocumentsStatingTheTestCount)
+        {
+            string full = Path.Combine(root, relative);
+            if (!File.Exists(full))
+            {
+                continue;
+            }
+
+            string text = File.ReadAllText(full);
+            foreach (var regex in TestCountRegexes)
             {
                 foreach (Match match in regex.Matches(text))
                 {

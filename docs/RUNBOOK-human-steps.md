@@ -131,12 +131,27 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 524`, on a line ending `(net10.0)`. The `dotnet` on this
+**Expect:** `Passed! - Failed: 0, Passed: 525`, on a line ending `(net10.0)`. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
 
-**Why it matters:** the number is not decorative. A test now fails if the README or the Field Guide
-advertise a count that disagrees with the suite, so `524` in the docs is checked, not asserted.
+**Why it matters:** the number is not decorative. A test fails if the README, the tutorial, the
+Field Guide or this runbook advertise a count that disagrees with the suite, so the number in the
+docs is checked, not asserted.
+
+**When it goes red, do not edit the four documents by hand.** They state the count in four different
+spellings - prose, the shields badge, the tree diagram, the pasted run output - and hand-editing is
+what put them out of step repeatedly. Re-derive all of them from the suite instead:
+
+```powershell
+$env:SPLAT_SYNC_TEST_COUNT = "1"
+& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~TheAdvertisedTestCount_MatchesTheSuite"
+Remove-Item Env:\SPLAT_SYNC_TEST_COUNT
+```
+
+That writes the real count into every spelling in all four files, using the same regexes that detect
+the drift - so a spelling the check can see is necessarily one the fix can reach. Review the diff and
+commit it like any other change.
 
 ### 1.2 The documentation actually matches the code
 
@@ -144,17 +159,19 @@ advertise a count that disagrees with the suite, so `524` in the docs is checked
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~DocumentationDrift"
 ```
 
-**Expect:** 13 passed. These check that every relative link in the README and in `docs/` resolves on
-disk, that every tool the MCP server exposes is documented, that retired overclaims have not crept
-back, and that the advertised test count matches reality.
+**Expect:** all pass - the count is deliberately not quoted here, because a number in this runbook
+rots the same way the ones it is policing do. These check that every relative link in the README and
+in `docs/` resolves on disk, that every tool the MCP server exposes is documented, that retired
+overclaims have not crept back, and that the advertised test count matches reality.
 
-**Try breaking it:** change `524` to `523` in `README.md` and re-run. It should go red and name the
-file. If it does not, the check is not doing its job — tell me.
+**Try breaking it:** change the advertised test count in `README.md` to any wrong number and re-run.
+It should go red, name the file, and print the sync command above. If it does not, the check is not
+doing its job — tell me.
 
 ### 1.3 The published Field Guide is not stale
 
 ```powershell
-& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER	ests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~ThePublishedFieldGuide"
+& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~ThePublishedFieldGuide"
 ```
 
 **Expect:** 1 passed.
