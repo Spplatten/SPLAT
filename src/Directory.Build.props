@@ -1,0 +1,21 @@
+<Project>
+
+  <!--
+    A warning fails the build for everything that ships.
+
+    The cold build has been clean for a while, and nothing held it there: NU1903 - a high-severity
+    advisory in the native SQLite this ledger loads - sat in the output as a warning until someone
+    happened to read it, and it had already shipped in dist\App by then. A warning nobody is forced
+    to read is a finding nobody acts on.
+
+    Deliberately here rather than at the repository root: coursework/ is a separate tree with its own
+    owner, and whether a warning should stop a teaching lab is not this file's decision to make.
+
+    To unblock a local experiment: dotnet build -p:TreatWarningsAsErrors=false. Do not commit that -
+    fix the warning, or exempt exactly one code with WarningsNotAsErrors and say why.
+  -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,14 @@
+<Project>
+
+  <!--
+    The same gate the shipping projects are held to, for the suite that proves them. A warning here is
+    usually a test that stopped testing what it says - an unawaited task, an unreachable assertion -
+    which is exactly the kind of rot a green run hides.
+
+    See src/Directory.Build.props for why this is not one file at the repository root.
+  -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

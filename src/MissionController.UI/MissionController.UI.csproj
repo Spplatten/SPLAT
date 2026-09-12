@@ -9,6 +9,13 @@
     <Platforms>x64;arm64</Platforms>
     <Platform>x64</Platform>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!--
+      The one project exempt from the warning gate in src/Directory.Build.props, because it is frozen:
+      it stays on net9.0-windows and Windows App SDK 1.6, it ships nothing, and the warnings it would
+      raise belong to the 2.x migration that is not being done today. Whoever does that migration owns
+      this line, and deleting it is part of finishing.
+    -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <UseWinUI>true</UseWinUI>
