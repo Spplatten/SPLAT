@@ -57,7 +57,7 @@ SPLAT ships with a squad of specialist agents — each one a bundle of a reasoni
 | 💾 **Titan-SysOps** | Storage | Watches disk space, finds bloated caches and clutter, and points at what's safe to clean up. |
 | 🔒 **Aegis-Endpoint** | Compliance | Checks that Microsoft Defender is on, virus signatures are fresh, and secure connections are configured right. |
 
-Behind them sits a catalog of **40+ specialists** covering networking, identity, endpoint security, system operations, and compliance — plus a newer *Autonomous Operations* wing with agents that build and deploy websites, draft multi-platform marketing campaigns, and vet grant eligibility before drafting the application paperwork — all under the same leash as everyone else. For bigger jobs, **Project Studio** chains up to six agents in a fixed order, and even the notes they pass to each other are filtered for secrets first. No free-for-all swarms, no infinite loops — by design.
+Behind them sits a catalog of **49 specialists** covering networking, identity, endpoint security, system operations, and compliance — plus a newer *Autonomous Operations* wing with agents that build and deploy websites, draft multi-platform marketing campaigns, and vet grant eligibility before drafting the application paperwork — all under the same leash as everyone else. For bigger jobs, **Project Studio** chains up to six agents in a fixed order, and even the notes they pass to each other are filtered for secrets first. No free-for-all swarms, no infinite loops — by design.
 
 ### Wait — is SPLAT an agent builder, or a containment zone?
 
@@ -91,7 +91,7 @@ Say you open SPLAT and type: *"My internet keeps cutting out during video calls.
 | **Quick Diagnostician** | The home screen. Big friendly tiles for one-click checkups, plus a box where you type any problem in your own words and let the Brain run with it. |
 | **Welcome** | The three-step setup wizard: meet the squad, paste one AI key, launch. Takes about two minutes. |
 | **Live Mission Monitor** | Watch missions run in real time — the agent's reasoning streams in as it works. |
-| **Template Catalog** | Browse all 40+ specialists, see exactly what tool and destination each one is allowed, and launch them directly. |
+| **Template Catalog** | Browse all 49 specialists, see exactly what tool and destination each one is allowed, and launch them directly. |
 | **Project Studio** | Chain up to six agents into a staged project — investigate, then verify, then summarize — with filtered hand-offs between stages. |
 | **Security Audit** | Read the tamper-evident ledger: every action ever taken, verifiable, in one place. |
 | **Memory** | Search past incidents by meaning, not keywords — "that time the printer broke" finds the right mission. |
@@ -159,4 +159,4 @@ For Python folks, there's a ready-made kit: the `splat-langgraph` package (in `s
 
 ---
 
-*SPLAT · © Platten Industries. This guide reflects the app as of August 2026.*
+*SPLAT · © Platten Industries. This guide reflects the app as of September 2026.*
