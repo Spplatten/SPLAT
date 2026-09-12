@@ -15,6 +15,12 @@ namespace MissionController.Tests;
 /// </summary>
 public sealed class SubstrateDoctorTests
 {
+
+    /// <summary>
+    /// A budget wide enough that losing the CPU cannot be mistaken for an unreachable daemon.
+    /// See <see cref="WslSubstrateHealthChecker"/>'s constructor for why this is not the default.
+    /// </summary>
+    private static readonly TimeSpan ReplyBudget = TimeSpan.FromSeconds(30);
     /// <summary>Port 1 is reserved and nothing listens there.</summary>
     private static readonly WslSubstrateHealthChecker NoDaemon = new("127.0.0.1", 1, HermeticToken);
 
@@ -164,7 +170,7 @@ public sealed class SubstrateDoctorTests
             new McpServerCommand.Doctor(null, McpEgressPolicy.None),
             report,
             wsl: (_, _) => Task.FromResult((0, "6.18.33.2\n---\nlsm=bpf\n")),
-            health: new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken));
+            health: new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
 
         string text = report.ToString();
         Assert.Equal(1, exit);
@@ -186,7 +192,7 @@ public sealed class SubstrateDoctorTests
             new McpServerCommand.Doctor(null, McpEgressPolicy.None),
             report,
             wsl: (_, _) => Task.FromResult((0, "6.18.33.2\n---\nlsm=bpf\n")),
-            health: new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken));
+            health: new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
 
         string text = report.ToString();
         Assert.Equal(0, exit);
