@@ -14,18 +14,6 @@ public sealed class SubstrateDoctorTests
 {
     private static readonly WslSubstrateHealthChecker NoDaemon = new("127.0.0.1", 1);
 
-    private static string RepositoryRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "MissionController.sln")))
-        {
-            dir = dir.Parent;
-        }
-
-        Assert.NotNull(dir);
-        return dir!.FullName;
-    }
-
     [Fact]
     public void TheSubcommand_IsOnlyEverTheFirstArgument()
     {
@@ -115,17 +103,4 @@ public sealed class SubstrateDoctorTests
         Assert.Contains("may connect only to 203.0.113.7:443", report.ToString());
     }
 
-    [Fact]
-    public void EveryPolicyLineItPrints_IsStillInSupportedPolicy()
-    {
-        string policy = File.ReadAllText(
-            Path.Combine(RepositoryRoot(), "native", "splat-agent", "SUPPORTED_POLICY.md"));
-
-        var missing = SubstrateDoctor.LeasePolicy
-            .Where(row => !policy.Contains(row.What, StringComparison.OrdinalIgnoreCase))
-            .Select(row => row.What)
-            .ToList();
-
-        Assert.Empty(missing);
-    }
 }

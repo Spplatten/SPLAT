@@ -131,12 +131,12 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 505`, on a line ending `(net10.0)`. The `dotnet` on this
+**Expect:** `Passed! - Failed: 0, Passed: 509`, on a line ending `(net10.0)`. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
 
 **Why it matters:** the number is not decorative. A test now fails if the README or the Field Guide
-advertise a count that disagrees with the suite, so `505` in the docs is checked, not asserted.
+advertise a count that disagrees with the suite, so `509` in the docs is checked, not asserted.
 
 ### 1.2 The documentation actually matches the code
 
@@ -148,7 +148,7 @@ advertise a count that disagrees with the suite, so `505` in the docs is checked
 disk, that every tool the MCP server exposes is documented, that retired overclaims have not crept
 back, and that the advertised test count matches reality.
 
-**Try breaking it:** change `505` to `504` in `README.md` and re-run. It should go red and name the
+**Try breaking it:** change `509` to `508` in `README.md` and re-run. It should go red and name the
 file. If it does not, the check is not doing its job — tell me.
 
 ### 1.3 The audit ledger verifies

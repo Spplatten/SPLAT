@@ -398,6 +398,18 @@ public class McpServerHandler
             }
         };
 
+        // One statement of what holds each tool, taken from the manifest that doctor and the
+        // tests read too. A description that says "governed" without saying by what is where F24
+        // began, and a tool the manifest does not name fails a test rather than shipping silent.
+        foreach (var tool in tools)
+        {
+            var capability = CapabilityManifest.Tools.FirstOrDefault(c => c.Tool == tool.Name);
+            if (capability is not null)
+            {
+                tool.Description += $" Enforced by {capability.Detail}.";
+            }
+        }
+
         var responseData = new { tools };
         return Task.FromResult(new McpJsonRpcMessage
         {

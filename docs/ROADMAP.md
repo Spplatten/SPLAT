@@ -1,6 +1,7 @@
 <!-- The one status record. When an item's state changes, change its row here in the same commit
      that changes it. When the ORDER changes, the argument goes in the plan and the rows move here.
-     Every "State" below was checked against the tree on 2026-09-10: a row that says "open" was
+     Every "State" below was checked against the tree when it was written, and each carries the date
+     it changed: a row that says "open" was
      looked for in the code, not carried over from an older document. -->
 
 # Roadmap
@@ -35,16 +36,18 @@ a decision. Where both appear, the agent does the work and you do the one step i
 
 **Exit:** a stranger with WSL2 adds one stanza to their MCP config, runs a command the kernel refuses,
 and can point to the line in [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md) that
-predicted it. This is also the first thing that can be invoiced: a containment assessment needs P1
+predicted it — **recorded on 2026-09-11** in `last-hop-probe.json` (1.8), so what remains of P1 is
+getting it onto a machine that is not this one. This is also the first thing that can be invoiced: a
+containment assessment needs P1
 and nothing after it.
 
-| # | Item | Owner | State, 2026-09-10 | Done when |
+| # | Item | Owner | State | Done when |
 | --- | --- | --- | --- | --- |
 | 1.1 | A `splat-mcp` command line — `--workspace`, help, refusal of unknown options — validated **before** any startup effect | agent | **Done 2026-09-11.** Parsed before anything is built: a bad option or a missing workspace exits 2 with the ledger untouched, and a workspace is never created. `--workspace` is optional on purpose — without it the file tools stay in SPLAT's private folder, which fails safe, and the server names that folder on stderr | The selected root reaches `WorkspaceGuard`, and a bad option exits without creating a database — both shown on the real exe, not only in tests |
-| 1.2 | `splat-mcp doctor` | agent | **Done 2026-09-12.** Probes this host — kernel, `lsm=` on the boot line, daemon reachable *and* holding live BPF maps, token present — and prints what a lease enforces, refuses and does not police, copied from `SUPPORTED_POLICY.md` and bound to it by a test. Exit 0 only when a lease reaches the kernel. On this host: enforcing, exit 0 | It reports this host's kernel, BPF-LSM state, daemon and token, then what will and will not be enforced — read from the policy tables, never hardcoded — and refuses the enforcing modes when the substrate is absent |
+| 1.2 | `splat-mcp doctor` | agent | **Done 2026-09-12.** Probes this host — kernel, `lsm=` on the boot line, daemon reachable *and* holding live BPF maps, token present — and prints what a lease enforces, refuses and does not police, read from the one capability manifest (1.5), which is bound to `SUPPORTED_POLICY.md` by a test. Exit 0 only when a lease reaches the kernel. On this host: enforcing, exit 0 | It reports this host's kernel, BPF-LSM state, daemon and token, then what will and will not be enforced — read from the policy tables, never hardcoded — and refuses the enforcing modes when the substrate is absent |
 | 1.3 | First-run WSL provisioning | agent; `wsl --install` is yours | Not started — there is no `WslProvisioner` | A clean machine reaches a kernel-contained mission with no manual shell step, and a broken provision names the missing piece instead of falling back silently |
 | 1.4 | Distribution: one downloadable `splat-mcp` | agent | **Done 2026-09-12** for the single file. `packaging/publish-splat-mcp.ps1` produces a self-contained 73.5 MB `splat-mcp.exe` with its native SQLite inside, plus a SHA-256, and stops rather than reporting success on a non-zero publish, a missing output, a stray file beside the executable, or an executable that cannot print its usage. **No `dotnet tool`:** `PackAsTool` rejects a platform TFM (NETSDK1146) and this project must target `net10.0-windows` for the Win32 primitives; a tool package would need a second, platform-neutral wrapper carrying the exe as payload. **No `npx` shim:** that needs a published release binary and an npm account — yours to decide | One downloaded file plus one config stanza is the whole setup, and the artifact cannot ship unverified |
-| 1.5 | F24 — one capability manifest | agent | Not started | The CLI, `tools/list`, `SUPPORTED_POLICY.md` and the tests all read one file — including which templates run outside the Windows AppContainer — and drift between them fails the build |
+| 1.5 | F24 — one capability manifest | agent | **Done 2026-09-12.** `CapabilityManifest` in Core states what a lease enforces, refuses and does not police; what holds each MCP tool; and — counted from the shipped catalog, never authored — how many templates run outside the Windows AppContainer. `doctor` prints it, every `tools/list` description ends with the enforcement it names, and tests bind it to `SUPPORTED_POLICY.md`, to the served tool list in both directions, and to the census sentence in this file. The README tool table is still prose a reader must trust | The CLI, `tools/list`, `SUPPORTED_POLICY.md` and the tests all read one file — including which templates run outside the Windows AppContainer — and drift between them fails the build |
 | 1.6 | Bound every request frame before parsing it | agent | **Done 2026-09-11.** Both ends cap a frame at 1 MiB before parsing: the daemon reads through `take`, says so and hangs up (the tail of an oversized frame must not be re-read as frames of its own); `splat-mcp` answers `-32700` and skips to the next newline, because a stdio client has no second connection | A frame exactly at the limit parses, and one byte over is refused before it can grow — asserted on both ends, the daemon's test trailing ten unread megabytes behind the refusal |
 | 1.7 | Warnings fail the build on the shipping projects | agent | Open. The cold build is clean today (above); nothing stops that regressing | A new warning in Core, Data, Linux, Network, Windows, `splat-mcp` or the tests fails the build |
 | 1.8 | Record the last hop | agent builds it; you start the root daemon | **Done 2026-09-11.** [`probe-last-hop.ps1`](../native/splat-agent/probe-last-hop.ps1) drives `splat-mcp.exe` over stdio as a client does; the kernel refused an undeclared exec and an out-of-lease connect while the permitted command ran as `nobody`. The run found the defect that made the hop unusable: the bridge's `wsl.exe` children inherited the server's stdin and ate the JSON-RPC stream | Evidence is committed of an MCP client's command refused by the kernel, bound to the sources that produced it, and `DocumentationDriftTests` holds the README to it in both directions |
@@ -56,7 +59,7 @@ and nothing after it.
 Three of the gaps people ask about first — read-only roots, copy-on-write scratch, running code an
 agent just wrote — are one missing capability. The plan's §3 has the argument.
 
-| # | Item | Owner | State, 2026-09-10 | Done when |
+| # | Item | Owner | State | Done when |
 | --- | --- | --- | --- | --- |
 | 2.1 | `unshare(CLONE_NEWNS)` and `pivot_root` inside the spawn's `pre_exec` closure | agent | Not started; it exists as a comment in `cow.rs`. The hard one: async-signal-safe code in a forked child of a multithreaded process | `readOnlyFs` and `overlayFs.enableCow` move out of `SUPPORTED_POLICY.md`'s **Refused** table |
 | 2.2 | Leased scratch execution for code an agent just wrote | agent | Blocked on 2.1 | A file created in scratch executes, the same file outside scratch does not, and the scratch layer is gone after teardown |
@@ -71,7 +74,7 @@ agent just wrote — are one missing capability. The plan's §3 has the argument
 do and what it did. The schema already exists — the six-group evidence contract in
 [the 09-04 roadmap](audits/2026-09-04-roadmap.md). Fill it in; do not redesign it.
 
-| # | Item | Owner | State, 2026-09-10 | Done when |
+| # | Item | Owner | State | Done when |
 | --- | --- | --- | --- | --- |
 | 3.1 | Assemble the bundle over `IMerkleProofEngine`, `IComplianceArchiveExporter` and the ledger | agent | The parts exist; nothing assembles them per mission | The exit above |
 | 3.2 | Key the ledger | agent; you decide where the key lives | Open. Keying is supported, but `splat-mcp` builds its ledger with no key and no vault, so it chains unkeyed and a rewrite is undetectable | A ledger that is meant to be keyed refuses to append without its key, and the record states which kind of chain it came from |

@@ -29,8 +29,9 @@ the short form.
   nothing beyond P1.
 - **P0, the runtime floor — done 2026-09-09.** The shipping tree is on .NET 10.
 - **P1, installable and provable by a stranger — next.** A `splat-mcp` CLI and `doctor` command,
-  single-file distribution, first-run WSL provisioning, and one capability manifest read by the
-  CLI, `tools/list`, SUPPORTED_POLICY and the tests (F24).
+  single-file distribution and first-run WSL provisioning. The capability manifest F24 asked for
+  landed on 2026-09-12: `CapabilityManifest` in Core, read by `doctor`, by every `tools/list`
+  description, and by the tests that bind it to SUPPORTED_POLICY and to the shipped catalog.
 - **P2, the workload's own mount namespace** — which unblocks `readOnlyFs`, copy-on-write scratch
   and running code an agent just wrote. AF_VSOCK too, if it fits.
 - **P3, the per-mission run record** — a bundle from which someone who did not run a mission can

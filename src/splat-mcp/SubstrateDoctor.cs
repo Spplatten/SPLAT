@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using MissionController.Core;
+using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Linux;
 
 namespace SplatMcp;
@@ -21,31 +23,6 @@ public static class SubstrateDoctor
 {
     /// <summary>Runs `wsl.exe` with these arguments; the seam exists so the report can be tested.</summary>
     public delegate Task<(int ExitCode, string Output)> WslRunner(IReadOnlyList<string> args, CancellationToken ct);
-
-    /// <summary>
-    /// Copied from <c>native/splat-agent/SUPPORTED_POLICY.md</c>, the substrate's own statement of
-    /// what it enforces, refuses, and leaves alone. <c>SubstrateDoctorTests</c> fails if any phrase
-    /// here stops appearing there, so a policy change cannot leave this report behind. F24 (roadmap
-    /// 1.5) replaces both with one manifest; until then this is the copy and that test is the binding.
-    /// </summary>
-    public static readonly IReadOnlyList<(string Where, string What)> LeasePolicy = new[]
-    {
-        ("enforced in the kernel", "Executable identity"),
-        ("enforced in the kernel", "Protected files"),
-        ("enforced in the kernel", "IPv4 egress"),
-        ("enforced in the kernel", "IPv6 egress"),
-        ("enforced by the daemon", "Memory, CPU, PID ceilings"),
-        ("enforced by the daemon", "Lease lifetime"),
-        ("enforced by the daemon", "Caller identity"),
-        ("enforced by the daemon", "Workload privilege"),
-        ("refused by the daemon", "readOnlyFs"),
-        ("refused by the daemon", "overlayFs.enableCow"),
-        ("not policed", "UDP to an unconnected socket"),
-        ("not policed", "AF_UNIX / AF_NETLINK"),
-        ("not policed", "Inherited file descriptors"),
-        ("not policed", "Filesystem writes outside the workspace"),
-        ("not policed", "Ambient reads"),
-    };
 
     public static async Task<int> RunAsync(
         McpServerCommand.Doctor doctor,
@@ -70,6 +47,11 @@ public static class SubstrateDoctor
                 : $"{workspace} (from --workspace)");
         Line(output, true, "file tools",
             "fs_read and fs_write are confined to that directory by the handle the kernel opened, not by the path string");
+        var census = CapabilityManifest.CensusOf(GovernedTemplateCatalog.All);
+        Line(output, census.Unconfined == 0 ? "ok" : "--", "sensor network",
+            $"{census.NetworkDenied} of {census.Templates} catalog templates run network-denied; "
+            + $"{census.Unconfined} keep a network stack ({census.NeedsNetwork} needs it, "
+            + $"{census.LocalSubsystems} would lose WMI, the Event Log, Defender or the SCM inside the container)");
         Line(output, true, "audit ledger",
             $"{LedgerPath()} - hash-chained and UNKEYED, so a rewrite by this user is undetectable");
         output.WriteLine();
@@ -122,9 +104,9 @@ public static class SubstrateDoctor
 
         output.WriteLine();
         output.WriteLine("What a lease enforces when one runs (native/splat-agent/SUPPORTED_POLICY.md)");
-        foreach (var group in LeasePolicy.GroupBy(row => row.Where))
+        foreach (var group in CapabilityManifest.Lease.GroupBy(row => row.Where))
         {
-            output.WriteLine($"  {group.Key,-24}{string.Join("; ", group.Select(row => row.What))}");
+            output.WriteLine($"  {Label(group.Key),-24}{string.Join("; ", group.Select(row => row.What))}");
         }
 
         bool enforcing = status.Enforcing;
@@ -134,6 +116,14 @@ public static class SubstrateDoctor
             : "Verdict: NOT enforcing here. Nothing above changes what fs_read and fs_write do, but run_command and run_code cannot be trusted to contain anything on this host.");
         return enforcing ? 0 : 1;
     }
+
+    private static string Label(LeaseEnforcement where) => where switch
+    {
+        LeaseEnforcement.Kernel => "enforced in the kernel",
+        LeaseEnforcement.Daemon => "enforced by the daemon",
+        LeaseEnforcement.Refused => "refused by the daemon",
+        _ => "not policed",
+    };
 
     private static void Line(TextWriter output, bool ok, string what, string detail) =>
         Line(output, ok ? "ok" : "FAIL", what, detail);
