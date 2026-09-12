@@ -126,6 +126,13 @@ public sealed class CapabilityManifestTests
             Assert.True(prose.Success, $"{doc} no longer states the census in the form this test reads");
             Assert.Equal(census.Templates, int.Parse(prose.Groups["total"].Value));
             Assert.Equal(census.NetworkDenied, int.Parse(prose.Groups["denied"].Value));
+
+            // The same section names the catalog size a second time, a paragraph earlier. It read
+            // "40+" while the sentence below it said 49 - the vague number is the one that survives
+            // a template being added, which is precisely why it should not be the one on the page.
+            var size = Regex.Match(text, @"the (?<total>\d+)-agent catalog");
+            Assert.True(size.Success, $"{doc} no longer states the catalog size in the form this test reads");
+            Assert.Equal(census.Templates, int.Parse(size.Groups["total"].Value));
         }
     }
 
