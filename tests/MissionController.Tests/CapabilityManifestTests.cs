@@ -114,6 +114,19 @@ public sealed class CapabilityManifestTests
         Assert.True(stated.Success, "the roadmap no longer states the census in the form this test reads");
         Assert.Equal(census.Templates, int.Parse(stated.Groups["total"].Value));
         Assert.Equal(census.NetworkDenied, int.Parse(stated.Groups["denied"].Value));
+
+        // The Field Guide states the same census in prose, in both synced copies. That document is
+        // what a non-engineer reads to decide whether to trust this, and it spent weeks telling them
+        // Windows did not filter network sockets at all - which the census above disproves for 33 of
+        // the 49. Bound here so the correction cannot quietly rot back into the comfortable version.
+        foreach (string doc in new[] { "TUTORIAL.md", "SPLAT-Field-Guide.html" })
+        {
+            string text = File.ReadAllText(Path.Combine(RepositoryRoot(), "docs", doc));
+            var prose = Regex.Match(text, @"of the (?<total>\d+) agents in the catalog, (?<denied>\d+) launch");
+            Assert.True(prose.Success, $"{doc} no longer states the census in the form this test reads");
+            Assert.Equal(census.Templates, int.Parse(prose.Groups["total"].Value));
+            Assert.Equal(census.NetworkDenied, int.Parse(prose.Groups["denied"].Value));
+        }
     }
 
     private sealed class NeverCalledExecutor : ILeasedExecutor

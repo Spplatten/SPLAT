@@ -38,12 +38,26 @@ public class WslSubstrateHealthChecker
     private readonly string _host;
     private readonly int _port;
     private readonly WslAgentToken _token;
+    private readonly TimeSpan _timeout;
 
-    public WslSubstrateHealthChecker(string host = "127.0.0.1", int port = 50051, WslAgentToken? token = null)
+    /// <param name="timeout">
+    /// How long the whole exchange gets. Two seconds is a policy about a status badge - a health
+    /// check that has not answered by then should read as "not answering" rather than hold a UI
+    /// thread - and it is wrong for every caller who is not a badge. It is a parameter because a
+    /// test that shares it is asserting scheduler luck: the same loopback exchange measured 12ms
+    /// alone and 363ms under the suite's own parallel load, and the one that lost that race read
+    /// as an unreachable daemon, which is indistinguishable from the bug this class exists to catch.
+    /// </param>
+    public WslSubstrateHealthChecker(
+        string host = "127.0.0.1",
+        int port = 50051,
+        WslAgentToken? token = null,
+        TimeSpan? timeout = null)
     {
         _host = host;
         _port = port;
         _token = token ?? WslAgentToken.Default;
+        _timeout = timeout ?? TimeSpan.FromSeconds(2);
     }
 
     public bool IsWslConfiguredForBpf()
@@ -71,7 +85,7 @@ public class WslSubstrateHealthChecker
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(2));
+            cts.CancelAfter(_timeout);
 
             using var client = new TcpClient();
             await client.ConnectAsync(_host, _port, cts.Token);

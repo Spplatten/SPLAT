@@ -23,6 +23,12 @@ namespace MissionController.Tests;
 /// </summary>
 public class WslLeasedExecutorWireTests
 {
+
+    /// <summary>
+    /// A budget wide enough that losing the CPU cannot be mistaken for an unreachable daemon.
+    /// See <see cref="WslSubstrateHealthChecker"/>'s constructor for why this is not the default.
+    /// </summary>
+    private static readonly TimeSpan ReplyBudget = TimeSpan.FromSeconds(30);
     /// <summary>
     /// A stand-in for the daemon's 0600 token. Supplied directly so these tests keep testing the
     /// wire and nothing else - the bridge otherwise reads the real secret out of the guest through
@@ -152,7 +158,7 @@ public class WslLeasedExecutorWireTests
             "{\"type\":\"HEALTH_RESPONSE\",\"bpfLsmActive\":true,\"cgroupV2Active\":true," +
             "\"overlayFsSupported\":false,\"kernelVersion\":\"6.18.33.2\",\"enforcing\":true,\"activeLeaseCount\":2}");
 
-        var checker = new WslSubstrateHealthChecker("127.0.0.1", port, new WslAgentToken(authToken: TestToken));
+        var checker = new WslSubstrateHealthChecker("127.0.0.1", port, new WslAgentToken(authToken: TestToken), ReplyBudget);
         var status = await checker.CheckHealthAsync();
 
         string request = Encoding.UTF8.GetString(await daemon);
@@ -179,7 +185,7 @@ public class WslLeasedExecutorWireTests
             listener,
             "{\"type\":\"STDERR\",\"data\":\"SPLAT refused the request: missing or invalid authToken.\\n\"}");
 
-        var checker = new WslSubstrateHealthChecker("127.0.0.1", port, new WslAgentToken(authToken: TestToken));
+        var checker = new WslSubstrateHealthChecker("127.0.0.1", port, new WslAgentToken(authToken: TestToken), ReplyBudget);
         var status = await checker.CheckHealthAsync();
 
         await daemon;
