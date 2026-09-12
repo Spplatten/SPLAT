@@ -15,6 +15,13 @@ public sealed class SqliteGovernedCrewRegistry : IGovernedCrewRegistry
     public SqliteGovernedCrewRegistry(SqliteStorageContext context)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
+        // Blocking on async work in a constructor is a deadlock shape wherever a single-threaded
+        // SynchronizationContext exists - and this type IS resolved on the WinUI UI thread, via the
+        // MainWindow constructor. It survives today only because Microsoft.Data.Sqlite has no true
+        // async I/O: its *Async methods return completed tasks, so the awaits below never post a
+        // continuation back to the blocked thread. That is a property of the provider, not of this
+        // code, so the awaits are ConfigureAwait(false) - the seeding stays correct if the store is
+        // ever swapped for one that really yields.
         InitializeDefaultCrewsAsync().GetAwaiter().GetResult();
     }
 
@@ -22,7 +29,7 @@ public sealed class SqliteGovernedCrewRegistry : IGovernedCrewRegistry
     {
         foreach (var crew in GovernedCrewCatalog.All)
         {
-            await RegisterCrewAsync(crew);
+            await RegisterCrewAsync(crew).ConfigureAwait(false);
         }
     }
 

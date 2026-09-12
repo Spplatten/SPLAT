@@ -18,6 +18,13 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
     public SqliteTemplateRegistry(SqliteStorageContext context)
     {
         _context = context;
+        // Blocking on async work in a constructor is a deadlock shape wherever a single-threaded
+        // SynchronizationContext exists - and this type IS resolved on the WinUI UI thread, via the
+        // MainWindow constructor. It survives today only because Microsoft.Data.Sqlite has no true
+        // async I/O: its *Async methods return completed tasks, so the awaits below never post a
+        // continuation back to the blocked thread. That is a property of the provider, not of this
+        // code, so the awaits are ConfigureAwait(false) - the seeding stays correct if the store is
+        // ever swapped for one that really yields.
         InitializeDefaultCatalogAsync().GetAwaiter().GetResult();
     }
 
@@ -27,7 +34,7 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
         // while user-authored templates remain intact under their own TemplateId values.
         foreach (var template in GovernedTemplateCatalog.All)
         {
-            await RegisterTemplateAsync(template);
+            await RegisterTemplateAsync(template).ConfigureAwait(false);
         }
     }
 

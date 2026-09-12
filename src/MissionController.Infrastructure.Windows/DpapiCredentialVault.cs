@@ -105,6 +105,8 @@ public sealed class DpapiCredentialVault : ICredentialVault
         }
         catch (UnauthorizedAccessException)
         {
+            // Same reasoning as the IOException above: an ACL that blocks the overwrite must not
+            // block the delete. Caught separately because it does not derive from IOException.
         }
 
         File.Delete(filePath);

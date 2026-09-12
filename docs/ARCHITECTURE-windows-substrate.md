@@ -1,6 +1,7 @@
 <!-- Companion to ARCHITECTURE.md. Covers MissionController.Infrastructure.Windows: what a Windows
      sensor tool process experiences, in the order it experiences it. Read out of the tree at
-     0027e57 on 2026-09-10. Where this disagrees with the code, the code wins and this is the bug. -->
+     f5ed4a3 on 2026-09-12, after the interop surface moved to source-generated P/Invoke.
+     Where this disagrees with the code, the code wins and this is the bug. -->
 
 # Windows substrate — what a sensor tool process experiences
 
@@ -19,7 +20,22 @@ not all of them always do.
 | The suspended launch that ties them together | [`SuspendedProcessLauncher`](../src/MissionController.Infrastructure.Windows/SuspendedProcessLauncher.cs) | `IProcessLauncher` |
 
 Every P/Invoke declaration lives in
-[`Win32Interop.cs`](../src/MissionController.Infrastructure.Windows/Win32Interop.cs).
+[`Win32Interop.cs`](../src/MissionController.Infrastructure.Windows/Win32Interop.cs). All 25 are
+`[LibraryImport]` — marshalling code generated at compile time, no runtime IL stubs — which imposes
+two rules on anyone adding to that file:
+
+- **Spell the entry point.** `[LibraryImport]` is always exact-spelling. `[DllImport]` with
+  `CharSet.Unicode` probed for the `W`-suffixed export; the generator never does. `CreateJobObject`
+  is declared with `EntryPoint = "CreateJobObjectW"` for exactly this reason — without it the
+  declaration compiles with zero diagnostics and throws `EntryPointNotFoundException` the first time
+  a sandbox is built. It is the one mistake in this file the compiler will not catch, so
+  [`Win32InteropMigrationTests`](../tests/MissionController.Tests/Win32InteropMigrationTests.cs)
+  constructs a real job object to catch it instead.
+- **Keep the structs blittable.** A struct carrying a managed reference is rejected outright
+  (`SYSLIB1051`), which is why `STARTUPINFO`'s three reserved `LPWSTR` fields are `nint` rather than
+  `string` — nothing here assigns them. That rewrite had to leave the native layout untouched,
+  because `STARTUPINFOEX`'s size *is* the `cb` that tells the kernel to read the extended form: get
+  it wrong and step 3 below silently stops applying. Size and offsets are asserted, not assumed.
 
 ## The launch, in order
 
