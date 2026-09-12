@@ -130,6 +130,21 @@ And if you're the type who wants to see the machinery: the Live Mission Monitor 
 
 SPLAT's locked rooms aren't just for SPLAT's own agents. Any AI framework that speaks MCP — Claude Code, Microsoft Copilot, or a Python agent built with LangGraph — can send its work through the `splat-mcp` connector. The outside AI keeps its own brain and its own plan; SPLAT stays the bouncer. If a manipulated agent asks for something outside its lease, it isn't SPLAT's *opinion* that says no — it's the same containment every native agent lives under.
 
+### Getting it onto your machine
+
+**It is one file.** `splat-mcp.exe` ships self-contained: the machine running it needs no runtime installed, and the database engine the logbook uses is packed inside the executable rather than laid beside it. It is published with a SHA-256 fingerprint, so you can check that the file you downloaded is the file that was built.
+
+**Ask the machine what it can actually enforce, before you trust it with anything.** `splat-mcp doctor` reports what this particular host will and will not hold: which kernel it is running, whether the in-kernel guard is loaded, whether the lease daemon answers, and whether it holds the token needed to speak to it. It serves nothing and creates nothing — it is a question, not a command — and it reports success *only* when a lease would genuinely reach the kernel. A machine that cannot contain anything says so out loud, instead of quietly serving tools that imply otherwise.
+
+**You draw the fences, not the visiting AI.** Two options set the whole perimeter, and both belong to whoever starts the connector:
+
+| Option | What it decides |
+| :--- | :--- |
+| `--workspace <dir>` | The single directory the file tools may read or write. It has to exist already: the connector never creates it for you, because a fence you can conjure with a typo is not a fence. Left out, those tools are confined to a default directory instead — never to the whole disk. |
+| `--egress <a.b.c.d:port,...>` | The complete list of addresses the command tools may connect to. A visiting agent may ask for some of them, and is never given the rest. **Left out, those tools get no network at all** — the quiet default is the closed one. |
+
+That last point is the argument of this whole guide in one line. The visiting AI never names the addresses it may reach. **The person starting the connector does**, before the agent has said a word — and an agent that asks for anything else is refused by the same plumbing that refuses SPLAT's own specialists.
+
 Two receipts make this partnership auditable rather than just safe:
 
 - **The case number (trace id).** An outside framework can hand SPLAT its own trace id with any request. SPLAT writes it into the tamper-evident ledger — *after* the work ran, so the entry records the outcome too. Later, an auditor holding the outside tool's trace can find the exact kernel-side record of what really executed. Two notebooks, one case number.

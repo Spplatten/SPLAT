@@ -108,11 +108,19 @@ if ($RecordPublished) {
         Write-Error 'The record file has no sha256 line in the form the test reads. Fix it by hand.'
         exit 1
     }
-    # [ \t]* rather than \s*: \s crosses the line break, so the replacement would eat the file's
-    # trailing newline and every run would leave a slightly different file than the last.
+    # No end-of-line anchor, deliberately. `\s*$` swallows the file's trailing newline, and `[ \t]*$`
+    # cannot match at all when the line ends CRLF - which it does, because git checks this repository
+    # out with autocrlf on. Both mistakes were made here first: the second one made the script report
+    # a hash it had silently failed to write. The value being replaced is fixed-length, so matching it
+    # alone and leaving the line ending untouched is both simpler and correct under either checkout.
     $today = (Get-Date).ToString('yyyy-MM-dd')
-    $text = [regex]::Replace($text, '(?m)^sha256([ \t]+)[0-9a-f]{64}[ \t]*$', "sha256`${1}$sha")
-    $text = [regex]::Replace($text, '(?m)^published([ \t]+)\d{4}-\d{2}-\d{2}[ \t]*$', "published`${1}$today")
+    $text = [regex]::Replace($text, '(?m)^(sha256[ \t]+)[0-9a-f]{64}', "`${1}$sha")
+    $text = [regex]::Replace($text, '(?m)^(published[ \t]+)\d{4}-\d{2}-\d{2}', "`${1}$today")
+
+    if ($text -notmatch [regex]::Escape($sha)) {
+        Write-Error 'The record file was not updated, so nothing was recorded. Fix this script rather than the file.'
+        exit 1
+    }
     [System.IO.File]::WriteAllText($record, $text, (New-Object System.Text.UTF8Encoding($false)))
     Write-Host "Recorded sha256 $sha (published $today)."
     Write-Host 'This asserts the live page matches the source. If it does not, you have just hidden that.'

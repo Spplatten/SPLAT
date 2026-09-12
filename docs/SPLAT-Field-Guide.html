@@ -221,6 +221,13 @@
   em { font-style: italic; }
   strong { font-weight: 600; }
   a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  /* The guest wing names commands and options; they should not read as prose. */
+  code {
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.88em;
+    color: var(--accent);
+    overflow-wrap: break-word;
+  }
   a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .pull {
@@ -644,6 +651,24 @@
     <p class="part">Part 9 &mdash; The guest wing</p>
     <h2>Plugging other AIs into the same cage</h2>
     <p>SPLAT's locked rooms aren't just for SPLAT's own agents. Any AI framework that speaks MCP &mdash; Claude Code, Microsoft Copilot, or a Python agent built with LangGraph &mdash; can send its work through the <em>splat-mcp</em> connector. The outside AI keeps its own brain and its own plan; SPLAT stays the bouncer. If a manipulated agent asks for something outside its lease, it isn't SPLAT's <em>opinion</em> that says no &mdash; it's the same containment every native agent lives under.</p>
+    <h3>Getting it onto your machine</h3>
+    <p><strong>It is one file.</strong> <code>splat-mcp.exe</code> ships self-contained: the machine running it needs no runtime installed, and the database engine the logbook uses is packed inside the executable rather than laid beside it. It is published with a SHA-256 fingerprint, so you can check that the file you downloaded is the file that was built.</p>
+    <p><strong>Ask the machine what it can actually enforce, before you trust it with anything.</strong> <code>splat-mcp doctor</code> reports what this particular host will and will not hold: which kernel it is running, whether the in-kernel guard is loaded, whether the lease daemon answers, and whether it holds the token needed to speak to it. It serves nothing and creates nothing — it is a question, not a command — and it reports success <em>only</em> when a lease would genuinely reach the kernel. A machine that cannot contain anything says so out loud, instead of quietly serving tools that imply otherwise.</p>
+    <p><strong>You draw the fences, not the visiting AI.</strong> Two options set the whole perimeter, and both belong to whoever starts the connector:</p>
+    <div class="squad">
+      <div class="agent">
+        <div class="agent-head c-sto"><span class="agent-name">--workspace</span><span class="chip">One folder</span></div>
+        <p>The single directory the file tools may read or write. It has to exist already: the connector never creates it for you, because a fence you can conjure with a typo is not a fence. Left out, those tools are confined to a default directory instead — never to the whole disk.</p>
+      </div>
+      <div class="agent">
+        <div class="agent-head c-net"><span class="agent-name">--egress</span><span class="chip">Which addresses</span></div>
+        <p>The complete list of addresses the command tools may connect to, written as plain <em>address:port</em> entries. A visiting agent may ask for some of them, and is never given the rest. <strong>Left out, those tools get no network at all</strong> — the quiet default is the closed one.</p>
+      </div>
+    </div>
+    <div class="pull">
+      <p>That last point is the argument of this whole guide in one line. The visiting AI never names the addresses it may reach. <strong>The person starting the connector does</strong>, before the agent has said a word — and an agent that asks for anything else is refused by the same plumbing that refuses SPLAT's own specialists.</p>
+    </div>
+
     <p>Two receipts make the partnership auditable, not just safe:</p>
     <div class="squad">
       <div class="agent">
