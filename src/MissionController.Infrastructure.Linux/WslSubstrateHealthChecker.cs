@@ -22,7 +22,13 @@ public record WslSubstrateStatus(
     /// and the daemon used to report all three booleans above as hardcoded true regardless.
     /// A daemon that predates this field reports nothing, which reads here as not enforcing.
     /// </summary>
-    bool Enforcing = false);
+    bool Enforcing = false,
+    /// <summary>
+    /// Whether the daemon accepted this host's token and answered. False with
+    /// <see cref="DaemonReachable"/> true means it is running and would not say anything — which is
+    /// a different fault from an absent daemon, and from one that answers "not enforcing".
+    /// </summary>
+    bool Authenticated = false);
 
 /// <summary>
 /// Probes and validates the status of the local WSL2 kernel substrate and BPF-LSM daemon.
@@ -118,7 +124,9 @@ public class WslSubstrateHealthChecker
                     Message: enforcing
                         ? "SPLAT Linux substrate online and enforcing."
                         : "SPLAT Linux daemon is reachable but NOT enforcing: leases it accepts do not reach the kernel. Treat any tool it runs as uncontained.",
-                    Enforcing: enforcing);
+                    Enforcing: enforcing,
+                    // It answered, which it only does for a request carrying the token it expects.
+                    Authenticated: true);
             }
         }
         catch (Exception ex)

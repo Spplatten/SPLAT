@@ -29,7 +29,8 @@ stderr at startup. `--egress a.b.c.d:port,...` names the only endpoints a `run_c
 `run_code` lease may connect to, checked by [`McpEgressPolicy`](../src/splat-mcp/McpEgressPolicy.cs);
 without it neither tool gets network. A bad option or a malformed list exits 2 with nothing built, and stdout carries only JSON-RPC —
 written without the UTF-8 byte order mark it carried until 2026-09-11. `splat-mcp doctor` reports what this host will enforce — kernel, boot command line, daemon,
-token — and exits 0 only when a lease would reach the kernel; its summary of a lease is copied
+token the daemon actually accepted, not merely one present on disk — and exits 0 only when a lease
+would reach the kernel; its summary of a lease is copied
 from [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md) and bound to it by a
 test. It ships as one self-contained executable from
 [`packaging/publish-splat-mcp.ps1`](../packaging/publish-splat-mcp.ps1), which refuses to report

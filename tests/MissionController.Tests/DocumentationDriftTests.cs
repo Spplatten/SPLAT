@@ -610,6 +610,16 @@ public class DocumentationDriftTests
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
+    /// A fourth spelling: the pasted run output. The README's verification block and the runbook's
+    /// "Expect:" line both quote `Passed! - Failed: 0, Passed: N`, which none of the regexes above
+    /// can see — so the runbook sat at 511 while the README said 518, and every count in it had
+    /// been updated by hand each time, which is the arrangement this class exists to replace.
+    /// </summary>
+    private static readonly Regex TestCountRunOutputRegex = new(
+        @"Failed:\s*0,\s*Passed:\s*(?<first>\d+)(?:,\s*Skipped:\s*\d+,\s*Total:\s*(?<second>\d+))?",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
     /// Every documented test count, from all three spellings in use: "297/297 automated tests" in
     /// the README's status table, "340 automated tests" in the tutorial's prose, and "459 xUnit …"
     /// in the README's tree diagram. In the paired form both halves are held to the real number,
@@ -623,7 +633,16 @@ public class DocumentationDriftTests
         // The Field Guide is the source TUTORIAL.md is derived from, and its header said this test
         // enforced the count there. It was never read: it said 387 automated tests while its own
         // copy said 459 and the suite ran 459.
-        foreach (string relative in new[] { "README.md", Path.Combine("docs", "TUTORIAL.md"), Path.Combine("docs", "SPLAT-Field-Guide.html") })
+        foreach (string relative in new[]
+                 {
+                     "README.md",
+                     Path.Combine("docs", "TUTORIAL.md"),
+                     Path.Combine("docs", "SPLAT-Field-Guide.html"),
+                     // The runbook tells a human what to expect from the run they are about to do,
+                     // so a stale number there is a verification step that fails for the wrong
+                     // reason - and it went stale the first time someone else moved the count.
+                     Path.Combine("docs", "RUNBOOK-human-steps.md"),
+                 })
         {
             string full = Path.Combine(root, relative);
             if (!File.Exists(full))
@@ -632,7 +651,7 @@ public class DocumentationDriftTests
             }
 
             string text = File.ReadAllText(full);
-            foreach (var regex in new[] { TestCountClaimRegex, TestCountBadgeRegex, TestCountXunitRegex })
+            foreach (var regex in new[] { TestCountClaimRegex, TestCountBadgeRegex, TestCountXunitRegex, TestCountRunOutputRegex })
             {
                 foreach (Match match in regex.Matches(text))
                 {
