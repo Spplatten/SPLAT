@@ -19,7 +19,7 @@ namespace MissionController.Tests;
 /// (which only inspected traffic when a caller remembered to arm it) and the restricted-token
 /// sandbox (which fell back to a full-privilege launch when the drop failed).
 /// </summary>
-public class EgressAndPrivilegeHardeningTests
+public partial class EgressAndPrivilegeHardeningTests
 {
     /// <summary>Terminates the handler chain so nothing actually leaves the machine.</summary>
     private sealed class SinkHandler : HttpMessageHandler
@@ -432,8 +432,8 @@ public class EgressAndPrivilegeHardeningTests
         public UIntPtr PeakJobMemoryUsed;
     }
 
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [System.Runtime.InteropServices.LibraryImport("kernel32.dll", SetLastError = true)]
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
-    private static extern bool QueryInformationJobObject(
+    private static partial bool QueryInformationJobObject(
         IntPtr hJob, int infoClass, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength, out uint lpReturnLength);
 }
