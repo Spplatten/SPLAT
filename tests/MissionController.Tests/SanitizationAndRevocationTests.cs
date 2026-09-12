@@ -1,4 +1,5 @@
 using System;
+using Microsoft.Win32.SafeHandles;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -22,7 +23,7 @@ public class SanitizationAndRevocationTests
     {
         public string JobName => "MockJob";
         public void ConfigureExtendedLimits(long maxMemoryBytes, int maxCpuPercent) { }
-        public void AssignProcess(IntPtr processHandle) { }
+        public void AssignProcess(SafeProcessHandle processHandle) { }
         public JobResourceMetrics GetResourceMetrics() => new(1, 0, 0, 1024, 2048);
         public void TerminateAllProcesses(uint exitCode = 1) { }
         public void Dispose() { }

@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace MissionController.Infrastructure.Windows.Native;
 
@@ -203,12 +204,12 @@ internal static partial class Win32Interop
     // only. Dropping this attribute compiles clean and throws EntryPointNotFoundException the first
     // time a sandbox is built - the one failure in this migration the compiler cannot catch.
     [LibraryImport("kernel32.dll", EntryPoint = "CreateJobObjectW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
-    public static partial IntPtr CreateJobObject(IntPtr lpJobAttributes, string? lpName);
+    public static partial SafeJobObjectHandle CreateJobObject(IntPtr lpJobAttributes, string? lpName);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool SetInformationJobObject(
-        IntPtr hJob,
+        SafeJobObjectHandle hJob,
         JobObjectInfoClass JobObjectInformationClass,
         IntPtr lpJobObjectInformation,
         uint cbJobObjectInformationLength);
@@ -216,7 +217,7 @@ internal static partial class Win32Interop
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool QueryInformationJobObject(
-        IntPtr hJob,
+        SafeJobObjectHandle hJob,
         JobObjectInfoClass JobObjectInformationClass,
         IntPtr lpJobObjectInformation,
         uint cbJobObjectInformationLength,
@@ -224,11 +225,11 @@ internal static partial class Win32Interop
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+    public static partial bool AssignProcessToJobObject(SafeJobObjectHandle hJob, SafeProcessHandle hProcess);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool TerminateJobObject(IntPtr hJob, uint uExitCode);
+    public static partial bool TerminateJobObject(SafeJobObjectHandle hJob, uint uExitCode);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -251,7 +252,7 @@ internal static partial class Win32Interop
     [LibraryImport("advapi32.dll", EntryPoint = "CreateProcessAsUserW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool CreateProcessAsUserW(
-        IntPtr hToken,
+        SafeAccessTokenHandle hToken,
         string? lpApplicationName,
         string? lpCommandLine,
         ref SECURITY_ATTRIBUTES lpProcessAttributes,
@@ -264,14 +265,14 @@ internal static partial class Win32Interop
         out PROCESS_INFORMATION lpProcessInformation);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
-    public static partial uint ResumeThread(IntPtr hThread);
+    public static partial uint ResumeThread(SafeThreadHandle hThread);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
-    public static partial uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+    public static partial uint WaitForSingleObject(SafeProcessHandle hHandle, uint dwMilliseconds);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+    public static partial bool GetExitCodeProcess(SafeProcessHandle hProcess, out uint lpExitCode);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -283,12 +284,12 @@ internal static partial class Win32Interop
 
     [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static partial bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+    public static partial bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out SafeAccessTokenHandle TokenHandle);
 
     [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool CreateRestrictedToken(
-        IntPtr ExistingTokenHandle,
+        SafeAccessTokenHandle ExistingTokenHandle,
         uint Flags,
         uint DisableSidCount,
         IntPtr SidsToDisable,
@@ -296,22 +297,22 @@ internal static partial class Win32Interop
         IntPtr PrivilegesToDelete,
         uint RestrictedSidCount,
         IntPtr SidsToRestrict,
-        out IntPtr NewTokenHandle);
+        out SafeAccessTokenHandle NewTokenHandle);
 
     [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool DuplicateTokenEx(
-        IntPtr hExistingToken,
+        SafeAccessTokenHandle hExistingToken,
         uint dwDesiredAccess,
         ref SECURITY_ATTRIBUTES lpTokenAttributes,
         int ImpersonationLevel,
         int TokenType,
-        out IntPtr phNewToken);
+        out SafeAccessTokenHandle phNewToken);
 
     [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool SetTokenInformation(
-        IntPtr TokenHandle,
+        SafeAccessTokenHandle TokenHandle,
         int TokenInformationClass,
         IntPtr TokenInformation,
         uint TokenInformationLength);
@@ -380,7 +381,7 @@ internal static partial class Win32Interop
     [LibraryImport("advapi32.dll", EntryPoint = "CreateProcessAsUserW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool CreateProcessAsUserExtendedW(
-        IntPtr hToken,
+        SafeAccessTokenHandle hToken,
         string? lpApplicationName,
         string? lpCommandLine,
         ref SECURITY_ATTRIBUTES lpProcessAttributes,

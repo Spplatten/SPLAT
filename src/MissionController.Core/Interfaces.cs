@@ -1,4 +1,5 @@
 using System;
+using Microsoft.Win32.SafeHandles;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,7 +12,7 @@ public interface IJobSandbox : IDisposable
 {
     string JobName { get; }
     void ConfigureExtendedLimits(long maxMemoryBytes, int maxCpuPercent);
-    void AssignProcess(IntPtr processHandle);
+    void AssignProcess(SafeProcessHandle processHandle);
     JobResourceMetrics GetResourceMetrics();
     void TerminateAllProcesses(uint exitCode = 1);
 }
@@ -55,7 +56,12 @@ public interface IJailManager
 
 public interface IRestrictedTokenProvider
 {
-    IntPtr CreateLowPrivilegeToken();
+    /// <summary>
+    /// The caller owns the returned token and must dispose it. Returning a SafeHandle rather than a
+    /// raw IntPtr is what makes that ownership checkable: the old signature handed out a live OS
+    /// handle with the obligation to close it recorded nowhere the compiler could see.
+    /// </summary>
+    SafeAccessTokenHandle CreateLowPrivilegeToken();
 }
 
 public interface ICredentialVault

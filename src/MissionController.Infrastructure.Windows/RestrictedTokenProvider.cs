@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using Microsoft.Win32.SafeHandles;
 using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Windows.Native;
 
@@ -9,17 +10,24 @@ namespace MissionController.Infrastructure.Windows.Security;
 
 public sealed class RestrictedTokenProvider : IRestrictedTokenProvider
 {
-    public IntPtr CreateLowPrivilegeToken()
+    public SafeAccessTokenHandle CreateLowPrivilegeToken()
     {
         using var self = global::System.Diagnostics.Process.GetCurrentProcess();
         IntPtr currentProcess = self.Handle;
+
+        // Every token below is owned by a SafeHandle from the moment the kernel returns it, so the
+        // several throw sites in this method can no longer strand one. Only the primary token
+        // escapes - deliberately, to the caller, which the interface now says in the type.
         if (!Win32Interop.OpenProcessToken(
             currentProcess,
             Win32Interop.TOKEN_DUPLICATE | Win32Interop.TOKEN_ASSIGN_PRIMARY | Win32Interop.TOKEN_QUERY | Win32Interop.TOKEN_ADJUST_DEFAULT,
-            out IntPtr currentToken))
+            out SafeAccessTokenHandle currentToken))
         {
+            currentToken.Dispose();
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to open current process token.");
         }
+
+        using var ownedCurrentToken = currentToken;
 
         // CreateRestrictedToken with DISABLE_MAX_PRIVILEGE strips every privilege except
         // SeChangeNotifyPrivilege, but it does NOT touch group SIDs or the integrity level. Two
@@ -45,8 +53,9 @@ public sealed class RestrictedTokenProvider : IRestrictedTokenProvider
                 1, sidsToDisable,   // Administrators -> USE_FOR_DENY_ONLY
                 0, IntPtr.Zero,
                 0, IntPtr.Zero,
-                out IntPtr restrictedToken))
+                out SafeAccessTokenHandle restrictedToken))
             {
+                restrictedToken.Dispose();
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to create restricted token.");
             }
 
@@ -74,8 +83,9 @@ public sealed class RestrictedTokenProvider : IRestrictedTokenProvider
                     ref sa,
                     2, // SecurityImpersonation
                     1, // TokenPrimary
-                    out IntPtr primaryToken))
+                    out SafeAccessTokenHandle primaryToken))
                 {
+                    primaryToken.Dispose();
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to duplicate restricted primary token.");
                 }
 
@@ -83,7 +93,7 @@ public sealed class RestrictedTokenProvider : IRestrictedTokenProvider
             }
             finally
             {
-                Win32Interop.CloseHandle(restrictedToken);
+                restrictedToken.Dispose();
             }
         }
         finally
@@ -92,14 +102,13 @@ public sealed class RestrictedTokenProvider : IRestrictedTokenProvider
             // only safe to free here, after that call has returned.
             if (sidsToDisable != IntPtr.Zero) Marshal.FreeHGlobal(sidsToDisable);
             if (adminSid != IntPtr.Zero) Marshal.FreeHGlobal(adminSid);
-            Win32Interop.CloseHandle(currentToken);
         }
     }
 
     // Medium is the standard-user integrity level (S-1-16-8192). You can lower integrity but never
     // raise it, so on an already-standard host this is a no-op rather than an error; on an elevated
     // host it removes the High integrity the operator would otherwise hand to the tool.
-    private static void LowerIntegrityToMedium(IntPtr token)
+    private static void LowerIntegrityToMedium(SafeAccessTokenHandle token)
     {
         IntPtr integritySid = IntPtr.Zero;
         IntPtr labelPtr = IntPtr.Zero;

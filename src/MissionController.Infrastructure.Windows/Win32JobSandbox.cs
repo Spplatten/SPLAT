@@ -1,6 +1,7 @@
 ﻿using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 using MissionController.Infrastructure.Windows.Native;
@@ -32,7 +33,7 @@ public sealed class Win32JobSandbox : IJobSandbox
     /// </summary>
     private const uint MaxActiveProcesses = 32;
 
-    private IntPtr _jobHandle;
+    private readonly SafeJobObjectHandle _jobHandle;
     private bool _disposed;
     public string JobName { get; }
 
@@ -40,8 +41,10 @@ public sealed class Win32JobSandbox : IJobSandbox
     {
         JobName = jobName ?? $"MissionJob_{Guid.NewGuid():N}";
         _jobHandle = Win32Interop.CreateJobObject(IntPtr.Zero, JobName);
-        if (_jobHandle == IntPtr.Zero)
+        if (_jobHandle.IsInvalid)
         {
+            // The SafeHandle already owns whatever came back, so the throw cannot strand a handle.
+            _jobHandle.Dispose();
             throw new Win32Exception(Marshal.GetLastWin32Error(), $"Failed to create Win32 Job Object '{JobName}'");
         }
 
@@ -141,7 +144,7 @@ public sealed class Win32JobSandbox : IJobSandbox
         }
     }
 
-    public void AssignProcess(IntPtr processHandle)
+    public void AssignProcess(SafeProcessHandle processHandle)
     {
         ThrowIfDisposed();
         if (!Win32Interop.AssignProcessToJobObject(_jobHandle, processHandle))
@@ -193,7 +196,7 @@ public sealed class Win32JobSandbox : IJobSandbox
 
     public void TerminateAllProcesses(uint exitCode = 1)
     {
-        if (_jobHandle != IntPtr.Zero)
+        if (!_jobHandle.IsInvalid && !_jobHandle.IsClosed)
         {
             Win32Interop.TerminateJobObject(_jobHandle, exitCode);
         }
@@ -201,7 +204,7 @@ public sealed class Win32JobSandbox : IJobSandbox
 
     private void ThrowIfDisposed()
     {
-        if (_disposed || _jobHandle == IntPtr.Zero)
+        if (_disposed || _jobHandle.IsInvalid || _jobHandle.IsClosed)
         {
             throw new ObjectDisposedException(nameof(Win32JobSandbox));
         }
@@ -212,11 +215,12 @@ public sealed class Win32JobSandbox : IJobSandbox
         if (!_disposed)
         {
             _disposed = true;
-            if (_jobHandle != IntPtr.Zero)
-            {
-                Win32Interop.CloseHandle(_jobHandle);
-                _jobHandle = IntPtr.Zero;
-            }
+
+            // Closing the last handle is what fires KILL_ON_JOB_CLOSE, so this is the containment
+            // kill, not just a resource release. SafeHandle carries a finalizer, so a sandbox that
+            // is dropped without ever reaching here still gets collected and still kills its
+            // contents - late, but it happens. The old raw IntPtr had no such backstop.
+            _jobHandle.Dispose();
         }
     }
 }

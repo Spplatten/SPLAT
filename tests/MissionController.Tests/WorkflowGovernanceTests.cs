@@ -1,4 +1,5 @@
 using System;
+using Microsoft.Win32.SafeHandles;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -40,7 +41,7 @@ public class WorkflowGovernanceTests
     {
         public string JobName => "workflow-fake-job";
         public void ConfigureExtendedLimits(long maxMemoryBytes, int maxCpuPercent) { }
-        public void AssignProcess(IntPtr processHandle) { }
+        public void AssignProcess(SafeProcessHandle processHandle) { }
         public JobResourceMetrics GetResourceMetrics() => new(0, 0, 0, 0, 0);
         public void TerminateAllProcesses(uint exitCode = 1) { }
         public void Dispose() { }

@@ -1,4 +1,5 @@
 using System;
+using Microsoft.Win32.SafeHandles;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -47,7 +48,7 @@ public class FailureIsNotEvidenceTests
     {
         public string JobName => "failure-evidence-job";
         public void ConfigureExtendedLimits(long maxMemoryBytes, int maxCpuPercent) { }
-        public void AssignProcess(IntPtr processHandle) { }
+        public void AssignProcess(SafeProcessHandle processHandle) { }
         public JobResourceMetrics GetResourceMetrics() => new(0, 0, 0, 0, 0);
         public void TerminateAllProcesses(uint exitCode = 1) { }
         public void Dispose() { }
@@ -359,7 +360,7 @@ public class FailureIsNotEvidenceTests
     {
         public string JobName => "mission-job";
         public void ConfigureExtendedLimits(long maxMemoryBytes, int maxCpuPercent) { }
-        public void AssignProcess(IntPtr processHandle) { }
+        public void AssignProcess(SafeProcessHandle processHandle) { }
         public JobResourceMetrics GetResourceMetrics() => new(0, 0, 0, 0, 0);
         public void TerminateAllProcesses(uint exitCode = 1) { }
         public void Dispose() { }

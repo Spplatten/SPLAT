@@ -126,7 +126,7 @@ public class EgressAndPrivilegeHardeningTests
 
     private sealed class FailingTokenProvider : MissionController.Core.Interfaces.IRestrictedTokenProvider
     {
-        public IntPtr CreateLowPrivilegeToken() =>
+        public Microsoft.Win32.SafeHandles.SafeAccessTokenHandle CreateLowPrivilegeToken() =>
             throw new InvalidOperationException("CreateRestrictedToken failed (simulated)");
     }
 
@@ -376,7 +376,11 @@ public class EgressAndPrivilegeHardeningTests
         var handleField = typeof(Win32JobSandbox).GetField(
             "_jobHandle",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-        IntPtr handle = (IntPtr)handleField!.GetValue(job)!;
+        // Cast to the SafeHandle base rather than SafeJobObjectHandle, which is internal to the
+        // Infrastructure.Windows assembly. DangerousGetHandle is correct here and only here: the
+        // job is a live local in the calling test, so it cannot be collected mid-query.
+        var safeHandle = (System.Runtime.InteropServices.SafeHandle)handleField!.GetValue(job)!;
+        IntPtr handle = safeHandle.DangerousGetHandle();
 
         int size = System.Runtime.InteropServices.Marshal.SizeOf<JobObjectExtendedLimitInformation>();
         IntPtr buffer = System.Runtime.InteropServices.Marshal.AllocHGlobal(size);

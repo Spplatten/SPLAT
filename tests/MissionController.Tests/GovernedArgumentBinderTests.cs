@@ -1,4 +1,5 @@
 using System;
+using Microsoft.Win32.SafeHandles;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -342,7 +343,7 @@ public class GovernedArgumentBinderTests
     {
         public string JobName => "noop";
         public void ConfigureExtendedLimits(long maxMemoryBytes, int maxCpuPercent) { }
-        public void AssignProcess(IntPtr processHandle) { }
+        public void AssignProcess(SafeProcessHandle processHandle) { }
         public JobResourceMetrics GetResourceMetrics() => JobResourceMetrics.Unavailable;
         public void TerminateAllProcesses(uint exitCode = 1) { }
         public void Dispose() { }

@@ -1,4 +1,5 @@
 using System;
+using Microsoft.Win32.SafeHandles;
 using System.Collections.Generic;
 using System.IO;
 using System.Security;
@@ -446,7 +447,9 @@ public class CopilotSafetySubstrateTests
 
     private sealed class MockTokenProvider : IRestrictedTokenProvider
     {
-        public IntPtr CreateLowPrivilegeToken() => new(0x1234);
+        // InvalidHandle rather than a fabricated value: nothing here consumes the token, and an
+        // owned SafeHandle over a made-up address would attempt to close it on finalization.
+        public SafeAccessTokenHandle CreateLowPrivilegeToken() => SafeAccessTokenHandle.InvalidHandle;
     }
 
     private sealed class MockJailManager : IJailManager

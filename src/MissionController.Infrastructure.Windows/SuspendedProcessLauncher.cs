@@ -46,7 +46,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
         IntPtr hStdOutWrite = IntPtr.Zero;
         IntPtr hStdErrRead = IntPtr.Zero;
         IntPtr hStdErrWrite = IntPtr.Zero;
-        IntPtr restrictedToken = IntPtr.Zero;
+        SafeAccessTokenHandle? restrictedToken = null;
         IntPtr attributeList = IntPtr.Zero;
         IntPtr capabilitiesBlock = IntPtr.Zero;
         IntPtr appContainerSidBuffer = IntPtr.Zero;
@@ -224,8 +224,13 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
                 throw new Win32Exception(Marshal.GetLastWin32Error(), $"Failed to create suspended process '{resolvedExecutable}'.");
             }
 
+            using var safeProcess = new SafeProcessHandle(pi.hProcess, ownsHandle: true);
+            pi.hProcess = IntPtr.Zero;
+            using var safeThread = new SafeThreadHandle(pi.hThread);
+            pi.hThread = IntPtr.Zero;
+
             // Assign process to Job Object BEFORE resuming thread
-            jobSandbox.AssignProcess(pi.hProcess);
+            jobSandbox.AssignProcess(safeProcess);
 
             // Close write ends in parent process so EOF can be detected on read
             Win32Interop.CloseHandle(hStdOutWrite);
@@ -234,7 +239,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
             hStdErrWrite = IntPtr.Zero;
 
             // Resume the primary thread now that the process is bound to the Job Object
-            uint resumeResult = Win32Interop.ResumeThread(pi.hThread);
+            uint resumeResult = Win32Interop.ResumeThread(safeThread);
             if (resumeResult == unchecked((uint)-1))
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to resume process thread.");
@@ -265,7 +270,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
                     while (true)
                     {
                         cts.Token.ThrowIfCancellationRequested();
-                        uint wait = Win32Interop.WaitForSingleObject(pi.hProcess, 100);
+                        uint wait = Win32Interop.WaitForSingleObject(safeProcess, 100);
                         if (wait == 0) // WAIT_OBJECT_0
                             break;
                     }
@@ -288,7 +293,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
             string stdout = await stdoutTask;
             string stderr = await stderrTask;
 
-            Win32Interop.GetExitCodeProcess(pi.hProcess, out uint exitCode);
+            Win32Interop.GetExitCodeProcess(safeProcess, out uint exitCode);
             var metrics = jobSandbox.GetResourceMetrics();
 
             return new ProcessExecutionResult((int)exitCode, stdout, stderr, timedOut, metrics);
@@ -299,9 +304,11 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
             if (hStdOutWrite != IntPtr.Zero) Win32Interop.CloseHandle(hStdOutWrite);
             if (hStdErrRead != IntPtr.Zero) Win32Interop.CloseHandle(hStdErrRead);
             if (hStdErrWrite != IntPtr.Zero) Win32Interop.CloseHandle(hStdErrWrite);
+            // Non-zero only when CreateProcess succeeded but something between it and the adoption
+            // above threw; past that point the two using declarations own them.
             if (pi.hThread != IntPtr.Zero) Win32Interop.CloseHandle(pi.hThread);
             if (pi.hProcess != IntPtr.Zero) Win32Interop.CloseHandle(pi.hProcess);
-            if (restrictedToken != IntPtr.Zero) Win32Interop.CloseHandle(restrictedToken);
+            restrictedToken?.Dispose();
 
             // The attribute list holds a pointer INTO capabilitiesBlock, which in turn points at
             // appContainerSidBuffer, so the list is deleted before either block is released.
