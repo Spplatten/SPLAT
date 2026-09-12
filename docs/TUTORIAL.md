@@ -57,7 +57,7 @@ SPLAT ships with a squad of specialist agents — each one a bundle of a reasoni
 | 💾 **Titan-SysOps** | Storage | Watches disk space, finds bloated caches and clutter, and points at what's safe to clean up. |
 | 🔒 **Aegis-Endpoint** | Compliance | Checks that Microsoft Defender is on, virus signatures are fresh, and secure connections are configured right. |
 
-Behind them sits a catalog of **40+ specialists** covering networking, identity, endpoint security, system operations, and compliance — plus a newer *Autonomous Operations* wing with agents that build and deploy websites, draft multi-platform marketing campaigns, and vet grant eligibility before drafting the application paperwork — all under the same leash as everyone else. For bigger jobs, **Project Studio** chains up to six agents in a fixed order, and even the notes they pass to each other are filtered for secrets first. No free-for-all swarms, no infinite loops — by design.
+Behind them sits a catalog of **49 specialists** covering networking, identity, endpoint security, system operations, and compliance — plus a newer *Autonomous Operations* wing with agents that build and deploy websites, draft multi-platform marketing campaigns, and vet grant eligibility before drafting the application paperwork — all under the same leash as everyone else. For bigger jobs, **Project Studio** chains up to six agents in a fixed order, and even the notes they pass to each other are filtered for secrets first. No free-for-all swarms, no infinite loops — by design.
 
 ### Wait — is SPLAT an agent builder, or a containment zone?
 
@@ -91,7 +91,7 @@ Say you open SPLAT and type: *"My internet keeps cutting out during video calls.
 | **Quick Diagnostician** | The home screen. Big friendly tiles for one-click checkups, plus a box where you type any problem in your own words and let the Brain run with it. |
 | **Welcome** | The three-step setup wizard: meet the squad, paste one AI key, launch. Takes about two minutes. |
 | **Live Mission Monitor** | Watch missions run in real time — the agent's reasoning streams in as it works. |
-| **Template Catalog** | Browse all 40+ specialists, see exactly what tool and destination each one is allowed, and launch them directly. |
+| **Template Catalog** | Browse all 49 specialists, see exactly what tool and destination each one is allowed, and launch them directly. |
 | **Project Studio** | Chain up to six agents into a staged project — investigate, then verify, then summarize — with filtered hand-offs between stages. |
 | **Security Audit** | Read the tamper-evident ledger: every action ever taken, verifiable, in one place. |
 | **Memory** | Search past incidents by meaning, not keywords — "that time the printer broke" finds the right mission. |
@@ -110,7 +110,7 @@ That's the difference between "we log everything" and "we can **prove** nobody r
 
 SPLAT's documentation makes a point of never blurring the line between built and planned. This guide keeps that promise.
 
-- ✅ **Working today** — The Windows containment system: frozen starts, resource clamps, stripped privileges, folder jails. The governance layer: the 1:1:1 rule, the secret-scrubbing censor, the one-line-out firewall, the tamper-evident ledger, local memory. The full app, the 49-agent catalog, and a connector (`splat-mcp`) that lets other AI tools — like Claude Code, or a Python agent built with LangGraph — borrow SPLAT's locked rooms. Backed by 522 automated tests, all passing.
+- ✅ **Working today** — The Windows containment system: frozen starts, resource clamps, stripped privileges, folder jails. The governance layer: the 1:1:1 rule, the secret-scrubbing censor, the one-line-out firewall, the tamper-evident ledger, local memory. The full app, the 49-agent catalog, and a connector (`splat-mcp`) that lets other AI tools — like Claude Code, or a Python agent built with LangGraph — borrow SPLAT's locked rooms. Backed by 524 automated tests, all passing.
 - 🔶 **Being built** — The Linux-side deep containment: a guard that lives inside the Linux kernel itself (BPF-LSM) and vetoes forbidden actions before they happen. **The proof run is now on record.** On a stock Microsoft kernel, the guard let through the one thing the job was allowed to do and refused the other three outright: reading the password file, calling an unapproved address, and running an unapproved program. The refusals came from the kernel, not from SPLAT asking nicely. The service that routes work to that guard now runs too: a tool it started with full root privileges was still refused the password file, by the kernel rather than by SPLAT's say-so. And the road in from outside is now on record too: a command sent by another AI tool through the connector travelled into that guard and was refused there, while the one command it was allowed to run went through in the same session. What is *not* yet true is that the app's **own** missions travel that road — the operator console still never routes one through the guard.
 - ⬜ **Planned** — Faster host-to-sandbox plumbing (VSOCK), fully automatic setup of the Linux sandbox, and deeper multi-step autonomy — which agents only earn in places where kernel-level enforcement is switched on.
 
@@ -159,4 +159,4 @@ For Python folks, there's a ready-made kit: the `splat-langgraph` package (in `s
 
 ---
 
-*SPLAT · © Platten Industries. This guide reflects the app as of August 2026.*
+*SPLAT · © Platten Industries. This guide reflects the app as of September 2026.*
