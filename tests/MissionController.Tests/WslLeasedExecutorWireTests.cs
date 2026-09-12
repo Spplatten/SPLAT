@@ -45,11 +45,12 @@ public class WslLeasedExecutorWireTests
     [Fact]
     public void EveryChildProcessTheBridgeStarts_GetsItsOwnStdin()
     {
-        string path = Path.Combine(
-            RepositoryRoot(), "src", "MissionController.Infrastructure.Linux", "WslLeasedExecutor.cs");
-        var declarations = File.ReadAllText(path)
-            .Split("new ProcessStartInfo")
-            .Skip(1)
+        // Every file in the bridge, not just the executor: the token read moved to its own class
+        // once the health check needed it too, and a guard that named one file would have stopped
+        // covering it at exactly that moment.
+        string project = Path.Combine(RepositoryRoot(), "src", "MissionController.Infrastructure.Linux");
+        var declarations = Directory.EnumerateFiles(project, "*.cs", SearchOption.AllDirectories)
+            .SelectMany(file => File.ReadAllText(file).Split("new ProcessStartInfo").Skip(1))
             // Up to the Process.Start that consumes it. Not to the closing brace: one of these
             // initializers carries a shell snippet containing "};" inside a string literal.
             .Select(block => block[..Math.Max(0, block.IndexOf("Process.Start", StringComparison.Ordinal))])
@@ -60,7 +61,7 @@ public class WslLeasedExecutorWireTests
         {
             Assert.True(
                 declaration.Contains("RedirectStandardInput = true", StringComparison.Ordinal),
-                "A ProcessStartInfo in WslLeasedExecutor.cs does not redirect standard input, so the child "
+                "A ProcessStartInfo in Infrastructure.Linux does not redirect standard input, so the child "
                 + "inherits the host's. Under splat-mcp that is the MCP client's JSON-RPC stream, and wsl.exe "
                 + "consumes it:\n" + declaration);
         }
@@ -130,6 +131,63 @@ public class WslLeasedExecutorWireTests
         }
 
         return Array.Empty<byte>();
+    }
+
+    /// <summary>
+    /// The health check is a request like any other, so it carries the token.
+    ///
+    /// It was open until 2026-09-11, on the grounds that a liveness probe should not need a secret.
+    /// But it answers with `enforcing`, the kernel version and the live lease count — so it told an
+    /// unauthenticated caller exactly when this daemon would run work it could not contain.
+    /// </summary>
+    [Fact]
+    public async Task TheHealthCheck_PresentsTheDaemonsToken()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var daemon = RunStandInDaemonAsync(
+            listener,
+            "{\"type\":\"HEALTH_RESPONSE\",\"bpfLsmActive\":true,\"cgroupV2Active\":true," +
+            "\"overlayFsSupported\":false,\"kernelVersion\":\"6.18.33.2\",\"enforcing\":true,\"activeLeaseCount\":2}");
+
+        var checker = new WslSubstrateHealthChecker("127.0.0.1", port, new WslAgentToken(authToken: TestToken));
+        var status = await checker.CheckHealthAsync();
+
+        string request = Encoding.UTF8.GetString(await daemon);
+        listener.Stop();
+
+        Assert.Contains("\"HEALTH_CHECK\"", request);
+        Assert.Contains(TestToken, request);
+        Assert.True(status.Enforcing);
+        Assert.Equal(2u, status.ActiveLeaseCount);
+    }
+
+    /// <summary>
+    /// A refused health check is a live daemon that would not answer, not an absent one: reporting
+    /// it as unreachable would send whoever reads it looking for a process that is running.
+    /// </summary>
+    [Fact]
+    public async Task ARefusedHealthCheck_ReadsAsReachableButUnauthenticated()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var daemon = RunStandInDaemonAsync(
+            listener,
+            "{\"type\":\"STDERR\",\"data\":\"SPLAT refused the request: missing or invalid authToken.\\n\"}");
+
+        var checker = new WslSubstrateHealthChecker("127.0.0.1", port, new WslAgentToken(authToken: TestToken));
+        var status = await checker.CheckHealthAsync();
+
+        await daemon;
+        listener.Stop();
+
+        Assert.True(status.DaemonReachable);
+        Assert.False(status.Enforcing);
+        Assert.Contains("refused the health check", status.Message);
     }
 
     [Fact]

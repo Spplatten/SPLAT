@@ -180,7 +180,10 @@ is labelled `[SPLAT POLICY]`, never reported as a kernel denial, and ledgered as
 
 ## The transport's trust boundary
 
-Loopback TCP, reached from Windows through WSL2 localhost forwarding and gated by the shared secret.
+Loopback TCP, reached from Windows through WSL2 localhost forwarding and gated by the shared secret
+on **every** request — `HEALTH_CHECK` included, because it answers with `enforcing`, the kernel
+version and the live lease count. Both callers read that secret through
+[`WslAgentToken`](../src/MissionController.Infrastructure.Linux/WslAgentToken.cs), once per host.
 That stops an unprivileged process **inside the guest** from issuing itself a lease. It does not
 stop another **Windows** process running as the same user, which can read the token exactly as the
 bridge does. A transport that carries peer identity — AF_VSOCK with a guest-side allow-list, or

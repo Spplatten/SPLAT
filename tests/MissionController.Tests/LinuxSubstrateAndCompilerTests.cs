@@ -129,7 +129,7 @@ public class LinuxSubstrateAndCompilerTests
     [Fact]
     public void HealthChecker_DetectsWslConfig()
     {
-        var checker = new WslSubstrateHealthChecker();
+        var checker = new WslSubstrateHealthChecker(token: new WslAgentToken(authToken: "cafebabe"));
         // Since we wrote .wslconfig in %USERPROFILE%\.wslconfig, this should be true
         bool configured = checker.IsWslConfiguredForBpf();
         Assert.True(configured);
@@ -138,7 +138,7 @@ public class LinuxSubstrateAndCompilerTests
     [Fact]
     public async Task HealthChecker_ReturnsCleanStatusWhenDaemonOffline()
     {
-        var checker = new WslSubstrateHealthChecker("127.0.0.1", 59999); // unused port
+        var checker = new WslSubstrateHealthChecker("127.0.0.1", 59999, new WslAgentToken(authToken: "cafebabe")); // unused port
         var status = await checker.CheckHealthAsync();
 
         Assert.NotNull(status);

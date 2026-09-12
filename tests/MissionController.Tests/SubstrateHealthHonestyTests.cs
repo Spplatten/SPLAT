@@ -58,6 +58,13 @@ public class SubstrateHealthHonestyTests
         }
     }
 
+    /// <summary>
+    /// A token supplied outright, so these tests never shell into WSL to read the real one. The
+    /// health check is authenticated, and what is under test here is what the checker believes
+    /// about an answer - not how this host obtains its secret.
+    /// </summary>
+    private static WslAgentToken HermeticToken => new(authToken: "0123456789abcdef");
+
     private const string EnforcingBody =
         """{"type":"HEALTH_RESPONSE","bpfLsmActive":true,"cgroupV2Active":true,"overlayFsSupported":true,"kernelVersion":"6.18.33.2-microsoft-standard-WSL2","enforcing":true,"activeLeaseCount":0}""";
 
@@ -72,7 +79,7 @@ public class SubstrateHealthHonestyTests
     public async Task AnEnforcingDaemon_ReadsAsEnforcing()
     {
         using var daemon = new FakeDaemon(EnforcingBody);
-        var status = await new WslSubstrateHealthChecker("127.0.0.1", daemon.Port).CheckHealthAsync();
+        var status = await new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken).CheckHealthAsync();
 
         Assert.True(status.DaemonReachable);
         Assert.True(status.Enforcing);
@@ -84,7 +91,7 @@ public class SubstrateHealthHonestyTests
     public async Task AReachableDaemonThatEnforcesNothing_DoesNotReadAsOperational()
     {
         using var daemon = new FakeDaemon(MockedBody);
-        var status = await new WslSubstrateHealthChecker("127.0.0.1", daemon.Port).CheckHealthAsync();
+        var status = await new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken).CheckHealthAsync();
 
         // Reachable, and useless for containment. The old message said "online and operational"
         // for exactly this response.
@@ -99,7 +106,7 @@ public class SubstrateHealthHonestyTests
     public async Task ADaemonTooOldToReportEnforcement_IsNotTrusted()
     {
         using var daemon = new FakeDaemon(LegacyOptimisticBody);
-        var status = await new WslSubstrateHealthChecker("127.0.0.1", daemon.Port).CheckHealthAsync();
+        var status = await new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken).CheckHealthAsync();
 
         // The absent field must default to "not enforcing". Defaulting the other way would let a
         // daemon predating this change keep asserting containment by saying nothing.
@@ -112,7 +119,7 @@ public class SubstrateHealthHonestyTests
     public async Task AnUnreachableDaemon_ReportsNeitherReachableNorEnforcing()
     {
         // Port 1 is reserved and nothing listens there.
-        var status = await new WslSubstrateHealthChecker("127.0.0.1", 1).CheckHealthAsync();
+        var status = await new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken).CheckHealthAsync();
 
         Assert.False(status.DaemonReachable);
         Assert.False(status.Enforcing);

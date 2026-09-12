@@ -22,18 +22,12 @@ public class WslLeasedExecutor : ILeasedExecutor
 {
     private readonly string _host;
     private readonly int _port;
-    private readonly string _authTokenPath;
 
     /// <summary>
-    /// The daemon's shared secret, cached for the life of this executor.
-    ///
-    /// Fetched through `wsl.exe -u root cat`, because the file is mode 0600 and root-owned: that is
-    /// what stops an unprivileged process INSIDE the guest from issuing itself a lease, which is the
-    /// threat the daemon's gate exists to close. It does not stop another Windows process running as
-    /// this same user, and the daemon's own header says so.
+    /// The daemon's shared secret. Read AFTER <see cref="EnsureDaemonRunningAsync"/>, never before:
+    /// the file does not exist until the daemon has started once.
     /// </summary>
-    private string? _cachedToken;
-    private readonly SemaphoreSlim _tokenLock = new(1, 1);
+    private readonly WslAgentToken _token;
 
     /// <param name="authTokenPath">
     /// Where the daemon keeps its shared secret inside the guest.
@@ -52,13 +46,11 @@ public class WslLeasedExecutor : ILeasedExecutor
     {
         _host = host;
         _port = port;
-        _authTokenPath = authTokenPath;
-        // An explicit token, then the environment, then the guest file. The first two exist so a
-        // host that already holds the secret - or a test driving the wire against a stand-in
-        // listener - never has to shell into WSL to learn something it was told.
-        _cachedToken = !string.IsNullOrWhiteSpace(authToken)
-            ? authToken
-            : Environment.GetEnvironmentVariable("SPLAT_AGENT_TOKEN");
+        // The shared default unless this caller named its own path or token, so one host reads the
+        // secret once however many components talk to the daemon.
+        _token = authTokenPath == WslAgentToken.DefaultPath && string.IsNullOrWhiteSpace(authToken)
+            ? WslAgentToken.Default
+            : new WslAgentToken(authTokenPath, authToken);
     }
 
     /// <summary>The envelope version this bridge speaks; the daemon refuses anything else.</summary>
@@ -107,11 +99,11 @@ public class WslLeasedExecutor : ILeasedExecutor
 
             // The daemon refuses an EXECUTE_TOOL that does not present its token, so a bridge that
             // cannot read one has nothing to send and should say why rather than get a bare refusal.
-            string? authToken = await GetAuthTokenAsync(cts.Token);
+            string? authToken = await _token.GetAsync(cts.Token);
             if (string.IsNullOrEmpty(authToken))
             {
                 throw new InvalidOperationException(
-                    $"Could not read the SPLAT daemon auth token at {_authTokenPath} inside WSL. " +
+                    $"Could not read the SPLAT daemon auth token at {_token.Path} inside WSL. " +
                     "The daemon generates it on first run as root; without it no lease can be requested.");
             }
 
@@ -258,77 +250,6 @@ public class WslLeasedExecutor : ILeasedExecutor
             // Timeout / transport-failure path: the run was cut short, so there is even less to
             // report than on the EXIT path. Nothing measured, nothing claimed.
             FinalMetrics: JobResourceMetrics.Unavailable);
-    }
-
-    /// <summary>
-    /// Reads the daemon's token out of the guest, once per executor.
-    ///
-    /// Read AFTER EnsureDaemonRunningAsync, never before: the file does not exist until the daemon
-    /// has started once, so fetching it first would fail on every clean machine.
-    /// </summary>
-    private async Task<string?> GetAuthTokenAsync(CancellationToken ct)
-    {
-        if (_cachedToken is { Length: > 0 })
-        {
-            return _cachedToken;
-        }
-
-        await _tokenLock.WaitAsync(ct);
-        try
-        {
-            if (_cachedToken is { Length: > 0 })
-            {
-                return _cachedToken;
-            }
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = "wsl.exe",
-                // -u root because the token is 0600 and root-owned. Reading it any other way would
-                // mean the file was readable to an unprivileged guest process, which is the state
-                // the daemon warns about at startup.
-                Arguments = $"-u root -e /bin/cat {_authTokenPath}",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                // And stdin, which this child has no use for. Without the redirect it INHERITS the
-                // host's stdin - and in splat-mcp that is the JSON-RPC channel: wsl.exe pumps
-                // whatever it finds there into the guest, eating bytes the client had already sent.
-                // Recorded on 2026-09-11 by the last-hop probe, whose sixth request reached the
-                // server as a lone "{" and came back as a parse error.
-                RedirectStandardInput = true,
-                CreateNoWindow = true
-            };
-
-            using var proc = Process.Start(psi);
-            if (proc is null)
-            {
-                return null;
-            }
-
-            proc.StandardInput.Close();
-
-            string output = await proc.StandardOutput.ReadToEndAsync(ct);
-            await proc.WaitForExitAsync(ct);
-
-            if (proc.ExitCode != 0)
-            {
-                return null;
-            }
-
-            // WSL hands back UTF-16-ish noise on some hosts; keep only the hex the daemon emits.
-            string token = new string(output.Where(Uri.IsHexDigit).ToArray());
-            _cachedToken = token.Length > 0 ? token : null;
-            return _cachedToken;
-        }
-        catch
-        {
-            return null;
-        }
-        finally
-        {
-            _tokenLock.Release();
-        }
     }
 
     private async Task EnsureDaemonRunningAsync(CancellationToken ct)

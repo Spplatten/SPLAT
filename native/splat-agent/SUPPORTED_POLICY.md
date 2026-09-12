@@ -32,7 +32,7 @@ revoking one does not remove an entry another still holds.
 | --- | --- | --- |
 | Memory, CPU, PID ceilings | cgroup v2 | Written to `memory.max`, `cpu.max`, `pids.max`, then **read back**; a controller that did not take the clamp fails the request. |
 | Lease lifetime | expiry reaper | On expiry the cgroup is killed and drained *before* its policy is withdrawn. |
-| Caller identity | `authToken` | A root-owned 0600 shared secret, compared in fixed time. |
+| Caller identity | `authToken` | A root-owned 0600 shared secret, compared in fixed time. Required on **every** request, `HEALTH_CHECK` included since 2026-09-11: that answer carries `enforcing`, the kernel version and the live lease count, so leaving it open told an unauthenticated caller exactly when this daemon would run work it cannot contain. |
 | Workload privilege | `pre_exec` | `setgroups` / `setresgid` / `setresuid` before exec; a drop that fails fails the spawn. |
 | Command coherence | request | A command absent from its own lease's `allowedExecPaths` is refused before it reaches the kernel. |
 

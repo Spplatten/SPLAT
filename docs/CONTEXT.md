@@ -93,7 +93,7 @@ The code and the tests enforce most of these; review enforces the rest.
 | **Canary** | `splat-canary`, the standalone harness that first proved the hooks; frozen |
 | **Probe**, **evidence file** | A script that exercises the real thing, and the JSON verdict it writes, bound to a source hash |
 | **Enforcing** | The daemon health field saying leases reach the kernel. Reachable is not enforcing |
-| **Last hop** | An agent's request travelling `splat-mcp` → bridge → daemon. Wired; no recorded run |
+| **Last hop** | An agent's request travelling `splat-mcp` → bridge → daemon. Recorded 2026-09-11 in [`last-hop-probe.json`](../native/splat-agent/evidence/last-hop-probe.json) |
 | **Run record** | P3's per-mission evidence bundle |
 | **`Fnn`**, **`AG-Fnn`** | Finding ids from [the clinical audit](audits/2026-09-04-clinical-audit.md) and [the antigravity audit](audits/2026-09-05-antigravity-deep-audit.md) |
 | **Wave** | A batch of remediations; [WAVE-PLAN.md](audits/WAVE-PLAN.md) records the commit that closed each |

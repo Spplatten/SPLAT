@@ -499,6 +499,22 @@ async fn handle_client(
 
         match req_type {
             "HEALTH_CHECK" => {
+                // Authenticated like everything else. This used to be open on the grounds that a
+                // liveness probe should not need a secret - but it answers with the kernel version,
+                // the live lease count, and `enforcing`, which tells an unauthenticated caller
+                // exactly when this daemon will run work it cannot contain. Every legitimate caller
+                // reads the same root-owned token the bridge does.
+                if !peer_auth.accepts(parsed.get("authToken").and_then(|v| v.as_str())) {
+                    warn!("Rejected an unauthenticated HEALTH_CHECK");
+                    let err_chunk = serde_json::json!({
+                        "type": "STDERR",
+                        "data": "SPLAT refused the request: missing or invalid authToken.\n"
+                    });
+                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                    line.clear();
+                    continue;
+                }
+
                 let health = SubstrateHealth::observe(lease_mgr.is_enforcing());
                 let resp = serde_json::json!({
                     "type": "HEALTH_RESPONSE",

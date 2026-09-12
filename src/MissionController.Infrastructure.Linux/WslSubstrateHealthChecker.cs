@@ -31,11 +31,13 @@ public class WslSubstrateHealthChecker
 {
     private readonly string _host;
     private readonly int _port;
+    private readonly WslAgentToken _token;
 
-    public WslSubstrateHealthChecker(string host = "127.0.0.1", int port = 50051)
+    public WslSubstrateHealthChecker(string host = "127.0.0.1", int port = 50051, WslAgentToken? token = null)
     {
         _host = host;
         _port = port;
+        _token = token ?? WslAgentToken.Default;
     }
 
     public bool IsWslConfiguredForBpf()
@@ -71,13 +73,39 @@ public class WslSubstrateHealthChecker
             using var reader = new StreamReader(stream);
             using var writer = new StreamWriter(stream) { AutoFlush = true };
 
-            await writer.WriteLineAsync("{\"type\":\"HEALTH_CHECK\"}");
+            // The health check is authenticated like every other request. It reports whether this
+            // host's containment is live, how many leases are running and which kernel is under
+            // them - state an unauthenticated caller has no business reading, and which told an
+            // attacker exactly when the daemon would run work it could not contain.
+            string? token = await _token.GetAsync(cts.Token);
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new { type = "HEALTH_CHECK", authToken = token ?? "" }));
             string? response = await reader.ReadLineAsync(cts.Token);
 
             if (!string.IsNullOrEmpty(response))
             {
                 using var doc = JsonDocument.Parse(response);
                 var root = doc.RootElement;
+
+                // Reachable, but it would not answer: that is an authentication failure, not an
+                // absent daemon, and reporting it as unreachable would send whoever reads this
+                // looking for a process that is running. Judged on the frame type rather than on a
+                // missing `enforcing` — a daemon too old to report that field still answers with a
+                // HEALTH_RESPONSE, and it is handled below.
+                if ((root.TryGetProperty("type", out var frameType) ? frameType.GetString() : null) != "HEALTH_RESPONSE")
+                {
+                    return new WslSubstrateStatus(
+                        WslConfiguredForBpf: wslConfigured,
+                        DaemonReachable: true,
+                        BpfLsmActive: false,
+                        CgroupV2Active: false,
+                        OverlayFsSupported: false,
+                        KernelVersion: "Unknown",
+                        ActiveLeaseCount: 0,
+                        Message: token is null
+                            ? $"Daemon reachable, but this host could not read its token at {_token.Path}, so the health check was refused."
+                            : "Daemon reachable, but it refused the health check: the token this host holds is not the one it expects.");
+                }
+
                 bool enforcing = root.TryGetProperty("enforcing", out var enf) && enf.GetBoolean();
                 return new WslSubstrateStatus(
                     WslConfiguredForBpf: wslConfigured,

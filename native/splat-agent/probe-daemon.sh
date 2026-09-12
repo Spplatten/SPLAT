@@ -40,6 +40,11 @@ def call(req, label, settle=2.0):
     # here rather than at six call sites so no future probe can forget it.
     if req.get("type") == "EXECUTE_TOOL":
         req = dict(req, authToken=token, protocolVersion=2)
+    # The health check is authenticated too, since 2026-09-11: it answers with `enforcing`, the
+    # kernel version and the live lease count. A request that names its own token keeps it - that is
+    # how the unauthenticated case below is written.
+    elif req.get("type") == "HEALTH_CHECK" and "authToken" not in req:
+        req = dict(req, authToken=token)
     out = []
     try:
         s = socket.create_connection((host, port), timeout=5)
@@ -92,7 +97,7 @@ def show(msgs, label):
     return msgs
 
 print("== 1. health check ==")
-show(call({"type": "HEALTH_CHECK"}, "health"), "health")
+health = show(call({"type": "HEALTH_CHECK"}, "health"), "health")
 
 print()
 # Arguments travel as an explicit argv array. The daemon used to receive one string and split it
@@ -278,6 +283,13 @@ undeclared_exec = show(call({
     "leaseDurationSeconds": 20,
 }, "undeclared-exec"), "undeclared-exec")
 
+print()
+print("== 13. HEALTH CHECK: the state of this host is not public either ==")
+print("   It answers with `enforcing`, the kernel version and the live lease count - so an open")
+print("   health check told an unauthenticated caller exactly when the daemon would run work it")
+print("   could not contain. Check 1 above is the control: with the token, it still answers.")
+unauth_health = show(call({"type": "HEALTH_CHECK", "authToken": ""}, "health-unauthenticated"), "health-unauthenticated")
+
 def had(msgs, t):
     return any(m.get("type") == t for m in (msgs or []))
 
@@ -373,6 +385,13 @@ undeclared_exec_refused = refused_naming(undeclared_exec, "allowedExecPaths")
 print(f"  undeclared egress refused      : {undeclared_egress_refused}")
 print(f"  undeclared exec list refused   : {undeclared_exec_refused}")
 
+# Both halves, or neither is a measurement: a daemon that answered nobody would also score the
+# refusal True.
+health_answered = had(health, "HEALTH_RESPONSE")
+unauth_health_refused = not had(unauth_health, "HEALTH_RESPONSE") and "authToken" in text(unauth_health)
+print(f"  health check answers a holder  : {health_answered}")
+print(f"  health check refuses a stranger: {unauth_health_refused}")
+
 # A run that is not recorded is not proof - the same rule the canary follows.
 import datetime
 # Hash the daemon's kernel program into the record. Without it a months-old PASS kept standing
@@ -420,6 +439,10 @@ evidence = {
         # An absent policy key is the absence of a decision, so it is refused rather than defaulted.
         "undeclared_egress_refused": undeclared_egress_refused,
         "undeclared_exec_list_refused": undeclared_exec_refused,
+        # The substrate's own state is not public: `enforcing` says when this daemon would run work
+        # it cannot contain, which is the one thing an attacker most wants to know.
+        "health_check_answers_a_token_holder": health_answered,
+        "unauthenticated_health_check_refused": unauth_health_refused,
     },
     "violations": [
         {k: m.get(k) for k in ("hook", "pid", "detail", "detailText", "comm") if k in m}
@@ -451,6 +474,8 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["expiry_killed_the_workload"]
     and evidence["results"]["undeclared_egress_refused"]
     and evidence["results"]["undeclared_exec_list_refused"]
+    and evidence["results"]["health_check_answers_a_token_holder"]
+    and evidence["results"]["unauthenticated_health_check_refused"]
 ) else "INCOMPLETE"
 
 out_dir = os.environ.get("SPLAT_EVIDENCE_DIR", "/mnt/c/C_AGENT_BUILDER/native/splat-agent/evidence")

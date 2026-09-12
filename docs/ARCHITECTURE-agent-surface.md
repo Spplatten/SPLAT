@@ -57,7 +57,7 @@ fails refuses the call with `-32001` rather than falling back to an anonymous ro
 | `investigate_system` | `GovernedInvestigationLoop` | A chain of complete missions |
 | `run_agent_brain` | `AgentBrainEngine` | Missions chosen by goal decomposition |
 | `run_governed_crew` | `GovernedCrewEngine` | A mission per templated task. Besides `crewId`, the handler accepts an inline `crewDefinition` that the published schema does not advertise; `GovernedCrewParser` validates it, and it can run tools only through catalog templates — its other tasks are model calls with the prompts it supplies |
-| `get_substrate_health` | `WslSubstrateHealthChecker` | Read-only; reports the daemon's `enforcing` field |
+| `get_substrate_health` | `WslSubstrateHealthChecker` | Read-only; reports the daemon's `enforcing` field. Authenticated like every other request to the daemon, so a host that cannot read the token reports "reachable, refused" rather than an absent daemon |
 | `list_diagnostic_templates`, `search_incident_memory`, `list_governed_crews` | The template registry, semantic memory, the crew catalog | Read-only |
 
 **Every result carries an audit anchor.** After the tool runs, `AttachAuditAnchorAsync` appends a
