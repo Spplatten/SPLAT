@@ -167,9 +167,23 @@ outside the repository, and for weeks it told readers that Windows does not filt
 at all — after both repository copies had been corrected. This check records the source's hash, so
 editing the guide without republishing the page now fails the build.
 
-**When it goes red:** that is the check working. Republish the artifact from the current source, then
-put the hash the failure message prints into `docs/SPLAT-Field-Guide.published`. Doing only the
-second half is worse than doing neither, because it silences the alarm without fixing the page.
+**When it goes red:** that is the check working. Two commands and a publish, in this order:
+
+```powershell
+C:\C_AGENT_BUILDER\packaging\build-field-guide-artifact.ps1
+```
+
+That writes `dist\field-guide-artifact.html` — the exact body to publish — and prints the hash. Ask
+me to publish that file to the artifact URL. Once the page is live:
+
+```powershell
+C:\C_AGENT_BUILDER\packaging\build-field-guide-artifact.ps1 -RecordPublished
+```
+
+**Do not run the second command first.** It is a separate switch precisely so that recording is a
+deliberate act: it asserts the live page matches the source, and if it does not, you have just
+hidden that. Doing only the second half is worse than doing neither — the page stays wrong and now
+looks verified.
 
 ### 1.4 The audit ledger verifies
 

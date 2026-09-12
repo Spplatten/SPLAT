@@ -14,13 +14,20 @@
 # checked against the code. That one was checked against nothing, because the only copy a non-engineer
 # actually reads lives outside this repository.
 #
-# WHEN THE TEST GOES RED: republish the artifact from the current source, then record the hash the
-# failure prints below. Both halves. Updating the hash alone silences the alarm and leaves the page
-# wrong, which is worse than the unguarded state, because now it looks checked.
+# WHEN THE TEST GOES RED, both halves, in this order:
 #
-# Republish by stripping the wrapper BY LINE NUMBER, never with a regex for `<head` - it also matches
-# `<header class="hero">`, and an earlier republish lost that opening tag, so the live page rendered
-# its title placard as bare text for months while every other copy looked right.
+#     packaging/build-field-guide-artifact.ps1                    # writes the body to publish
+#     ...publish that file to the URL above...
+#     packaging/build-field-guide-artifact.ps1 -RecordPublished   # rewrites the hash below
+#
+# The switches are separate so that recording is a deliberate act. Updating the hash without
+# publishing silences the alarm and leaves the page wrong, which is worse than no check at all,
+# because the page then looks verified. That is the one failure this design cannot detect, and it is
+# why the second command prints what it is asserting on your behalf.
+#
+# Do not hand-slice the wrapper any more. The script matches whole lines; a regex for `<head` also
+# matches `<header class="hero">`, and an earlier republish lost that opening tag, so the live page
+# rendered its title placard as bare text for months while every other copy looked right.
 
 published  2026-09-12
 source     docs/SPLAT-Field-Guide.html
