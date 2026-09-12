@@ -81,16 +81,21 @@ public static class SubstrateDoctor
             status.DaemonReachable ? "reachable" : "not reachable - run_command and run_code will fail, not fall back");
         if (status.DaemonReachable)
         {
-            Line(output, status.Enforcing, "enforcement",
-                status.Enforcing
-                    ? $"live: a lease reaches the kernel ({status.ActiveLeaseCount} active)"
-                    : "the daemon answers but holds no BPF maps: treat anything it runs as UNCONTAINED");
-            var (tokenExit, _) = await wsl(
-                new[] { "-u", "root", "-e", "sh", "-c", "test -r /etc/splat/agent.token" }, ct);
-            Line(output, tokenExit == 0, "daemon token",
-                tokenExit == 0
-                    ? "/etc/splat/agent.token is present (root-owned; this host can authenticate to the daemon)"
-                    : "/etc/splat/agent.token is missing - the daemon refuses every request without it");
+            // Reported from the request that was actually made, not from `test -r` on the file. A
+            // present token is not an accepted one - a stale secret, or a daemon restarted with a
+            // new one, reads as "this host can authenticate" to a presence check while every
+            // request it makes is refused. The health check above is that request.
+            Line(output, status.Authenticated, "daemon token",
+                status.Authenticated
+                    ? $"accepted: a request from this host authenticated against {WslAgentToken.DefaultPath} (root-owned)"
+                    : $"REFUSED: {status.Message}");
+
+            Line(output, status.Authenticated && status.Enforcing, "enforcement",
+                !status.Authenticated
+                    ? "unknown: the daemon would not answer this host, so whether a lease reaches the kernel cannot be read from here"
+                    : status.Enforcing
+                        ? $"live: a lease reaches the kernel ({status.ActiveLeaseCount} active)"
+                        : "the daemon answers but holds no BPF maps: treat anything it runs as UNCONTAINED");
         }
 
         output.WriteLine();
