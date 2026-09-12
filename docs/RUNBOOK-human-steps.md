@@ -144,14 +144,34 @@ advertise a count that disagrees with the suite, so `524` in the docs is checked
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~DocumentationDrift"
 ```
 
-**Expect:** 10 passed. These check that every relative link in the README and in `docs/` resolves on
+**Expect:** 13 passed. These check that every relative link in the README and in `docs/` resolves on
 disk, that every tool the MCP server exposes is documented, that retired overclaims have not crept
 back, and that the advertised test count matches reality.
 
 **Try breaking it:** change `524` to `523` in `README.md` and re-run. It should go red and name the
 file. If it does not, the check is not doing its job — tell me.
 
-### 1.3 The audit ledger verifies
+### 1.3 The published Field Guide is not stale
+
+```powershell
+& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER	ests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~ThePublishedFieldGuide"
+```
+
+**Expect:** 1 passed.
+
+**Why it matters:** the Field Guide has three copies — `docs/SPLAT-Field-Guide.html` (the source),
+`docs/TUTORIAL.md`, and a published page at
+<https://claude.ai/code/artifact/18992308-da75-4782-87b8-20b6ba7b4311>. The first two are checked
+against the code by everything above. The third is the one a non-engineer actually reads, it lives
+outside the repository, and for weeks it told readers that Windows does not filter network sockets
+at all — after both repository copies had been corrected. This check records the source's hash, so
+editing the guide without republishing the page now fails the build.
+
+**When it goes red:** that is the check working. Republish the artifact from the current source, then
+put the hash the failure message prints into `docs/SPLAT-Field-Guide.published`. Doing only the
+second half is worse than doing neither, because it silences the alarm without fixing the page.
+
+### 1.4 The audit ledger verifies
 
 The ledger is a hash chain: every entry commits to the one before it. `VerifyLedgerIntegrityAsync`
 recomputes the chain and fails on any edit. It is exercised by the suite above; to see it against

@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -130,8 +132,14 @@ public class DocumentationDriftTests
     // Fixed and proven by the canary on 2026-09-03, so the phrase is now accurate and no longer
     // guarded. Retiring a guard needs the same evidence as making the claim.
     //
-    // True only on an incremental build; a cold build emits 186 MVVMTK0045 warnings.
-    [InlineData("zero compiler warnings across the solution")]
+    // NOTE: "zero compiler warnings across the solution" was guarded here because it was true only
+    // on an incremental build - a cold one emitted MVVMTK0045 once per observable field across the
+    // nine ViewModels. Both halves of that have since changed: the UI project suppresses MVVMTK0045
+    // under a rationale UiWarningSuppressionTests binds to the absence of AOT and trimming, and
+    // src/ and tests/ turn warnings into errors, so a warning there cannot be reported as a warning
+    // at all - it fails the build. A cold solution build in a fresh worktree on 2026-09-12 reported
+    // 0 Warning(s), 0 Error(s), which is the evidence this retirement needs. The claim is no longer
+    // guarded because it is no longer false, and it is now structurally defended rather than lucky.
     // fs_read/fs_write run on the Windows control plane, and run_command depends on a substrate
     // whose enforcement proof is still pending.
     [InlineData("every tool call resolves to a lease")]
@@ -573,6 +581,45 @@ public class DocumentationDriftTests
             wrong.Count == 0,
             $"The suite contains {actual} test cases, but {string.Join("; ", wrong)}. " +
             "Update the documented count in those files to match.");
+    }
+
+
+    /// <summary>
+    /// The one copy of the Field Guide no test could reach. The published artifact is a deterministic
+    /// slice of the source - that file minus the doctype/html/head/body wrapper the artifact host
+    /// supplies - so binding the source binds the page, and no network call is needed to do it.
+    ///
+    /// This is not a hypothetical drift. The live page sat at 511 tests telling readers that on
+    /// Windows the locks "do not filter network sockets", for weeks after both repository copies were
+    /// corrected to say that 33 of 49 templates launch with no network capability at all. Every other
+    /// claim in this class is checked against the code; that one was checked against nothing, because
+    /// the only copy a non-engineer actually reads lives outside the repository.
+    ///
+    /// It cannot prove the republish happened - nothing local can. It makes forgetting it a failed
+    /// build instead of a silent one, which is the same bargain the warning gate strikes.
+    /// </summary>
+    [Fact]
+    public void ThePublishedFieldGuide_IsTheSourceAsItStandsToday()
+    {
+        string root = RepositoryRoot();
+        string record = File.ReadAllText(Path.Combine(root, "docs", "SPLAT-Field-Guide.published"));
+
+        var stated = Regex.Match(record, @"^sha256\s+(?<hex>[0-9a-f]{64})\s*$", RegexOptions.Multiline);
+        Assert.True(stated.Success, "docs/SPLAT-Field-Guide.published no longer records a sha256 line this test can read");
+
+        // Hashed as normalised text rather than raw bytes: this repository is checked out with
+        // core.autocrlf on, so the same commit is CRLF in the shared tree and LF in a worktree, and
+        // a byte hash would fail on which machine ran the test rather than on what the page says.
+        string source = File.ReadAllText(Path.Combine(root, "docs", "SPLAT-Field-Guide.html"))
+            .Replace("\r\n", "\n");
+        string actual = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
+
+        Assert.True(
+            actual == stated.Groups["hex"].Value,
+            "docs/SPLAT-Field-Guide.html has moved ahead of the published artifact at " +
+            "https://claude.ai/code/artifact/18992308-da75-4782-87b8-20b6ba7b4311, so the page a reader " +
+            $"opens is stale. Republish it from the current source, then record sha256 {actual} in " +
+            "docs/SPLAT-Field-Guide.published. Both halves - updating the hash alone just moves the lie.");
     }
 
     /// <summary>
