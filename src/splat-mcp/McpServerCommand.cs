@@ -22,6 +22,7 @@ public abstract record McpServerCommand
     public static string Usage => $"""
         Usage: splat-mcp [--workspace <dir>] [--egress <a.b.c.d:port,...>]
                splat-mcp doctor [--workspace <dir>] [--egress <a.b.c.d:port,...>]
+               splat-mcp provision [--apply]
 
         Serves SPLAT's governed tools to an MCP client: JSON-RPC, one message per line, on stdin
         and stdout. Diagnostics go to stderr, never stdout.
@@ -30,6 +31,12 @@ public abstract record McpServerCommand
                               BPF-LSM, the daemon and its token - and exit. Exits 0 only
                               when a lease would reach the kernel. Serves nothing, and
                               creates nothing.
+          provision           Do what doctor reports missing: build and install the lease
+                              daemon in the guest and start it under systemd, so it is there
+                              after a restart. Reports only, until --apply.
+          --apply             With provision, make the changes rather than listing them.
+                              `wsl --install` and `wsl --shutdown` stay yours: one needs
+                              administrator rights, the other ends every WSL session you have.
           --workspace <dir>   The one directory fs_read and fs_write may touch. It must already
                               exist; it is never created. Without it, both are confined to
                               {McpServerHandler.DefaultWorkspaceRoot}
@@ -60,7 +67,8 @@ public abstract record McpServerCommand
         // `doctor` is a subcommand, and only as the first argument: the value of an option
         // must never be able to turn into one.
         bool doctor = args.Count > 0 && args[0] == "doctor";
-        IReadOnlyList<string> options = doctor ? args.Skip(1).ToArray() : args;
+        bool provision = args.Count > 0 && args[0] == "provision";
+        IReadOnlyList<string> options = doctor || provision ? args.Skip(1).ToArray() : args;
 
         var given = new Dictionary<string, string>(StringComparer.Ordinal);
         for (int i = 0; i < options.Count; i++)
@@ -69,6 +77,29 @@ public abstract record McpServerCommand
             int equals = arg.IndexOf('=');
             string option = equals < 0 ? arg : arg[..equals];
             string? value;
+
+            // The one flag that carries no value. It is refused outside `provision` rather than
+            // ignored there: an option that silently does nothing is how a caller comes to believe
+            // a machine was changed when nothing was.
+            if (option == "--apply")
+            {
+                if (equals >= 0)
+                {
+                    return new UsageError("--apply takes no value.");
+                }
+
+                if (!provision)
+                {
+                    return new UsageError("--apply is only for `splat-mcp provision`.");
+                }
+
+                if (!given.TryAdd("--apply", string.Empty))
+                {
+                    return new UsageError("--apply was given more than once.");
+                }
+
+                continue;
+            }
 
             if (option is not ("--workspace" or "--egress"))
             {
@@ -115,6 +146,15 @@ public abstract record McpServerCommand
             }
         }
 
+        if (provision)
+        {
+            // Neither option changes what provisioning does, and accepting one would say otherwise.
+            string? irrelevant = given.Keys.FirstOrDefault(key => key is "--workspace" or "--egress");
+            return irrelevant is null
+                ? new Provision(given.ContainsKey("--apply"))
+                : new UsageError($"`provision` takes only --apply; {irrelevant} belongs to the server or to `doctor`.");
+        }
+
         return given.TryGetValue("--workspace", out string? workspace)
             ? ValidateWorkspace(workspace, egress, doctor)
             : Built(doctor, null, egress);
@@ -156,6 +196,13 @@ public abstract record McpServerCommand
 
     /// <summary>Report what this host will and will not enforce, then exit. Serves nothing.</summary>
     public sealed record Doctor(string? WorkspaceRoot, McpEgressPolicy Egress) : McpServerCommand;
+
+    /// <summary>
+    /// Do what `doctor` reports missing. <see cref="Apply"/> is false by default: the steps write to
+    /// /etc inside the guest and to the user's .wslconfig, so a dry run is what an unqualified
+    /// invocation gets.
+    /// </summary>
+    public sealed record Provision(bool Apply) : McpServerCommand;
 
     public sealed record ShowHelp : McpServerCommand;
 

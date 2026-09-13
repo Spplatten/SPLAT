@@ -31,7 +31,7 @@ public sealed class SubstrateDoctorTests
     /// One canned answer on loopback. The doctor's own probe does the talking, so what is under test
     /// is what it concludes from a real exchange rather than from a status object handed to it.
     /// </summary>
-    private sealed class StandInDaemon : IDisposable
+    internal sealed class StandInDaemon : IDisposable
     {
         private readonly TcpListener _listener;
         private readonly CancellationTokenSource _cts = new();

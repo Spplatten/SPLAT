@@ -142,7 +142,8 @@ public static class SubstrateDoctor
     private static string Short(string text) =>
         text.Length <= 90 ? text.ReplaceLineEndings(" ") : text.ReplaceLineEndings(" ")[..90] + "...";
 
-    private static async Task<(int, string)> RunWslAsync(IReadOnlyList<string> args, CancellationToken ct)
+    /// <summary>The real runner, shared with the provisioner so both reach the guest the same way.</summary>
+    internal static async Task<(int, string)> RunWslAsync(IReadOnlyList<string> args, CancellationToken ct)
     {
         var start = new ProcessStartInfo("wsl.exe")
         {

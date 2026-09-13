@@ -53,6 +53,11 @@ public static class Program
         Console.OutputEncoding = Encoding.UTF8;
         Console.InputEncoding = Encoding.UTF8;
 
+        if (command is McpServerCommand.Provision provision)
+        {
+            return await SubstrateProvisioner.RunAsync(provision, Console.Out);
+        }
+
         if (command is McpServerCommand.Doctor doctor)
         {
             return await SubstrateDoctor.RunAsync(doctor, Console.Out);
