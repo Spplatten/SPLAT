@@ -47,5 +47,11 @@ public sealed class SplatMcpDistributionTests
         Assert.Contains("produced no", script);
         Assert.Contains("failed to print its usage", script);
         Assert.Contains("it is not self-contained", script);
+
+        // And since 1.9, the daemon it carries: one that links libelf or zlib dynamically cannot start in a
+        // guest without them, and an executable that quietly shipped without it would send a stranger back
+        // to a repository and a Rust toolchain they do not have.
+        Assert.Contains("links libelf, zlib or zstd dynamically", script);
+        Assert.Contains("does not carry the daemon it was built with", script);
     }
 }

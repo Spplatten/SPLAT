@@ -31,6 +31,10 @@ public sealed class SubstrateProvisionerTests
 
         public bool BpfOnBootLine { get; init; } = true;
 
+        public string? InstalledAgentSha256 { get; init; }
+
+        public string? ShippedAgentFailsWith { get; init; }
+
         public Task<(int ExitCode, string Output)> RunAsync(IReadOnlyList<string> args, CancellationToken ct)
         {
             string line = string.Join(' ', args);
@@ -45,6 +49,9 @@ public sealed class SubstrateProvisionerTests
                 _ when line.Contains("test -x /opt/splat/splat-agent", StringComparison.Ordinal) => (HasAgent ? 0 : 1, string.Empty),
                 _ when line.Contains("test -f /etc/systemd/system/splat-agent.service", StringComparison.Ordinal) => (HasAgent ? 0 : 1, string.Empty),
                 _ when line.Contains("systemctl is-active", StringComparison.Ordinal) => (0, "active\nenabled"),
+                _ when line.Contains("sha256sum /opt/splat/splat-agent", StringComparison.Ordinal) => (0, $"{InstalledAgentSha256 ?? new string('0', 64)}  /opt/splat/splat-agent"),
+                _ when line.Contains("wslpath -a", StringComparison.Ordinal) => (0, "/mnt/c/shipped/splat-agent"),
+                _ when line.Contains("splat-agent.new --help", StringComparison.Ordinal) => ShippedAgentFailsWith is null ? (0, string.Empty) : (3, ShippedAgentFailsWith),
                 _ => (0, string.Empty),
             };
             return Task.FromResult(answer);
@@ -57,6 +64,7 @@ public sealed class SubstrateProvisionerTests
         || command.Contains("systemctl enable", StringComparison.Ordinal)
         || command.Contains("daemon-reload", StringComparison.Ordinal)
         || command.Contains(">> /etc/wsl.conf", StringComparison.Ordinal)
+        || command.Contains("systemctl restart", StringComparison.Ordinal)
         || command.Contains("cargo", StringComparison.Ordinal);
 
     [Theory]
@@ -215,4 +223,116 @@ public sealed class SubstrateProvisionerTests
         Assert.Contains(named, report);
         Assert.Equal(config, after);
     }
+
+    /// <summary>A stand-in for the daemon publish-splat-mcp.ps1 builds into the executable.</summary>
+    private sealed class ShippedAgent : IDisposable
+    {
+        public ShippedAgent() => File.WriteAllBytes(Path, new byte[] { 0x7F, (byte)'E', (byte)'L', (byte)'F', 2, 1, 1 });
+
+        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "splat-agent-test-" + Guid.NewGuid().ToString("N"));
+
+        public string Sha256 => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(Path))).ToLowerInvariant();
+
+        public void Dispose() => File.Delete(Path);
+    }
+
+    [Fact]
+    public async Task AGuestWithNoRustToolchain_GetsTheShippedDaemon_WithoutABuild()
+    {
+        using var shipped = new ShippedAgent();
+        var guest = new ScriptedGuest { HasAgent = false };
+        var report = new StringWriter();
+
+        await SubstrateProvisioner.RunAsync(
+            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
+
+        // The whole of 1.9: nothing is built and no toolchain is looked for, so a guest without one gets
+        // exactly as far as a guest with one.
+        Assert.DoesNotContain(guest.Commands, command => command.Contains("cargo", StringComparison.Ordinal));
+        Assert.Contains(guest.Commands, command => command.Contains("splat-agent.new --help", StringComparison.Ordinal));
+        Assert.Contains("no Rust toolchain involved", report.ToString());
+    }
+
+    [Fact]
+    public async Task AShippedDaemonThatWillNotStartHere_IsNamed_AndReplacesNothing()
+    {
+        using var shipped = new ShippedAgent();
+        var guest = new ScriptedGuest
+        {
+            HasAgent = false,
+            ShippedAgentFailsWith = "/lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found (required by /opt/splat/splat-agent.new)",
+        };
+        var report = new StringWriter();
+
+        int exit = await SubstrateProvisioner.RunAsync(
+            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
+
+        // The loader's own words, whole: the version it names is the thing a stranger has to act on, and a
+        // unit that starts a binary which cannot run would fail at boot where nobody is looking.
+        Assert.Equal(1, exit);
+        Assert.Contains("GLIBC_2.39' not found", report.ToString());
+        Assert.DoesNotContain(guest.Commands, command => command.Contains("systemctl", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnInstalledDaemonThatIsNotTheShippedOne_IsReplaced_AndTheServiceRestarted()
+    {
+        using var shipped = new ShippedAgent();
+        var guest = new ScriptedGuest { InstalledAgentSha256 = new string('a', 64) };
+        var report = new StringWriter();
+
+        await SubstrateProvisioner.RunAsync(
+            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
+
+        // Replacing the file is not enough on its own: the old process keeps running the old code until
+        // the service restarts, which `enable --now` never does to a service that is already up.
+        Assert.Contains(guest.Commands, command => command.Contains("splat-agent.new --help", StringComparison.Ordinal));
+        Assert.Contains(guest.Commands, command => command.Contains("systemctl restart splat-agent", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnInstalledDaemonThatIsTheShippedOne_IsLeftAlone()
+    {
+        using var shipped = new ShippedAgent();
+        var guest = new ScriptedGuest { InstalledAgentSha256 = shipped.Sha256 };
+        var report = new StringWriter();
+
+        await SubstrateProvisioner.RunAsync(
+            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
+
+        // Restarting on every --apply would drop the leases a running daemon holds, to replace a file with
+        // itself.
+        Assert.DoesNotContain(guest.Commands, command => command.Contains("splat-agent.new", StringComparison.Ordinal));
+        Assert.DoesNotContain(guest.Commands, command => command.Contains("systemctl restart", StringComparison.Ordinal));
+        Assert.Contains("byte-for-byte the daemon built into this executable", report.ToString());
+    }
+
+    [Fact]
+    public async Task ADryRun_WithAShippedDaemon_NamesIt_AndChangesNothing()
+    {
+        using var shipped = new ShippedAgent();
+        var guest = new ScriptedGuest { HasAgent = false };
+        var report = new StringWriter();
+
+        int exit = await SubstrateProvisioner.RunAsync(
+            new McpServerCommand.Provision(Apply: false), report, guest.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("--apply installs the daemon built into this executable - no Rust toolchain needed", report.ToString());
+        Assert.DoesNotContain(guest.Commands, Mutates);
+    }
+
+    [Theory]
+    // The warning this guest printed on every call on 2026-09-13, beside a clean stdout and exit 0.
+    [InlineData(0, "systemd\n", "wsl: Failed to start the systemd user session for 'root'. See journalctl for more details.\n", "systemd")]
+    [InlineData(0, "/mnt/c/Users/someone/AppData/Local/Temp/splat-agent-42\n", "wsl: Failed to start the systemd user session for 'someone'. See journalctl for more details.\n", "/mnt/c/Users/someone/AppData/Local/Temp/splat-agent-42")]
+    // A command that failed keeps what wsl.exe said about it: there, stderr is the explanation.
+    [InlineData(1, "", "wsl: There is no distribution with the supplied name.\n", "wsl: There is no distribution with the supplied name.")]
+    public void WslDiagnostics_StayOutOfAnAnswer_ButNotOutOfAFailure(int exitCode, string stdout, string stderr, string expected) =>
+        Assert.Equal(expected, SubstrateDoctor.OutputOf(exitCode, stdout, stderr));
 }

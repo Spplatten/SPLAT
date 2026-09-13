@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using MissionController.Infrastructure.Linux;
@@ -52,6 +53,7 @@ public static class SubstrateProvisioner
         SubstrateDoctor.WslRunner? wsl = null,
         WslSubstrateHealthChecker? health = null,
         string? wslConfigPath = null,
+        string? agentBinaryPath = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(provision);
@@ -119,25 +121,29 @@ public static class SubstrateProvisioner
 
         // 4. The daemon binary, at a path that survives a restart. /tmp does not: it is tmpfs, and the
         //    distro stops seconds after its last process exits, taking the build with it.
-        var (agentExit, _) = await wsl(Root($"test -x {AgentPath}"), ct);
-        if (agentExit != 0)
+        //
+        //    A published splat-mcp.exe carries the daemon inside it, so a stranger needs neither this
+        //    repository nor a Rust toolchain. A developer checkout carries none, and builds it with cargo.
+        string? extracted = agentBinaryPath is null ? ExtractShippedAgent() : null;
+        AgentStep agent;
+        try
         {
-            if (!apply)
+            agent = await AgentStepAsync(output, wsl, apply, agentBinaryPath ?? extracted, ct);
+        }
+        finally
+        {
+            if (extracted is not null)
             {
-                Line(output, "todo", "daemon binary",
-                    $"{AgentPath} is not there. --apply builds it from this repo and installs it.");
-                return Verdict(output, false, apply);
+                File.Delete(extracted);
             }
+        }
 
-            if (!await InstallAgentAsync(output, wsl, ct))
-            {
-                return Verdict(output, false, apply);
-            }
-        }
-        else
+        if (agent == AgentStep.Stop)
         {
-            Line(output, "ok", "daemon binary", AgentPath);
+            return Verdict(output, false, apply);
         }
+
+        bool reinstalled = agent == AgentStep.Installed;
 
         // 5. The unit, rewritten on every --apply: a stale ExecStart pointing at a path that no longer
         //    exists fails at boot, quietly, and nobody reads a unit they did not write today.
@@ -152,7 +158,7 @@ public static class SubstrateProvisioner
         {
             var (writeExit, writeOut) = await wsl(Root(
                 $"install -d /opt/splat && printf '%s' \"$SPLAT_UNIT\" > {UnitPath} && "
-                + "systemctl daemon-reload && systemctl enable --now splat-agent", ("SPLAT_UNIT", UnitFile)), ct);
+                + "systemctl daemon-reload && " + StartCommand(reinstalled), ("SPLAT_UNIT", UnitFile)), ct);
             if (writeExit != 0)
             {
                 Line(output, "FAIL", "service", $"could not install the unit: {Short(writeOut)}");
@@ -184,6 +190,140 @@ public static class SubstrateProvisioner
 
         return Verdict(output, status.Enforcing, apply);
     }
+
+    private const string ShippedAgentResource = "splat-agent";
+
+    /// <summary>Where step 4 left the daemon: already right, freshly installed, or blocked.</summary>
+    private enum AgentStep
+    {
+        InPlace,
+        Installed,
+        Stop,
+    }
+
+    private static async Task<AgentStep> AgentStepAsync(
+        TextWriter output, SubstrateDoctor.WslRunner wsl, bool apply, string? shipped, CancellationToken ct)
+    {
+        var (agentExit, _) = await wsl(Root($"test -x {AgentPath}"), ct);
+        bool installed = agentExit == 0;
+
+        if (installed)
+        {
+            if (shipped is null)
+            {
+                Line(output, "ok", "daemon binary", AgentPath);
+                return AgentStep.InPlace;
+            }
+
+            // Kept only when it is byte-for-byte the daemon this executable carries. A newer splat-mcp.exe
+            // over an older daemon is two halves of a wire protocol from different builds. A checksum
+            // that cannot be read counts as different, and the replacement is verified before it lands.
+            var (_, sums) = await wsl(Root($"sha256sum {AgentPath}"), ct);
+            if (sums.Trim().Split(' ', 2)[0].Equals(Sha256Of(shipped), StringComparison.OrdinalIgnoreCase))
+            {
+                Line(output, "ok", "daemon binary", $"{AgentPath}, byte-for-byte the daemon built into this executable");
+                return AgentStep.InPlace;
+            }
+        }
+
+        if (!apply)
+        {
+            Line(output, "todo", "daemon binary",
+                shipped is null
+                    ? $"{AgentPath} is not there. --apply builds it from this repo and installs it."
+                    : installed
+                        ? $"{AgentPath} is not the daemon built into this executable. --apply replaces it and restarts the service."
+                        : $"{AgentPath} is not there. --apply installs the daemon built into this executable - no Rust toolchain needed.");
+            return AgentStep.Stop;
+        }
+
+        bool done = shipped is null
+            ? await InstallAgentAsync(output, wsl, ct)
+            : await InstallShippedAgentAsync(output, wsl, shipped, ct);
+        return done ? AgentStep.Installed : AgentStep.Stop;
+    }
+
+    /// <summary>
+    /// Installs the daemon this executable carries: staged beside the live binary, run once, and only then
+    /// renamed over it. The run is the check that matters for a binary built on another machine - a guest
+    /// whose glibc predates the build's, or that lacks a library, fails here with the loader naming what is
+    /// missing, not at boot in a unit log nobody reads. Running the staged copy rather than the file on the
+    /// Windows mount means a DrvFs mount without exec permission cannot pass for a binary that will not
+    /// start, and the rename means the service never sees a half-written file.
+    /// </summary>
+    private static async Task<bool> InstallShippedAgentAsync(
+        TextWriter output, SubstrateDoctor.WslRunner wsl, string shipped, CancellationToken ct)
+    {
+        var (pathExit, guestPath) = await wsl(new[] { "-e", "wslpath", "-a", shipped }, ct);
+        if (pathExit != 0 || string.IsNullOrWhiteSpace(guestPath))
+        {
+            Line(output, "FAIL", "daemon binary", $"could not resolve {shipped} inside the guest: {Short(guestPath)}");
+            return false;
+        }
+
+        string staged = AgentPath + ".new";
+        var (installExit, installOut) = await wsl(Root(
+            "install -D -m 0755 \"$SPLAT_AGENT\" " + staged
+            + " && { " + staged + " --help >/dev/null 2>/tmp/splat-agent-check"
+            + " || { cat /tmp/splat-agent-check; rm -f " + staged + "; exit 3; }; }"
+            + " && mv -f " + staged + " " + AgentPath,
+            ("SPLAT_AGENT", guestPath.Trim())), ct);
+
+        if (installExit == 3)
+        {
+            // Not shortened: this is the one line the reader has to act on, and the version the loader
+            // names is exactly what Short() would cut off.
+            Line(output, "FAIL", "daemon binary",
+                "the daemon built into this executable will not start in this guest, so nothing was replaced: "
+                + installOut.ReplaceLineEndings(" ").Trim());
+            return false;
+        }
+
+        if (installExit != 0)
+        {
+            Line(output, "FAIL", "daemon binary", $"could not install the daemon built into this executable: {Short(installOut)}");
+            return false;
+        }
+
+        Line(output, "ok", "daemon binary", $"installed the daemon built into this executable to {AgentPath} - no Rust toolchain involved");
+        return true;
+    }
+
+    /// <summary>
+    /// The daemon publish-splat-mcp.ps1 builds into this executable, written out to a temp file; or null for
+    /// a build that carries none - a developer checkout, where this repository and cargo are the way in.
+    /// </summary>
+    private static string? ExtractShippedAgent()
+    {
+        using Stream? resource = typeof(SubstrateProvisioner).Assembly.GetManifestResourceStream(ShippedAgentResource);
+        if (resource is null)
+        {
+            return null;
+        }
+
+        string path = Path.Combine(Path.GetTempPath(), $"splat-agent-{Environment.ProcessId}");
+        using (var file = File.Create(path))
+        {
+            resource.CopyTo(file);
+        }
+
+        return path;
+    }
+
+    private static string Sha256Of(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Restarted, not merely enabled, when step 4 put a new binary in place: <c>enable --now</c> leaves a
+    /// running service alone, so the old daemon would go on serving the old code until the next boot.
+    /// When nothing changed it is only enabled, because a restart drops every lease the daemon holds.
+    /// </summary>
+    private static string StartCommand(bool reinstalled) => reinstalled
+        ? "systemctl enable splat-agent && systemctl restart splat-agent"
+        : "systemctl enable --now splat-agent";
 
     private static async Task<bool> InstallAgentAsync(TextWriter output, SubstrateDoctor.WslRunner wsl, CancellationToken ct)
     {

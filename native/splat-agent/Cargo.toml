@@ -19,3 +19,22 @@ tracing-subscriber = "0.3"
 
 [build-dependencies]
 libbpf-cargo = "0.24"
+
+[features]
+# Links libelf, zlib and zstd into the binary instead of beside it. The default dynamic link is right on
+# the machine that built the daemon and wrong everywhere else: a guest without libelf installed cannot
+# start it. packaging/publish-splat-mcp.ps1 builds with this feature for the copy splat-mcp.exe carries
+# (roadmap 1.9), and the feature does not build on its own. That script also sets:
+#
+#   LIBBPF_SYS_LIBRARY_PATH    where libelf.a and libz.a live: libbpf-sys links them statically only
+#                              from a directory it is told about.
+#   RUSTFLAGS='-C link-arg=-l:libzstd.a'
+#                              the distribution's libelf.a references zstd, which libbpf-sys never links.
+#                              It must reach every link, not just the daemon's: libbpf-sys declares
+#                              links = "bpf", so Cargo builds a single copy for host and target, and this
+#                              crate's build script links that same static libelf. A build.rs line reaches
+#                              only the daemon; --target neither splits the copies nor lets RUSTFLAGS
+#                              reach the build script.
+#
+# glibc stays dynamic, so the oldest glibc the binary accepts is measured by that script, never assumed.
+portable = ["libbpf-rs/static"]

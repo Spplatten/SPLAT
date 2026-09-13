@@ -167,10 +167,12 @@ public static class SubstrateDoctor
                 return (-1, "wsl.exe did not start");
             }
 
-            string stdout = await process.StandardOutput.ReadToEndAsync(cts.Token);
-            string stderr = await process.StandardError.ReadToEndAsync(cts.Token);
+            // Both streams at once. Reading one to its end before starting the other deadlocks the moment
+            // the child fills the second pipe's buffer, and waits out the fifteen seconds for nothing.
+            Task<string> stdout = process.StandardOutput.ReadToEndAsync(cts.Token);
+            Task<string> stderr = process.StandardError.ReadToEndAsync(cts.Token);
             await process.WaitForExitAsync(cts.Token);
-            return (process.ExitCode, (stdout + stderr).Trim());
+            return (process.ExitCode, OutputOf(process.ExitCode, await stdout, await stderr));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || ct.IsCancellationRequested)
         {
@@ -179,4 +181,15 @@ public static class SubstrateDoctor
             return (-1, ex.Message);
         }
     }
+
+    /// <summary>
+    /// What a caller gets to parse. On success, stdout alone: wsl.exe writes its own diagnostics to stderr, and
+    /// on a guest whose systemd user session will not start it writes "wsl: Failed to start the systemd user
+    /// session ..." on every call - measured 2026-09-13, stdout clean and exit 0 beside it. Appended to the
+    /// answer, that turns `systemd` from `ps -p 1` into something that is not "systemd", so provision would
+    /// report a guest without systemd, and turns a wslpath answer into a path that does not exist. On failure,
+    /// both streams, because then stderr is the diagnosis.
+    /// </summary>
+    public static string OutputOf(int exitCode, string stdout, string stderr) =>
+        (exitCode == 0 ? stdout : stdout + stderr).Trim();
 }
