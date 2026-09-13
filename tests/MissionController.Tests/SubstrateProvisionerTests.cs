@@ -29,6 +29,8 @@ public sealed class SubstrateProvisionerTests
 
         public bool HasSystemd { get; init; } = true;
 
+        public bool BpfOnBootLine { get; init; } = true;
+
         public Task<(int ExitCode, string Output)> RunAsync(IReadOnlyList<string> args, CancellationToken ct)
         {
             string line = string.Join(' ', args);
@@ -39,7 +41,7 @@ public sealed class SubstrateProvisionerTests
                 _ when line.EndsWith("echo ok", StringComparison.Ordinal) => (0, "ok"),
                 _ when line.Contains("os-release", StringComparison.Ordinal) => (0, "Ubuntu 26.04 LTS"),
                 _ when line.Contains("ps -p 1", StringComparison.Ordinal) => (0, HasSystemd ? "systemd" : "init"),
-                _ when line.Contains("/proc/cmdline", StringComparison.Ordinal) => (0, "initrd=\\initrd.img lsm=landlock,yama,bpf"),
+                _ when line.Contains("/proc/cmdline", StringComparison.Ordinal) => (0, BpfOnBootLine ? "initrd=\\initrd.img lsm=landlock,yama,bpf" : "initrd=\\initrd.img lsm=landlock,yama"),
                 _ when line.Contains("test -x /opt/splat/splat-agent", StringComparison.Ordinal) => (HasAgent ? 0 : 1, string.Empty),
                 _ when line.Contains("test -f /etc/systemd/system/splat-agent.service", StringComparison.Ordinal) => (HasAgent ? 0 : 1, string.Empty),
                 _ when line.Contains("systemctl is-active", StringComparison.Ordinal) => (0, "active\nenabled"),
@@ -142,5 +144,75 @@ public sealed class SubstrateProvisionerTests
         Assert.Contains("live: a lease reaches the kernel", report.ToString());
         Assert.Contains("comes back on its own after a restart", report.ToString());
         Assert.DoesNotContain(guest.Commands, Mutates);
+    }
+
+    /// <summary>
+    /// Runs one provision against a .wslconfig in a directory of its own. Until this existed the path
+    /// was the developer's real one, so no test could reach the code that appends to it - and any test
+    /// that did would have appended to the file on the machine running the suite.
+    /// </summary>
+    private static async Task<(int Exit, string Report, string? After)> ProvisionWithConfig(string? config, bool apply)
+    {
+        string dir = Directory.CreateTempSubdirectory("splat-wslconfig-").FullName;
+        try
+        {
+            string path = Path.Combine(dir, ".wslconfig");
+            if (config is not null)
+            {
+                await File.WriteAllTextAsync(path, config);
+            }
+
+            var report = new StringWriter();
+            int exit = await SubstrateProvisioner.RunAsync(
+                new McpServerCommand.Provision(Apply: apply), report, new ScriptedGuest { BpfOnBootLine = false }.RunAsync,
+                new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), path);
+
+            return (exit, report.ToString(), File.Exists(path) ? await File.ReadAllTextAsync(path) : null);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ADryRun_LeavesTheWindowsSideAlone_NotJustTheGuest()
+    {
+        // Mutates() reads the commands the guest was handed, and .wslconfig is not written through the
+        // guest - so "changed nothing" was never asserted for the one file this command edits on Windows.
+        var (exit, report, after) = await ProvisionWithConfig(config: null, apply: false);
+
+        Assert.Equal(1, exit);
+        Assert.Null(after);
+        Assert.Contains("--apply appends a [wsl2] section", report);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("# kernelCommandLine = lsm=landlock,bpf\n")]
+    [InlineData("[experimental]\nkernelCommandLine = lsm=landlock,bpf\n")]
+    [InlineData("[boot]\nsystemd=true")]
+    public async Task WithNoLiveKeyUnderWsl2_ApplyAppendsTheStanza(string? config)
+    {
+        // A commented-out key, or the same key under another section, is ignored by WSL. Reading either
+        // as "already set" sent the user to edit a line that could never take effect.
+        var (_, report, after) = await ProvisionWithConfig(config, apply: true);
+
+        string written = Assert.IsType<string>(after);
+        Assert.Contains("appended the lsm= stanza", report);
+        Assert.StartsWith(config ?? string.Empty, written);
+        Assert.EndsWith("[wsl2]\nkernelCommandLine = lsm=landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,apparmor,tomoyo,bpf\n", written);
+    }
+
+    [Theory]
+    [InlineData("[wsl2]\nkernelCommandLine = lsm=landlock,yama\n", "already sets kernelCommandLine under [wsl2]")]
+    [InlineData("[wsl2]\nmemory=8GB\n", "has a [wsl2] section without a kernelCommandLine")]
+    public async Task AnExistingWsl2Section_IsNeverRewrittenOrDuplicated_OnlyNamed(string config, string named)
+    {
+        var (exit, report, after) = await ProvisionWithConfig(config, apply: true);
+
+        Assert.Equal(1, exit);
+        Assert.Contains(named, report);
+        Assert.Equal(config, after);
     }
 }

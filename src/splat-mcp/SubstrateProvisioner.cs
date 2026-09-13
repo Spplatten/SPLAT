@@ -51,6 +51,7 @@ public static class SubstrateProvisioner
         TextWriter output,
         SubstrateDoctor.WslRunner? wsl = null,
         WslSubstrateHealthChecker? health = null,
+        string? wslConfigPath = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(provision);
@@ -110,7 +111,7 @@ public static class SubstrateProvisioner
 
         if (!bpf)
         {
-            Line(output, "todo", "BPF-LSM", WslConfigAdvice(apply));
+            Line(output, "todo", "BPF-LSM", WslConfigAdvice(apply, wslConfigPath));
             return Verdict(output, false, apply);
         }
 
@@ -237,27 +238,50 @@ public static class SubstrateProvisioner
     /// <summary>
     /// The kernel command line is a Windows-side setting, and merging one that already exists is not
     /// something to guess at: an operator's boot line may carry options this tool has never heard of.
-    /// So it appends the stanza only when there is none, and otherwise prints the one edit to make.
+    /// So it appends the stanza only when the file has no [wsl2] section at all, and otherwise prints
+    /// the one edit to make.
+    ///
+    /// "Already sets kernelCommandLine" is read the way WSL reads it: a live key under [wsl2]. The
+    /// substring test this replaced also matched a commented-out line and the same key under any other
+    /// section - both ignored by WSL - and told the user to add bpf to a line that could never take
+    /// effect, so the restart they were sent to make came back with the same answer. Nor is a second
+    /// [wsl2] appended beside an existing one: whether WSL honours a key in a repeated section is its
+    /// parser's business, and this tool should not depend on an answer nobody here has observed.
     /// </summary>
-    private static string WslConfigAdvice(bool apply)
+    private static string WslConfigAdvice(bool apply, string? path)
     {
-        string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".wslconfig");
-        const string stanza = "[wsl2]\nkernelCommandLine = lsm=landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,apparmor,tomoyo,bpf\n";
+        path ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".wslconfig");
+        const string line = "kernelCommandLine = lsm=landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,apparmor,tomoyo,bpf";
         string existing = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
 
-        if (existing.Contains("kernelCommandLine", StringComparison.OrdinalIgnoreCase))
+        string[] lines = existing.ReplaceLineEndings("\n").Split('\n');
+        int section = Array.FindIndex(lines, l => l.Trim().Equals("[wsl2]", StringComparison.OrdinalIgnoreCase));
+        bool liveKey = section >= 0 && lines
+            .Skip(section + 1)
+            .TakeWhile(l => !l.TrimStart().StartsWith('['))
+            .Select(l => l.Trim())
+            .Where(l => !l.StartsWith('#') && !l.StartsWith(';'))
+            .Any(l => l.Contains('=') && l[..l.IndexOf('=')].Trim().Equals("kernelCommandLine", StringComparison.OrdinalIgnoreCase));
+
+        if (liveKey)
         {
-            return $"bpf is NOT on the boot command line, and {path} already sets kernelCommandLine. "
+            return $"bpf is NOT on the boot command line, and {path} already sets kernelCommandLine under [wsl2]. "
                 + "Add `bpf` to the end of its lsm= list yourself, then run `wsl --shutdown`.";
+        }
+
+        if (section >= 0)
+        {
+            return $"bpf is NOT on the boot command line, and {path} has a [wsl2] section without a kernelCommandLine. "
+                + $"Add this line under [wsl2] yourself, then run `wsl --shutdown`: {line}";
         }
 
         if (!apply)
         {
-            return $"bpf is NOT on the boot command line. --apply appends this to {path}, after which "
-                + "`wsl --shutdown` is yours: " + stanza.ReplaceLineEndings(" ");
+            return $"bpf is NOT on the boot command line. --apply appends a [wsl2] section to {path}, after which "
+                + $"`wsl --shutdown` is yours: [wsl2] {line}";
         }
 
-        File.AppendAllText(path, (existing.Length > 0 && !existing.EndsWith('\n') ? "\n" : string.Empty) + stanza);
+        File.AppendAllText(path, (existing.Length > 0 && !existing.EndsWith('\n') ? "\n" : string.Empty) + "[wsl2]\n" + line + "\n");
         return $"appended the lsm= stanza to {path}. `wsl --shutdown` is yours - it ends every WSL "
             + "session you have open - then re-run this.";
     }
