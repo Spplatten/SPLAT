@@ -27,6 +27,7 @@ public sealed class WslAgentToken
 
     private readonly SemaphoreSlim _lock = new(1, 1);
     private string? _cached;
+    private readonly Func<CancellationToken, Task<string?>>? _fetch;
 
     /// <summary>Where this instance looks, named so a refusal can say what it could not read.</summary>
     public string Path { get; }
@@ -42,6 +43,19 @@ public sealed class WslAgentToken
         _cached = !string.IsNullOrWhiteSpace(authToken)
             ? authToken
             : Environment.GetEnvironmentVariable("SPLAT_AGENT_TOKEN");
+    }
+
+    /// <param name="fetch">
+    /// How the secret is obtained, for a host that holds it somewhere other than the guest - or a test
+    /// that needs the read to be slow, which is the case a health check's budget must not absorb. Asked
+    /// again after an empty answer; a token it returns is kept for the life of the instance.
+    /// </param>
+    /// <param name="authTokenPath">Named in refusals, although this instance never reads it.</param>
+    public WslAgentToken(Func<CancellationToken, Task<string?>> fetch, string authTokenPath = DefaultPath)
+    {
+        ArgumentNullException.ThrowIfNull(fetch);
+        _fetch = fetch;
+        Path = authTokenPath;
     }
 
     /// <summary>
@@ -65,44 +79,8 @@ public sealed class WslAgentToken
                 return _cached;
             }
 
-            var psi = new ProcessStartInfo
-            {
-                FileName = "wsl.exe",
-                // -u root because the token is 0600 and root-owned. Reading it any other way would
-                // mean the file was readable to an unprivileged guest process, which is the state
-                // the daemon warns about at startup.
-                Arguments = $"-u root -e /bin/cat {Path}",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                // And stdin, which this child has no use for. Without the redirect it INHERITS the
-                // host's stdin - and in splat-mcp that is the JSON-RPC channel: wsl.exe pumps
-                // whatever it finds there into the guest, eating bytes the client had already sent.
-                // Recorded on 2026-09-11 by the last-hop probe, whose sixth request reached the
-                // server as a lone "{" and came back as a parse error.
-                RedirectStandardInput = true,
-                CreateNoWindow = true
-            };
-
-            using var proc = Process.Start(psi);
-            if (proc is null)
-            {
-                return null;
-            }
-
-            proc.StandardInput.Close();
-
-            string output = await proc.StandardOutput.ReadToEndAsync(ct);
-            await proc.WaitForExitAsync(ct);
-
-            if (proc.ExitCode != 0)
-            {
-                return null;
-            }
-
-            // WSL hands back UTF-16-ish noise on some hosts; keep only the hex the daemon emits.
-            string token = new string(output.Where(Uri.IsHexDigit).ToArray());
-            _cached = token.Length > 0 ? token : null;
+            string? token = _fetch is null ? await FetchFromGuestAsync(ct) : await _fetch(ct);
+            _cached = token is { Length: > 0 } ? token : null;
             return _cached;
         }
         catch
@@ -113,5 +91,46 @@ public sealed class WslAgentToken
         {
             _lock.Release();
         }
+    }
+
+    private async Task<string?> FetchFromGuestAsync(CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "wsl.exe",
+            // -u root because the token is 0600 and root-owned. Reading it any other way would
+            // mean the file was readable to an unprivileged guest process, which is the state
+            // the daemon warns about at startup.
+            Arguments = $"-u root -e /bin/cat {Path}",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            // And stdin, which this child has no use for. Without the redirect it INHERITS the
+            // host's stdin - and in splat-mcp that is the JSON-RPC channel: wsl.exe pumps
+            // whatever it finds there into the guest, eating bytes the client had already sent.
+            // Recorded on 2026-09-11 by the last-hop probe, whose sixth request reached the
+            // server as a lone "{" and came back as a parse error.
+            RedirectStandardInput = true,
+            CreateNoWindow = true
+        };
+
+        using var proc = Process.Start(psi);
+        if (proc is null)
+        {
+            return null;
+        }
+
+        proc.StandardInput.Close();
+
+        string output = await proc.StandardOutput.ReadToEndAsync(ct);
+        await proc.WaitForExitAsync(ct);
+
+        if (proc.ExitCode != 0)
+        {
+            return null;
+        }
+
+        // WSL hands back UTF-16-ish noise on some hosts; keep only the hex the daemon emits.
+        return new string(output.Where(Uri.IsHexDigit).ToArray());
     }
 }

@@ -40,8 +40,15 @@ public class WslSubstrateHealthChecker
     private readonly WslAgentToken _token;
     private readonly TimeSpan _timeout;
 
+    /// <summary>
+    /// For reading the token, apart from the daemon's budget: long enough for a cold wsl.exe on a guest
+    /// still booting, and bounded so a wedged WSL cannot hold a health check open indefinitely.
+    /// </summary>
+    private static readonly TimeSpan TokenReadBudget = TimeSpan.FromSeconds(15);
+
     /// <param name="timeout">
-    /// How long the whole exchange gets. Two seconds is a policy about a status badge - a health
+    /// How long the exchange with the daemon gets; the token is read before it, under a budget of its
+    /// own. Two seconds is a policy about a status badge - a health
     /// check that has not answered by then should read as "not answering" rather than hold a UI
     /// thread - and it is wrong for every caller who is not a badge. It is a parameter because a
     /// test that shares it is asserting scheduler luck: the same loopback exchange measured 12ms
@@ -84,6 +91,19 @@ public class WslSubstrateHealthChecker
 
         try
         {
+            // The token is read first, under a budget of its own, and only then does the daemon's clock
+            // start. Reading it spawns wsl.exe, which is always cold in a one-shot command - doctor,
+            // provision - and slowest exactly when provision runs: straight after the `wsl --shutdown` it
+            // asks for, on a guest still booting. Timed inside the daemon's two seconds, that spawn alone
+            // ran out the clock, the read came back empty, an unauthenticated request went out, and a
+            // daemon that was up and enforcing was reported unreachable.
+            string? token;
+            using (var tokenCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                tokenCts.CancelAfter(TokenReadBudget);
+                token = await _token.GetAsync(tokenCts.Token);
+            }
+
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(_timeout);
 
@@ -97,7 +117,6 @@ public class WslSubstrateHealthChecker
             // host's containment is live, how many leases are running and which kernel is under
             // them - state an unauthenticated caller has no business reading, and which told an
             // attacker exactly when the daemon would run work it could not contain.
-            string? token = await _token.GetAsync(cts.Token);
             await writer.WriteLineAsync(JsonSerializer.Serialize(new { type = "HEALTH_CHECK", authToken = token ?? "" }));
             string? response = await reader.ReadLineAsync(cts.Token);
 

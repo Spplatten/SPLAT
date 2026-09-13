@@ -122,6 +122,28 @@ public class SubstrateHealthHonestyTests
     }
 
     [Fact]
+    public async Task ASlowTokenRead_IsNotChargedToTheDaemonsBudget()
+    {
+        // Observed 2026-09-13 on a guest two minutes out of a restart: the daemon was up and enforcing,
+        // logged "Rejected an unauthenticated HEALTH_CHECK" four seconds after accepting the connection,
+        // and doctor reported it unreachable. Reading the token spawns wsl.exe - always cold in a one-shot
+        // command - and that spawn was timed against the two seconds meant for the daemon. Here the read
+        // alone outlasts the whole budget, so the check can pass only if the budget starts after it.
+        using var daemon = new FakeDaemon(EnforcingBody);
+        var slowToken = new WslAgentToken(async ct =>
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(2500), ct);
+            return "0123456789abcdef";
+        });
+
+        var status = await new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, slowToken, TimeSpan.FromSeconds(2))
+            .CheckHealthAsync();
+
+        Assert.True(status.DaemonReachable);
+        Assert.True(status.Enforcing);
+    }
+
+    [Fact]
     public async Task AnUnreachableDaemon_ReportsNeitherReachableNorEnforcing()
     {
         // Port 1 is reserved and nothing listens there.
