@@ -55,8 +55,8 @@ public partial class App : Application
         FatalErrorLog.Write(source, detail);
     }
 
-    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+    [System.Runtime.InteropServices.LibraryImport("user32.dll", EntryPoint = "MessageBoxW", StringMarshalling = System.Runtime.InteropServices.StringMarshalling.Utf16)]
+    private static partial int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
 
     private const uint MbIconError = 0x00000010;
     private const uint MbSystemModal = 0x00001000;

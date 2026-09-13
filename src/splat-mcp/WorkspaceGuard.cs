@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -24,7 +25,7 @@ namespace SplatMcp;
 /// swap between the check and the use — a path re-opened after checking is a different question
 /// asked twice.
 /// </summary>
-public sealed class WorkspaceGuard
+public sealed partial class WorkspaceGuard
 {
     private const uint FILE_FLAG_BACKUP_SEMANTICS = 0x0200_0000;   // required to open a directory
     private const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x0020_0000; // open the LINK, not its target
@@ -36,14 +37,14 @@ public sealed class WorkspaceGuard
     private const uint CREATE_ALWAYS = 2;
     private const uint VOLUME_NAME_DOS = 0x0;
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "CreateFileW")]
-    private static extern SafeFileHandle CreateFile(
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    private static partial SafeFileHandle CreateFile(
         string lpFileName, uint dwDesiredAccess, uint dwShareMode, IntPtr lpSecurityAttributes,
         uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "GetFinalPathNameByHandleW")]
-    private static extern uint GetFinalPathNameByHandle(
-        SafeFileHandle hFile, StringBuilder lpszFilePath, uint cchFilePath, uint dwFlags);
+    [LibraryImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true)]
+    private static unsafe partial uint GetFinalPathNameByHandle(
+        SafeFileHandle hFile, char* lpszFilePath, uint cchFilePath, uint dwFlags);
 
     /// <summary>The root's own final path: if the ROOT is itself a link, everything beneath it is judged against where it really points.</summary>
     private readonly string _root;
@@ -58,21 +59,54 @@ public sealed class WorkspaceGuard
     }
 
     /// <summary>The path the kernel says a handle actually refers to, with the \\?\ prefix removed.</summary>
-    private static string? FinalPathOf(SafeFileHandle handle)
+    private static unsafe string? FinalPathOf(SafeFileHandle handle)
     {
         if (handle.IsInvalid)
         {
             return null;
         }
 
-        var buffer = new StringBuilder(short.MaxValue);
-        uint len = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, VOLUME_NAME_DOS);
-        if (len == 0 || len > buffer.Capacity)
+        Span<char> initialBuffer = stackalloc char[512];
+        uint len;
+        fixed (char* pInitial = initialBuffer)
+        {
+            len = GetFinalPathNameByHandle(handle, pInitial, (uint)initialBuffer.Length, VOLUME_NAME_DOS);
+        }
+
+        if (len == 0)
         {
             return null;
         }
 
-        string p = buffer.ToString();
+        string p;
+        if (len < initialBuffer.Length)
+        {
+            p = initialBuffer[..(int)len].ToString();
+        }
+        else
+        {
+            char[] rented = ArrayPool<char>.Shared.Rent((int)len);
+            try
+            {
+                uint retryLen;
+                fixed (char* pRented = rented)
+                {
+                    retryLen = GetFinalPathNameByHandle(handle, pRented, (uint)rented.Length, VOLUME_NAME_DOS);
+                }
+
+                if (retryLen == 0 || retryLen > rented.Length)
+                {
+                    return null;
+                }
+
+                p = new string(rented, 0, (int)retryLen);
+            }
+            finally
+            {
+                ArrayPool<char>.Shared.Return(rented);
+            }
+        }
+
         // GetFinalPathNameByHandle always answers in \\?\ form. Strip it so the comparison is
         // against paths of the same shape; \\?\UNC\server\share is the network spelling.
         if (p.StartsWith(@"\\?\UNC\", StringComparison.Ordinal))
