@@ -34,6 +34,12 @@ Reference, not plan: these describe the tree as it is, and are corrected when th
 | [ARCHITECTURE-agent-surface.md](ARCHITECTURE-agent-surface.md) | How an external agent gets in: `splat-mcp`, the LangGraph adapter, the Copilot / Semantic Kernel adapter. |
 | [MODULE_INFO.md](MODULE_INFO.md) | Every buildable unit: target, references, packages, what it owns, its tests, and whether it ships. |
 
+## Coursework
+
+| Document | What it is |
+| --- | --- |
+| [course/README.md](course/README.md) | Ten-week bottom-up systems and cybersecurity course, with eight- and twelve-week options, executable interface labs, source traces and current repair assignments. |
+
 ## Prospect-facing
 
 Machine-checked: `DocumentationDriftTests` reads every non-`PLAN-` file in this directory and fails

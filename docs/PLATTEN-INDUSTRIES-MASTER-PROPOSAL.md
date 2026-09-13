@@ -69,7 +69,9 @@ SPLAT provides a local-first, dual-OS containment substrate that runs on stock, 
 2. **Stock Microsoft Kernel Compatibility:** Zero custom kernel forks or CVE burdens. Operates on standard Microsoft Windows 10/11 Enterprise and stock WSL2 Linux kernels (6.6+/6.18+) via standard `.wslconfig` BPF-LSM directives.
 3. **Filesystem Atomicity (Ephemeral Scratch Overlays):** Speculative operations execute inside isolated, access-controlled directory overlays. If the assertion passes, changes commit; if the tool fails or times out, the overlay is instantly purged—guaranteeing the host filesystem remains untouched.
 4. **Cryptographic Non-Repudiation:** Every action produces a SHA-256 chained entry where:
-   $$\text{EntryHash} = \text{SHA256}(\text{PreviousHash} \parallel \text{Timestamp} \parallel \text{MissionId} \parallel \text{Action} \parallel \text{HMAC}(\text{Details}, \text{Salt}))$$
+   ```
+EntryHash = SHA256(PreviousHash || Timestamp || MissionId || Action || Details)
+```
    Audit anchors are returned directly to calling orchestrators (LangGraph checkpointers, n8n payloads, Sentinel workbooks).
 
 ---
@@ -155,7 +157,9 @@ flowchart LR
 ```
 
 ### The CISO ROI Pitch:
-$$\text{Net Annual Savings} = (\text{Tickets Deflected} \times \$25\text{ avg ticket cost}) - \text{SPLAT Fleet License}$$
+```
+Net Annual Savings = (Tickets Deflected * $25 avg ticket cost) - SPLAT Fleet License
+```
 
 Run that formula on the worked example and it does not close at Track B list price:
 

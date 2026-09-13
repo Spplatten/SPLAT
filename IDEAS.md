@@ -102,7 +102,9 @@ flowchart LR
 * **Intune Ecosystem Synergy:**
   * Package as a turnkey Intune App catalog entry, making rollout as simple as a single policy assignment.
 * **The "ROI Calculator" Pitch:**
-  $$\text{Net Annual Savings} = (\text{Tickets Deflected} \times \$25\text{ avg ticket cost}) - \text{SPLAT License}$$
+  ```
+Net Annual Savings = (Tickets Deflected * $25 avg ticket cost) - SPLAT Fleet License
+```
   *(A 3,000-seat organization resolving 600 tickets/month with SPLAT yields over \$150k/year in net operational savings).*
 
 ---

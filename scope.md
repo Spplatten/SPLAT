@@ -75,7 +75,9 @@ The software standardizes institutional runbooks into signed, declarative 1:1:1 
 * **1:1:1 Schema Validator:** Enforce strict validation rules on declarative JSON templates: exactly 1 Target Model, 1 Dedicated Native Executable Tool, and 1 Allowed Egress FQDN.
 * **In-Process SQLite Engine:** Configure SQLite in WAL mode (`PRAGMA journal_mode = WAL;`, `PRAGMA synchronous = NORMAL;`).
 * **Sequential SHA-256 Chained Hash Audit Worker:** Implement a dedicated single-threaded `System.Threading.Channels.Channel<AuditLogEntry>` background writer to eliminate WAL lock contention and compute tamper-evident hash chains:
-  $$\text{EntryHash} = \text{SHA256}(\text{PreviousHash} \parallel \text{TimestampUtc} \parallel \text{MissionId} \parallel \text{Action} \parallel \text{Details})$$
+  ```
+EntryHash = SHA256(PreviousHash || Timestamp || MissionId || Action || Details)
+```
 
 ### Phase 4: WinUI 3 Desktop Shell & MVVM Presentation
 * **Presentation Architecture:** `CommunityToolkit.Mvvm` implementation using `ObservableObject` and `AsyncRelayCommand`.
