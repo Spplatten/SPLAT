@@ -7,8 +7,8 @@
 //
 // The token is a shared secret in a root-owned 0600 file. What that buys, precisely:
 //
-//   * A non-root process in the guest cannot read the file, so it cannot issue or widen a lease.
-//     That is the threat the audit named, and it is closed.
+//   * A non-root process in the guest cannot read the file - but while this daemon is not listening
+//     it can take the port, and the bridge hands the token to whatever answers there (ROADMAP 2.4).
 //   * A process already running as root in the guest can read the file - and could equally load its
 //     own BPF programs or write the cgroup tree directly. A token cannot defend against a principal
 //     that already outranks the thing protecting it, and pretending otherwise would be the same

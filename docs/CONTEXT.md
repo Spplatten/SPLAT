@@ -170,6 +170,7 @@ Open, and written down, so that nobody rediscovers them as news.
 | `readOnlyFs` and copy-on-write are refused — the workload has no mount namespace yet | SUPPORTED_POLICY.md; P2 |
 | The last hop is recorded, but only for `run_command`: no governed mission has travelled it | [`last-hop-probe.json`](../native/splat-agent/evidence/last-hop-probe.json); the README's status table |
 | The daemon's shared secret does not stop a same-user Windows process | [auth.rs](../native/splat-agent/src/auth.rs); AF_VSOCK in P2 |
+| The bridge hands the daemon's secret to whatever answers on its port, so while the daemon is not listening an unprivileged guest process can collect it | [ROADMAP 2.4](ROADMAP.md) |
 | On Windows, a `ToolProcess` sensor's destination is a claim, and WMI-dependent templates keep their network | [Windows substrate](ARCHITECTURE-windows-substrate.md#who-gets-the-appcontainer) |
 | The ledger runs unkeyed, so a rewrite is undetectable | [Control plane](ARCHITECTURE-control-plane.md#evidence-and-memory); the README |
 | No bare-token DLP rules for AWS, GitHub, OpenAI, Stripe or JWT | AG-F06, planned with P3 |

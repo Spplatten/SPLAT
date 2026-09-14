@@ -10,9 +10,11 @@ namespace MissionController.Infrastructure.Linux;
 /// The daemon's shared secret, read out of the guest once and held for the life of the host process.
 ///
 /// Every request to the daemon carries it — leases and health checks alike. It lives at
-/// <c>/etc/splat/agent.token</c>, mode 0600 and root-owned, which is what stops an unprivileged
-/// process INSIDE the guest from issuing itself a lease or reading the substrate's state. It does
-/// not stop another Windows process running as this same user, and the daemon's own header says so.
+/// <c>/etc/splat/agent.token</c>, mode 0600 and root-owned, which stops an unprivileged process
+/// INSIDE the guest from reading it - though not from being handed it: every caller presents it to
+/// whatever answers on the daemon's port, and while the daemon is not listening, anything can. It
+/// does not stop another Windows process running as this same user, and the daemon's own header
+/// says so.
 ///
 /// One class rather than one per caller, because the way it is fetched has already been a defect
 /// twice, and a second copy is where a fix stops being applied.

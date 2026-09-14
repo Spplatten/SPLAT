@@ -187,8 +187,11 @@ Loopback TCP, reached from Windows through WSL2 localhost forwarding and gated b
 on **every** request — `HEALTH_CHECK` included, because it answers with `enforcing`, the kernel
 version and the live lease count. Both callers read that secret through
 [`WslAgentToken`](../src/MissionController.Infrastructure.Linux/WslAgentToken.cs), once per host.
-That stops an unprivileged process **inside the guest** from issuing itself a lease. It does not
-stop another **Windows** process running as the same user, which can read the token exactly as the
+That stops an unprivileged process **inside the guest** from reading the token, not from being
+handed it: the bridge presents the token to whatever answers on the port, and while the daemon is
+not listening any process can bind it — on 2026-09-13 a listener run as `nobody` received what
+Windows sent. Nor does it stop another **Windows** process running as the same user, which can
+read the token exactly as the
 bridge does. A transport that carries peer identity — AF_VSOCK with a guest-side allow-list, or
 `SO_PEERCRED` over AF_UNIX — would close that. It is not built; the live plan pencils it into P2.
 
