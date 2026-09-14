@@ -124,17 +124,18 @@ public static class SubstrateProvisioner
         //
         //    A published splat-mcp.exe carries the daemon inside it, so a stranger needs neither this
         //    repository nor a Rust toolchain. A developer checkout carries none, and builds it with cargo.
-        string? extracted = agentBinaryPath is null ? ExtractShippedAgent() : null;
+        (string Path, string Sha256)? extracted = agentBinaryPath is null ? ExtractShippedAgent() : null;
+        (string Path, string Sha256)? shipped = agentBinaryPath is null ? extracted : (agentBinaryPath, Sha256Of(agentBinaryPath));
         AgentStep agent;
         try
         {
-            agent = await AgentStepAsync(output, wsl, apply, agentBinaryPath ?? extracted, ct);
+            agent = await AgentStepAsync(output, wsl, apply, shipped, ct);
         }
         finally
         {
             if (extracted is not null)
             {
-                File.Delete(extracted);
+                File.Delete(extracted.Value.Path);
             }
         }
 
@@ -202,7 +203,7 @@ public static class SubstrateProvisioner
     }
 
     private static async Task<AgentStep> AgentStepAsync(
-        TextWriter output, SubstrateDoctor.WslRunner wsl, bool apply, string? shipped, CancellationToken ct)
+        TextWriter output, SubstrateDoctor.WslRunner wsl, bool apply, (string Path, string Sha256)? shipped, CancellationToken ct)
     {
         var (agentExit, _) = await wsl(Root($"test -x {AgentPath}"), ct);
         bool installed = agentExit == 0;
@@ -219,7 +220,7 @@ public static class SubstrateProvisioner
             // over an older daemon is two halves of a wire protocol from different builds. A checksum
             // that cannot be read counts as different, and the replacement is verified before it lands.
             var (_, sums) = await wsl(Root($"sha256sum {AgentPath}"), ct);
-            if (sums.Trim().Split(' ', 2)[0].Equals(Sha256Of(shipped), StringComparison.OrdinalIgnoreCase))
+            if (sums.Trim().Split(' ', 2)[0].Equals(shipped.Value.Sha256, StringComparison.OrdinalIgnoreCase))
             {
                 Line(output, "ok", "daemon binary", $"{AgentPath}, byte-for-byte the daemon built into this executable");
                 return AgentStep.InPlace;
@@ -239,7 +240,7 @@ public static class SubstrateProvisioner
 
         bool done = shipped is null
             ? await InstallAgentAsync(output, wsl, ct)
-            : await InstallShippedAgentAsync(output, wsl, shipped, ct);
+            : await InstallShippedAgentAsync(output, wsl, shipped.Value, ct);
         return done ? AgentStep.Installed : AgentStep.Stop;
     }
 
@@ -249,25 +250,40 @@ public static class SubstrateProvisioner
     /// whose glibc predates the build's, or that lacks a library, fails here with the loader naming what is
     /// missing, not at boot in a unit log nobody reads. Running the staged copy rather than the file on the
     /// Windows mount means a DrvFs mount without exec permission cannot pass for a binary that will not
-    /// start, and the rename means the service never sees a half-written file.
+    /// start, and the rename means the service never sees a half-written file. Before any of that the copy
+    /// is hashed against the bytes this executable carries, because the file it was copied from is on the
+    /// Windows mount, and every process in the guest can write there.
     /// </summary>
     private static async Task<bool> InstallShippedAgentAsync(
-        TextWriter output, SubstrateDoctor.WslRunner wsl, string shipped, CancellationToken ct)
+        TextWriter output, SubstrateDoctor.WslRunner wsl, (string Path, string Sha256) shipped, CancellationToken ct)
     {
-        var (pathExit, guestPath) = await wsl(new[] { "-e", "wslpath", "-a", shipped }, ct);
+        var (pathExit, guestPath) = await wsl(new[] { "-e", "wslpath", "-a", shipped.Path }, ct);
         if (pathExit != 0 || string.IsNullOrWhiteSpace(guestPath))
         {
-            Line(output, "FAIL", "daemon binary", $"could not resolve {shipped} inside the guest: {Short(guestPath)}");
+            Line(output, "FAIL", "daemon binary", $"could not resolve {shipped.Path} inside the guest: {Short(guestPath)}");
             return false;
         }
 
+        // The check's stderr is kept in a variable, not in /tmp. It went to a fixed file there, and the
+        // guest's /tmp is world-writable: a file planted under that name made root's write fail, so the
+        // check failed and `cat` gave the planter's text as the reason.
         string staged = AgentPath + ".new";
         var (installExit, installOut) = await wsl(Root(
             "install -D -m 0755 \"$SPLAT_AGENT\" " + staged
-            + " && { " + staged + " --help >/dev/null 2>/tmp/splat-agent-check"
-            + " || { cat /tmp/splat-agent-check; rm -f " + staged + "; exit 3; }; }"
+            + " && { [ \"$(sha256sum " + staged + " | cut -d ' ' -f 1)\" = \"$SPLAT_AGENT_SHA256\" ]"
+            + " || { rm -f " + staged + "; exit 4; }; }"
+            + " && { err=$(" + staged + " --help 2>&1 >/dev/null)"
+            + @" || { printf '%s\n' ""$err""; rm -f " + staged + "; exit 3; }; }"
             + " && mv -f " + staged + " " + AgentPath,
-            ("SPLAT_AGENT", guestPath.Trim())), ct);
+            ("SPLAT_AGENT", guestPath.Trim()), ("SPLAT_AGENT_SHA256", shipped.Sha256)), ct);
+
+        if (installExit == 4)
+        {
+            Line(output, "FAIL", "daemon binary",
+                "the copy that reached the guest does not match the daemon built into this executable, so nothing "
+                + "was replaced. It came through the Windows mount, which every process in the guest can write.");
+            return false;
+        }
 
         if (installExit == 3)
         {
@@ -290,10 +306,11 @@ public static class SubstrateProvisioner
     }
 
     /// <summary>
-    /// The daemon publish-splat-mcp.ps1 builds into this executable, written out to a temp file; or null for
-    /// a build that carries none - a developer checkout, where this repository and cargo are the way in.
+    /// The daemon publish-splat-mcp.ps1 builds into this executable, written out to a temp file, with the hash
+    /// of the bytes written; or null for a build that carries none - a developer checkout, where this
+    /// repository and cargo are the way in.
     /// </summary>
-    private static string? ExtractShippedAgent()
+    private static (string Path, string Sha256)? ExtractShippedAgent()
     {
         using Stream? resource = typeof(SubstrateProvisioner).Assembly.GetManifestResourceStream(ShippedAgentResource);
         if (resource is null)
@@ -301,13 +318,17 @@ public static class SubstrateProvisioner
             return null;
         }
 
+        // Hashed as it is written, never read back: the guest reaches the file through /mnt/c, so by the
+        // time it was read again anything in the guest could have changed it.
         string path = Path.Combine(Path.GetTempPath(), $"splat-agent-{Environment.ProcessId}");
+        using var sha256 = SHA256.Create();
         using (var file = File.Create(path))
+        using (var hashing = new CryptoStream(file, sha256, CryptoStreamMode.Write))
         {
-            resource.CopyTo(file);
+            resource.CopyTo(hashing);
         }
 
-        return path;
+        return (path, Convert.ToHexString(sha256.Hash!).ToLowerInvariant());
     }
 
     private static string Sha256Of(string path)
@@ -350,12 +371,26 @@ public static class SubstrateProvisioner
             return false;
         }
 
+        // The building user's own cache, never /tmp. Root installs what this build leaves, and the guest's
+        // /tmp is world-writable: whoever created /tmp/splat_agent_target before the first build owned every
+        // file in it from then on. $HOME is read here because root's, below, is a different one.
+        var (homeExit, home) = await wsl(new[] { "-e", "sh", "-c", "printf %s \"$HOME\"" }, ct);
+        if (homeExit != 0 || !home.StartsWith('/'))
+        {
+            Line(output, "FAIL", "daemon binary", $"could not find the guest user's home directory: {Short(home)}");
+            return false;
+        }
+
+        string target = home + "/.cache/splat-agent-target";
         Line(output, "...", "daemon binary", $"building from {guestCrate.Trim()} - about a minute the first time");
         var (buildExit, buildOut) = await wsl(new[]
         {
             "-e", "sh", "-c",
-            $"cd '{guestCrate.Trim()}' && EXTRA_CFLAGS=-Wno-error CFLAGS=-Wno-error "
-            + $"CARGO_TARGET_DIR=/tmp/splat_agent_target '{cargo.Trim()}' build --release 2>&1 | tail -3",
+            // cargo's exit status, not tail's. Piped straight into tail, a failed build exited 0 - and with a
+            // target directory that persists, root would then have installed whatever an earlier build left.
+            $"out=$(cd '{guestCrate.Trim()}' && EXTRA_CFLAGS=-Wno-error CFLAGS=-Wno-error "
+            + $"CARGO_TARGET_DIR='{target}' '{cargo.Trim()}' build --release 2>&1); status=$?; "
+            + @"printf '%s\n' ""$out"" | tail -3; exit $status",
         }, ct);
         if (buildExit != 0)
         {
@@ -364,7 +399,7 @@ public static class SubstrateProvisioner
         }
 
         var (installExit, installOut) = await wsl(
-            Root($"install -D -m 0755 /tmp/splat_agent_target/release/splat-agent {AgentPath}"), ct);
+            Root("install -D -m 0755 \"$SPLAT_AGENT\" " + AgentPath, ("SPLAT_AGENT", target + "/release/splat-agent")), ct);
         if (installExit != 0)
         {
             Line(output, "FAIL", "daemon binary", $"built, but could not install to {AgentPath}: {Short(installOut)}");

@@ -25,6 +25,12 @@ public sealed class WslAgentToken
     /// <summary>The token every caller on this host shares, fetched at most once.</summary>
     public static WslAgentToken Default { get; } = new();
 
+    /// <summary>
+    /// How long a caller gives <see cref="GetAsync"/>, apart from any budget of its own: long enough for a
+    /// cold wsl.exe on a guest still booting, and bounded so a wedged WSL cannot hold the caller open.
+    /// </summary>
+    public static TimeSpan ReadBudget { get; } = TimeSpan.FromSeconds(15);
+
     private readonly SemaphoreSlim _lock = new(1, 1);
     private string? _cached;
     private readonly Func<CancellationToken, Task<string?>>? _fetch;
@@ -62,7 +68,7 @@ public sealed class WslAgentToken
     /// The token, or null when this host cannot read one.
     ///
     /// Callers that also start the daemon must do that FIRST: the file does not exist until the
-    /// daemon has run once, so fetching it on a clean machine would fail and cache the failure.
+    /// daemon has run once, so a read made before the start finds nothing to read.
     /// </summary>
     public async Task<string?> GetAsync(CancellationToken ct = default)
     {

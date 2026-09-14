@@ -139,7 +139,7 @@ message box, writes the reason to `%LOCALAPPDATA%\SPLAT\crash.log` and exits;
 | Compliance packages | `%LOCALAPPDATA%\MissionController\ComplianceExports` |
 | MCP and Copilot workspaces | `%LOCALAPPDATA%\SPLAT\mcp-workspace`, `%LOCALAPPDATA%\SPLAT\copilot-workspace` |
 | Crash log | `%LOCALAPPDATA%\SPLAT\crash.log` |
-| In the WSL2 guest: daemon token, daemon log, lease cgroups | `/etc/splat/agent.token` (root, 0600), `/tmp/splat-agent.log`, `/sys/fs/cgroup/splat_leases` |
+| In the WSL2 guest: daemon token, daemon log, lease cgroups | `/etc/splat/agent.token` (root, 0600), `journalctl -u splat-agent`, `/sys/fs/cgroup/splat_leases` |
 
 **The Linux side needs a person.** Loading BPF-LSM programs needs root, `sudo` prompts, and an agent
 cannot type into the prompt. [RUNBOOK-human-steps.md](RUNBOOK-human-steps.md) lists those steps.

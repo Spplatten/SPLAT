@@ -259,8 +259,9 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
   [`cow.rs`](../native/splat-agent/src/cow.rs), which is parked;
   [`src/bpf/lease_lsm.bpf.c`](../native/splat-agent/src/bpf/lease_lsm.bpf.c); a generated
   `vmlinux.h` — never hand-edit it.
-- **Scripts:** [`run-daemon.sh`](../native/splat-agent/run-daemon.sh) builds with
-  `CARGO_TARGET_DIR=/tmp/splat_agent_target` and starts the daemon as root on loopback;
+- **Scripts:** [`run-daemon.sh`](../native/splat-agent/run-daemon.sh) builds into
+  `~/.cache/splat-agent-target` — not `/tmp`, where any guest user could plant what it runs — and
+  starts the daemon as root on loopback;
   [`probe-daemon.sh`](../native/splat-agent/probe-daemon.sh) exercises a running daemon.
 - **Evidence:** [`evidence/`](../native/splat-agent/evidence). **Policy:**
   [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md).

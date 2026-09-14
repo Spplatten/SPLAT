@@ -35,6 +35,10 @@ public sealed class SubstrateProvisionerTests
 
         public string? ShippedAgentFailsWith { get; init; }
 
+        public bool HasCargo { get; init; }
+
+        public bool ShippedAgentAlteredInTransit { get; init; }
+
         public Task<(int ExitCode, string Output)> RunAsync(IReadOnlyList<string> args, CancellationToken ct)
         {
             string line = string.Join(' ', args);
@@ -49,9 +53,11 @@ public sealed class SubstrateProvisionerTests
                 _ when line.Contains("test -x /opt/splat/splat-agent", StringComparison.Ordinal) => (HasAgent ? 0 : 1, string.Empty),
                 _ when line.Contains("test -f /etc/systemd/system/splat-agent.service", StringComparison.Ordinal) => (HasAgent ? 0 : 1, string.Empty),
                 _ when line.Contains("systemctl is-active", StringComparison.Ordinal) => (0, "active\nenabled"),
-                _ when line.Contains("sha256sum /opt/splat/splat-agent", StringComparison.Ordinal) => (0, $"{InstalledAgentSha256 ?? new string('0', 64)}  /opt/splat/splat-agent"),
+                _ when line.EndsWith("sha256sum /opt/splat/splat-agent", StringComparison.Ordinal) => (0, $"{InstalledAgentSha256 ?? new string('0', 64)}  /opt/splat/splat-agent"),
                 _ when line.Contains("wslpath -a", StringComparison.Ordinal) => (0, "/mnt/c/shipped/splat-agent"),
-                _ when line.Contains("splat-agent.new --help", StringComparison.Ordinal) => ShippedAgentFailsWith is null ? (0, string.Empty) : (3, ShippedAgentFailsWith),
+                _ when line.Contains("splat-agent.new --help", StringComparison.Ordinal) => ShippedAgentAlteredInTransit ? (4, string.Empty) : ShippedAgentFailsWith is null ? (0, string.Empty) : (3, ShippedAgentFailsWith),
+                _ when line.Contains("command -v cargo", StringComparison.Ordinal) => HasCargo ? (0, "/home/dev/.cargo/bin/cargo") : (1, string.Empty),
+                _ when line.Contains("printf %s \"$HOME\"", StringComparison.Ordinal) => (0, "/home/dev"),
                 _ => (0, string.Empty),
             };
             return Task.FromResult(answer);
@@ -325,6 +331,56 @@ public sealed class SubstrateProvisionerTests
         Assert.Equal(1, exit);
         Assert.Contains("--apply installs the daemon built into this executable - no Rust toolchain needed", report.ToString());
         Assert.DoesNotContain(guest.Commands, Mutates);
+    }
+
+    /// <summary>
+    /// Root installs what provision hands it, and the guest's /tmp is world-writable: any process in it -
+    /// a leased workload included, which runs as nobody - can create a path there before provision does.
+    /// The source build used /tmp/splat_agent_target, so whoever made that directory first owned what root
+    /// installed out of it; the shipped install sent its startup check to a fixed /tmp file, which a file
+    /// planted under that name made fail, with the planter's text given as the reason.
+    /// </summary>
+    [Fact]
+    public async Task NeitherWayOfInstallingTheDaemon_GoesThroughTheGuestsTmp()
+    {
+        var building = new ScriptedGuest { HasAgent = false, HasCargo = true };
+        await SubstrateProvisioner.RunAsync(
+            new McpServerCommand.Provision(Apply: true), new StringWriter(), building.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
+
+        using var shipped = new ShippedAgent();
+        var carrying = new ScriptedGuest { HasAgent = false };
+        await SubstrateProvisioner.RunAsync(
+            new McpServerCommand.Provision(Apply: true), new StringWriter(), carrying.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
+
+        Assert.DoesNotContain(building.Commands.Concat(carrying.Commands), command => command.Contains("/tmp", StringComparison.Ordinal));
+        // The build lands in the building user's own cache, and root installs it from there.
+        Assert.Contains(building.Commands, command => command.Contains("install -D", StringComparison.Ordinal)
+            && command.Contains("/home/dev/.cache/splat-agent-target/release/splat-agent", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The shipped daemon reaches the guest as a file in this user's Windows temp directory, which every
+    /// process in the guest can write: DrvFs lists it rwxrwxrwx, and on 2026-09-13 `nobody` appended to
+    /// one. So root hashes its own copy - made where only root can write - against the bytes this
+    /// executable carries, before it runs that copy or moves it into place.
+    /// </summary>
+    [Fact]
+    public async Task AShippedDaemonChangedOnItsWayIntoTheGuest_IsNotInstalled()
+    {
+        using var shipped = new ShippedAgent();
+        var guest = new ScriptedGuest { HasAgent = false, ShippedAgentAlteredInTransit = true };
+        var report = new StringWriter();
+
+        int exit = await SubstrateProvisioner.RunAsync(
+            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
+
+        Assert.Equal(1, exit);
+        Assert.Contains(guest.Commands, command => command.Contains($"SPLAT_AGENT_SHA256={shipped.Sha256}", StringComparison.Ordinal));
+        Assert.Contains("does not match the daemon built into this executable", report.ToString());
+        Assert.DoesNotContain(guest.Commands, command => command.Contains("systemctl", StringComparison.Ordinal));
     }
 
     [Theory]

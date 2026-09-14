@@ -24,10 +24,20 @@ public class WslLeasedExecutor : ILeasedExecutor
     private readonly int _port;
 
     /// <summary>
-    /// The daemon's shared secret. Read AFTER <see cref="EnsureDaemonRunningAsync"/>, never before:
-    /// the file does not exist until the daemon has started once.
+    /// The daemon's shared secret. Read once a connection to the daemon is open, never before: the file
+    /// does not exist until the daemon has started once.
     /// </summary>
     private readonly WslAgentToken _token;
+
+    /// <summary>What runs when a connection is refused; its exit code says whether the daemon started.</summary>
+    private readonly Func<CancellationToken, Task<int>> _startDaemon;
+
+    /// <summary>
+    /// For reaching a daemon whose port refused the first connection: long enough to boot a stopped
+    /// guest, have systemd start the service and let the daemon load its BPF programs before it binds;
+    /// bounded, so a service that starts and then exits refuses the lease instead of holding it open.
+    /// </summary>
+    private static readonly TimeSpan DaemonStartBudget = TimeSpan.FromSeconds(30);
 
     /// <param name="authTokenPath">
     /// Where the daemon keeps its shared secret inside the guest.
@@ -43,14 +53,26 @@ public class WslLeasedExecutor : ILeasedExecutor
         int port = 50051,
         string authTokenPath = "/etc/splat/agent.token",
         string? authToken = null)
-    {
-        _host = host;
-        _port = port;
         // The shared default unless this caller named its own path or token, so one host reads the
         // secret once however many components talk to the daemon.
-        _token = authTokenPath == WslAgentToken.DefaultPath && string.IsNullOrWhiteSpace(authToken)
+        : this(host, port, authTokenPath == WslAgentToken.DefaultPath && string.IsNullOrWhiteSpace(authToken)
             ? WslAgentToken.Default
-            : new WslAgentToken(authTokenPath, authToken);
+            : new WslAgentToken(authTokenPath, authToken))
+    {
+    }
+
+    /// <param name="token">The daemon's secret, for a host or a test that obtains it its own way.</param>
+    /// <param name="startDaemon">
+    /// What to run when nothing is listening; by default `systemctl start splat-agent` as root in the
+    /// guest. Replaceable so that a test can stand in for the service instead of starting the real one.
+    /// </param>
+    public WslLeasedExecutor(string host, int port, WslAgentToken token, Func<CancellationToken, Task<int>>? startDaemon = null)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        _host = host;
+        _port = port;
+        _token = token;
+        _startDaemon = startDaemon ?? StartInstalledServiceAsync;
     }
 
     /// <summary>The envelope version this bridge speaks; the daemon refuses anything else.</summary>
@@ -75,17 +97,12 @@ public class WslLeasedExecutor : ILeasedExecutor
         int exitCode = -1;
         bool timedOut = false;
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, lease.LeaseDurationSeconds)));
-
         try
         {
-            await EnsureDaemonRunningAsync(cts.Token);
-
-            using var client = new TcpClient();
-            
-            // Connect to guest daemon (AF_VSOCK port mapped or loopback mirrored)
-            await client.ConnectAsync(_host, _port, cts.Token);
+            // Nothing before the request is the workload, so none of it is charged to the lease. Its clock
+            // used to start here and pay for starting the daemon, the connect and a cold wsl.exe token
+            // read, so a slow start came back as an expired lease and a slow read as a missing token.
+            using var client = await ConnectToDaemonAsync(ct);
             using var stream = client.GetStream();
             using var reader = new StreamReader(stream, Encoding.UTF8);
             // UTF-8 WITHOUT a byte order mark. `Encoding.UTF8` emits one, so StreamWriter prepended
@@ -99,7 +116,13 @@ public class WslLeasedExecutor : ILeasedExecutor
 
             // The daemon refuses an EXECUTE_TOOL that does not present its token, so a bridge that
             // cannot read one has nothing to send and should say why rather than get a bare refusal.
-            string? authToken = await _token.GetAsync(cts.Token);
+            string? authToken;
+            using (var tokenCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                tokenCts.CancelAfter(WslAgentToken.ReadBudget);
+                authToken = await _token.GetAsync(tokenCts.Token);
+            }
+
             if (string.IsNullOrEmpty(authToken))
             {
                 throw new InvalidOperationException(
@@ -145,6 +168,10 @@ public class WslLeasedExecutor : ILeasedExecutor
             };
 
             string jsonPayload = JsonSerializer.Serialize(payload);
+
+            // The lease's clock starts with the request it times.
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, lease.LeaseDurationSeconds)));
             await writer.WriteLineAsync(jsonPayload.AsMemory(), cts.Token);
 
             // 2. Stream Inbound Output Chunks
@@ -252,63 +279,101 @@ public class WslLeasedExecutor : ILeasedExecutor
             FinalMetrics: JobResourceMetrics.Unavailable);
     }
 
-    private async Task EnsureDaemonRunningAsync(CancellationToken ct)
+    /// <summary>
+    /// An open connection to the daemon, starting the installed service first if nothing is listening.
+    ///
+    /// This used to race a probe connect against 200 ms and, whenever the probe lost - which load makes
+    /// likely - run a root script that launched the first splat-agent it found at
+    /// /tmp/splat_agent_target or in this repository's target/, if pgrep saw none running. A connect
+    /// that loses a race is not an absent daemon; and the guest's /tmp is world-writable, so any
+    /// unprivileged process in it, a leased workload included, could leave a file there for root to
+    /// run. Now only a refused connection means nothing is listening, and the one thing started is the
+    /// unit `splat-mcp provision` installs, whose binary is root's own under /opt/splat.
+    /// </summary>
+    private async Task<TcpClient> ConnectToDaemonAsync(CancellationToken ct)
     {
-        try
-        {
-            using var probe = new TcpClient();
-            var connectTask = probe.ConnectAsync(_host, _port, ct).AsTask();
-            if (await Task.WhenAny(connectTask, Task.Delay(200, ct)) == connectTask && probe.Connected)
-            {
-                return;
-            }
-        }
-        catch
-        {
-            // Daemon is not responding; attempt to bootstrap it in WSL2
-        }
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(DaemonStartBudget);
+
+        // What the budget is being spent on, so running out of it names the step that never finished.
+        string waitingFor = $"an answer from {_host}:{_port}";
+        bool started = false;
 
         try
         {
-            // Loopback only. This previously launched the daemon with `--listen 0.0.0.0:50051`,
-            // undoing the fix that made the daemon's own default loopback: the control plane that
-            // executes leased processes was reachable from the guest's network interfaces - and on
-            // the LAN under mirrored networking - as an unauthenticated way to run commands inside
-            // the sandbox. Binding a containment control plane to a wildcard address is never right.
-            //
-            // The binary is taken from the build's CARGO_TARGET_DIR (see run-daemon.sh) with the
-            // in-tree target/ as a fallback; the old path named only the latter, which the standard
-            // build never produces.
-            const string daemonPaths =
-                "/tmp/splat_agent_target/release/splat-agent " +
-                "/mnt/c/C_AGENT_BUILDER/native/splat-agent/target/release/splat-agent";
+            while (true)
+            {
+                var client = new TcpClient();
+                try
+                {
+                    await client.ConnectAsync(_host, _port, budget.Token);
+                    return client;
+                }
+                catch (Exception ex)
+                {
+                    client.Dispose();
+                    if (ex is not SocketException { SocketErrorCode: SocketError.ConnectionRefused })
+                    {
+                        throw;
+                    }
+                }
 
-            var psi = new ProcessStartInfo
-            {
-                FileName = "wsl.exe",
-                Arguments =
-                    "-u root -e /bin/bash -l -c \"export PATH=/root/.cargo/bin:$PATH; " +
-                    "if ! pgrep -x splat-agent >/dev/null; then " +
-                    $"for d in {daemonPaths}; do " +
-                    "[ -x \\\"$d\\\" ] && { \\\"$d\\\" --listen 127.0.0.1:50051 >/tmp/splat-agent.log 2>&1 & break; }; " +
-                    "done; fi\"",
-                UseShellExecute = false,
-                // Same reason as the token read: an inherited stdin is the caller's protocol stream,
-                // and this runs on EVERY leased execution.
-                RedirectStandardInput = true,
-                CreateNoWindow = true
-            };
-            using var proc = Process.Start(psi);
-            if (proc != null)
-            {
-                proc.StandardInput.Close();
-                await proc.WaitForExitAsync(ct);
-                await Task.Delay(400, ct);
+                if (!started)
+                {
+                    waitingFor = "`systemctl start splat-agent` in WSL to return";
+                    int exit = await _startDaemon(budget.Token);
+                    if (exit != 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"Nothing is listening at {_host}:{_port}, and `systemctl start splat-agent` in WSL exited {exit}"
+                            + (exit == 5 ? " - the service is not installed." : ".")
+                            + " `splat-mcp provision --apply` installs and starts it.");
+                    }
+
+                    started = true;
+                    waitingFor = $"splat-agent to listen at {_host}:{_port} once started; `journalctl -u splat-agent` in WSL says why it did not";
+                }
+
+                // Windows paces this already - a refused loopback connect takes it about two seconds - but
+                // not every host refuses that slowly.
+                await Task.Delay(TimeSpan.FromMilliseconds(250), budget.Token);
             }
         }
-        catch
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            // Best-effort daemon bootstrap
+            throw new TimeoutException($"Waited {DaemonStartBudget.TotalSeconds:0} seconds for {waitingFor}.");
         }
+    }
+
+    /// <summary>
+    /// `systemctl start splat-agent` as root in the guest, booting the guest first if it has stopped, and
+    /// its exit code: 0 once the unit is running, 5 when it is not installed.
+    /// </summary>
+    private static async Task<int> StartInstalledServiceAsync(CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "wsl.exe",
+            // An absolute path and no shell: this runs as root, so nothing in it is looked up.
+            Arguments = "-u root -e /bin/systemctl start splat-agent",
+            UseShellExecute = false,
+            // All three. Under splat-mcp this process's stdin and stdout are the JSON-RPC channel: an
+            // inherited stdin is consumed by wsl.exe, and anything written to an inherited stdout lands
+            // in the middle of a reply.
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+
+        using var proc = Process.Start(psi) ?? throw new InvalidOperationException("wsl.exe did not start.");
+        proc.StandardInput.Close();
+
+        // Drained, not read: the exit code is the answer, and the journal has the detail.
+        await Task.WhenAll(
+            proc.StandardOutput.ReadToEndAsync(ct),
+            proc.StandardError.ReadToEndAsync(ct),
+            proc.WaitForExitAsync(ct));
+        return proc.ExitCode;
     }
 }

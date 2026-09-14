@@ -139,10 +139,13 @@ own mount namespace.
 referenced by `splat-mcp` and the tests. The console does not reference it.
 
 - **[`WslLeasedExecutor`](../src/MissionController.Infrastructure.Linux/WslLeasedExecutor.cs)**
-  (`ILeasedExecutor`). Probes the port; if nothing answers, starts the daemon as root through
-  `wsl.exe` from the build's `CARGO_TARGET_DIR` or the in-tree `target/`, bound to loopback and
-  logging to `/tmp/splat-agent.log`. Takes the token from an explicit argument, then
-  `SPLAT_AGENT_TOKEN`, then `wsl.exe -u root -e /bin/cat /etc/splat/agent.token`, and caches it.
+  (`ILeasedExecutor`). Connects to the port, and only when the connection is refused runs
+  `systemctl start splat-agent` as root through `wsl.exe` — the unit `splat-mcp provision` installs —
+  then waits up to 30 seconds for it to listen; a service that is not installed is refused by name,
+  pointing at `splat-mcp provision --apply`. It never launches a daemon binary itself. Takes the token
+  from an explicit argument, then `SPLAT_AGENT_TOKEN`, then
+  `wsl.exe -u root -e /bin/cat /etc/splat/agent.token`, under a 15-second budget of its own, and
+  caches it; the lease's clock starts only when the request is sent.
   Sends a version-2 envelope in UTF-8 **without** a byte-order mark — a BOM once made every request
   invalid JSON — carrying the lease as *paths*, because an inode number read on Windows means
   nothing in the guest. Reports resource metrics as `JobResourceMetrics.Unavailable`, because the

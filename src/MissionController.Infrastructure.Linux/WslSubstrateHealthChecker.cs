@@ -40,12 +40,6 @@ public class WslSubstrateHealthChecker
     private readonly WslAgentToken _token;
     private readonly TimeSpan _timeout;
 
-    /// <summary>
-    /// For reading the token, apart from the daemon's budget: long enough for a cold wsl.exe on a guest
-    /// still booting, and bounded so a wedged WSL cannot hold a health check open indefinitely.
-    /// </summary>
-    private static readonly TimeSpan TokenReadBudget = TimeSpan.FromSeconds(15);
-
     /// <param name="timeout">
     /// How long the exchange with the daemon gets; the token is read before it, under a budget of its
     /// own. Two seconds is a policy about a status badge - a health
@@ -100,7 +94,7 @@ public class WslSubstrateHealthChecker
             string? token;
             using (var tokenCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
-                tokenCts.CancelAfter(TokenReadBudget);
+                tokenCts.CancelAfter(WslAgentToken.ReadBudget);
                 token = await _token.GetAsync(tokenCts.Token);
             }
 

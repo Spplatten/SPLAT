@@ -2,7 +2,7 @@
 # Exercise a RUNNING splat-agent over its JSON line protocol and report what the kernel actually did.
 #
 # The daemon must already be running as root in another terminal:
-#     sudo /tmp/splat_agent_target/release/splat-agent
+#     bash run-daemon.sh
 #
 # This is only a client, but it does need to READ the daemon's token: EXECUTE_TOOL carries a
 # root-owned 0600 secret, so the one privileged step here is `sudo cat` on that file.

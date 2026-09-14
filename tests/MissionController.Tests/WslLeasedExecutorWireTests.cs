@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using MissionController.Core.Interfaces;
@@ -51,19 +52,7 @@ public class WslLeasedExecutorWireTests
     [Fact]
     public void EveryChildProcessTheBridgeStarts_GetsItsOwnStdin()
     {
-        // Every file in the bridge, not just the executor: the token read moved to its own class
-        // once the health check needed it too, and a guard that named one file would have stopped
-        // covering it at exactly that moment.
-        string project = Path.Combine(RepositoryRoot(), "src", "MissionController.Infrastructure.Linux");
-        var declarations = Directory.EnumerateFiles(project, "*.cs", SearchOption.AllDirectories)
-            .SelectMany(file => File.ReadAllText(file).Split("new ProcessStartInfo").Skip(1))
-            // Up to the Process.Start that consumes it. Not to the closing brace: one of these
-            // initializers carries a shell snippet containing "};" inside a string literal.
-            .Select(block => block[..Math.Max(0, block.IndexOf("Process.Start", StringComparison.Ordinal))])
-            .ToList();
-
-        Assert.NotEmpty(declarations);
-        foreach (string declaration in declarations)
+        foreach (string declaration in ChildProcessDeclarations())
         {
             Assert.True(
                 declaration.Contains("RedirectStandardInput = true", StringComparison.Ordinal),
@@ -71,6 +60,45 @@ public class WslLeasedExecutorWireTests
                 + "inherits the host's. Under splat-mcp that is the MCP client's JSON-RPC stream, and wsl.exe "
                 + "consumes it:\n" + declaration);
         }
+    }
+
+    /// <summary>
+    /// Every child this bridge starts runs as root, so each is one program named by an absolute path
+    /// under /bin, and never a shell.
+    ///
+    /// The daemon bootstrap was `/bin/bash -l -c` around a loop that ran the first splat-agent it found
+    /// at /tmp/splat_agent_target or in this repository's target/. The guest's /tmp is world-writable,
+    /// so any unprivileged process in it - a leased workload included - could have left a file there
+    /// for root to run. Asserted on the source for the same reason as the stdin redirect above.
+    /// </summary>
+    [Fact]
+    public void EveryChildProcessTheBridgeStarts_IsOneProgramUnderBin_NeverAShell()
+    {
+        foreach (string declaration in ChildProcessDeclarations())
+        {
+            Match program = Regex.Match(declaration, @"Arguments = \$?""-u root -e /(?:usr/)?bin/(?<name>[a-z]+) ");
+            Assert.True(program.Success, "A child of the bridge is not one program under /bin, run with -e:\n" + declaration);
+            Assert.DoesNotContain(program.Groups["name"].Value, new[] { "sh", "bash", "dash", "env" });
+        }
+    }
+
+    /// <summary>
+    /// Each ProcessStartInfo initializer in the bridge. Every file in the project, not just the executor:
+    /// the token read moved to its own class once the health check needed it too, and a guard that named
+    /// one file would have stopped covering it at exactly that moment.
+    /// </summary>
+    private static List<string> ChildProcessDeclarations()
+    {
+        string project = Path.Combine(RepositoryRoot(), "src", "MissionController.Infrastructure.Linux");
+        var declarations = Directory.EnumerateFiles(project, "*.cs", SearchOption.AllDirectories)
+            .SelectMany(file => File.ReadAllText(file).Split("new ProcessStartInfo").Skip(1))
+            // Up to the Process.Start that consumes it. Not to the closing brace, which a string literal
+            // inside an initializer can contain.
+            .Select(block => block[..Math.Max(0, block.IndexOf("Process.Start", StringComparison.Ordinal))])
+            .ToList();
+
+        Assert.NotEmpty(declarations);
+        return declarations;
     }
 
     private static string RepositoryRoot()
@@ -97,12 +125,21 @@ public class WslLeasedExecutorWireTests
         LeaseDurationSeconds: 15,
         Limits: new LeaseResourceLimits(64 * 1024 * 1024, 25, 20));
 
+    /// <summary>A loopback port with nothing listening on it, so a connection to it is refused.</summary>
+    private static int UnusedPort()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        return port;
+    }
+
     /// <summary>
     /// Captures the raw request bytes and replies with the given frames.
     ///
-    /// The executor opens a liveness probe connection before the real one and closes it without
-    /// sending anything, so a single Accept would consume the probe and leave the actual request
-    /// unanswered. Keep accepting until a connection actually says something.
+    /// A connection that closes without sending anything - a bridge that refused before it had a
+    /// request to send - is skipped, so a request that does follow is still captured and answered.
     /// </summary>
     private static async Task<byte[]> RunStandInDaemonAsync(TcpListener listener, params string[] responseFrames)
     {
@@ -119,12 +156,12 @@ public class WslLeasedExecutorWireTests
             }
             catch (IOException)
             {
-                continue; // Probe hung up mid-read.
+                continue; // Hung up mid-read.
             }
 
             if (read == 0)
             {
-                continue; // The liveness probe: connected, said nothing, closed.
+                continue; // Connected, said nothing, closed.
             }
 
             foreach (var frame in responseFrames)
@@ -334,6 +371,97 @@ public class WslLeasedExecutorWireTests
         {
             listener.Stop();
         }
+    }
+
+    /// <summary>
+    /// Reading the token spawns wsl.exe, cold on the first lease a host asks for, and that read was
+    /// timed against the lease: a slow one came back as a token that could not be read. The shortest
+    /// lease the bridge times is five seconds and this read takes six, so the lease goes ahead only if
+    /// its clock starts when the request is sent.
+    /// </summary>
+    [Fact]
+    public async Task ASlowTokenRead_IsNotChargedToTheLease()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        _ = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
+
+        var slowToken = new WslAgentToken(async ct =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(6), ct);
+            return TestToken;
+        });
+
+        try
+        {
+            var result = await new WslLeasedExecutor("127.0.0.1", port, slowToken)
+                .ExecuteLeasedAsync(SampleLease() with { LeaseDurationSeconds = 1 }, "/usr/bin/id", Array.Empty<string>());
+
+            Assert.True(result.ExitCode == 0 && !result.TimedOut, result.StandardError);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    /// <summary>
+    /// Only a refused connection means nothing is listening, and what starts then is the installed
+    /// service, once. The bridge used to decide from a 200 ms race, and a connect that lost it ran a
+    /// root bootstrap whether or not a daemon was already listening.
+    /// </summary>
+    [Fact]
+    public async Task ARefusedConnection_StartsTheService_AndADaemonThatAnswersIsNeverStarted()
+    {
+        int port = UnusedPort();
+        var listener = new TcpListener(IPAddress.Loopback, port);
+        int starts = 0;
+
+        var executor = new WslLeasedExecutor("127.0.0.1", port, new WslAgentToken(authToken: TestToken), ct =>
+        {
+            starts++;
+            listener.Start();
+            _ = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
+            return Task.FromResult(0);
+        });
+
+        try
+        {
+            var first = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
+            Assert.True(first.ExitCode == 0, first.StandardError);
+
+            // It answers now, and a daemon that answers is never started again.
+            var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
+            var second = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
+            Assert.True(second.ExitCode == 0, second.StandardError);
+            Assert.Contains("EXECUTE_TOOL", Encoding.UTF8.GetString(await daemon));
+
+            Assert.Equal(1, starts);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    /// <summary>
+    /// A service that is not there is a step the user has not taken yet, so the refusal names the
+    /// command that takes it - and it is a refusal, not a lease that expired: nothing ran.
+    /// </summary>
+    [Fact]
+    public async Task WhenTheServiceIsNotInstalled_TheRefusalNamesTheCommandThatInstallsIt()
+    {
+        var executor = new WslLeasedExecutor("127.0.0.1", UnusedPort(), new WslAgentToken(authToken: TestToken),
+            // systemctl's exit code for a unit it cannot find, as measured in this guest on 2026-09-13.
+            _ => Task.FromResult(5));
+
+        var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.False(result.TimedOut);
+        Assert.Contains("splat-mcp provision --apply", result.StandardError);
     }
 
     /// <summary>
