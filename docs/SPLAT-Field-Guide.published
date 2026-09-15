@@ -29,6 +29,6 @@
 # matches `<header class="hero">`, and an earlier republish lost that opening tag, so the live page
 # rendered its title placard as bare text for months while every other copy looked right.
 
-published  2026-09-14
+published  2026-09-15
 source     docs/SPLAT-Field-Guide.html
-sha256     bc25647457be3b9a347861038b6513f0c0417870ecb71ed40e3192c8a68ff04b
+sha256     376955c84b15a25177e6805821e347fe181a9fd5577d5509ff75c38354e44094
