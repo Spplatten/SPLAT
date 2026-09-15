@@ -15,7 +15,7 @@ below.
 
 **Status.** The program is proven in operation on a stock WSL2 kernel — standalone, and through the
 daemon under root — with evidence bound to the source it ran. The last hop, an agent's request
-travelling from `splat-mcp` through the C# bridge into the daemon, is recorded as of 2026-09-11 in
+travelling from `splat-mcp` through the C# bridge into the daemon, is recorded, most recently on 2026-09-15 under protocol 3, in
 [`last-hop-probe.json`](../native/splat-agent/evidence/last-hop-probe.json). The README's status
 table is the test-bound statement of this; where it and this paragraph disagree, trust the README.
 
@@ -93,22 +93,28 @@ rather than serve work it cannot contain. Then it loads or creates the auth toke
 0600, and refuses to start without one — refuses a workload uid or gid of 0, starts the expiry
 reaper, and binds, loopback by default.
 
+**Every connection, first.** Protocol 3 opens with a handshake, and nothing else is read until it
+holds. The caller's `HELLO` names a nonce; the daemon answers with its own and an HMAC-SHA256 of both
+under the token, which the caller checks before it sends anything more. Each request then travels in
+an `AUTHENTICATED` frame whose proof covers both nonces, the request's place on the connection and its
+exact bytes, checked in fixed time before any of them is parsed. A frame that does not prove itself —
+including a protocol 2 request carrying the token itself — is refused, and the connection closed.
+
 **`EXECUTE_TOOL`, in order:**
 
-1. Authenticate `authToken`, in fixed time, before reading any policy field.
-2. Require `protocolVersion` 2 and an `argv` array. Version 1 carried arguments as one string the
+1. Require `protocolVersion` 3 and an `argv` array. Version 1 carried arguments as one string the
    daemon split on whitespace, and nothing can reconstruct that correctly.
-3. Refuse policy it cannot enforce: `readOnlyFs: true`, `overlayFs.enableCow: true`.
-4. Resolve the clamps. A request may lower the daemon-wide ceilings (`MAX_MEMORY_BYTES_CEILING`,
+2. Refuse policy it cannot enforce: `readOnlyFs: true`, `overlayFs.enableCow: true`.
+3. Resolve the clamps. A request may lower the daemon-wide ceilings (`MAX_MEMORY_BYTES_CEILING`,
    `MAX_CPU_PERCENT_CEILING`, `MAX_PIDS_CEILING`), never raise them.
-5. Create `splat_leases/mission_<id>`, delegate the controllers to it, write `memory.max`,
+4. Create `splat_leases/mission_<id>`, delegate the controllers to it, write `memory.max`,
    `cpu.max` and `pids.max`, and **read them back**. A clamp that did not take refuses the request.
-6. Build the lease. Egress addresses and ports come from the request, and an explicit empty list
+5. Build the lease. Egress addresses and ports come from the request, and an explicit empty list
    means nothing is permitted. Protected paths are the daemon's own defaults **unioned** with the
    request's — a caller can add protection, never remove it. Exec paths come from the request; a
    legacy default applies only when the field is absent, with a warning.
-7. Refuse a lease that does not permit its own command.
-8. Register the lease: resolve each path to an inode, write every map entry, and roll back the
+6. Refuse a lease that does not permit its own command.
+7. Register the lease: resolve each path to an inode, write every map entry, and roll back the
    partial writes on failure.
 9. Spawn. In `pre_exec` — async-signal-safe code in the forked child of a multithreaded process —
    write `0` to the cgroup's `cgroup.procs`, then `setgroups(0)`, `setresgid` and `setresuid` to the
@@ -146,7 +152,10 @@ referenced by `splat-mcp` and the tests. The console does not reference it.
   from an explicit argument, then `SPLAT_AGENT_TOKEN`, then
   `wsl.exe -u root -e /bin/cat /etc/splat/agent.token`, under a 15-second budget of its own, and
   caches it; the lease's clock starts only when the request is sent.
-  Sends a version-2 envelope in UTF-8 **without** a byte-order mark — a BOM once made every request
+  Opens a protocol 3 session through
+  [`WslAgentSession`](../src/MissionController.Infrastructure.Linux/WslAgentSession.cs): whatever
+  answers must prove it holds the token, within 10 seconds, before anything but a nonce is sent to it.
+  The envelope travels in UTF-8 **without** a byte-order mark — a BOM once made every request
   invalid JSON — carrying the lease as *paths*, because an inode number read on Windows means
   nothing in the guest. Reports resource metrics as `JobResourceMetrics.Unavailable`, because the
   `EXIT` frame carries no cgroup accounting and inventing figures is how arithmetic on constants
@@ -158,7 +167,7 @@ referenced by `splat-mcp` and the tests. The console does not reference it.
   tool definition, and copy-on-write requested off. `splat-mcp` constructs it and passes it to the
   handler, which never calls it; today only the tests exercise it.
 - **[`WslSubstrateHealthChecker`](../src/MissionController.Infrastructure.Linux/WslSubstrateHealthChecker.cs)**.
-  A `.wslconfig` heuristic plus `HEALTH_CHECK`. Its `Enforcing` field is the one to trust.
+  A `.wslconfig` heuristic plus `HEALTH_CHECK`, asked inside a protocol 3 session, so an answer is believed only from something that proved it holds the token. Its `Enforcing` field is the one to trust.
 
 ## Who authors a lease today
 
@@ -183,17 +192,19 @@ is labelled `[SPLAT POLICY]`, never reported as a kernel denial, and ledgered as
 
 ## The transport's trust boundary
 
-Loopback TCP, reached from Windows through WSL2 localhost forwarding and gated by the shared secret
-on **every** request — `HEALTH_CHECK` included, because it answers with `enforcing`, the kernel
-version and the live lease count. Both callers read that secret through
-[`WslAgentToken`](../src/MissionController.Infrastructure.Linux/WslAgentToken.cs), once per host.
-That stops an unprivileged process **inside the guest** from reading the token, not from being
-handed it: the bridge presents the token to whatever answers on the port, and while the daemon is
-not listening any process can bind it — on 2026-09-13 a listener run as `nobody` received what
-Windows sent. Nor does it stop another **Windows** process running as the same user, which can
-read the token exactly as the
-bridge does. A transport that carries peer identity — AF_VSOCK with a guest-side allow-list, or
-`SO_PEERCRED` over AF_UNIX — would close that. It is not built; the live plan pencils it into P2.
+Loopback TCP, reached from Windows through WSL2 localhost forwarding. Every connection opens with
+protocol 3's handshake, and every request — `HEALTH_CHECK` included, because it answers with
+`enforcing`, the kernel version and the live lease count — proves the shared secret without sending
+it. Both callers read that secret through
+[`WslAgentToken`](../src/MissionController.Infrastructure.Linux/WslAgentToken.cs), once per host,
+and speak through [`WslAgentSession`](../src/MissionController.Infrastructure.Linux/WslAgentSession.cs).
+An unprivileged process **inside the guest** cannot read the token, and taking the port while the
+daemon is down no longer yields it: on 2026-09-13 a listener run as `nobody` received what Windows
+sent, which under protocol 2 was the token itself, and such a listener is now sent one nonce and
+cannot produce the proof the caller checks before sending anything more. That does not stop another
+**Windows** process running as the same user, which can read the token exactly as the bridge does. A
+transport that carries peer identity — AF_VSOCK with a guest-side allow-list, or `SO_PEERCRED` over
+AF_UNIX — would close that. It is not built; the live plan pencils it into P2.
 
 ## Evidence, and how it is re-run
 

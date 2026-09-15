@@ -24,9 +24,10 @@ public record WslSubstrateStatus(
     /// </summary>
     bool Enforcing = false,
     /// <summary>
-    /// Whether the daemon accepted this host's token and answered. False with
-    /// <see cref="DaemonReachable"/> true means it is running and would not say anything — which is
-    /// a different fault from an absent daemon, and from one that answers "not enforcing".
+    /// Whether the daemon proved it holds this host's token and answered a request that proved it back.
+    /// False with <see cref="DaemonReachable"/> true means something is listening that would not answer,
+    /// or that could not prove it is the daemon — a different fault from an absent daemon, and from one
+    /// that answers "not enforcing".
     /// </summary>
     bool Authenticated = false);
 
@@ -104,15 +105,30 @@ public class WslSubstrateHealthChecker
             using var client = new TcpClient();
             await client.ConnectAsync(_host, _port, cts.Token);
             using var stream = client.GetStream();
-            using var reader = new StreamReader(stream);
-            using var writer = new StreamWriter(stream) { AutoFlush = true };
 
-            // The health check is authenticated like every other request. It reports whether this
-            // host's containment is live, how many leases are running and which kernel is under
-            // them - state an unauthenticated caller has no business reading, and which told an
-            // attacker exactly when the daemon would run work it could not contain.
-            await writer.WriteLineAsync(JsonSerializer.Serialize(new { type = "HEALTH_CHECK", authToken = token ?? "" }));
-            string? response = await reader.ReadLineAsync(cts.Token);
+            // Something is listening. Without the token this host can neither check that it is the daemon
+            // nor prove anything to it, so nothing is sent.
+            if (string.IsNullOrEmpty(token))
+            {
+                return new WslSubstrateStatus(
+                    WslConfiguredForBpf: wslConfigured,
+                    DaemonReachable: true,
+                    BpfLsmActive: false,
+                    CgroupV2Active: false,
+                    OverlayFsSupported: false,
+                    KernelVersion: "Unknown",
+                    ActiveLeaseCount: 0,
+                    Message: $"Daemon reachable, but this host could not read its token at {_token.Path}, so it cannot authenticate a health check.");
+            }
+
+            // The health check is authenticated like every other request. It reports whether this host's
+            // containment is live, how many leases are running and which kernel is under them - state an
+            // unauthenticated caller has no business reading. And the answer is believed only from something
+            // that proved it holds the token: whatever took the daemon's port could otherwise report
+            // `enforcing` for a daemon that is not running.
+            using var session = await WslAgentSession.OpenAsync(stream, token, cts.Token);
+            await session.SendAsync(JsonSerializer.Serialize(new { type = "HEALTH_CHECK" }), cts.Token);
+            string? response = await session.ReadLineAsync(cts.Token);
 
             if (!string.IsNullOrEmpty(response))
             {
@@ -134,9 +150,10 @@ public class WslSubstrateHealthChecker
                         OverlayFsSupported: false,
                         KernelVersion: "Unknown",
                         ActiveLeaseCount: 0,
-                        Message: token is null
-                            ? $"Daemon reachable, but this host could not read its token at {_token.Path}, so the health check was refused."
-                            : "Daemon reachable, but it refused the health check: the token this host holds is not the one it expects.");
+                        Message: "Daemon reachable, and it proved it holds this host's token, but it refused the health check: "
+                            + (root.TryGetProperty("data", out var said) && said.GetString() is { Length: > 0 } reason
+                                ? reason.Trim()
+                                : "it gave no reason."));
                 }
 
                 bool enforcing = root.TryGetProperty("enforcing", out var enf) && enf.GetBoolean();
@@ -152,9 +169,23 @@ public class WslSubstrateHealthChecker
                         ? "SPLAT Linux substrate online and enforcing."
                         : "SPLAT Linux daemon is reachable but NOT enforcing: leases it accepts do not reach the kernel. Treat any tool it runs as uncontained.",
                     Enforcing: enforcing,
-                    // It answered, which it only does for a request carrying the token it expects.
+                    // It answered, which it does only for a request that proved the token.
                     Authenticated: true);
             }
+        }
+        catch (WslAgentHandshakeException ex)
+        {
+            // Something answered on the daemon's port and did not prove it holds the token. It is reported
+            // as reachable, because something is, and as nothing more.
+            return new WslSubstrateStatus(
+                WslConfiguredForBpf: wslConfigured,
+                DaemonReachable: true,
+                BpfLsmActive: false,
+                CgroupV2Active: false,
+                OverlayFsSupported: false,
+                KernelVersion: "Unknown",
+                ActiveLeaseCount: 0,
+                Message: ex.Message);
         }
         catch (Exception ex)
         {

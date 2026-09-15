@@ -283,7 +283,7 @@ and a green run proved nothing.
 | 0.6 Commit the evidence file | either | **done** |
 
 The daemon-level equivalent went further and is also done: `native/splat-agent/evidence/daemon-probe.json`,
-PASS on 17 checks under a root daemon, which is what [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md)
+PASS on 19 checks under a root daemon, which is what [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md)
 cites for every claim in its enforced tables. The hop into it from a real MCP client is recorded
 separately, in `evidence/last-hop-probe.json`; `native/splat-agent/probe-last-hop.ps1` re-runs that
 one from Windows against the same root daemon, and needs no `sudo` of its own.

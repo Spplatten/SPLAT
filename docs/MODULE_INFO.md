@@ -252,7 +252,8 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 
 - **Crate:** `splat-agent` 0.2.0, edition 2021. **Dependencies:** `libbpf-rs` 0.24 — its API still
   moves, so the version is pinned — plus `tokio`, `clap`, `serde`, `serde_json`, `libc`, `anyhow`,
-  `ctrlc`, `tracing`; `libbpf-cargo` 0.24 at build time.
+  `ctrlc`, `tracing`, and `hmac` 0.12 with `sha2` 0.10 for protocol 3's handshake; `libbpf-cargo` 0.24
+  at build time.
 - **Owns:** [`src/main.rs`](../native/splat-agent/src/main.rs) — the daemon and its protocol;
   [`lease.rs`](../native/splat-agent/src/lease.rs), [`cgroup.rs`](../native/splat-agent/src/cgroup.rs),
   [`auth.rs`](../native/splat-agent/src/auth.rs), [`violation.rs`](../native/splat-agent/src/violation.rs),

@@ -4,8 +4,9 @@
 # The daemon must already be running as root in another terminal:
 #     bash run-daemon.sh
 #
-# This is only a client, but it does need to READ the daemon's token: EXECUTE_TOOL carries a
-# root-owned 0600 secret, so the one privileged step here is `sudo cat` on that file.
+# This is only a client, but it does need to READ the daemon's token: every request proves the
+# root-owned 0600 secret - protocol 3 never sends it - so the one privileged step here is `sudo cat`
+# on that file.
 #
 # Usage:  bash probe-daemon.sh [host:port] [token-file]
 set -uo pipefail
@@ -28,23 +29,39 @@ fi
 [ -n "$TOKEN" ] || echo "  WARNING: no token read from $TOKEN_FILE - every EXECUTE_TOOL will be refused."
 
 python3 - "$HOST" "$PORT" "$TOKEN" <<'PY'
-import json, os, socket, sys, threading, time
+import hashlib, hmac, json, os, socket, sys, threading, time
 
 host, port = sys.argv[1], int(sys.argv[2])
 token = sys.argv[3] if len(sys.argv) > 3 else ""
 
-def call(req, label, settle=2.0):
-    """Send one request, collect every response line until the daemon stops talking."""
-    # Every EXECUTE_TOOL has carried a root-owned shared secret since the peer-auth change; a
-    # probe that omits it is refused at the gate and learns nothing about the kernel. Injected
-    # here rather than at six call sites so no future probe can forget it.
+# One entry per session: its label, and whether the daemon proved it holds the token. Kept out of the
+# messages, which the checks below read as the daemon's own words.
+handshakes = []
+
+def read_line(s, buf):
+    """One frame from the socket, and whatever arrived after it."""
+    while b"\n" not in buf:
+        chunk = s.recv(65536)
+        if not chunk:
+            break
+        buf += chunk
+    line, _, rest = buf.partition(b"\n")
+    return line, rest
+
+def prove(key, label, client_nonce, server_nonce, tail=b""):
+    return hmac.new(key, label + bytes([0]) + client_nonce + server_nonce + tail, hashlib.sha256).hexdigest()
+
+def call(req, label, settle=2.0, forge=None, clear=False):
+    """Open a protocol 3 session, send one request, collect every response line until the daemon stops talking.
+
+    The token never crosses the wire. The daemon proves it holds it first - recorded in `handshakes`
+    and nothing is sent to a daemon that cannot - and the request carries a proof back. `forge`
+    makes that proof under another key, as a caller without the token would; `clear` sends the request with
+    the token in it instead, as a protocol 2 caller did.
+    """
+    # Injected here rather than at the call sites, so no future probe can forget it.
     if req.get("type") == "EXECUTE_TOOL":
-        req = dict(req, authToken=token, protocolVersion=2)
-    # The health check is authenticated too, since 2026-09-11: it answers with `enforcing`, the
-    # kernel version and the live lease count. A request that names its own token keeps it - that is
-    # how the unauthenticated case below is written.
-    elif req.get("type") == "HEALTH_CHECK" and "authToken" not in req:
-        req = dict(req, authToken=token)
+        req = dict(req, protocolVersion=3)
     out = []
     try:
         s = socket.create_connection((host, port), timeout=5)
@@ -52,9 +69,40 @@ def call(req, label, settle=2.0):
         print(f"  [{label}] CANNOT CONNECT: {e}")
         return None
     with s:
-        s.sendall((json.dumps(req) + "\n").encode())
-        s.settimeout(settle)
         buf = b""
+        try:
+            if clear:
+                s.sendall((json.dumps(dict(req, authToken=token)) + "\n").encode())
+            else:
+                client_nonce = os.urandom(32)
+                hello = {"type": "HELLO", "protocolVersion": 3, "clientNonce": client_nonce.hex()}
+                s.sendall((json.dumps(hello) + "\n").encode())
+                first, buf = read_line(s, buf)
+                try:
+                    challenge = json.loads(first)
+                except ValueError:
+                    challenge = {"type": "RAW", "data": first.decode(errors="replace")}
+                if challenge.get("type") != "CHALLENGE":
+                    out.append(challenge)
+                    return out
+                try:
+                    server_nonce = bytes.fromhex(str(challenge.get("serverNonce", "")))
+                except ValueError:
+                    server_nonce = b""
+                expected = prove(token.encode(), b"splat-agent/3 daemon", client_nonce, server_nonce)
+                proven = len(server_nonce) == 32 and hmac.compare_digest(
+                    expected.encode(), str(challenge.get("serverProof", "")).encode(errors="replace"))
+                handshakes.append((label, proven))
+                if not proven:
+                    return out
+                body = json.dumps(req)
+                proof = prove((forge or token).encode(), b"splat-agent/3 request", client_nonce, server_nonce,
+                              (0).to_bytes(8, "big") + body.encode())
+                s.sendall((json.dumps({"type": "AUTHENTICATED", "proof": proof, "request": body}) + "\n").encode())
+        except socket.timeout:
+            out.append({"type": "RAW", "data": "no answer to the handshake"})
+            return out
+        s.settimeout(settle)
         try:
             while True:
                 chunk = s.recv(65536)
@@ -285,10 +333,16 @@ undeclared_exec = show(call({
 
 print()
 print("== 13. HEALTH CHECK: the state of this host is not public either ==")
-print("   It answers with `enforcing`, the kernel version and the live lease count - so an open")
-print("   health check told an unauthenticated caller exactly when the daemon would run work it")
-print("   could not contain. Check 1 above is the control: with the token, it still answers.")
-unauth_health = show(call({"type": "HEALTH_CHECK", "authToken": ""}, "health-unauthenticated"), "health-unauthenticated")
+print("   It answers with `enforcing`, the kernel version and the live lease count. A request whose")
+print("   proof was made without the token is refused. Check 1 above is the control, and its session")
+print("   also records that the daemon proved it holds the token before anything was sent to it.")
+unauth_health = show(call({"type": "HEALTH_CHECK"}, "health-unauthenticated", forge="not the daemon's token"), "health-unauthenticated")
+
+print()
+print("== 14. PROTOCOL 2: the token in the clear is refused, even the right one ==")
+print("   Protocol 2 put the token in every request, so a caller handed it to whatever held the port.")
+print("   A daemon that still accepted that form would make capturing the token worth something.")
+clear_health = show(call({"type": "HEALTH_CHECK"}, "health-protocol-2", clear=True), "health-protocol-2")
 
 def had(msgs, t):
     return any(m.get("type") == t for m in (msgs or []))
@@ -388,9 +442,13 @@ print(f"  undeclared exec list refused   : {undeclared_exec_refused}")
 # Both halves, or neither is a measurement: a daemon that answered nobody would also score the
 # refusal True.
 health_answered = had(health, "HEALTH_RESPONSE")
-unauth_health_refused = not had(unauth_health, "HEALTH_RESPONSE") and "authToken" in text(unauth_health)
+unauth_health_refused = not had(unauth_health, "HEALTH_RESPONSE") and "proof" in text(unauth_health)
+daemon_proved_itself = bool(handshakes) and all(proven for _, proven in handshakes)
+clear_token_refused = not had(clear_health, "HEALTH_RESPONSE") and "protocol 3" in text(clear_health)
 print(f"  health check answers a holder  : {health_answered}")
 print(f"  health check refuses a stranger: {unauth_health_refused}")
+print(f"  daemon proved it holds token   : {daemon_proved_itself}")
+print(f"  token in the clear refused     : {clear_token_refused}")
 
 # A run that is not recorded is not proof - the same rule the canary follows.
 import datetime
@@ -406,9 +464,9 @@ except OSError:
     bpf_sha = "unreadable"
 
 evidence = {
-    "schema": 2,
+    "schema": 3,
     "bpf_source_sha256": bpf_sha,
-    "protocol_version": 2,
+    "protocol_version": 3,
     "recorded_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
     "results": {
@@ -443,6 +501,11 @@ evidence = {
         # it cannot contain, which is the one thing an attacker most wants to know.
         "health_check_answers_a_token_holder": health_answered,
         "unauthenticated_health_check_refused": unauth_health_refused,
+        # Protocol 3: the token never crosses the wire. The daemon proves it holds it before a caller
+        # sends anything, and the old form that carried it - which whatever held the port could
+        # collect - is refused even with the right token.
+        "daemon_proved_it_holds_the_token": daemon_proved_itself,
+        "protocol_2_token_in_the_clear_refused": clear_token_refused,
     },
     "violations": [
         {k: m.get(k) for k in ("hook", "pid", "detail", "detailText", "comm") if k in m}
@@ -476,6 +539,8 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["undeclared_exec_list_refused"]
     and evidence["results"]["health_check_answers_a_token_holder"]
     and evidence["results"]["unauthenticated_health_check_refused"]
+    and evidence["results"]["daemon_proved_it_holds_the_token"]
+    and evidence["results"]["protocol_2_token_in_the_clear_refused"]
 ) else "INCOMPLETE"
 
 out_dir = os.environ.get("SPLAT_EVIDENCE_DIR", "/mnt/c/C_AGENT_BUILDER/native/splat-agent/evidence")

@@ -26,7 +26,7 @@ public class SubstrateHealthHonestyTests
     /// See <see cref="WslSubstrateHealthChecker"/>'s constructor for why this is not the default.
     /// </summary>
     private static readonly TimeSpan ReplyBudget = TimeSpan.FromSeconds(30);
-    /// <summary>Answers one HEALTH_CHECK with a caller-chosen body, the way the daemon would.</summary>
+    /// <summary>Answers one HEALTH_CHECK with a caller-chosen body, the way the daemon would: after the handshake.</summary>
     private sealed class FakeDaemon : IDisposable
     {
         private readonly TcpListener _listener;
@@ -46,10 +46,7 @@ public class SubstrateHealthHonestyTests
                 {
                     using var client = await _listener.AcceptTcpClientAsync(_cts.Token);
                     using var stream = client.GetStream();
-                    using var reader = new StreamReader(stream);
-                    using var writer = new StreamWriter(stream) { AutoFlush = true };
-                    await reader.ReadLineAsync(_cts.Token);
-                    await writer.WriteLineAsync(healthJson);
+                    await StandInAgent.ServeAsync(stream, Token, new[] { healthJson }, _cts.Token);
                     await Task.Delay(200, _cts.Token);
                 }
                 catch { /* the test finished first */ }
@@ -69,7 +66,9 @@ public class SubstrateHealthHonestyTests
     /// health check is authenticated, and what is under test here is what the checker believes
     /// about an answer - not how this host obtains its secret.
     /// </summary>
-    private static WslAgentToken HermeticToken => new(authToken: "0123456789abcdef");
+    private const string Token = "0123456789abcdef";
+
+    private static WslAgentToken HermeticToken => new(authToken: Token);
 
     private const string EnforcingBody =
         """{"type":"HEALTH_RESPONSE","bpfLsmActive":true,"cgroupV2Active":true,"overlayFsSupported":true,"kernelVersion":"6.18.33.2-microsoft-standard-WSL2","enforcing":true,"activeLeaseCount":0}""";
@@ -141,6 +140,39 @@ public class SubstrateHealthHonestyTests
 
         Assert.True(status.DaemonReachable);
         Assert.True(status.Enforcing);
+    }
+
+    /// <summary>
+    /// Whatever takes the daemon's port can answer a health check with the one thing a caller wants to hear.
+    /// Nothing is believed from something that has not proved it holds the token: this one answers the
+    /// handshake itself with an enforcing HEALTH_RESPONSE.
+    /// </summary>
+    [Fact]
+    public async Task ASquatterClaimingEnforcement_IsNotBelieved()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var squatter = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync();
+            using var stream = client.GetStream();
+            return await StandInAgent.ImpersonateAsync(stream, _ => EnforcingBody);
+        });
+
+        try
+        {
+            var status = await new WslSubstrateHealthChecker("127.0.0.1", port, HermeticToken, ReplyBudget).CheckHealthAsync();
+            await squatter;
+
+            Assert.True(status.DaemonReachable);
+            Assert.False(status.Authenticated);
+            Assert.False(status.Enforcing);
+        }
+        finally
+        {
+            listener.Stop();
+        }
     }
 
     [Fact]

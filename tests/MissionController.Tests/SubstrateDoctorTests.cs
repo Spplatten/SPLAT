@@ -28,15 +28,20 @@ public sealed class SubstrateDoctorTests
     private static WslAgentToken HermeticToken => new(authToken: "0123456789abcdef");
 
     /// <summary>
-    /// One canned answer on loopback. The doctor's own probe does the talking, so what is under test
-    /// is what it concludes from a real exchange rather than from a status object handed to it.
+    /// One canned answer on loopback, given after protocol 3's handshake. The doctor's own probe does the
+    /// talking, so what is under test is what it concludes from a real exchange rather than from a status
+    /// object handed to it.
     /// </summary>
     internal sealed class StandInDaemon : IDisposable
     {
         private readonly TcpListener _listener;
         private readonly CancellationTokenSource _cts = new();
 
-        public StandInDaemon(string responseFrame)
+        /// <param name="token">
+        /// The token it proves. One the caller does not hold plays a daemon restarted with a new secret, as
+        /// seen from a host still holding the old one.
+        /// </param>
+        public StandInDaemon(string responseFrame, string token = "0123456789abcdef")
         {
             _listener = new TcpListener(IPAddress.Loopback, 0);
             _listener.Start();
@@ -47,16 +52,7 @@ public sealed class SubstrateDoctorTests
                 {
                     using var client = await _listener.AcceptTcpClientAsync(_cts.Token);
                     using var stream = client.GetStream();
-                    var buffer = new byte[4096];
-                    // Answer only a caller that actually asked: a connection that says nothing is a
-                    // liveness probe, and replying to it would leave the real request unanswered.
-                    if (await stream.ReadAsync(buffer, _cts.Token) == 0)
-                    {
-                        return;
-                    }
-
-                    await stream.WriteAsync(Encoding.UTF8.GetBytes(responseFrame + "\n"), _cts.Token);
-                    await stream.FlushAsync(_cts.Token);
+                    await StandInAgent.ServeAsync(stream, token, new[] { responseFrame }, _cts.Token);
                 }
                 catch (OperationCanceledException)
                 {
@@ -162,8 +158,11 @@ public sealed class SubstrateDoctorTests
     [Fact]
     public async Task ADaemonThatRefusesThisHostsToken_IsNotReportedAsAbleToAuthenticate()
     {
+        // It proves a token, just not this host's - and it would claim enforcement if it were believed.
         using var daemon = new StandInDaemon(
-            "{\"type\":\"STDERR\",\"data\":\"SPLAT refused the request: missing or invalid authToken.\\n\"}");
+            "{\"type\":\"HEALTH_RESPONSE\",\"bpfLsmActive\":true,\"cgroupV2Active\":true," +
+            "\"overlayFsSupported\":false,\"kernelVersion\":\"6.18.33.2\",\"enforcing\":true,\"activeLeaseCount\":1}",
+            token: "fedcba9876543210");
         var report = new StringWriter();
 
         int exit = await SubstrateDoctor.RunAsync(

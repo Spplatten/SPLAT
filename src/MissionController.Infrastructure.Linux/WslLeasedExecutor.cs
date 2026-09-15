@@ -39,6 +39,9 @@ public class WslLeasedExecutor : ILeasedExecutor
     /// </summary>
     private static readonly TimeSpan DaemonStartBudget = TimeSpan.FromSeconds(30);
 
+    /// <summary>For the handshake, which a live daemon answers at once; see <see cref="OpenSessionAsync"/>.</summary>
+    private static readonly TimeSpan HandshakeBudget = TimeSpan.FromSeconds(10);
+
     /// <param name="authTokenPath">
     /// Where the daemon keeps its shared secret inside the guest.
     /// </param>
@@ -75,9 +78,6 @@ public class WslLeasedExecutor : ILeasedExecutor
         _startDaemon = startDaemon ?? StartInstalledServiceAsync;
     }
 
-    /// <summary>The envelope version this bridge speaks; the daemon refuses anything else.</summary>
-    private const int ProtocolVersion = 2;
-
     public async Task<ProcessExecutionResult> ExecuteLeasedAsync(
         LeaseSpec lease,
         string command,
@@ -104,18 +104,9 @@ public class WslLeasedExecutor : ILeasedExecutor
             // read, so a slow start came back as an expired lease and a slow read as a missing token.
             using var client = await ConnectToDaemonAsync(ct);
             using var stream = client.GetStream();
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            // UTF-8 WITHOUT a byte order mark. `Encoding.UTF8` emits one, so StreamWriter prepended
-            // EF BB BF to the first write and the daemon answered every request with
-            // "Invalid JSON request: expected value at line 1 column 1". A BOM is meaningless on a
-            // socket and fatal to a line-delimited JSON protocol.
-            using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
-            {
-                AutoFlush = true
-            };
 
-            // The daemon refuses an EXECUTE_TOOL that does not present its token, so a bridge that
-            // cannot read one has nothing to send and should say why rather than get a bare refusal.
+            // The daemon refuses a caller that cannot prove it holds the token, so a bridge that cannot read
+            // one has nothing to prove and should say why rather than get a bare refusal.
             string? authToken;
             using (var tokenCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
@@ -130,12 +121,14 @@ public class WslLeasedExecutor : ILeasedExecutor
                     "The daemon generates it on first run as root; without it no lease can be requested.");
             }
 
+            // Whatever answered must prove it holds the token before a byte of the lease is sent to it.
+            using var session = await OpenSessionAsync(stream, authToken, ct);
+
             // 1. Serialize Lease Request Envelope
             var payload = new
             {
                 type = "EXECUTE_TOOL",
-                protocolVersion = ProtocolVersion,
-                authToken,
+                protocolVersion = WslAgentSession.ProtocolVersion,
                 missionId = lease.MissionId.ToString(),
                 command = command,
                 argv,
@@ -172,12 +165,12 @@ public class WslLeasedExecutor : ILeasedExecutor
             // The lease's clock starts with the request it times.
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, lease.LeaseDurationSeconds)));
-            await writer.WriteLineAsync(jsonPayload.AsMemory(), cts.Token);
+            await session.SendAsync(jsonPayload, cts.Token);
 
             // 2. Stream Inbound Output Chunks
             while (!cts.Token.IsCancellationRequested)
             {
-                string? line = await reader.ReadLineAsync(cts.Token);
+                string? line = await session.ReadLineAsync(cts.Token);
                 if (line == null) break;
 
                 if (string.IsNullOrWhiteSpace(line)) continue;
@@ -277,6 +270,26 @@ public class WslLeasedExecutor : ILeasedExecutor
             // Timeout / transport-failure path: the run was cut short, so there is even less to
             // report than on the EXIT path. Nothing measured, nothing claimed.
             FinalMetrics: JobResourceMetrics.Unavailable);
+    }
+
+    /// <summary>
+    /// Protocol 3's handshake, under a budget of its own. A live daemon answers it at once, so a listener
+    /// that accepts the connection and then says nothing is refused rather than left holding the lease open.
+    /// </summary>
+    private static async Task<WslAgentSession> OpenSessionAsync(Stream stream, string token, CancellationToken ct)
+    {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(HandshakeBudget);
+        try
+        {
+            return await WslAgentSession.OpenAsync(stream, token, budget.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"Waited {HandshakeBudget.TotalSeconds:0} seconds for the daemon to answer the protocol "
+                + $"{WslAgentSession.ProtocolVersion} handshake.");
+        }
     }
 
     /// <summary>

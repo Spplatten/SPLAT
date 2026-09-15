@@ -10,7 +10,7 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use libbpf_rs::skel::{OpenSkel, Skel, SkelBuilder};
 use libbpf_rs::{MapCore, MapFlags, MapHandle, RingBufferBuilder};
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc};
@@ -22,14 +22,19 @@ mod cow;
 mod lease;
 mod violation;
 
-/// The only EXECUTE_TOOL envelope this daemon speaks.
+/// The protocol this daemon speaks: its handshake, and the EXECUTE_TOOL envelope inside it.
 ///
 /// Version 1 carried `arguments` as a single string, which the daemon then split on whitespace.
 /// That is not a parse, it is a guess: MCP's run_code shipped `-c '<code>'` and the split handed
 /// python the literal `'print(123)'` - a string expression that evaluates, prints nothing and
 /// exits 0. Any argument containing a space tore in half. There is no way to repair a v1 request
 /// here, because the information needed to split it correctly was destroyed before it was sent.
-const PROTOCOL_VERSION: u64 = 2;
+///
+/// Version 2 fixed that, and put the token itself in every request - so a caller handed it to
+/// whatever answered on this port, and while this daemon was not listening, anything in the guest
+/// could. Version 3 opens each connection with a handshake in which both sides prove they hold the
+/// token without sending it: see `open_session`.
+const PROTOCOL_VERSION: u64 = 3;
 
 /// Daemon-wide ceilings. A request may ask for less; it can never ask for more.
 const MAX_MEMORY_BYTES_CEILING: u64 = 256 * 1024 * 1024;
@@ -447,6 +452,102 @@ async fn read_frame(reader: &mut (impl AsyncBufRead + Unpin), line: &mut String)
     Ok(read)
 }
 
+/// Opens protocol 3's session: reads the caller's HELLO and answers it with this daemon's proof that it
+/// holds the token, or refuses and returns None. Nothing else is read from a connection before this.
+async fn open_session(
+    reader: &mut (impl AsyncBufRead + Unpin),
+    writer: &mut (impl AsyncWrite + Unpin),
+    line: &mut String,
+    peer_auth: &PeerAuth,
+) -> Result<Option<auth::Session>> {
+    let refusal = match read_frame(reader, line).await {
+        Ok(0) => return Ok(None),
+        Ok(_) => match hello_nonce(line.trim()) {
+            Ok(client_nonce) => {
+                let session = auth::Session { client_nonce, server_nonce: auth::random_bytes()? };
+                let challenge = serde_json::json!({
+                    "type": "CHALLENGE",
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "serverNonce": auth::hex(&session.server_nonce),
+                    "serverProof": auth::hex(&peer_auth.daemon_proof(&session.client_nonce, &session.server_nonce)),
+                });
+                writer.write_all(format!("{challenge}\n").as_bytes()).await?;
+                return Ok(Some(session));
+            }
+            Err(reason) => reason,
+        },
+        Err(e) => e.to_string(),
+    };
+
+    warn!("Refused a connection at its handshake: {refusal}");
+    let err_resp = serde_json::json!({
+        "type": "STDERR",
+        "data": format!("SPLAT refused the request: {refusal}.\n")
+    });
+    let _ = writer.write_all(format!("{err_resp}\n").as_bytes()).await;
+    Ok(None)
+}
+
+/// The client nonce from a protocol 3 HELLO, or why the frame is not one.
+fn hello_nonce(frame: &str) -> std::result::Result<[u8; auth::NONCE_BYTES], String> {
+    let hello: serde_json::Value =
+        serde_json::from_str(frame).map_err(|e| format!("the first frame is not JSON ({e})"))?;
+
+    // A protocol 2 caller opens with a request carrying the token in the clear. By the time it is read
+    // here it has been sent; refusing it is what makes sending it pointless.
+    if hello.get("type").and_then(|t| t.as_str()) != Some("HELLO") {
+        return Err(format!(
+            "this daemon speaks protocol {PROTOCOL_VERSION}, which opens with a HELLO and never carries the \
+             token itself. A caller that sends the token with its request speaks protocol 2 and must be updated"
+        ));
+    }
+
+    let version = hello.get("protocolVersion").and_then(|v| v.as_u64()).unwrap_or(0);
+    if version != PROTOCOL_VERSION {
+        return Err(format!(
+            "protocol version {version} is not supported; this daemon speaks version {PROTOCOL_VERSION}"
+        ));
+    }
+
+    hello
+        .get("clientNonce")
+        .and_then(|n| n.as_str())
+        .and_then(auth::from_hex)
+        .ok_or_else(|| format!("a HELLO carries its clientNonce as {} hex digits", auth::NONCE_BYTES * 2))
+}
+
+/// The request inside an AUTHENTICATED frame, once its proof holds for this session and for its place
+/// on it - or why it does not.
+fn authenticated_request(
+    frame: &str,
+    session: &auth::Session,
+    peer_auth: &PeerAuth,
+    sequence: u64,
+) -> std::result::Result<serde_json::Value, String> {
+    let envelope: serde_json::Value =
+        serde_json::from_str(frame).map_err(|e| format!("a frame is not JSON ({e})"))?;
+    if envelope.get("type").and_then(|t| t.as_str()) != Some("AUTHENTICATED") {
+        return Err("after the handshake, every request travels in an AUTHENTICATED frame".to_string());
+    }
+
+    let request = envelope
+        .get("request")
+        .and_then(|r| r.as_str())
+        .ok_or_else(|| "an AUTHENTICATED frame carries its request as a string".to_string())?;
+    let proof = envelope
+        .get("proof")
+        .and_then(|p| p.as_str())
+        .and_then(auth::from_hex)
+        .ok_or_else(|| format!("an AUTHENTICATED frame carries its proof as {} hex digits", auth::NONCE_BYTES * 2))?;
+
+    // Over the request's bytes exactly as they arrived, before any of them is parsed.
+    if !peer_auth.verifies(&session.client_nonce, &session.server_nonce, sequence, request.as_bytes(), &proof) {
+        return Err("the request's proof does not match this daemon's token".to_string());
+    }
+
+    serde_json::from_str(request).map_err(|e| format!("its request is not valid JSON ({e})"))
+}
+
 async fn handle_client(
     socket: TcpStream,
     lease_mgr: LeaseManager,
@@ -457,6 +558,14 @@ async fn handle_client(
     let (reader, mut writer) = socket.into_split();
     let mut buf_reader = BufReader::new(reader);
     let mut line = String::new();
+
+    // Protocol 3: the caller's HELLO, and this daemon's proof that it holds the token, before anything
+    // else is read. Protocol 2 put the token itself in every request, so a caller handed it to whatever
+    // answered on this port - and while this daemon was not listening, anything in the guest could.
+    let Some(session) = open_session(&mut buf_reader, &mut writer, &mut line, &peer_auth).await? else {
+        return Ok(());
+    };
+    let mut sequence: u64 = 0;
 
     loop {
         match read_frame(&mut buf_reader, &mut line).await {
@@ -482,38 +591,29 @@ async fn handle_client(
             continue;
         }
 
-        let parsed: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(e) => {
+        // Every frame after the handshake is one request and its proof. One that does not prove itself
+        // ends the connection: nothing in it can be believed, including where the next frame begins.
+        let parsed: serde_json::Value = match authenticated_request(trimmed, &session, &peer_auth, sequence) {
+            Ok(request) => request,
+            Err(reason) => {
+                warn!("Closing connection: {reason}");
                 let err_resp = serde_json::json!({
                     "type": "STDERR",
-                    "data": format!("Invalid JSON request: {e}\n")
+                    "data": format!("SPLAT refused the request: {reason}.\n")
                 });
-                writer.write_all(format!("{err_resp}\n").as_bytes()).await?;
-                line.clear();
-                continue;
+                let _ = writer.write_all(format!("{err_resp}\n").as_bytes()).await;
+                break;
             }
         };
+        sequence += 1;
 
         let req_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
         match req_type {
             "HEALTH_CHECK" => {
-                // Authenticated like everything else. This used to be open on the grounds that a
-                // liveness probe should not need a secret - but it answers with the kernel version,
-                // the live lease count, and `enforcing`, which tells an unauthenticated caller
-                // exactly when this daemon will run work it cannot contain. Every legitimate caller
-                // reads the same root-owned token the bridge does.
-                if !peer_auth.accepts(parsed.get("authToken").and_then(|v| v.as_str())) {
-                    warn!("Rejected an unauthenticated HEALTH_CHECK");
-                    let err_chunk = serde_json::json!({
-                        "type": "STDERR",
-                        "data": "SPLAT refused the request: missing or invalid authToken.\n"
-                    });
-                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
-                    line.clear();
-                    continue;
-                }
+                // Answered only inside a session, like everything else: it carries the kernel version,
+                // the live lease count and `enforcing`, which tells a stranger exactly when this daemon
+                // will run work it cannot contain.
 
                 let health = SubstrateHealth::observe(lease_mgr.is_enforcing());
                 let resp = serde_json::json!({
@@ -531,22 +631,9 @@ async fn handle_client(
             }
 
             "EXECUTE_TOOL" => {
-                // Authenticate BEFORE reading a single policy field. This request names a command
-                // for a root daemon to run; until the caller is known, none of it is a request,
-                // it is an offer. HEALTH_CHECK stays open on purpose - a liveness probe should not
-                // need a secret, and it discloses nothing an attacker gains from.
-                if !peer_auth.accepts(parsed.get("authToken").and_then(|v| v.as_str())) {
-                    warn!("Rejected an unauthenticated EXECUTE_TOOL request");
-                    let err_chunk = serde_json::json!({
-                        "type": "STDERR",
-                        "data": "SPLAT refused the request: missing or invalid authToken.\n"
-                    });
-                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
-                    let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
-                    writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
-                    line.clear();
-                    continue;
-                }
+                // The session proved the caller before a single field of this was read. It names a
+                // command for a root daemon to run, and until the caller is known none of it is a
+                // request, only an offer.
 
                 let mission_id = parsed.get("missionId").and_then(|v| v.as_str()).unwrap_or("default");
                 let command = parsed.get("command").and_then(|v| v.as_str()).unwrap_or("/bin/sh");
@@ -1176,6 +1263,81 @@ mod frame_tests {
 
         assert_eq!(read, 0);
         assert!(line.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::{authenticated_request, hello_nonce, open_session, PROTOCOL_VERSION};
+    use crate::auth::{self, PeerAuth};
+    use tokio::io::BufReader;
+
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    /// The point of protocol 3: a caller learns this daemon holds the token before it sends a request.
+    #[tokio::test]
+    async fn a_hello_is_answered_with_a_proof_of_the_token() {
+        let auth = PeerAuth::from_token(TOKEN);
+        let client_nonce = [7u8; auth::NONCE_BYTES];
+        let hello = serde_json::json!({
+            "type": "HELLO",
+            "protocolVersion": PROTOCOL_VERSION,
+            "clientNonce": auth::hex(&client_nonce),
+        });
+        let input = format!("{hello}\n");
+        let mut reader = BufReader::new(input.as_bytes());
+        let mut written: Vec<u8> = Vec::new();
+        let mut line = String::new();
+
+        let session = open_session(&mut reader, &mut written, &mut line, &auth)
+            .await
+            .unwrap()
+            .expect("a HELLO opens a session");
+
+        let challenge: serde_json::Value = serde_json::from_slice(&written).unwrap();
+        assert_eq!(challenge["type"], "CHALLENGE");
+        assert_eq!(challenge["serverNonce"].as_str(), Some(auth::hex(&session.server_nonce).as_str()));
+        assert_eq!(
+            challenge["serverProof"].as_str(),
+            Some(auth::hex(&auth.daemon_proof(&client_nonce, &session.server_nonce)).as_str())
+        );
+    }
+
+    /// A protocol 2 caller opens with its token in the clear. It is refused, and no session opens.
+    #[tokio::test]
+    async fn a_protocol_2_request_opens_no_session() {
+        let auth = PeerAuth::from_token(TOKEN);
+        let input = format!("{}\n", serde_json::json!({ "type": "HEALTH_CHECK", "authToken": TOKEN }));
+        let mut reader = BufReader::new(input.as_bytes());
+        let mut written: Vec<u8> = Vec::new();
+        let mut line = String::new();
+
+        assert!(open_session(&mut reader, &mut written, &mut line, &auth).await.unwrap().is_none());
+        let refusal = String::from_utf8(written).unwrap();
+        assert!(refusal.contains("protocol 3"), "{refusal}");
+        assert!(!refusal.contains(TOKEN), "a refusal must not echo what it refused");
+
+        let old = serde_json::json!({ "type": "HELLO", "protocolVersion": 2, "clientNonce": "00".repeat(32) });
+        assert!(hello_nonce(&old.to_string()).is_err());
+    }
+
+    /// After the handshake a request stands or falls by its proof.
+    #[test]
+    fn a_request_is_believed_only_with_its_proof() {
+        let auth = PeerAuth::from_token(TOKEN);
+        let session = auth::Session { client_nonce: [1; auth::NONCE_BYTES], server_nonce: [2; auth::NONCE_BYTES] };
+        let request = r#"{"type":"HEALTH_CHECK"}"#;
+        let frame = |proof: &[u8]| {
+            serde_json::json!({ "type": "AUTHENTICATED", "proof": auth::hex(proof), "request": request }).to_string()
+        };
+        let proof = auth.request_proof(&session.client_nonce, &session.server_nonce, 0, request.as_bytes());
+
+        let parsed = authenticated_request(&frame(&proof), &session, &auth, 0).unwrap();
+        assert_eq!(parsed["type"], "HEALTH_CHECK");
+
+        let replayed = authenticated_request(&frame(&proof), &session, &auth, 1).unwrap_err();
+        assert!(replayed.contains("proof"), "{replayed}");
+        assert!(authenticated_request(request, &session, &auth, 0).is_err(), "a bare request is not believed");
     }
 }
 

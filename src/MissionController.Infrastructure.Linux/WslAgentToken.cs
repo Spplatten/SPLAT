@@ -9,12 +9,12 @@ namespace MissionController.Infrastructure.Linux;
 /// <summary>
 /// The daemon's shared secret, read out of the guest once and held for the life of the host process.
 ///
-/// Every request to the daemon carries it — leases and health checks alike. It lives at
-/// <c>/etc/splat/agent.token</c>, mode 0600 and root-owned, which stops an unprivileged process
-/// INSIDE the guest from reading it - though not from being handed it: every caller presents it to
-/// whatever answers on the daemon's port, and while the daemon is not listening, anything can. It
-/// does not stop another Windows process running as this same user, and the daemon's own header
-/// says so.
+/// Every request to the daemon proves it — leases and health checks alike — and since protocol 3 none
+/// carries it: <see cref="WslAgentSession"/> proves possession instead. It lives at
+/// <c>/etc/splat/agent.token</c>, mode 0600 and root-owned, which stops an unprivileged process INSIDE
+/// the guest from reading it, and a process that takes the daemon's port while the daemon is down is sent
+/// a nonce, never the token. It does not stop another Windows process running as this same user, and the
+/// daemon's own header says so.
 ///
 /// One class rather than one per caller, because the way it is fetched has already been a defect
 /// twice, and a second copy is where a fix stops being applied.

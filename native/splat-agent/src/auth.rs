@@ -5,10 +5,13 @@
 // ability to open a TCP connection to 127.0.0.1 - which is to say, nothing. Reachability was being
 // treated as authority.
 //
-// The token is a shared secret in a root-owned 0600 file. What that buys, precisely:
+// The token is a shared secret in a root-owned 0600 file, and since protocol 3 it never crosses the
+// wire: this daemon proves it holds the token by answering a caller's nonce, and every request proves
+// it back over both nonces, its place on the connection and its own bytes. What that buys, precisely:
 //
-//   * A non-root process in the guest cannot read the file - but while this daemon is not listening
-//     it can take the port, and the bridge hands the token to whatever answers there (ROADMAP 2.4).
+//   * A non-root process in the guest cannot read the file. Nor can it learn the token by taking the
+//     port while this daemon is down, as protocol 2 allowed: a caller sends such a listener a nonce
+//     and nothing else, and any proof it does see is good for one request on one connection.
 //   * A process already running as root in the guest can read the file - and could equally load its
 //     own BPF programs or write the cgroup tree directly. A token cannot defend against a principal
 //     that already outranks the thing protecting it, and pretending otherwise would be the same
@@ -17,6 +20,8 @@
 //     process running as that user can obtain it. Closing that requires a transport that carries
 //     peer identity (AF_VSOCK with a guest-side allow-list, or SO_PEERCRED over AF_UNIX); it is
 //     the wire-contract work, not this.
+//   * The frames this daemon sends after the handshake carry no proof of their own. On loopback
+//     nothing sits between the two ends of a connection, and the handshake settled who is at each.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -24,10 +29,25 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use tracing::{info, warn};
 
 /// Length of a generated token in bytes; rendered as 64 lowercase hex characters.
 const TOKEN_BYTES: usize = 32;
+
+/// Bytes in a handshake nonce, and in a proof, which is SHA-256's output: 64 hex digits on the wire.
+pub const NONCE_BYTES: usize = 32;
+
+// Distinct labels, so neither proof can be passed off as the other.
+const DAEMON_LABEL: &[u8] = b"splat-agent/3 daemon";
+const REQUEST_LABEL: &[u8] = b"splat-agent/3 request";
+
+/// The two nonces that name one connection's handshake. Every request on it is proven over both.
+pub struct Session {
+    pub client_nonce: [u8; NONCE_BYTES],
+    pub server_nonce: [u8; NONCE_BYTES],
+}
 
 pub struct PeerAuth {
     token: String,
@@ -87,15 +107,7 @@ impl PeerAuth {
     }
 
     fn generate() -> Result<String> {
-        // read_exact on an opened handle, NOT fs::read. /dev/urandom is a character device with no
-        // EOF, so fs::read never returns - it just grows its buffer until the box gives out. Caught
-        // by the test suite hanging at exactly the two tests that generate a token.
-        let mut file = fs::File::open("/dev/urandom").context("open /dev/urandom")?;
-        let mut bytes = [0u8; TOKEN_BYTES];
-        file.read_exact(&mut bytes)
-            .context("read entropy for a new auth token")?;
-
-        Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+        Ok(hex(&random_bytes::<TOKEN_BYTES>()?))
     }
 
     fn warn_if_world_readable(path: &Path) {
@@ -111,16 +123,72 @@ impl PeerAuth {
         }
     }
 
-    /// Whether `presented` is the token, compared without an early return.
+    /// This daemon's answer to a HELLO: proof that it holds the token, over the caller's nonce and its
+    /// own. A caller checks it before sending anything else, which is what keeps it from handing a
+    /// request - or, under protocol 2, the token itself - to whatever took this daemon's port.
+    pub fn daemon_proof(&self, client_nonce: &[u8; NONCE_BYTES], server_nonce: &[u8; NONCE_BYTES]) -> [u8; NONCE_BYTES] {
+        let mut mac = self.mac();
+        mac.update(DAEMON_LABEL);
+        mac.update(&[0]);
+        mac.update(client_nonce);
+        mac.update(server_nonce);
+        let mut proof = [0u8; NONCE_BYTES];
+        proof.copy_from_slice(&mac.finalize().into_bytes());
+        proof
+    }
+
+    /// Whether `proof` is this token's proof of `request`, as the `sequence`-th request on the
+    /// connection these nonces opened.
     ///
-    /// `==` on a String stops at the first differing byte. Over a loopback socket a local process
-    /// can time that well enough to recover the secret byte by byte, and a local process is exactly
-    /// the caller this check exists to stop.
-    pub fn accepts(&self, presented: Option<&str>) -> bool {
-        match presented {
-            Some(p) => constant_time_eq(p.as_bytes(), self.token.as_bytes()),
-            None => false,
-        }
+    /// Checked in fixed time. A comparison that stops at the first differing byte lets a local caller
+    /// time its way to a valid proof a byte at a time, and a local caller is who this check stops.
+    pub fn verifies(
+        &self,
+        client_nonce: &[u8; NONCE_BYTES],
+        server_nonce: &[u8; NONCE_BYTES],
+        sequence: u64,
+        request: &[u8],
+        proof: &[u8],
+    ) -> bool {
+        self.request_mac(client_nonce, server_nonce, sequence, request)
+            .verify_slice(proof)
+            .is_ok()
+    }
+
+    /// The proof a caller holding this token makes. The daemon only ever checks one, so only the tests
+    /// make one here.
+    #[cfg(test)]
+    pub fn request_proof(
+        &self,
+        client_nonce: &[u8; NONCE_BYTES],
+        server_nonce: &[u8; NONCE_BYTES],
+        sequence: u64,
+        request: &[u8],
+    ) -> [u8; NONCE_BYTES] {
+        let mut proof = [0u8; NONCE_BYTES];
+        proof.copy_from_slice(&self.request_mac(client_nonce, server_nonce, sequence, request).finalize().into_bytes());
+        proof
+    }
+
+    fn request_mac(
+        &self,
+        client_nonce: &[u8; NONCE_BYTES],
+        server_nonce: &[u8; NONCE_BYTES],
+        sequence: u64,
+        request: &[u8],
+    ) -> Hmac<Sha256> {
+        let mut mac = self.mac();
+        mac.update(REQUEST_LABEL);
+        mac.update(&[0]);
+        mac.update(client_nonce);
+        mac.update(server_nonce);
+        mac.update(&sequence.to_be_bytes());
+        mac.update(request);
+        mac
+    }
+
+    fn mac(&self) -> Hmac<Sha256> {
+        <Hmac<Sha256> as Mac>::new_from_slice(self.token.as_bytes()).expect("HMAC takes a key of any length")
     }
 
     /// Only the tests read this back; the daemon never logs or echoes the secret itself.
@@ -130,50 +198,109 @@ impl PeerAuth {
     }
 }
 
-/// Length-independent equality. Differing lengths are rejected up front - the length of a
-/// fixed-format token is not a secret - and equal-length inputs are compared in full.
-pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
+/// Bytes from the kernel's CSPRNG.
+pub fn random_bytes<const N: usize>() -> Result<[u8; N]> {
+    // read_exact on an opened handle, NOT fs::read. /dev/urandom is a character device with no EOF, so
+    // fs::read never returns - it just grows its buffer until the box gives out. Caught by the test
+    // suite hanging at exactly the two tests that generate a token.
+    let mut file = fs::File::open("/dev/urandom").context("open /dev/urandom")?;
+    let mut bytes = [0u8; N];
+    file.read_exact(&mut bytes).context("read entropy")?;
+    Ok(bytes)
+}
+
+/// Lowercase hex, the way tokens, nonces and proofs are written.
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A nonce or proof from exactly 64 hex digits, or None. Strict, because a lenient parser - Rust's own
+/// accepts a leading `+` - is a second way to spell the same bytes.
+pub fn from_hex(text: &str) -> Option<[u8; NONCE_BYTES]> {
+    let digits = text.as_bytes();
+    if digits.len() != NONCE_BYTES * 2 {
+        return None;
     }
 
-    let mut diff: u8 = 0;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
+    let mut bytes = [0u8; NONCE_BYTES];
+    for (byte, pair) in bytes.iter_mut().zip(digits.chunks_exact(2)) {
+        *byte = (nibble(pair[0])? << 4) | nibble(pair[1])?;
     }
-    // read_volatile stops the optimiser turning the accumulate back into an early exit.
-    unsafe { std::ptr::read_volatile(&diff) == 0 }
+    Some(bytes)
+}
+
+fn nibble(digit: u8) -> Option<u8> {
+    match digit {
+        b'0'..=b'9' => Some(digit - b'0'),
+        b'a'..=b'f' => Some(digit - b'a' + 10),
+        b'A'..=b'F' => Some(digit - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_matching_token_is_accepted_and_anything_else_is_not() {
-        let auth = PeerAuth::from_token("a".repeat(64));
+    // Computed independently with Python's hmac module on 2026-09-14, and asserted by the bridge's
+    // WslAgentSessionTests too, so the two sides cannot drift apart while each agrees with itself.
+    const VECTOR_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const VECTOR_REQUEST: &[u8] = br#"{"type":"HEALTH_CHECK"}"#;
 
-        assert!(auth.accepts(Some(&"a".repeat(64))));
-        assert!(!auth.accepts(Some(&"b".repeat(64))));
-        assert!(!auth.accepts(Some("")), "an empty token is not a token");
-        assert!(!auth.accepts(None), "a request that omits the field is unauthenticated");
+    fn vector_nonces() -> ([u8; NONCE_BYTES], [u8; NONCE_BYTES]) {
+        let mut client = [0u8; NONCE_BYTES];
+        let mut server = [0u8; NONCE_BYTES];
+        for i in 0..NONCE_BYTES {
+            client[i] = i as u8;
+            server[i] = (NONCE_BYTES + i) as u8;
+        }
+        (client, server)
     }
 
     #[test]
-    fn a_prefix_of_the_token_is_not_accepted() {
-        // The shape a length-only or early-exit comparison would let through.
-        let auth = PeerAuth::from_token("deadbeef");
-        assert!(!auth.accepts(Some("dead")));
-        assert!(!auth.accepts(Some("deadbeef0")));
+    fn the_proofs_match_the_vector_the_bridge_is_tested_against() {
+        let auth = PeerAuth::from_token(VECTOR_TOKEN);
+        let (client, server) = vector_nonces();
+
+        assert_eq!(
+            hex(&auth.daemon_proof(&client, &server)),
+            "52265f2b72fe6c7801c6ffadbd9745a0a69bb165d31d71f31007e81f1c01ea7d"
+        );
+        assert_eq!(
+            hex(&auth.request_proof(&client, &server, 0, VECTOR_REQUEST)),
+            "835749efc2b9219f33027ab8571edebb135df57a55b6a0fbc79e1cc68c42c5aa"
+        );
+        assert_eq!(
+            hex(&auth.request_proof(&client, &server, 1, VECTOR_REQUEST)),
+            "2bb2251468dd196a6a88d2684c95beacdf2954864d0555e0143a124c30ca755d"
+        );
     }
 
     #[test]
-    fn constant_time_eq_agrees_with_equality() {
-        assert!(constant_time_eq(b"", b""));
-        assert!(constant_time_eq(b"abc", b"abc"));
-        assert!(!constant_time_eq(b"abc", b"abd"));
-        assert!(!constant_time_eq(b"abc", b"ab"));
-        assert!(!constant_time_eq(b"", b"a"));
+    fn a_proof_holds_for_one_request_on_one_connection_and_nowhere_else() {
+        let auth = PeerAuth::from_token(VECTOR_TOKEN);
+        let (client, server) = vector_nonces();
+        let proof = auth.request_proof(&client, &server, 0, VECTOR_REQUEST);
+
+        assert!(auth.verifies(&client, &server, 0, VECTOR_REQUEST, &proof));
+        assert!(!auth.verifies(&client, &server, 1, VECTOR_REQUEST, &proof), "replayed later on the connection");
+        assert!(!auth.verifies(&server, &client, 0, VECTOR_REQUEST, &proof), "on a connection with other nonces");
+        assert!(!auth.verifies(&client, &server, 0, br#"{"type":"EXECUTE_TOOL"}"#, &proof), "over another request");
+        assert!(!auth.verifies(&client, &server, 0, VECTOR_REQUEST, &proof[..31]), "cut short");
+        assert!(
+            !PeerAuth::from_token("b".repeat(64)).verifies(&client, &server, 0, VECTOR_REQUEST, &proof),
+            "under another token"
+        );
+    }
+
+    #[test]
+    fn hex_is_read_strictly() {
+        let bytes = [0xab_u8; NONCE_BYTES];
+        assert_eq!(from_hex(&hex(&bytes)), Some(bytes));
+        assert_eq!(from_hex(&"AB".repeat(NONCE_BYTES)), Some(bytes));
+        assert_eq!(from_hex(&"ab".repeat(NONCE_BYTES - 1)), None, "too short");
+        assert_eq!(from_hex(&format!("+b{}", "ab".repeat(NONCE_BYTES - 1))), None, "a sign is not a digit");
+        assert_eq!(from_hex(&"zz".repeat(NONCE_BYTES)), None);
     }
 
     #[test]
@@ -191,7 +318,7 @@ mod tests {
         );
 
         let reloaded = PeerAuth::load_or_create(&path).expect("reload");
-        assert!(reloaded.accepts(Some(created.token())));
+        assert_eq!(reloaded.token(), created.token());
 
         let _ = fs::remove_dir_all(&dir);
     }

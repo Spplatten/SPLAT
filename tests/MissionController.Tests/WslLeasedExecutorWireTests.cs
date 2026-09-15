@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -136,55 +137,36 @@ public class WslLeasedExecutorWireTests
     }
 
     /// <summary>
-    /// Captures the raw request bytes and replies with the given frames.
+    /// Plays the daemon, protocol 3 handshake and all, on the next connection that says anything, and
+    /// replies to its request with the given frames.
     ///
     /// A connection that closes without sending anything - a bridge that refused before it had a
     /// request to send - is skipped, so a request that does follow is still captured and answered.
     /// </summary>
-    private static async Task<byte[]> RunStandInDaemonAsync(TcpListener listener, params string[] responseFrames)
+    private static async Task<StandInAgent.Exchange> RunStandInDaemonAsync(TcpListener listener, params string[] responseFrames)
     {
         for (int attempt = 0; attempt < 5; attempt++)
         {
             using var client = await listener.AcceptTcpClientAsync();
             using var stream = client.GetStream();
 
-            var buffer = new byte[8192];
-            int read;
-            try
+            var exchange = await StandInAgent.ServeAsync(stream, TestToken, responseFrames);
+            if (exchange.Raw.Length > 0)
             {
-                read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length));
+                return exchange;
             }
-            catch (IOException)
-            {
-                continue; // Hung up mid-read.
-            }
-
-            if (read == 0)
-            {
-                continue; // Connected, said nothing, closed.
-            }
-
-            foreach (var frame in responseFrames)
-            {
-                await stream.WriteAsync(Encoding.UTF8.GetBytes(frame + "\n"));
-                await stream.FlushAsync();
-            }
-
-            return buffer[..read];
         }
 
-        return Array.Empty<byte>();
+        return new StandInAgent.Exchange(Array.Empty<byte>(), null, false);
     }
 
     /// <summary>
-    /// The health check is a request like any other, so it carries the token.
-    ///
-    /// It was open until 2026-09-11, on the grounds that a liveness probe should not need a secret.
-    /// But it answers with `enforcing`, the kernel version and the live lease count — so it told an
-    /// unauthenticated caller exactly when this daemon would run work it could not contain.
+    /// The health check is a request like any other, so it proves the token - and it never carries the
+    /// token itself. It was open until 2026-09-11, on the grounds that a liveness probe should not need a
+    /// secret, and until protocol 3 it put the secret in the request.
     /// </summary>
     [Fact]
-    public async Task TheHealthCheck_PresentsTheDaemonsToken()
+    public async Task TheHealthCheck_ProvesTheToken_WithoutSendingIt()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -198,11 +180,12 @@ public class WslLeasedExecutorWireTests
         var checker = new WslSubstrateHealthChecker("127.0.0.1", port, new WslAgentToken(authToken: TestToken), ReplyBudget);
         var status = await checker.CheckHealthAsync();
 
-        string request = Encoding.UTF8.GetString(await daemon);
+        var exchange = await daemon;
         listener.Stop();
 
-        Assert.Contains("\"HEALTH_CHECK\"", request);
-        Assert.Contains(TestToken, request);
+        Assert.True(exchange.Proven, "the health check did not prove the token");
+        Assert.Contains("\"HEALTH_CHECK\"", exchange.Request ?? "");
+        Assert.DoesNotContain(TestToken, Encoding.UTF8.GetString(exchange.Raw));
         Assert.True(status.Enforcing);
         Assert.Equal(2u, status.ActiveLeaseCount);
     }
@@ -220,7 +203,7 @@ public class WslLeasedExecutorWireTests
 
         var daemon = RunStandInDaemonAsync(
             listener,
-            "{\"type\":\"STDERR\",\"data\":\"SPLAT refused the request: missing or invalid authToken.\\n\"}");
+            "{\"type\":\"STDERR\",\"data\":\"SPLAT refused the request: a reason of this test's choosing.\"}");
 
         var checker = new WslSubstrateHealthChecker("127.0.0.1", port, new WslAgentToken(authToken: TestToken), ReplyBudget);
         var status = await checker.CheckHealthAsync();
@@ -248,7 +231,7 @@ public class WslLeasedExecutorWireTests
         var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
         var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
-        byte[] request = await daemon;
+        byte[] request = (await daemon).Raw;
         listener.Stop();
 
         Assert.True(request.Length >= 3, "the bridge sent nothing");
@@ -280,14 +263,15 @@ public class WslLeasedExecutorWireTests
         var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
         await executor.ExecuteLeasedAsync(lease, "/usr/bin/curl", new[] { "--max-time", "3" });
 
-        byte[] request = await daemon;
+        var exchange = await daemon;
         listener.Stop();
 
-        using var doc = JsonDocument.Parse(Encoding.UTF8.GetString(request).Trim());
+        Assert.True(exchange.Proven, "the lease did not prove the token");
+        using var doc = JsonDocument.Parse(exchange.Request ?? "");
         var root = doc.RootElement;
 
         Assert.Equal("EXECUTE_TOOL", root.GetProperty("type").GetString());
-        Assert.Equal(2, root.GetProperty("protocolVersion").GetInt32());
+        Assert.Equal(3, root.GetProperty("protocolVersion").GetInt32());
         Assert.Equal("/usr/bin/curl", root.GetProperty("command").GetString());
 
         // argv, not a pre-quoted string. The daemon used to split whatever arrived on whitespace,
@@ -310,12 +294,11 @@ public class WslLeasedExecutorWireTests
     }
 
     /// <summary>
-    /// The daemon refuses any EXECUTE_TOOL that does not present its token, so the bridge has to
-    /// carry one. Before F07 the daemon ran commands as root for anyone who could open a loopback
-    /// socket, and the envelope had no field for a credential at all.
+    /// The daemon refuses any request that does not prove the token, and the token itself never travels.
+    /// Protocol 2 carried it in every request, so the bridge handed it to whatever answered on the port.
     /// </summary>
     [Fact]
-    public async Task TheRequestCarriesTheAuthToken()
+    public async Task TheTokenNeverCrossesTheWire_OnlyProofsOfIt()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -324,13 +307,59 @@ public class WslLeasedExecutorWireTests
         var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
 
         var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
-        await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
+        var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
-        byte[] request = await daemon;
+        var exchange = await daemon;
         listener.Stop();
 
-        using var doc = JsonDocument.Parse(Encoding.UTF8.GetString(request).Trim());
-        Assert.Equal(TestToken, doc.RootElement.GetProperty("authToken").GetString());
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(exchange.Proven, "the request did not prove the token");
+        Assert.DoesNotContain(TestToken, Encoding.UTF8.GetString(exchange.Raw));
+        using var doc = JsonDocument.Parse(exchange.Request ?? "");
+        Assert.False(doc.RootElement.TryGetProperty("authToken", out _), "the request still names the token");
+    }
+
+    /// <summary>
+    /// Anything on the daemon's port that cannot prove it holds the token is sent the handshake's nonce and
+    /// nothing else: not the lease, not the command, and not the token. On 2026-09-13 a listener run as
+    /// nobody on a free loopback port received what Windows sent it, and under protocol 2 that was the token.
+    /// </summary>
+    [Fact]
+    public async Task AnImpostorOnTheDaemonsPort_IsSentNothingButTheNonce()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        // It has no token, so the proof it offers is made under a guess.
+        var impostor = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync();
+            using var stream = client.GetStream();
+            return await StandInAgent.ImpersonateAsync(stream, clientNonce =>
+            {
+                byte[] serverNonce = RandomNumberGenerator.GetBytes(WslAgentSession.ProofBytes);
+                byte[] guess = Encoding.UTF8.GetBytes("a guess at the token");
+                return StandInAgent.Challenge(serverNonce, WslAgentSession.DaemonProof(guess, clientNonce, serverNonce));
+            });
+        });
+
+        try
+        {
+            var result = await new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken)
+                .ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
+            string[] sent = StandInAgent.Frames(await impostor);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains("did not prove it holds this host's token", result.StandardError);
+            string hello = Assert.Single(sent);
+            Assert.Contains("\"HELLO\"", hello);
+            Assert.DoesNotContain(TestToken, hello);
+        }
+        finally
+        {
+            listener.Stop();
+        }
     }
 
     /// <summary>
@@ -364,7 +393,7 @@ public class WslLeasedExecutorWireTests
             // could send an envelope the daemon would only have refused anyway.
             var finished = await Task.WhenAny(daemon, Task.Delay(500));
             Assert.True(
-                finished != daemon || (await daemon).Length == 0,
+                finished != daemon || (await daemon).Raw.Length == 0,
                 "an EXECUTE_TOOL envelope went out without a token");
         }
         finally
@@ -436,7 +465,7 @@ public class WslLeasedExecutorWireTests
             var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
             var second = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
             Assert.True(second.ExitCode == 0, second.StandardError);
-            Assert.Contains("EXECUTE_TOOL", Encoding.UTF8.GetString(await daemon));
+            Assert.Contains("EXECUTE_TOOL", (await daemon).Request ?? "");
 
             Assert.Equal(1, starts);
         }
