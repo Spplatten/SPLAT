@@ -58,7 +58,7 @@ These are reachable by a leased process. They are listed so nobody has to discov
 | **AF_UNIX / AF_NETLINK** | Local IPC is untouched. Denying it wholesale would break name resolution and logging for the shipped catalogue; a per-socket allow-list is the real answer and does not exist. A leased tool can talk to any local daemon socket its uid can reach. |
 | **Inherited file descriptors** | The hooks fire on `open` and `connect`. A descriptor the tool inherits was opened by the daemon, before any of them ran. |
 | **Filesystem writes outside the workspace** | The deny-list names specific inodes. It is not a jail: everything not named is reachable at the workload's uid, which is why the privilege drop matters more than the deny-list does. |
-| **Ambient reads** | `file_open` denies a listed inode. It does not confine reads to an allow-list — the policy is a denylist, and a denylist is not a boundary. |
+| **Ambient reads** | `file_open` denies a listed inode. It does not confine reads to an allow-list — the policy is a denylist, and a denylist is not a boundary. On WSL that includes the Windows drives. `/mnt/c` is mounted with every mode bit open, so the workload's `nobody` reaches the Windows user's profile: on 2026-09-18, `nobody` read a public key in that profile's `.ssh` folder and passed the read check on the private key beside it. A mount namespace without `/mnt` would close it (P2). |
 
 ## What has been proven, and where
 
