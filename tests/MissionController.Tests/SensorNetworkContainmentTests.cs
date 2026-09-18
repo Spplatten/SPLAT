@@ -58,7 +58,7 @@ public class SensorNetworkContainmentTests
                 jailPath,
                 job,
                 dropAdminPrivileges: true,
-                timeoutSeconds: 30,
+                timeoutSeconds: ProbeTimeoutSeconds,
                 stdoutProgress: null,
                 stderrProgress: null,
                 cancellationToken: default,
@@ -72,6 +72,15 @@ public class SensorNetworkContainmentTests
                 throw new InvalidOperationException(
                     $"The probe process failed to initialise (0xC0000142) with denyNetworkAccess={denyNetworkAccess}. " +
                     "Nothing about containment can be concluded: the interpreter never started.");
+            }
+
+            // Killed by the launcher, so the script never reached either exit. Reported as a breach
+            // instead, this read "opened a socket" on an elevated run whose probe had connected to nothing.
+            if (result.TimedOut)
+            {
+                throw new InvalidOperationException(
+                    $"The probe was killed at the {ProbeTimeoutSeconds} s launch timeout with denyNetworkAccess={denyNetworkAccess}. " +
+                    "Nothing about containment can be concluded: the script never finished.");
             }
 
             return result.ExitCode;
@@ -103,8 +112,27 @@ public class SensorNetworkContainmentTests
         }
     }
 
+    /// <summary>
+    /// Waits out OS timeouts inside the container: a denied WMI call and TCP's own retransmissions both
+    /// run about 20 s, and an elevated interpreter starts slower - 29.3 s and 30.8 s against the old 30.
+    /// </summary>
+    private const int ProbeTimeoutSeconds = 90;
+
+    /// <summary>
+    /// The container drops a denied SYN rather than refusing it, so an unbounded Connect waits out
+    /// TCP's retransmissions. Both controls connect in milliseconds - one to a listener in this very
+    /// process - so a connection still pending after this long has been denied, not delayed.
+    /// </summary>
+    private const int ConnectBudgetMs = 5000;
+
+    /// <summary>Only a connection is a breach; any other exit is a probe that proved nothing either way.</summary>
+    private static string BreachOrNothing(int confined, string breach) => confined == ConnectSucceeded
+        ? "CONTAINMENT BREACH: " + breach
+        : $"The network-denied sensor exited {confined}, neither connecting nor refused. Nothing about containment can be concluded.";
+
+    // Wait throws for a refused connection and returns false for a dropped one; both are the denial.
     private static string ConnectScript(string host, int port) =>
-        $"try {{ (New-Object Net.Sockets.TcpClient).Connect('{host}',{port}); exit {ConnectSucceeded} }} catch {{ exit {ConnectRefused} }}";
+        $"try {{ if ((New-Object Net.Sockets.TcpClient).ConnectAsync('{host}',{port}).Wait({ConnectBudgetMs})) {{ exit {ConnectSucceeded} }} exit {ConnectRefused} }} catch {{ exit {ConnectRefused} }}";
 
     /// <summary>
     /// The load-bearing test, and the one that needs no internet: a listener inside this test process
@@ -131,7 +159,7 @@ public class SensorNetworkContainmentTests
             int confined = await RunProbeAsync(script, denyNetworkAccess: true);
             Assert.True(
                 confined == ConnectRefused,
-                $"CONTAINMENT BREACH: a network-denied sensor opened a socket (exit {confined}).");
+                BreachOrNothing(confined, "a network-denied sensor connected to a listener in this very process."));
         }
         finally
         {
@@ -170,7 +198,7 @@ public class SensorNetworkContainmentTests
         int confined = await RunProbeAsync(script, denyNetworkAccess: true);
         Assert.True(
             confined == ConnectRefused,
-            $"CONTAINMENT BREACH: a network-denied sensor reached 1.1.1.1:443 by raw IP (exit {confined}).");
+            BreachOrNothing(confined, "a network-denied sensor reached 1.1.1.1:443 by raw IP."));
     }
 
     /// <summary>
