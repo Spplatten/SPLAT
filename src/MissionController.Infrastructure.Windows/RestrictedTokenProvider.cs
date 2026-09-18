@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
 using System.Security.Principal;
 using Microsoft.Win32.SafeHandles;
 using MissionController.Core.Interfaces;
@@ -64,6 +65,10 @@ public sealed class RestrictedTokenProvider : IRestrictedTokenProvider
                 // Drop integrity on the restricted token before duplicating it, so the primary
                 // token (and the process launched from it) inherits Medium integrity.
                 LowerIntegrityToMedium(restrictedToken);
+
+                // And let the child open what it creates - its own process first. From an elevated
+                // console it could not, and never started: see GiveTheUserWhatItCreates.
+                GiveTheUserWhatItCreates(restrictedToken);
 
                 // bInheritHandle = 0, deliberately. CreateProcessAsUserW consumes this handle in the
                 // PARENT, so nothing needs it to be inheritable - and the launcher passes
@@ -141,6 +146,56 @@ public sealed class RestrictedTokenProvider : IRestrictedTokenProvider
             if (integritySid != IntPtr.Zero) Marshal.FreeHGlobal(integritySid);
         }
     }
+
+    /// <summary>
+    /// The default DACL and owner a non-elevated token already hands out: the user in full, and SYSTEM.
+    ///
+    /// An elevated administrator's token gives everything it creates a DACL naming Administrators and
+    /// SYSTEM, not the user, and makes Administrators the owner. The restricted token kept both while
+    /// marking Administrators deny-only above, so a child launched from an elevated console could not
+    /// open its own process and died in DLL initialisation (0xC0000142). Seven tests failed exactly that
+    /// way from an elevated PowerShell on 2026-09-18 - in the configuration this privilege drop exists for.
+    /// </summary>
+    private static void GiveTheUserWhatItCreates(SafeAccessTokenHandle token)
+    {
+        SecurityIdentifier user = WindowsIdentity.GetCurrent().User
+            ?? throw new InvalidOperationException("This process's token names no user to grant.");
+
+        var dacl = new DiscretionaryAcl(isContainer: false, isDS: false, capacity: 2);
+        dacl.AddAccess(AccessControlType.Allow, user, GenericAll, InheritanceFlags.None, PropagationFlags.None);
+        dacl.AddAccess(AccessControlType.Allow, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            GenericAll, InheritanceFlags.None, PropagationFlags.None);
+        byte[] acl = new byte[dacl.BinaryLength];
+        dacl.GetBinaryForm(acl, 0);
+
+        IntPtr aclBuffer = Marshal.AllocHGlobal(acl.Length);
+        IntPtr owner = MarshalSid(user);
+        // TOKEN_DEFAULT_DACL and TOKEN_OWNER are each a structure holding one pointer.
+        IntPtr pointer = Marshal.AllocHGlobal(IntPtr.Size);
+        try
+        {
+            Marshal.Copy(acl, 0, aclBuffer, acl.Length);
+            Marshal.WriteIntPtr(pointer, aclBuffer);
+            if (!Win32Interop.SetTokenInformation(token, Win32Interop.TokenDefaultDacl, pointer, (uint)IntPtr.Size))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to give the restricted token a default DACL naming its user.");
+            }
+
+            Marshal.WriteIntPtr(pointer, owner);
+            if (!Win32Interop.SetTokenInformation(token, Win32Interop.TokenOwner, pointer, (uint)IntPtr.Size))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to make the restricted token's user the owner of what it creates.");
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(pointer);
+            Marshal.FreeHGlobal(owner);
+            Marshal.FreeHGlobal(aclBuffer);
+        }
+    }
+
+    private const int GenericAll = 0x10000000;
 
     private static IntPtr MarshalSid(SecurityIdentifier sid)
     {

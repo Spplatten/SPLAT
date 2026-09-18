@@ -1,12 +1,18 @@
 using System;
+using System.ComponentModel;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Security;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Win32.SafeHandles;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 using MissionController.Infrastructure.Network.Egress;
 using MissionController.Infrastructure.Network.Siem;
+using MissionController.Infrastructure.Windows.Jails;
 using MissionController.Infrastructure.Windows.JobObjects;
 using MissionController.Infrastructure.Windows.Process;
 using MissionController.Infrastructure.Windows.Security;
@@ -245,6 +251,168 @@ public partial class EgressAndPrivilegeHardeningTests
         Assert.DoesNotContain("S-1-16-12288", groups);
         Assert.DoesNotContain("S-1-16-16384", groups);
     }
+
+    /// <summary>
+    /// An elevated administrator's token gives everything it creates a DACL naming Administrators and
+    /// SYSTEM, not the user - and the restricted token makes Administrators deny-only. Unless the sandbox
+    /// hands the child a DACL of its own, the child cannot open its own process and dies in DLL
+    /// initialisation, 0xC0000142. From an elevated PowerShell on 2026-09-18 every restricted launch did
+    /// exactly that - seven tests - while the same suite, run without elevation, passed. Reproduced here
+    /// without elevation: see <see cref="ElevatedShapeProvider"/>.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ARestrictedLaunch_FromAnElevatedOperatorsToken_StillStarts(bool denyNetworkAccess)
+    {
+        var jails = new NtAclJailManager();
+        string jail = await jails.ProvisionJailAsync(Guid.NewGuid());
+        try
+        {
+            var launcher = new SuspendedProcessLauncher(new ElevatedShapeProvider());
+            using var job = new Win32JobSandbox($"elevated-shape-{Guid.NewGuid():N}");
+
+            var result = await launcher.LaunchSuspendedInJobAsync(
+                @"C:\Windows\System32\cmd.exe",
+                "/c echo sandboxed",
+                jail,
+                job,
+                dropAdminPrivileges: true,
+                timeoutSeconds: 20,
+                stdoutProgress: null,
+                stderrProgress: null,
+                cancellationToken: default,
+                denyNetworkAccess: denyNetworkAccess);
+
+            Assert.True(result.ExitCode == 0, $"the sandboxed child exited 0x{result.ExitCode:X8}");
+            Assert.Contains("sandboxed", result.StandardOutput);
+        }
+        finally
+        {
+            await jails.DrainAndCleanupJailAsync(jail);
+        }
+    }
+
+    /// <summary>
+    /// Restricted tokens made the way an elevated operator's process makes them. For the length of one
+    /// call this process's own token hands out the default DACL an elevated administrator's token
+    /// carries - Administrators and SYSTEM, not the user - and it is put back straight after. It has to
+    /// be this process's own token: CreateProcessAsUserW takes a restricted token without a privilege no
+    /// test holds only when it was made from the caller's own, and refused one made from a copy (1314).
+    /// </summary>
+    private sealed class ElevatedShapeProvider : IRestrictedTokenProvider
+    {
+        public SafeAccessTokenHandle CreateLowPrivilegeToken()
+        {
+            if (!OpenProcessToken(new IntPtr(-1), TokenQuery | TokenAdjustDefault, out SafeAccessTokenHandle self))
+            {
+                int error = Marshal.GetLastWin32Error();
+                self.Dispose();
+                throw new Win32Exception(error, "Could not open this process's token.");
+            }
+
+            using (self)
+            {
+                byte[]? original = DefaultDacl(self);
+                SetDefaultDacl(self, ElevatedDefaultDacl());
+                try
+                {
+                    return new RestrictedTokenProvider().CreateLowPrivilegeToken();
+                }
+                finally
+                {
+                    SetDefaultDacl(self, original);
+                }
+            }
+        }
+    }
+
+    private static byte[] ElevatedDefaultDacl()
+    {
+        var dacl = new DiscretionaryAcl(false, false, 2);
+        dacl.AddAccess(AccessControlType.Allow, new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            GenericAll, InheritanceFlags.None, PropagationFlags.None);
+        dacl.AddAccess(AccessControlType.Allow, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            GenericAll, InheritanceFlags.None, PropagationFlags.None);
+        byte[] acl = new byte[dacl.BinaryLength];
+        dacl.GetBinaryForm(acl, 0);
+        return acl;
+    }
+
+    /// <summary>The token's default DACL as bytes, or null when it hands out none.</summary>
+    private static byte[]? DefaultDacl(SafeAccessTokenHandle token)
+    {
+        GetTokenInformation(token, TokenDefaultDacl, IntPtr.Zero, 0, out uint needed);
+        IntPtr buffer = Marshal.AllocHGlobal((int)needed);
+        try
+        {
+            if (!GetTokenInformation(token, TokenDefaultDacl, buffer, needed, out _))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not read the token's default DACL.");
+            }
+
+            // TOKEN_DEFAULT_DACL is one pointer to the ACL, whose size is the ushort at offset 2.
+            IntPtr acl = Marshal.ReadIntPtr(buffer);
+            if (acl == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            byte[] bytes = new byte[(ushort)Marshal.ReadInt16(acl, 2)];
+            Marshal.Copy(acl, bytes, 0, bytes.Length);
+            return bytes;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    private static void SetDefaultDacl(SafeAccessTokenHandle token, byte[]? acl)
+    {
+        IntPtr aclBuffer = acl is null ? IntPtr.Zero : Marshal.AllocHGlobal(acl.Length);
+        IntPtr defaultDacl = Marshal.AllocHGlobal(IntPtr.Size);
+        try
+        {
+            if (acl is not null)
+            {
+                Marshal.Copy(acl, 0, aclBuffer, acl.Length);
+            }
+
+            Marshal.WriteIntPtr(defaultDacl, aclBuffer);
+            if (!SetTokenInformation(token, TokenDefaultDacl, defaultDacl, (uint)IntPtr.Size))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not set the token's default DACL.");
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(defaultDacl);
+            if (aclBuffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(aclBuffer);
+            }
+        }
+    }
+
+    private const int GenericAll = 0x10000000;
+    private const int TokenDefaultDacl = 6;
+    private const uint TokenQuery = 0x0008;
+    private const uint TokenAdjustDefault = 0x0080;
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool OpenProcessToken(IntPtr process, uint desiredAccess, out SafeAccessTokenHandle token);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetTokenInformation(
+        SafeAccessTokenHandle token, int informationClass, IntPtr information, uint length, out uint returnLength);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetTokenInformation(
+        SafeAccessTokenHandle token, int informationClass, IntPtr information, uint length);
 
     // ---------------------------------------------------------------------------------------------
     // Job Object containment. The flags below are read back out of the live kernel object rather

@@ -135,6 +135,10 @@ Nothing here changes state. Run them in any order.
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
 
+Run it from an elevated PowerShell as well, when you can. On 2026-09-18 an elevated run caught what a
+normal one could not - every restricted-token launch dying with `0xC0000142`, fixed the same day. An
+elevated console is how an operator runs this product, so the suite has to pass there too.
+
 **Why it matters:** the number is not decorative. A test fails if the README, the tutorial, the
 Field Guide or this runbook advertise a count that disagrees with the suite, so the number in the
 docs is checked, not asserted.
@@ -249,6 +253,10 @@ from the machine rather than the folder:
 ```powershell
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" publish C:\C_AGENT_BUILDER\src\MissionController.UI\MissionController.UI.csproj -c Release -r win-x64 --self-contained false -p:Platform=x64 -p:WindowsPackageType=None
 ```
+
+**Close the app before the mirror:** `Stop-Process -Name MissionController.UI`. A running app holds its
+DLLs open, and `robocopy` retries a locked file every 30 seconds, a million times over - on 2026-09-18
+that stalled this step until the app was closed.
 
 Then mirror the result in:
 

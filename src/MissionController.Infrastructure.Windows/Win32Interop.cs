@@ -58,6 +58,11 @@ internal static partial class Win32Interop
     public const int TokenIntegrityLevel = 25;         // TOKEN_INFORMATION_CLASS.TokenIntegrityLevel
     public const uint SE_GROUP_INTEGRITY = 0x00000020; // marks a SID_AND_ATTRIBUTES as a mandatory label
 
+    // What a token gives the objects its process creates: their owner and their DACL. Each is set
+    // through a structure holding a single pointer.
+    public const int TokenOwner = 4;                   // TOKEN_INFORMATION_CLASS.TokenOwner
+    public const int TokenDefaultDacl = 6;             // TOKEN_INFORMATION_CLASS.TokenDefaultDacl
+
     // Job Object Info Classes
     public enum JobObjectInfoClass
     {
