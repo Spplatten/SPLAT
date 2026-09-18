@@ -118,6 +118,31 @@ public sealed class SubstrateDoctorTests
         Assert.Contains("UNKEYED", text);
     }
 
+    /// <summary>
+    /// A host that has never served has no default workspace yet, because the server creates it on
+    /// first start. On a clean machine (2026-09-18) that read as FAIL - the first line a stranger saw,
+    /// printed above a verdict of enforcing.
+    /// </summary>
+    [Fact]
+    public async Task ADefaultWorkspaceNotCreatedYet_IsNotAFailure()
+    {
+        string absent = Path.Combine(Path.GetTempPath(), "splat-never-served-" + Guid.NewGuid().ToString("N"));
+        var report = new StringWriter();
+
+        await SubstrateDoctor.RunAsync(
+            new McpServerCommand.Doctor(null, McpEgressPolicy.None),
+            report,
+            wsl: (_, _) => Task.FromResult((-1, "wsl.exe not found")),
+            health: NoDaemon,
+            defaultWorkspace: absent);
+
+        string line = report.ToString().Split('\n').Single(l => l.Contains(absent));
+        Assert.StartsWith("  ok", line);
+        Assert.Contains("the server creates it when it first starts", line);
+        // Reporting it must not be what creates it: the doctor serves nothing and creates nothing.
+        Assert.False(Directory.Exists(absent));
+    }
+
     [Fact]
     public async Task TheKernelAndItsBootLineAreReported_WhateverTheDaemonIsDoing()
     {

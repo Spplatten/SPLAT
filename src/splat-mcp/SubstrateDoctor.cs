@@ -29,6 +29,7 @@ public static class SubstrateDoctor
         TextWriter output,
         WslRunner? wsl = null,
         WslSubstrateHealthChecker? health = null,
+        string? defaultWorkspace = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(doctor);
@@ -39,12 +40,19 @@ public static class SubstrateDoctor
         output.WriteLine("SPLAT doctor - what this host will enforce");
         output.WriteLine();
 
-        string workspace = doctor.WorkspaceRoot ?? McpServerHandler.DefaultWorkspaceRoot;
+        string workspace = doctor.WorkspaceRoot ?? defaultWorkspace ?? McpServerHandler.DefaultWorkspaceRoot;
+        bool exists = Directory.Exists(workspace);
         output.WriteLine("Windows control plane");
-        Line(output, Directory.Exists(workspace), "workspace",
-            doctor.WorkspaceRoot is null
-                ? $"{workspace} (the default; --workspace names another)"
-                : $"{workspace} (from --workspace)");
+        // The server creates the default folder when it first starts, so a host that has never served
+        // has none - which a clean machine reported as FAIL above a verdict of enforcing (2026-09-18).
+        // A --workspace is never created, and the parser refused a missing one, so absence there is real.
+        Line(output, exists || doctor.WorkspaceRoot is null, "workspace", (doctor.WorkspaceRoot, exists) switch
+        {
+            (null, true) => $"{workspace} (the default; --workspace names another)",
+            (null, false) => $"{workspace} (the default; the server creates it when it first starts, and --workspace names another)",
+            (_, true) => $"{workspace} (from --workspace)",
+            (_, false) => $"{workspace} (from --workspace) does not exist",
+        });
         Line(output, true, "file tools",
             "fs_read and fs_write are confined to that directory by the handle the kernel opened, not by the path string");
         var census = CapabilityManifest.CensusOf(GovernedTemplateCatalog.All);
