@@ -131,13 +131,15 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 568`, on a line ending `(net10.0)`. The `dotnet` on this
+**Expect:** `Passed! - Failed: 0, Passed: 569`, on a line ending `(net10.0)`. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
 
 Run it from an elevated PowerShell as well, when you can. On 2026-09-18 an elevated run caught what a
-normal one could not - every restricted-token launch dying with `0xC0000142`, fixed the same day. An
-elevated console is how an operator runs this product, so the suite has to pass there too.
+normal one could not - every restricted-token launch dying with `0xC0000142`. It was fixed the same
+day and confirmed on a second machine that evening. An elevated console is how an operator runs this
+product, so the suite has to pass there too. Run it at the machine's own desktop, not over SSH. An SSH
+session is a network logon, and four sensor-containment tests cannot start their probes in one.
 
 **Why it matters:** the number is not decorative. A test fails if the README, the tutorial, the
 Field Guide or this runbook advertise a count that disagrees with the suite, so the number in the

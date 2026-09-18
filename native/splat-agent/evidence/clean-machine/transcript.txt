@@ -1,0 +1,134 @@
+==== 01-doctor-before
+PS> .\splat-mcp.exe doctor
+SPLAT doctor - what this host will enforce
+
+Windows control plane
+  FAIL  workspace         %USERPROFILE%\AppData\Local\SPLAT\mcp-workspace (the default; --workspace names another)
+  ok    file tools        fs_read and fs_write are confined to that directory by the handle the kernel opened, not by the path string
+  --    sensor network    33 of 49 catalog templates run network-denied; 16 keep a network stack (1 needs it, 15 would lose WMI, the Event Log, Defender or the SCM inside the container)
+  ok    audit ledger      %USERPROFILE%\AppData\Local\SPLAT\audit_ledger.db - hash-chained and UNKEYED, so a rewrite by this user is undetectable
+
+Linux lease substrate - run_command and run_code
+  ok    WSL               6.18.33.2-microsoft-standard-WSL2
+  FAIL  BPF-LSM           bpf is NOT on the boot command line - no lease can be enforced until .wslconfig names it
+  FAIL  daemon            not reachable - run_command and run_code will fail, not fall back
+
+Network for leases
+  --    lease network     no --egress given, so a lease gets no network at all
+
+What a lease enforces when one runs (native/splat-agent/SUPPORTED_POLICY.md)
+  enforced in the kernel  Executable identity; Protected files; IPv4 egress; IPv6 egress
+  enforced by the daemon  Memory, CPU, PID ceilings; Lease lifetime; Caller identity; Workload privilege; Command coherence
+  refused by the daemon   readOnlyFs; overlayFs.enableCow
+  not policed             UDP to an unconnected socket; AF_UNIX / AF_NETLINK; Inherited file descriptors; Filesystem writes outside the workspace; Ambient reads
+
+Verdict: NOT enforcing here. Nothing above changes what fs_read and fs_write do, but run_command and run_code cannot be trusted to contain anything on this host.
+(exit 1)
+==== 02-provision-dry-run
+PS> .\splat-mcp.exe provision
+SPLAT provision - what this host still needs (nothing is changed; add --apply)
+
+  ok    WSL               Ubuntu 26.04.1 LTS
+  ok    systemd           pid 1, so a unit can start the daemon at boot
+  todo  BPF-LSM           bpf is NOT on the boot command line. --apply appends a [wsl2] section to %USERPROFILE%\.wslconfig, after which `wsl --shutdown` is yours: [wsl2] kernelCommandLine = lsm=landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,apparmor,tomoyo,bpf
+
+Verdict: NOT provisioned. Nothing was changed - re-run with --apply to do the steps marked `todo`.
+(exit 1)
+==== 03-provision-apply-1
+PS> .\splat-mcp.exe provision --apply
+SPLAT provision - making this host enforce
+
+  ok    WSL               Ubuntu 26.04.1 LTS
+  ok    systemd           pid 1, so a unit can start the daemon at boot
+  todo  BPF-LSM           appended the lsm= stanza to %USERPROFILE%\.wslconfig. `wsl --shutdown` is yours - it ends every WSL session you have open - then re-run this.
+
+Verdict: NOT provisioned yet. The first line above that is not `ok` is the step to take.
+(exit 1)
+--- %USERPROFILE%\.wslconfig now:
+[wsl2]
+kernelCommandLine = lsm=landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,apparmor,tomoyo,bpf
+==== 04-provision-apply-2
+PS> wsl --shutdown
+(exit 0)
+PS> .\splat-mcp.exe provision --apply
+SPLAT provision - making this host enforce
+
+  ok    WSL               Ubuntu 26.04.1 LTS
+  ok    systemd           pid 1, so a unit can start the daemon at boot
+  ok    BPF-LSM           bpf is on the boot command line, so the kernel initialised it
+  ok    daemon binary     installed the daemon built into this executable to /opt/splat/splat-agent - no Rust toolchain involved
+  ok    service           splat-agent is active and enabled - it comes back on its own after a restart
+  ok    daemon token      accepted: a request from this host authenticated against /etc/splat/agent.token
+  ok    enforcement       live: a lease reaches the kernel (0 active)
+
+Verdict: provisioned. A lease on this host reaches the kernel, and `splat-mcp doctor` will say the same.
+(exit 0, 6 s)
+==== 05-doctor-after
+PS> .\splat-mcp.exe doctor
+SPLAT doctor - what this host will enforce
+
+Windows control plane
+  FAIL  workspace         %USERPROFILE%\AppData\Local\SPLAT\mcp-workspace (the default; --workspace names another)
+  ok    file tools        fs_read and fs_write are confined to that directory by the handle the kernel opened, not by the path string
+  --    sensor network    33 of 49 catalog templates run network-denied; 16 keep a network stack (1 needs it, 15 would lose WMI, the Event Log, Defender or the SCM inside the container)
+  ok    audit ledger      %USERPROFILE%\AppData\Local\SPLAT\audit_ledger.db - hash-chained and UNKEYED, so a rewrite by this user is undetectable
+
+Linux lease substrate - run_command and run_code
+  ok    WSL               6.18.33.2-microsoft-standard-WSL2
+  ok    BPF-LSM           bpf is on the boot command line, so the kernel initialised it
+  ok    daemon            reachable
+  ok    daemon token      accepted: a request from this host authenticated against /etc/splat/agent.token (root-owned)
+  ok    enforcement       live: a lease reaches the kernel (0 active)
+
+Network for leases
+  --    lease network     no --egress given, so a lease gets no network at all
+
+What a lease enforces when one runs (native/splat-agent/SUPPORTED_POLICY.md)
+  enforced in the kernel  Executable identity; Protected files; IPv4 egress; IPv6 egress
+  enforced by the daemon  Memory, CPU, PID ceilings; Lease lifetime; Caller identity; Workload privilege; Command coherence
+  refused by the daemon   readOnlyFs; overlayFs.enableCow
+  not policed             UDP to an unconnected socket; AF_UNIX / AF_NETLINK; Inherited file descriptors; Filesystem writes outside the workspace; Ambient reads
+
+Verdict: a lease on this host reaches the kernel. run_command and run_code are enforced.
+(exit 0)
+==== 06-last-hop-probe
+PS> probe-last-hop.ps1 -Exe .\splat-mcp.exe -EvidenceDir .\evidence
+== last hop: MCP client -> splat-mcp -> bridge -> daemon -> kernel ==
+   server : %USERPROFILE%\splat\splat-mcp.exe
+   egress : 127.0.0.1:80   (permitted probe dials http://127.0.0.1/, refused probe dials 1.1.1.1)
+  [control] 65534 | [Process Exited with code 0]
+  [unleased-exec] /bin/sh: 1: dpkg: Operation not permitted | [KERNEL VIOLATION CONTAINMENT REPORT]
+  [egress-permitted] [Process Exited with code 7]
+ | {"auditAnchor":{"anchorHash":"ba73c0222226691626424eaf1cedce9d2bb38190d46253e9bb11b5981a3ef1e5","anchorEntryId":4,"traceId":null,"tool":"run_command","timestampUtc":"2026-09-18T19:08:19.31281-04:00"}}
+  [egress-refused] [KERNEL VIOLATION CONTAINMENT REPORT]
+ |   -EPERM: Hook=Connect Comm=curl Detail=socket_connect: denied outbound network connection to unapproved IPv4 1.1.1.1 (PID=2247)
+  [outside-policy] [SPLAT POLICY] run_command was refused before any lease was requested: 203.0.113.7 is not in this host's egress policy. This is a check in the MCP host, not a kernel denial. | {"auditAnchor":{"anchorHash":"6c7daeef8422f6940f9ecaecd7773931bfc1546bc988e8c8ad72215f3a8881f5","anchorEntryId":6,"traceId":null,"tool":"run_command","timestampUtc":"2026-09-18T19:08:19.5909969-04:00"}}
+
+  permitted_command_ran_as_nobody                 : True
+  unleased_second_exec_blocked_by_kernel          : True
+  unleased_exec_output_leaked                     : False
+  permitted_endpoint_reached_the_syscall          : True
+  egress_outside_the_lease_blocked_by_kernel      : True
+  outside_operator_policy_refused_before_any_lease: True
+
+  evidence written: %USERPROFILE%\splat\evidence\last-hop-probe.json  (verdict PASS)
+(exit 0)
+wrote last-hop-probe.json
+==== 07-restart-survival
+PS> wsl --shutdown
+(exit 0)
+PS> wsl -l -v
+  NAME      STATE           VERSION
+* Ubuntu    Stopped         2
+PS> .\splat-mcp.exe doctor   (the first WSL call since the shutdown)
+  ok    BPF-LSM           bpf is on the boot command line, so the kernel initialised it
+  ok    daemon            reachable
+  ok    daemon token      accepted: a request from this host authenticated against /etc/splat/agent.token (root-owned)
+  ok    enforcement       live: a lease reaches the kernel (0 active)
+  enforced by the daemon  Memory, CPU, PID ceilings; Lease lifetime; Caller identity; Workload privilege; Command coherence
+  refused by the daemon   readOnlyFs; overlayFs.enableCow
+Verdict: a lease on this host reaches the kernel. run_command and run_code are enforced.
+(exit 0)
+PS> wsl -u root systemctl is-enabled/is-active splat-agent
+enabled
+active

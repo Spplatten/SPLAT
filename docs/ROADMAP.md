@@ -37,17 +37,20 @@ a decision. Where both appear, the agent does the work and you do the one step i
 | The bridge stopped starting whatever daemon it could find | 2026-09-13. `WslLeasedExecutor` raced a loopback connect against 200 ms, and a connect that lost ran a root script that started the first `splat-agent` in `/tmp/splat_agent_target` or the repository's `target/` — in a guest where any process can write to `/tmp`. Only a refused connection starts anything now, and what it starts is the installed service, or the lease is refused naming `splat-mcp provision --apply`; setup no longer spends the lease's clock. `provision` had the same exposure: its source build ran in `/tmp` and root installed the result, with a failed build reporting success through a pipe, and its shipped install sent a check through a fixed `/tmp` file. Neither touches `/tmp` now, and the shipped daemon is hashed after it is copied, because `/mnt/c` is writable from inside the guest — `nobody` wrote to it on this machine |
 | The token stopped crossing the wire | 2026-09-15, protocol 3. The bridge sent the daemon's secret in every request, so while the daemon was down anything that took `127.0.0.1:50051` could collect it — a listener run as `nobody` received what Windows sent. Now the daemon proves it holds the token over the bridge's nonce before anything else is sent, and every request proves it back over both nonces, its place on the connection and its bytes. Verified on this machine: with the daemon stopped and a `nobody` listener on its port answering with a forged challenge, `splat-mcp doctor` sent it one `HELLO`, nothing else, and reported REFUSED; both probes re-recorded PASS under protocol 3, the root probe with the token sent in the clear refused; and the Rust and C# proofs agree on one fixed vector |
 | A restricted launch from an elevated console starts | 2026-09-18. Run from an elevated PowerShell, seven tests failed: every restricted-token launch died with 0xC0000142 before running a line, while the suite passed without elevation. An elevated administrator's token gives what it creates a DACL naming Administrators and SYSTEM, and the sandbox makes Administrators deny-only, so the child could not open its own process. The restricted token now hands out what a non-elevated one does — the user in full, and SYSTEM — and a test reproduces the elevated shape without elevation: 0xC0000142 before the change, a clean start after. Found by the operator running the runbook by hand, not by the suite |
+| P1 met on a second machine | 2026-09-18. The published `splat-mcp.exe` from `7e3a8c8` ran on Windows 11 Home with a stock WSL kernel and no toolchain. It reached enforcing after two `--apply` runs and the operator's one `wsl --shutdown`. `doctor` exited 0, the last-hop probe passed, and the daemon came back after a restart. The run found two defects that this machine never showed. `doctor` printed `FAIL workspace` on every fresh host, for a folder the server creates on first start. Under an elevated token, the loopback-containment test hit its 30 s launch timeout and reported the timeout as a breach: the container drops a denied SYN rather than refusing it. Both are fixed, and in that machine's desktop session the suite passes with an elevated token and a standard one ([record](../native/splat-agent/evidence/clean-machine/README.md)) |
 | Remediation waves 1–3, and Wave 4's F10, F11 and F15/F17 | [WAVE-PLAN](audits/WAVE-PLAN.md) |
 
 ---
 
-## Now — P1: installable and provable by a stranger
+## Done 2026-09-18 — P1: installable and provable by a stranger
 
 **Exit:** a stranger with WSL2 adds one stanza to their MCP config, runs a command the kernel refuses,
 and can point to the line in [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md) that
-predicted it — **recorded on 2026-09-11** in `last-hop-probe.json` (1.8), so what remains of P1 is
-getting it onto a machine that is not this one. This is also the first thing that can be invoiced: a
-containment assessment needs P1
+predicted it — **recorded on 2026-09-11** in `last-hop-probe.json` (1.8), and **met on a second
+machine on 2026-09-18**: the published executable, on a Windows install that had never seen SPLAT,
+provisioned itself to enforcing and passed the same probe
+([record](../native/splat-agent/evidence/clean-machine/README.md)). This is also the first thing that
+can be invoiced: a containment assessment needs P1
 and nothing after it.
 
 | # | Item | Owner | State | Done when |
@@ -64,7 +67,7 @@ and nothing after it.
 
 ---
 
-## Next — P2: the workload's own mount namespace
+## Now — P2: the workload's own mount namespace
 
 Three of the gaps people ask about first — read-only roots, copy-on-write scratch, running code an
 agent just wrote — are one missing capability. The plan's §3 has the argument.
@@ -78,7 +81,7 @@ agent just wrote — are one missing capability. The plan's §3 has the argument
 
 ---
 
-## Then — P3: the per-mission run record
+## Next — P3: the per-mission run record
 
 **Exit:** someone who did not run a mission can verify from the bundle alone what it was permitted to
 do and what it did. The schema already exists — the six-group evidence contract in
@@ -113,6 +116,7 @@ Real, known, and not blocking the phases above. Each needs a decision or a slot 
 | The 30-second stream stall against a thinking model | agent builds nothing; one live run with a key is yours | Unverified. `ClaudeStreamClient.cs:134` and `GeminiStreamClient.cs:126` cancel any read that sees no bytes for 30 s and report the stream as stalled. Whether a model with extended thinking sends bytes inside that window before its first text has not been observed. One live mission with thinking on settles it either way |
 | `wevtutil` in place of `Get-WinEvent` in SysOps | agent | Open. Three SysOps sensors (`GovernedTemplateCatalog.SysOps.cs:95`, `:120`, `:187`) call `Get-WinEvent`, which cannot reach the Event Log service from inside the AppContainer. `wevtutil` is reported to still read it there — reported, not yet shown by a differential test. Where it is a template's only blocker, the swap moves that template into network denial, and the census sentence above is test-bound, so it moves in the same change |
 | WSL stops the daemon when the guest goes idle | agent | Observed 2026-09-14, twice: an instance started by a short `wsl.exe` command ended about 17 seconds later, and systemd stopped `splat-agent` with it while the VM stayed up. The bridge starts the service again on a refused connection, so a lease after an idle gap first pays for an instance start and a refused connect, which takes about two seconds on Windows. Unverified: whether a lease that outlives that window is cut off too, since nothing in it is a `wsl.exe` process. One long `run_command` through `splat-mcp` settles it |
+| Network-denied sensors from a non-interactive logon | agent | Observed 2026-09-18 over SSH, which is a network logon. A PowerShell probe launched into the sensor AppContainer died at 0xC0000142, while `cmd.exe` started there, and a restricted child could not reach WMI. The same tests pass in the same machine's desktop session, elevated or not. It fails closed, because the sensor never runs: an operator or MCP client driving SPLAT over SSH or from a service gets failed sensor templates, not uncontained ones. Why the logon type matters is unverified. The first suspect is a window station that an AppContainer child cannot join |
 
 ---
 
@@ -138,11 +142,14 @@ next.
 | An LLC, with the IP assigned to it | Not tracked in this repository | Anything is signed |
 | General-liability and E&O cover | Not tracked | The first client machine |
 | The OEM term sheet: draw the open-core line at the daemon, and attach `SUPPORTED_POLICY.md` as Exhibit A | A draft exists outside the repository; its runtime defect went away with P0 | It is sent |
-| The first containment assessment | Waiting on P1 | — |
-| The first outreach | Triggered by P1's exit; the targets are in [TARGETS-cold-outreach.md](TARGETS-cold-outreach.md) | — |
+| The first containment assessment | Unblocked: P1's exit was met on 2026-09-18 | — |
+| The first outreach | Triggered: P1's exit was met on 2026-09-18; the targets are in [TARGETS-cold-outreach.md](TARGETS-cold-outreach.md) | — |
 
 ## Human-only steps
 
-Open for you: running the stranger's path on a second machine, which closes P1, and re-running the suite
-from an elevated PowerShell to confirm the 2026-09-18 fix. 2.3 will re-record the daemon probe under
-root; on this machine that needs no password, because `wsl -u root` asks for none.
+Both steps open this morning were done on 2026-09-18, on a second machine reached over SSH: the
+stranger's path, which closed P1, and the suite under an elevated token, which confirmed that day's
+fix ([record](../native/splat-agent/evidence/clean-machine/README.md)). Run the suite from a desktop
+session. An SSH session is a network logon, and four sensor-containment tests cannot start their
+probes in one. 2.3 will re-record the daemon probe under root; on this machine that needs no password,
+because `wsl -u root` asks for none.

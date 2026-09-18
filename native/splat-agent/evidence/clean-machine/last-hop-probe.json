@@ -1,0 +1,25 @@
+{
+    "schema":  1,
+    "bpf_source_sha256":  "8ac49790aaaa6d3ffb04dd1ae568a0508537b43c0c0d216e71d2cbc20597fd59",
+    "kernel_release":  "6.18.33.2-microsoft-standard-WSL2",
+    "protocol_version":  3,
+    "recorded_utc":  "2026-09-18T23:08:20Z",
+    "subject":  "the last hop: a run_command from an MCP client, through splat-mcp and the C# bridge, refused in the kernel",
+    "transport":  "stdio JSON-RPC to splat-mcp.exe; loopback TCP 127.0.0.1:50051 to splat-agent",
+    "operator_egress_policy":  "127.0.0.1:80",
+    "trace_id":  "last-hop-98030b75abe94fd682a5ca90d9b975cc",
+    "audit_anchor_sha256":  "1656845af4a5314f944ee099fa965ec3b3c232e189c7ae5106065a3fddfe358a",
+    "results":  {
+                    "permitted_command_ran_as_nobody":  true,
+                    "unleased_second_exec_blocked_by_kernel":  true,
+                    "unleased_exec_output_leaked":  false,
+                    "permitted_endpoint_reached_the_syscall":  true,
+                    "egress_outside_the_lease_blocked_by_kernel":  true,
+                    "outside_operator_policy_refused_before_any_lease":  true
+                },
+    "violations":  [
+                       "-EPERM: Hook=Exec Comm=sh Detail=bprm_check_security: denied execution of unleased binary (inode 1596) (PID=2243)",
+                       "-EPERM: Hook=Connect Comm=curl Detail=socket_connect: denied outbound network connection to unapproved IPv4 1.1.1.1 (PID=2247)"
+                   ],
+    "verdict":  "PASS"
+}

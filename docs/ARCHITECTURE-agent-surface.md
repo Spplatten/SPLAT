@@ -32,7 +32,7 @@ written without the UTF-8 byte order mark it carried until 2026-09-11. `splat-mc
 token the daemon actually accepted, not merely one present on disk — and exits 0 only when a lease
 would reach the kernel; its summary of a lease is copied
 from [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md) and bound to it by a
-test. `splat-mcp provision` does what `doctor` reports missing — builds the lease daemon in the guest, installs it at `/opt/splat/splat-agent` and starts it under a systemd unit, so it survives a restart — and changes nothing without `--apply`; `wsl --install` and `wsl --shutdown` stay the user's. It ships as one self-contained executable from
+test. `splat-mcp provision` does what `doctor` reports missing — installs the lease daemon it carries at `/opt/splat/splat-agent` and starts it under a systemd unit, so it survives a restart — and changes nothing without `--apply`; `wsl --install` and `wsl --shutdown` stay the user's. It ships as one self-contained executable from
 [`packaging/publish-splat-mcp.ps1`](../packaging/publish-splat-mcp.ps1), which refuses to report
 success on a non-zero publish, a missing output, a stray file beside the executable, or a result
 that cannot print its usage. There is no `dotnet tool` package: `PackAsTool` rejects the platform
