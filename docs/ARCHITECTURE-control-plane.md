@@ -180,9 +180,15 @@ Each append runs in a transaction: read the previous entry hash, draw a 256-bit 
 salted digest of the details rather than the details themselves (hash version 2), and chain the
 entry hash over the previous hash, timestamp, mission, template, action, that commitment and the
 operator. The salted commitment is what lets retention erase a payload later without forging a
-tamper signal. An HMAC key can be supplied explicitly or stored in the vault as
-`audit-ledger-hmac-key`; no shipped code stores one, so both hosts chain unkeyed. **Editing a row
-in place is detected; deleting the tail and re-appending, or recomputing from genesis, is not.**
+tamper signal. The key, when there is one, is the raw bytes of a file the operator keeps
+([`LedgerKeyFile`](../src/MissionController.Infrastructure.Data/LedgerKeyFile.cs)): `--ledger-key` on
+`splat-mcp`, `SPLAT_LEDGER_KEY_FILE` for either host, never the vault. Each row's hash version
+names its chain: 2 is unkeyed SHA-256, and 3 is HMAC-SHA256 under the key. The first keyed append
+writes a `LEDGER_KEYED` entry that commits to the unkeyed history before it. A keyed ledger refuses
+to be extended without its key or with another, and a host holding a key verifies only a chain that
+has been keyed. **Unkeyed, editing a row in place is detected; recomputing from genesis is not.
+Keyed, neither goes unnoticed by anyone without the key file. Deleting the newest entries is caught
+only by a saved audit anchor, and whoever can read the key file can do anything the key can.**
 
 **Proofs and packages.** [`MerkleTreeEngine`](../src/MissionController.Infrastructure.Data/Compliance/MerkleTreeEngine.cs)
 builds a tree over ledger rows and produces and verifies inclusion proofs — an inclusion proof shows
@@ -238,6 +244,6 @@ directly.
 ## What this layer does not do
 
 - Contain a process. The job object, token, AppContainer and lease live in the substrates.
-- Detect a ledger rewrite, while no HMAC key is provisioned.
+- Detect a ledger rewrite while the ledger is unkeyed, or one by anyone who can read the key file.
 - Catch secrets its patterns do not describe.
 - Give the two hosts one record: each keeps its own ledger and memory.

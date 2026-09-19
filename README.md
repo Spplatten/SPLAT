@@ -5,7 +5,7 @@
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](src/)
 [![Rust](https://img.shields.io/badge/Rust-libbpf--rs%20%2B%20eBPF-CE412B?logo=rust&logoColor=white)](native/splat-agent/)
 [![WinUI 3](https://img.shields.io/badge/UI-WinUI%203%20%2F%20Windows%20App%20SDK-0078D6?logo=windows&logoColor=white)](src/MissionController.UI/)
-[![Tests](https://img.shields.io/badge/Tests-569%2F569%20passing-success)](tests/MissionController.Tests/)
+[![Tests](https://img.shields.io/badge/Tests-578%2F578%20passing-success)](tests/MissionController.Tests/)
 [![Build](https://img.shields.io/badge/Build-0%20errors-success)](src/)
 
 **New here, or allergic to jargon?** Start with **[The SPLAT Field Guide](docs/TUTORIAL.md)** — the whole system explained in plain English.
@@ -39,7 +39,7 @@ Technical evaluations of agent sandboxes tend to blur together into generic "iso
 | Component | State |
 | :--- | :--- |
 | Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
-| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 569/569 automated tests passing |
+| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 578/578 automated tests passing |
 | Zero-warning build gate | **Enforced** — [`src`](src/Directory.Build.props) and [`tests`](tests/Directory.Build.props) compile with `TreatWarningsAsErrors`, so a cold solution build reports 0 warnings and 0 errors. The frozen WinUI console is the one exemption, and `WarningGateTests` fails if a second one appears |
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 12 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining ten run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
@@ -122,7 +122,7 @@ Policy matches on inode identity, not path strings — full-path resolution in B
 | `diagnose_system`, `investigate_system`, `run_agent_brain`, `run_governed_crew` | The full 1:1:1 mission pipeline: validated argument binding, Job Object clamps, restricted token, ACL jail, DLP, audit ledger, Layer-2 cognitive planning, and multi-agent crew execution |
 | `get_substrate_health`, `list_diagnostic_templates`, `search_incident_memory`, `list_governed_crews` | Read-only queries against the local host, catalog, memory, and crew registry |
 
-Run it as `splat-mcp --workspace <dir>`. `fs_read` and `fs_write` are confined to that directory, which must already exist — it is never created for you. Without the flag they fall back to a private folder under `%LOCALAPPDATA%\SPLAT\mcp-workspace`, and the server names it on stderr at startup; stdout carries nothing but JSON-RPC. A bad option exits with status 2 before anything is built. `splat-mcp --help` prints the rest. On a fresh host, `splat-mcp provision --apply` does the Linux setup that `splat-mcp doctor` reports missing: it installs the lease daemon it carries at `/opt/splat/splat-agent`, starts it under systemd so it survives a restart, and succeeds only when the daemon is enforcing. Without `--apply` it changes nothing and lists what it would do.
+Run it as `splat-mcp --workspace <dir>`. `fs_read` and `fs_write` are confined to that directory, which must already exist — it is never created for you. Without the flag they fall back to a private folder under `%LOCALAPPDATA%\SPLAT\mcp-workspace`, and the server names it on stderr at startup; stdout carries nothing but JSON-RPC. A bad option exits with status 2 before anything is built. `--ledger-key <file>` keys the audit ledger with a file you keep; an MCP client may start the server without your environment variables, so give it in the stanza's `args`. `splat-mcp --help` prints the rest. On a fresh host, `splat-mcp provision --apply` does the Linux setup that `splat-mcp doctor` reports missing: it installs the lease daemon it carries at `/opt/splat/splat-agent`, starts it under systemd so it survives a restart, and succeeds only when the daemon is enforcing. Without `--apply` it changes nothing and lists what it would do.
 
 **Installing it.** One self-contained file; the target machine needs no .NET, and its WSL guest needs no Rust toolchain, because the Linux daemon travels inside it:
 
@@ -161,7 +161,7 @@ Every call lands in the audit ledger attributed to a resolved principal — the 
 
 - **Tamper-evident ledger** — [`SqliteChainedAuditLedger.cs`](src/MissionController.Infrastructure.Data/SqliteChainedAuditLedger.cs): every action, argument, token, and fix is committed to a SHA-256 chained hash ledger (WAL-mode SQLite) with Merkle-root verification. The chain commits to a *salted digest* of the payload rather than the plaintext, which is what makes retention erasure possible without forging a tamper signal — a purged row still recomputes. Each row is attributed to a resolved principal (the Windows logon session, or a validated credential) with its provenance recorded inline, never to a caller-supplied name.
 
-  **What this detects, and what it does not.** Editing any historical row in place breaks the chain verifiably. It does **not** detect a rewrite: the chain is unkeyed and `ComputeEntryHashV2` is public, so anyone who can write the database file can delete the tail and re-append, or recompute the whole chain from genesis, undetectably. Closing that needs a key the rewriter does not hold — an HMAC under the DPAPI vault, or periodic anchoring to append-only external storage. Until then this is integrity against accident and casual editing, not against a determined local administrator.
+  **What this detects, and what it does not.** Editing any historical row in place breaks the chain verifiably. Unkeyed — the default — it does **not** detect a rewrite: `ComputeEntryHashV2` is public, so anyone who can write the database file can recompute the whole chain from genesis undetectably, and `splat-mcp doctor` says so on every unkeyed host. Since 2026-09-18 the operator can key it with a file they keep (`--ledger-key <file>` on `splat-mcp`, or `SPLAT_LEDGER_KEY_FILE` for either host). Each keyed entry is HMAC-SHA256 under that key, and each row records which chain it is on. The first keyed entry records the switch and commits to the unkeyed history before it. A keyed ledger refuses to be extended without its key or with another. Keyed, nobody without the key file can rewrite it unnoticed. Two things a key does not change: deleting the newest entries is caught only by a saved audit anchor, and whoever can read the key file — the operator's own account included — can rewrite it as freely as SPLAT can write it.
 - **SIEM streaming** — [`SiemForwarder.cs`](src/MissionController.Infrastructure.Network/Siem/SiemForwarder.cs): Microsoft Sentinel (HMAC), CEF, and RFC 5424 syslog export; [`EdrIngestionBridge.cs`](src/MissionController.Infrastructure.Network/Edr/EdrIngestionBridge.cs) bridges Defender / CrowdStrike endpoint posture.
 - **Pre-egress DLP** — [`RegexDataLossPreventionSanitizer.cs`](src/MissionController.Infrastructure.Network/Dlp/RegexDataLossPreventionSanitizer.cs) masks private-key blocks, NTLM hash pairs, passwords/API keys/bearer tokens, CLI password parameters, emails, card and SSN patterns — in memory, before anything reaches a model provider.
 - **Local semantic memory** — [`SqliteSemanticMemoryIndex.cs`](src/MissionController.Infrastructure.Data/Vector/SqliteSemanticMemoryIndex.cs): in-process 128-dim embeddings with sub-second cosine similarity over incident history; no cloud embedding calls.
@@ -178,10 +178,10 @@ Every call lands in the audit ledger attributed to a resolved principal — the 
 
 ```text
 $ dotnet test tests/MissionController.Tests/MissionController.Tests.csproj
-Passed!  - Failed: 0, Passed: 569, Skipped: 0, Total: 569, Duration: 25 s - MissionController.Tests.dll (net10.0)
+Passed!  - Failed: 0, Passed: 578, Skipped: 0, Total: 578, Duration: 25 s - MissionController.Tests.dll (net10.0)
 ```
 
-569 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
+578 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
 
 **On the warning count.** An incremental `dotnet build` reports zero warnings, but that is an artifact of caching rather than a property of the source: a cold `--no-incremental` build re-runs the CommunityToolkit source generators and emits **186 `MVVMTK0045` warnings**, one per `[ObservableProperty]` field that should be declared as a partial property for WinRT marshalling. They are cosmetic and confined to the view models, but a "zero warnings" claim would only have been true on the build nobody runs from clean. Converting the fields is tracked work; the badge above claims zero *errors*, which holds either way.
 
@@ -200,7 +200,7 @@ SPLAT/
 ├── native/
 │   ├── splat-agent/                             # Rust eBPF daemon: lease_lsm.bpf.c + libbpf-rs loader
 │   └── splat-canary/                            # Minimal -EPERM proof harness (preflight → canary)
-├── tests/MissionController.Tests/               # 569 xUnit unit / integration / security tests
+├── tests/MissionController.Tests/               # 578 xUnit unit / integration / security tests
 ├── packaging/                                   # Signed MSIX build + Intune/SCCM silent install scripts
 └── docs/                                        # Architecture, context and module maps; briefs, plans, audits - index in docs/README.md
 ```
@@ -213,7 +213,7 @@ SPLAT/
 | HIPAA Security Rule | § 164.312(b) cryptographic chained audit controls · § 164.312(e)(1) transmission security & DLP masking |
 | NIST SP 800-171 / CMMC 2.0 | AU.2.041–042 attributed, chained audit logs · SC.3.177 strict egress isolation |
 
-These are the controls the architecture is *built against*; they are not an attestation, and SPLAT has not been assessed by an auditor. One qualification worth stating rather than burying: AU.2.041 non-repudiation has two halves, and only one is complete. Actions are now attributed to a principal the OS or a validator established, but the chain protecting that attribution is unkeyed (see the ledger note above), so a local administrator can still rewrite history including their own name in it. Read the mapping as design intent with a known gap, not as a passed control.
+These are the controls the architecture is *built against*; they are not an attestation, and SPLAT has not been assessed by an auditor. One qualification worth stating rather than burying: AU.2.041 non-repudiation has two halves, and only one is complete. Actions are now attributed to a principal the OS or a validator established, but the chain protecting that attribution is unkeyed unless the operator supplies a key (see the ledger note above). Unkeyed, a local administrator can still rewrite history including their own name in it; keyed, so can anyone who can read the key file, which an administrator can. Read the mapping as design intent with a known gap, not as a passed control.
 
 ## Roadmap
 
@@ -232,8 +232,8 @@ plans. In order:
    rather than trusting a secret. Which callers that actually excludes has to be worked out before
    it is claimed.
 4. **The per-mission run record** — a bundle from which someone who did not run a mission can verify
-   what it was permitted to do and what it did. It needs a keyed ledger first; the chain is unkeyed
-   today, as the compliance note above says.
+   what it was permitted to do and what it did. It needs a keyed ledger, which the operator can now
+   supply; unkeyed is still the default, as the compliance note above says.
 
 ## License
 

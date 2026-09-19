@@ -92,7 +92,7 @@ Two things the picture says on purpose.
 | Which endpoints a `run_command` / `run_code` lease names | [`McpEgressPolicy`](../src/splat-mcp/McpEgressPolicy.cs) — the operator's `--egress` list; a caller may request part of it, never more | Check in `splat-mcp` | An agent writing its own destinations into the lease the kernel then enforces |
 | MCP `fs_read` / `fs_write` | [`WorkspaceGuard`](../src/splat-mcp/WorkspaceGuard.cs) — the final path of the opened handle | Check in `splat-mcp` | `..`, string-prefix tricks, junctions, symlinks |
 | Who acted | Windows logon session; in `splat-mcp`, optionally a validated credential | Check in SPLAT's process | Caller-supplied names |
-| The record of what happened | [`SqliteChainedAuditLedger`](../src/MissionController.Infrastructure.Data/SqliteChainedAuditLedger.cs) — SHA-256 chain over salted commitments | Tamper evidence | Editing a row in place — **not** a rewrite by anyone who can write the database file, because no shipped code provisions the ledger's HMAC key |
+| The record of what happened | [`SqliteChainedAuditLedger`](../src/MissionController.Infrastructure.Data/SqliteChainedAuditLedger.cs) — SHA-256 chain over salted commitments, or HMAC-SHA256 under the operator's key file | Tamper evidence | Editing a row in place — **not** a rewrite by anyone who can write the database file, because no shipped code provisions the ledger's HMAC key |
 
 ## Two hosts, one pipeline
 
@@ -188,7 +188,7 @@ A class that no host constructs is not a capability, however well it is tested. 
 | Code | State |
 | --- | --- |
 | [`TemplatePolicyCompiler`](../src/MissionController.Infrastructure.Linux/TemplatePolicyCompiler.cs) | `splat-mcp` constructs it and hands it to the handler, which never calls it — `run_command` builds its lease inline. Exercised by tests |
-| HMAC keying in [`SqliteChainedAuditLedger`](../src/MissionController.Infrastructure.Data/SqliteChainedAuditLedger.cs) | Supported, from an explicit key or the vault secret `audit-ledger-hmac-key`; nothing provisions either, so both hosts chain unkeyed |
+| HMAC keying in [`SqliteChainedAuditLedger`](../src/MissionController.Infrastructure.Data/SqliteChainedAuditLedger.cs) | Since 2026-09-18, from a key file the operator keeps: `--ledger-key` on `splat-mcp`, `SPLAT_LEDGER_KEY_FILE` for either host. Unkeyed until one is given |
 | [`DataRetentionService`](../src/MissionController.Infrastructure.Data/Retention/DataRetentionService.cs) | Implemented and tested; no host schedules it |
 | [`VertexAiStreamClient`](../src/MissionController.Infrastructure.Network/VertexAiStreamClient.cs), [`PkceLoopbackAuthService`](../src/MissionController.Infrastructure.Network/PkceLoopbackAuthService.cs), [`ServiceAccountAuthService`](../src/MissionController.Infrastructure.Network/ServiceAccountAuthService.cs) | Constructed by neither host |
 | [`EmbeddedWebhookListener`](../src/MissionController.Infrastructure.Network/Triggers/EmbeddedWebhookListener.cs), `OAuthCallbackCoordinator`, `WorkflowScheduler` | Trigger hosting, constructed by neither host — the orchestration plan's Phase 1, subtracted on 2026-09-09 |

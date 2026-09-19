@@ -131,7 +131,7 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 569`, on a line ending `(net10.0)`. The `dotnet` on this
+**Expect:** `Passed! - Failed: 0, Passed: 578`, on a line ending `(net10.0)`. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
 
@@ -217,7 +217,51 @@ verifies the console's own chain in `%LOCALAPPDATA%\MissionController\Data\missi
 `splat-mcp` keeps a separate chain in `%LOCALAPPDATA%\SPLAT\audit_ledger.db`, which that screen does
 not read.
 
-### 1.4 The app runs
+### 1.5 Key the audit ledger
+
+Unkeyed, the chain catches an edited row but not a rewrite: whoever can write the file can recompute
+every hash. Keyed, nobody without the key file can. SPLAT reads the key file and never writes it, so
+you make it, once, in a folder only you use:
+
+```powershell
+$key = "C:\path\to\your\KEYS\splat-ledger.key"
+if (Test-Path $key) { throw "$key already exists, and may already be keying a ledger." }
+$bytes = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+[IO.File]::WriteAllBytes($key, $bytes)
+[Environment]::SetEnvironmentVariable("SPLAT_LEDGER_KEY_FILE", $key, "User")
+```
+
+The last line keys the app, and `splat-mcp` started from a terminal, from their next start. An MCP
+client may start `splat-mcp` without your environment, so add the key to its stanza's `args` too:
+`"--ledger-key", "C:\\path\\to\\your\\KEYS\\splat-ledger.key"`.
+
+**Expect:** `splat-mcp doctor --ledger-key <that path>` prints the audit ledger line as
+`ok ... its next entry keys it`, and as `ok ... keyed by` once anything has been recorded. The first
+keyed entry is a `LEDGER_KEYED` row that commits to everything before it.
+
+**Keep the file.** A keyed ledger refuses to be extended without its key or with another, and never
+falls back to unkeyed. Lose the key and the only way on is to move the ledger aside and start a new
+one. Whoever can read the file can rewrite the ledger, so keep it where only you can.
+
+### 1.6 Keep leased commands out of your Windows files, until P2
+
+A lease runs its command as `nobody` inside WSL, and WSL mounts your Windows drives with every
+permission open. So that command can read your whole Windows profile, SSH keys included
+(`SUPPORTED_POLICY.md`, **Ambient reads**). Until P2 gives the workload a root without `/mnt`, this
+leaves the Windows drives to your own Linux user and root. It needs a WSL restart, which ends every
+WSL session you have open:
+
+```powershell
+wsl -u root -e sh -c 'grep -q ''^\[automount\]'' /etc/wsl.conf || printf ''\n[automount]\noptions = \042umask=077\042\n'' >> /etc/wsl.conf'
+wsl --shutdown
+wsl -u nobody --cd / -e ls /mnt/c
+```
+
+**Expect:** the last line fails with `Permission denied`. Applied to this machine and the second one
+on 2026-09-18.
+
+### 1.7 The app runs
 
 ```powershell
 Start-Process C:\C_AGENT_BUILDER\dist\App\MissionController.UI.exe -WorkingDirectory C:\C_AGENT_BUILDER\dist\App
