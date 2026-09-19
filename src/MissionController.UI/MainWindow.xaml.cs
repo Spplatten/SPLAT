@@ -1,11 +1,18 @@
 using System;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Shapes;
+using MissionController.Core.Interfaces;
+using MissionController.Infrastructure.Windows.Jails;
+using MissionController.Infrastructure.Windows.JobObjects;
 using MissionController.UI.Views;
 using Windows.Graphics;
 
@@ -28,9 +35,68 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         // Read from the runtime the app is on: typed into the XAML, it said ".NET 9" through the move to 10.
-        RuntimeLabel.Text = $"8-LAYER GOVERNED APPLIANCE  ·  .NET {Environment.Version.Major}";
+        RuntimeLabel.Text = $"GOVERNED APPLIANCE  ·  .NET {Environment.Version.Major}";
         ConfigureWindow();
+        _ = RunSelfCheckAsync();
         NavigateTo(typeof(QuickDiagnosticianView), SlideNavigationTransitionEffect.FromRight);
+    }
+
+    /// <summary>
+    /// The status bar used to be typed into the XAML: green lights reading JOB SANDBOX ENFORCED, ACL
+    /// JAILS ISOLATED and SHA-256 LEDGER VERIFIED, and CONTROL PLANE ONLINE above them, which no code
+    /// ever checked. The ledger's stayed green whether or not the chain verified. Each light is now a
+    /// check run at start, on the same types a mission uses, and says what it found.
+    /// </summary>
+    private async Task RunSelfCheckAsync()
+    {
+        var checks = new (TextBlock Label, Ellipse Dot, string Passed, string Failed, Func<Task<bool>> Run)[]
+        {
+            (JobSandboxLabel, JobSandboxDot, "JOB SANDBOX READY", "JOB SANDBOX FAILED", () => Task.Run(() =>
+            {
+                using var job = new Win32JobSandbox($"splat-selfcheck-{Guid.NewGuid():N}");
+                return true;
+            })),
+            (JailLabel, JailDot, "ACL JAIL READY", "ACL JAIL FAILED", () => Task.Run(async () =>
+            {
+                var jails = new NtAclJailManager();
+                await jails.DrainAndCleanupJailAsync(await jails.ProvisionJailAsync(Guid.NewGuid()));
+                return true;
+            })),
+            // Off the UI thread: Microsoft.Data.Sqlite's async calls run synchronously, over the whole chain.
+            (LedgerLabel, LedgerDot, "LEDGER CHAIN VERIFIED", "LEDGER CHAIN FAILED",
+                () => Task.Run(() => App.Services.GetRequiredService<IAuditLedger>().VerifyLedgerIntegrityAsync())),
+        };
+
+        int failed = 0;
+        foreach (var check in checks)
+        {
+            bool passed;
+            try
+            {
+                passed = await check.Run();
+            }
+            catch (Exception)
+            {
+                // A check that throws has not passed, and says FAILED rather than staying green.
+                passed = false;
+            }
+
+            failed += passed ? 0 : 1;
+            check.Label.Text = passed ? check.Passed : check.Failed;
+            Paint(check.Dot, passed);
+        }
+
+        SelfCheckLabel.Text = failed == 0 ? "SELF-CHECK PASSED" : $"SELF-CHECK: {failed} FAILED";
+        Paint(SelfCheckDot, failed == 0);
+    }
+
+    private static void Paint(Ellipse dot, bool passed)
+    {
+        if (Application.Current.Resources.TryGetValue(passed ? "SplatSuccessBrush" : "SplatDangerBrush", out object? brush)
+            && brush is Brush fill)
+        {
+            dot.Fill = fill;
+        }
     }
 
     private void ConfigureWindow()

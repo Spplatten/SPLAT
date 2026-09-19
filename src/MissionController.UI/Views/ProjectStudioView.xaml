@@ -75,13 +75,12 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0" PlaceholderText="e.g. Set up a TikTok OAuth callback receiver, capture the token into DPAPI, and fetch ad campaign performance..." Text="{x:Bind ViewModel.NaturalLanguagePrompt, Mode=TwoWay}" />
+                                    <TextBox Grid.Column="0" PlaceholderText="e.g. Check DNS latency, then look for failed sign-ins, then summarize both..." Text="{x:Bind ViewModel.NaturalLanguagePrompt, Mode=TwoWay}" />
                                     <Button Grid.Column="1" Content="Synthesize Flow" Command="{x:Bind ViewModel.SynthesizeWorkflowCommand}" Style="{StaticResource AccentButtonStyle}" />
                                 </Grid>
-                                <StackPanel Orientation="Horizontal" Spacing="16" Margin="0,4,0,0">
-                                    <TextBlock Text="Webhook Trigger: http://127.0.0.1:5678/webhook/active" FontSize="11" Foreground="{ThemeResource SplatVioletBrush}" />
-                                    <TextBlock Text="OAuth Receiver: http://127.0.0.1:5678/oauth/callback/{provider}" FontSize="11" Foreground="{ThemeResource SplatGoodBrush}" />
-                                </StackPanel>
+                                <!-- These listed a webhook and an OAuth receiver on :5678 as live. Nothing in the app
+                                     starts either listener; the roadmap defers trigger hosting. -->
+                                <TextBlock Margin="0,4,0,0" Text="Webhook triggers and OAuth receivers are designed but not started by this app yet." FontSize="11" Foreground="{ThemeResource SplatTextTertiaryBrush}" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
 

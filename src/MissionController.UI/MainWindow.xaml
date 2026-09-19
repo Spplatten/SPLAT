@@ -52,8 +52,8 @@
             </StackPanel>
             <Border Grid.Column="1" Background="{ThemeResource SplatSurfaceElevatedBrush}" BorderBrush="{ThemeResource SplatBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="10,4" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal" Spacing="7">
-                    <Ellipse Width="6" Height="6" Fill="{ThemeResource SplatSuccessBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="CONTROL PLANE ONLINE" FontSize="9" CharacterSpacing="40" FontWeight="SemiBold" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
+                    <Ellipse x:Name="SelfCheckDot" Width="6" Height="6" Fill="{ThemeResource SplatTextTertiaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="SelfCheckLabel" Text="SELF-CHECK RUNNING" FontSize="9" CharacterSpacing="40" FontWeight="SemiBold" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
                 </StackPanel>
             </Border>
         </Grid>
@@ -110,16 +110,16 @@
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="18">
                 <StackPanel Orientation="Horizontal" Spacing="6">
-                    <Ellipse Width="6" Height="6" Fill="{ThemeResource SplatSuccessBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="JOB SANDBOX ENFORCED" FontSize="10" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
+                    <Ellipse x:Name="JobSandboxDot" Width="6" Height="6" Fill="{ThemeResource SplatTextTertiaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="JobSandboxLabel" Text="CHECKING JOB SANDBOX" FontSize="10" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Spacing="6">
-                    <Ellipse Width="6" Height="6" Fill="{ThemeResource SplatAccentBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="ACL JAILS ISOLATED" FontSize="10" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
+                    <Ellipse x:Name="JailDot" Width="6" Height="6" Fill="{ThemeResource SplatTextTertiaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="JailLabel" Text="CHECKING ACL JAIL" FontSize="10" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Spacing="6">
-                    <Ellipse Width="6" Height="6" Fill="{ThemeResource SplatVioletBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="SHA-256 LEDGER VERIFIED" FontSize="10" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
+                    <Ellipse x:Name="LedgerDot" Width="6" Height="6" Fill="{ThemeResource SplatTextTertiaryBrush}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="LedgerLabel" Text="CHECKING LEDGER" FontSize="10" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
                 </StackPanel>
             </StackPanel>
             <TextBlock x:Name="RuntimeLabel" Grid.Column="1" FontSize="10" CharacterSpacing="35" Foreground="{ThemeResource SplatTextTertiaryBrush}" />

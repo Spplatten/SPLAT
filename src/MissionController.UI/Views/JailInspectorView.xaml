@@ -19,7 +19,7 @@
         <!-- Header -->
         <StackPanel Grid.Row="0" Spacing="4">
             <TextBlock Text="Win32 Subprocess Confinement &amp; Jail Inspector" Style="{StaticResource SplatPageTitleStyle}" />
-            <TextBlock Text="Hardware &amp; filesystem isolation controls enforcing hard resource clamping and zero-zombie process termination" Style="{StaticResource SplatPageSubtitleStyle}" />
+            <TextBlock Text="Kernel job objects and NTFS ACL jails: hard resource caps, and every process in a job ends when the job closes" Style="{StaticResource SplatPageSubtitleStyle}" />
         </StackPanel>
 
         <!-- Jail Status & Actions Banner -->
