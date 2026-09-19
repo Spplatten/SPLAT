@@ -85,7 +85,29 @@ public static class GovernedArgumentBinder
     /// A value cannot be placed safely. The caller must abandon the mission rather than continue
     /// with a repaired string.
     /// </exception>
-    public static string Bind(SingleToolTemplate template, IReadOnlyDictionary<string, string> parameters)
+    public static string Bind(SingleToolTemplate template, IReadOnlyDictionary<string, string> parameters) =>
+        RefusedOnTimeout(() => BindCore(template, parameters));
+
+    /// <summary>
+    /// A check that did not finish is a check that did not pass. As a refusal, the mission and workflow
+    /// engines record it as a refused mission; as a timeout it got past both of their catches. On
+    /// 2026-09-19 a loaded test run saw this binder throw something other than a refusal for input it
+    /// refuses at once, and a match timeout is the only other thing these paths throw.
+    /// </summary>
+    private static string RefusedOnTimeout(Func<string> bind)
+    {
+        try
+        {
+            return bind();
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            throw new TemplateParameterRejectedException(
+                "*", $"a check did not finish within its {PatternTimeout.TotalMilliseconds:0} ms limit, so nothing was bound.");
+        }
+    }
+
+    private static string BindCore(SingleToolTemplate template, IReadOnlyDictionary<string, string> parameters)
     {
         ArgumentNullException.ThrowIfNull(template);
         ArgumentNullException.ThrowIfNull(parameters);
@@ -152,7 +174,13 @@ public static class GovernedArgumentBinder
     public static string BindWorkflowCommand(
         string? commandTemplate,
         IReadOnlyDictionary<string, string> values,
-        bool isPowerShell = true)
+        bool isPowerShell = true) =>
+        RefusedOnTimeout(() => BindWorkflowCommandCore(commandTemplate, values, isPowerShell));
+
+    private static string BindWorkflowCommandCore(
+        string? commandTemplate,
+        IReadOnlyDictionary<string, string> values,
+        bool isPowerShell)
     {
         ArgumentNullException.ThrowIfNull(values);
 
