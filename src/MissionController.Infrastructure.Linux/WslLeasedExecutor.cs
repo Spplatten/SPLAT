@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -33,6 +34,14 @@ public class WslLeasedExecutor : ILeasedExecutor
     private readonly Func<CancellationToken, Task<int>> _startDaemon;
 
     /// <summary>
+    /// Held for the whole of a lease, so WSL cannot stop the guest under it. WSL stops a distro about
+    /// fifteen seconds after its last Windows-side session ends, and systemd stops the daemon with it:
+    /// on a machine with no WSL window open, a 75-second lease was killed 15 seconds in (2026-09-18,
+    /// exit -1). Neither the daemon nor the lease's own connection counts as a session; a wsl.exe does.
+    /// </summary>
+    private readonly Func<IDisposable> _holdGuestAwake;
+
+    /// <summary>
     /// For reaching a daemon whose port refused the first connection: long enough to boot a stopped
     /// guest, have systemd start the service and let the daemon load its BPF programs before it binds;
     /// bounded, so a service that starts and then exits refuses the lease instead of holding it open.
@@ -55,12 +64,13 @@ public class WslLeasedExecutor : ILeasedExecutor
         string host = "127.0.0.1",
         int port = 50051,
         string authTokenPath = "/etc/splat/agent.token",
-        string? authToken = null)
+        string? authToken = null,
+        Func<IDisposable>? holdGuestAwake = null)
         // The shared default unless this caller named its own path or token, so one host reads the
         // secret once however many components talk to the daemon.
         : this(host, port, authTokenPath == WslAgentToken.DefaultPath && string.IsNullOrWhiteSpace(authToken)
             ? WslAgentToken.Default
-            : new WslAgentToken(authTokenPath, authToken))
+            : new WslAgentToken(authTokenPath, authToken), holdGuestAwake: holdGuestAwake)
     {
     }
 
@@ -69,13 +79,23 @@ public class WslLeasedExecutor : ILeasedExecutor
     /// What to run when nothing is listening; by default `systemctl start splat-agent` as root in the
     /// guest. Replaceable so that a test can stand in for the service instead of starting the real one.
     /// </param>
-    public WslLeasedExecutor(string host, int port, WslAgentToken token, Func<CancellationToken, Task<int>>? startDaemon = null)
+    /// <param name="holdGuestAwake">
+    /// What keeps the guest running for the length of a lease; by default an idle wsl.exe session.
+    /// Replaceable so that a test against a stand-in daemon never boots the real guest.
+    /// </param>
+    public WslLeasedExecutor(
+        string host,
+        int port,
+        WslAgentToken token,
+        Func<CancellationToken, Task<int>>? startDaemon = null,
+        Func<IDisposable>? holdGuestAwake = null)
     {
         ArgumentNullException.ThrowIfNull(token);
         _host = host;
         _port = port;
         _token = token;
         _startDaemon = startDaemon ?? StartInstalledServiceAsync;
+        _holdGuestAwake = holdGuestAwake ?? IdleGuestSession.Open;
     }
 
     public async Task<ProcessExecutionResult> ExecuteLeasedAsync(
@@ -100,6 +120,10 @@ public class WslLeasedExecutor : ILeasedExecutor
 
         try
         {
+            // Opened before the connect, so it also boots a stopped guest and holds it through the
+            // daemon's start; released when this block is left, whatever the lease's outcome.
+            using var awake = _holdGuestAwake();
+
             // Nothing before the request is the workload, so none of it is charged to the lease. Its clock
             // used to start here and pay for starting the daemon, the connect and a cold wsl.exe token
             // read, so a slow start came back as an expired lease and a slow read as a missing token.
@@ -410,5 +434,69 @@ public class WslLeasedExecutor : ILeasedExecutor
             proc.StandardError.ReadToEndAsync(ct),
             proc.WaitForExitAsync(ct));
         return proc.ExitCode;
+    }
+
+    /// <summary>
+    /// A wsl.exe session that does nothing until disposed: `cat` reading a pipe this process holds, so
+    /// closing that pipe is its whole shutdown and nothing is left running in the guest.
+    /// </summary>
+    private sealed class IdleGuestSession : IDisposable
+    {
+        private readonly Process? _process;
+
+        private IdleGuestSession(Process? process) => _process = process;
+
+        public static IDisposable Open()
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "wsl.exe",
+                // Root and an absolute path, like every child here; `-` is stdin, which is all it reads.
+                Arguments = "-u root -e /bin/cat -",
+                UseShellExecute = false,
+                // All three, as for systemctl above: under splat-mcp this process's stdin and stdout
+                // are the JSON-RPC channel.
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            try
+            {
+                return new IdleGuestSession(Process.Start(psi));
+            }
+            catch (Win32Exception)
+            {
+                // No wsl.exe at all: there is no guest to keep awake, and the connect will say why.
+                return new IdleGuestSession(null);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_process is null)
+            {
+                return;
+            }
+
+            try
+            {
+                // End of input: cat exits, and wsl.exe with it.
+                _process.StandardInput.Close();
+                if (!_process.WaitForExit(2000))
+                {
+                    _process.Kill(entireProcessTree: true);
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException)
+            {
+                // Already gone, taking its pipe with it.
+            }
+            finally
+            {
+                _process.Dispose();
+            }
+        }
     }
 }

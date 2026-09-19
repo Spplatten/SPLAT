@@ -126,6 +126,78 @@ public class WslLeasedExecutorWireTests
         LeaseDurationSeconds: 15,
         Limits: new LeaseResourceLimits(64 * 1024 * 1024, 25, 20));
 
+    /// <summary>
+    /// Stands in for the idle wsl.exe session a lease holds, and counts it. These tests talk to a
+    /// stand-in daemon in this process, so none of them may boot the real guest.
+    /// </summary>
+    private sealed class GuestHold : IDisposable
+    {
+        private int _opened;
+        private int _released;
+
+        public int Opened => Volatile.Read(ref _opened);
+
+        public bool IsHeld => Volatile.Read(ref _opened) > Volatile.Read(ref _released);
+
+        public IDisposable Open()
+        {
+            Interlocked.Increment(ref _opened);
+            return this;
+        }
+
+        public void Dispose() => Interlocked.Increment(ref _released);
+    }
+
+    private static IDisposable NoGuest() => new GuestHold().Open();
+
+    /// <summary>
+    /// WSL stops a distro about fifteen seconds after its last Windows-side session ends, and systemd
+    /// stops the daemon with it: on a machine with no WSL window open, a 75-second lease was killed 15
+    /// seconds in (2026-09-18). So the bridge holds a session from before it connects until the lease
+    /// is over, and lets it go then.
+    /// </summary>
+    [Fact]
+    public async Task TheGuestIsHeldAwakeForTheWholeLease_AndReleasedAfter()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var hold = new GuestHold();
+        bool heldWhenReached = false;
+
+        var daemon = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync();
+            heldWhenReached = hold.IsHeld;
+            using var stream = client.GetStream();
+            return await StandInAgent.ServeAsync(stream, TestToken, new[] { "{\"type\":\"EXIT\",\"exitCode\":0}" });
+        });
+
+        var result = await new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: hold.Open)
+            .ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
+        await daemon;
+        listener.Stop();
+
+        Assert.True(result.ExitCode == 0, result.StandardError);
+        Assert.True(heldWhenReached, "the daemon was reached with nothing holding the guest awake");
+        Assert.Equal(1, hold.Opened);
+        Assert.False(hold.IsHeld, "the session outlived the lease");
+    }
+
+    [Fact]
+    public async Task ALeaseThatFails_StillLetsTheGuestGo()
+    {
+        var hold = new GuestHold();
+        var executor = new WslLeasedExecutor("127.0.0.1", UnusedPort(), new WslAgentToken(authToken: TestToken),
+            _ => Task.FromResult(5), holdGuestAwake: hold.Open);
+
+        var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Equal(1, hold.Opened);
+        Assert.False(hold.IsHeld, "a failed lease kept the guest awake");
+    }
+
     /// <summary>A loopback port with nothing listening on it, so a connection to it is refused.</summary>
     private static int UnusedPort()
     {
@@ -228,7 +300,7 @@ public class WslLeasedExecutorWireTests
             "{\"type\":\"STDOUT\",\"data\":\"ok\\n\"}",
             "{\"type\":\"EXIT\",\"exitCode\":0}");
 
-        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
         var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
         byte[] request = (await daemon).Raw;
@@ -260,7 +332,7 @@ public class WslLeasedExecutorWireTests
         var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
 
         var lease = SampleLease();
-        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
         await executor.ExecuteLeasedAsync(lease, "/usr/bin/curl", new[] { "--max-time", "3" });
 
         var exchange = await daemon;
@@ -306,7 +378,7 @@ public class WslLeasedExecutorWireTests
 
         var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
 
-        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
         var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
         var exchange = await daemon;
@@ -346,7 +418,7 @@ public class WslLeasedExecutorWireTests
 
         try
         {
-            var result = await new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken)
+            var result = await new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest)
                 .ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
             string[] sent = StandInAgent.Frames(await impostor);
 
@@ -380,7 +452,7 @@ public class WslLeasedExecutorWireTests
         {
             // A path no daemon ever wrote, so the guest read finds nothing either.
             var executor = new WslLeasedExecutor(
-                "127.0.0.1", port, authTokenPath: "/nonexistent/splat/agent.token");
+                "127.0.0.1", port, authTokenPath: "/nonexistent/splat/agent.token", holdGuestAwake: NoGuest);
 
             var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
@@ -425,7 +497,7 @@ public class WslLeasedExecutorWireTests
 
         try
         {
-            var result = await new WslLeasedExecutor("127.0.0.1", port, slowToken)
+            var result = await new WslLeasedExecutor("127.0.0.1", port, slowToken, holdGuestAwake: NoGuest)
                 .ExecuteLeasedAsync(SampleLease() with { LeaseDurationSeconds = 1 }, "/usr/bin/id", Array.Empty<string>());
 
             Assert.True(result.ExitCode == 0 && !result.TimedOut, result.StandardError);
@@ -454,7 +526,7 @@ public class WslLeasedExecutorWireTests
             listener.Start();
             _ = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
             return Task.FromResult(0);
-        });
+        }, holdGuestAwake: NoGuest);
 
         try
         {
@@ -484,7 +556,7 @@ public class WslLeasedExecutorWireTests
     {
         var executor = new WslLeasedExecutor("127.0.0.1", UnusedPort(), new WslAgentToken(authToken: TestToken),
             // systemctl's exit code for a unit it cannot find, as measured in this guest on 2026-09-13.
-            _ => Task.FromResult(5));
+            _ => Task.FromResult(5), holdGuestAwake: NoGuest);
 
         var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
@@ -511,7 +583,7 @@ public class WslLeasedExecutorWireTests
             "{\"type\":\"EXIT\",\"exitCode\":1}");
 
         var seen = new List<LeaseViolationEvent>();
-        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
         var result = await executor.ExecuteLeasedAsync(
             SampleLease(), "/bin/cat", new[] { "/etc/shadow" },
             violations: new Progress<LeaseViolationEvent>(v => { lock (seen) { seen.Add(v); } }));
@@ -547,7 +619,7 @@ public class WslLeasedExecutorWireTests
 
         var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
 
-        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
         var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
         await daemon;
