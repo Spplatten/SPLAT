@@ -32,7 +32,7 @@ if (-not (Test-Path $OutputDir)) {
 
 # 2. Build & Publish Solution in Release Mode
 Write-Host "`n[1/4] Publishing application binaries in $Configuration mode ($Architecture)..." -ForegroundColor Yellow
-$PublishDir = "$ProjectRoot\src\MissionController.UI\bin\x64\$Configuration\net9.0-windows10.0.19041.0\$Architecture\publish"
+$PublishDir = "$ProjectRoot\src\MissionController.UI\bin\x64\$Configuration\net10.0-windows10.0.19041.0\$Architecture\publish"
 
 & $DotNetExe publish "$ProjectRoot\src\MissionController.UI\MissionController.UI.csproj" `
     -c $Configuration `

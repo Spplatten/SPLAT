@@ -9,13 +9,12 @@ namespace MissionController.Tests;
 /// tidiness: NU1903, a high-severity advisory in the native SQLite the ledger loads, sat in build
 /// output as a warning long enough to ship inside dist\App.
 ///
-/// So the exemption list is asserted rather than trusted. One project is allowed to opt out, and it
-/// is named here, which means adding a second one is a deliberate act that shows up in a diff.
+/// So the exemption list is asserted rather than trusted, and it is empty. The last project that
+/// opted out, the console, was frozen on Windows App SDK 1.6; it moved to 2.5.1 on .NET 10 on
+/// 2026-09-18 and built with no warnings, so an exemption now has to appear in a diff and fail here.
 /// </summary>
 public sealed class WarningGateTests
 {
-    private const string Exempt = "MissionController.UI.csproj";
-
     private static string RepositoryRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -40,7 +39,7 @@ public sealed class WarningGateTests
     }
 
     [Fact]
-    public void TheOnlyProjectAllowedToOptOut_IsTheFrozenConsole()
+    public void NoProjectOptsOut()
     {
         var optedOut = Directory
             .EnumerateFiles(RepositoryRoot(), "*.csproj", SearchOption.AllDirectories)
@@ -51,6 +50,6 @@ public sealed class WarningGateTests
             .Select(Path.GetFileName)
             .ToList();
 
-        Assert.Equal(new[] { Exempt }, optedOut);
+        Assert.Empty(optedOut);
     }
 }
