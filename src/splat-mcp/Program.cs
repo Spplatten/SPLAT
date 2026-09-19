@@ -33,7 +33,7 @@ public static class Program
         // Decided before anything is built: a bad invocation must not create the ledger database,
         // seed the catalog or reach for the daemon. stdout is the JSON-RPC channel, so everything that
         // is not a protocol message - errors, and the startup note - goes to stderr.
-        var command = McpServerCommand.Parse(args);
+        var command = McpServerCommand.WithLedgerKeyFromEnvironment(McpServerCommand.Parse(args), Environment.GetEnvironmentVariable);
         if (command is McpServerCommand.ShowHelp)
         {
             Console.Out.Write(McpServerCommand.Usage);
@@ -74,8 +74,34 @@ public static class Program
 
         // 1. Data & Storage Layer
         string dbPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SPLAT", "audit_ledger.db");
+        byte[]? ledgerKey;
+        SqliteChainedAuditLedger.ChainState chain;
+        try
+        {
+            ledgerKey = serve.LedgerKeyPath is null ? null : LedgerKeyFile.Read(serve.LedgerKeyPath);
+            chain = await SqliteChainedAuditLedger.InspectAsync(dbPath, ledgerKey);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine($"splat-mcp: {ex.Message}");
+            return McpServerCommand.UsageExitCode;
+        }
+
+        // Refused here, not on the first tool call: a keyed ledger would turn every call away, and the
+        // client's log should say why before the agent meets a single refusal.
+        if (chain.Keyed && chain.KeyMatches != true)
+        {
+            Console.Error.WriteLine(ledgerKey is null
+                ? $"splat-mcp: the audit ledger at {dbPath} is keyed; start the server with --ledger-key <file>."
+                : $"splat-mcp: the audit ledger at {dbPath} was not keyed by {serve.LedgerKeyPath}.");
+            return McpServerCommand.UsageExitCode;
+        }
+
+        Console.Error.WriteLine(ledgerKey is null
+            ? "splat-mcp: no --ledger-key given; the audit ledger chains unkeyed"
+            : $"splat-mcp: the audit ledger is keyed by {serve.LedgerKeyPath}");
         var storageContext = new SqliteStorageContext(dbPath);
-        var auditLedger = new SqliteChainedAuditLedger(storageContext);
+        var auditLedger = new SqliteChainedAuditLedger(storageContext, ledgerKey);
         var templateRegistry = new SqliteTemplateRegistry(storageContext);
         var semanticMemory = new SqliteSemanticMemoryIndex(storageContext);
 

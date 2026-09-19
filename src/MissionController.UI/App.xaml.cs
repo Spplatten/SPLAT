@@ -160,7 +160,13 @@ public partial class App : Application
 
         // Infrastructure - Data & Audit & Semantic Memory & Merkle Compliance
         services.AddSingleton<SqliteStorageContext>();
-        services.AddSingleton<IAuditLedger, SqliteChainedAuditLedger>();
+        // The console has no command line, so the operator's key file reaches it through this variable.
+        // A variable naming a file that will not do stops the start rather than chaining unkeyed.
+        services.AddSingleton<IAuditLedger>(sp => new SqliteChainedAuditLedger(
+            sp.GetRequiredService<SqliteStorageContext>(),
+            Environment.GetEnvironmentVariable(LedgerKeyFile.EnvironmentVariable) is { Length: > 0 } keyPath
+                ? LedgerKeyFile.Read(keyPath)
+                : null));
         services.AddSingleton<ITemplateRegistry, SqliteTemplateRegistry>();
         services.AddSingleton<IProjectTemplateRegistry, SqliteProjectTemplateRegistry>();
         services.AddSingleton<ISemanticMemoryIndex, SqliteSemanticMemoryIndex>();

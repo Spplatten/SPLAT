@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using MissionController.Infrastructure.Data.Audit;
 
 namespace SplatMcp;
 
@@ -9,7 +10,7 @@ namespace SplatMcp;
 /// What the command line asked for, decided before the server builds anything.
 ///
 /// A bad invocation must cost nothing — no ledger database, no catalog seeding, no daemon client —
-/// so this is a pure function of the arguments plus one question to the filesystem, and
+/// so this is a pure function of the arguments plus a look at the paths they name, and
 /// <see cref="Program"/> acts on the verdict before it constructs a single service. The workspace is
 /// validated, never created: a typo in a client's config should fail loudly in that client's log,
 /// not quietly hand the agent a new, empty directory somewhere nobody meant.
@@ -20,8 +21,8 @@ public abstract record McpServerCommand
     public const int UsageExitCode = 2;
 
     public static string Usage => $"""
-        Usage: splat-mcp [--workspace <dir>] [--egress <a.b.c.d:port,...>]
-               splat-mcp doctor [--workspace <dir>] [--egress <a.b.c.d:port,...>]
+        Usage: splat-mcp [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>]
+               splat-mcp doctor [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>]
                splat-mcp provision [--apply]
 
         Serves SPLAT's governed tools to an MCP client: JSON-RPC, one message per line, on stdin
@@ -44,6 +45,11 @@ public abstract record McpServerCommand
                               to, as IPv4 a.b.c.d:port separated by commas. A caller may ask
                               for some of them and never for others. Without it, neither tool
                               gets any network.
+          --ledger-key <file> The operator's key for the audit ledger: a file of 32 to 4096
+                              bytes, read and never written or printed. With it every new
+                              entry is HMAC-SHA256 under the key, and a keyed ledger is never
+                              extended without it. Without the option, the path in
+                              {LedgerKeyFile.EnvironmentVariable} is used; with neither, the ledger is unkeyed.
           -h, --help          Show this and exit.
 
         """;
@@ -101,7 +107,7 @@ public abstract record McpServerCommand
                 continue;
             }
 
-            if (option is not ("--workspace" or "--egress"))
+            if (option is not ("--workspace" or "--egress" or "--ledger-key"))
             {
                 return arg.StartsWith('-')
                     ? new UsageError($"unknown option '{arg}'.")
@@ -120,9 +126,12 @@ public abstract record McpServerCommand
 
             if (string.IsNullOrWhiteSpace(value))
             {
-                return new UsageError(option == "--workspace"
-                    ? "--workspace needs a directory."
-                    : "--egress needs a list of a.b.c.d:port endpoints.");
+                return new UsageError(option switch
+                {
+                    "--workspace" => "--workspace needs a directory.",
+                    "--ledger-key" => "--ledger-key needs the key file's path.",
+                    _ => "--egress needs a list of a.b.c.d:port endpoints.",
+                });
             }
 
             if (!given.TryAdd(option, value))
@@ -149,18 +158,75 @@ public abstract record McpServerCommand
         if (provision)
         {
             // Neither option changes what provisioning does, and accepting one would say otherwise.
-            string? irrelevant = given.Keys.FirstOrDefault(key => key is "--workspace" or "--egress");
+            string? irrelevant = given.Keys.FirstOrDefault(key => key is "--workspace" or "--egress" or "--ledger-key");
             return irrelevant is null
                 ? new Provision(given.ContainsKey("--apply"))
                 : new UsageError($"`provision` takes only --apply; {irrelevant} belongs to the server or to `doctor`.");
         }
 
+        string? ledgerKey = null;
+        if (given.TryGetValue("--ledger-key", out string? keyPath) && CheckLedgerKey(keyPath, "--ledger-key", out ledgerKey) is UsageError keyError)
+        {
+            return keyError;
+        }
+
         return given.TryGetValue("--workspace", out string? workspace)
-            ? ValidateWorkspace(workspace, egress, doctor)
-            : Built(doctor, null, egress);
+            ? ValidateWorkspace(workspace, egress, doctor, ledgerKey)
+            : Built(doctor, null, egress, ledgerKey);
     }
 
-    private static McpServerCommand ValidateWorkspace(string workspace, McpEgressPolicy egress, bool doctor)
+    /// <summary>
+    /// Fills in the ledger key from <see cref="LedgerKeyFile.EnvironmentVariable"/> when --ledger-key was
+    /// not given. Kept out of <see cref="Parse"/>, which stays a function of its arguments, and so of
+    /// nothing set on the machine that runs the tests.
+    /// </summary>
+    public static McpServerCommand WithLedgerKeyFromEnvironment(McpServerCommand command, Func<string, string?> environment)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ArgumentNullException.ThrowIfNull(environment);
+        if (command is not (Serve { LedgerKeyPath: null } or Doctor { LedgerKeyPath: null }))
+        {
+            return command;
+        }
+
+        string? path = environment(LedgerKeyFile.EnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return command;
+        }
+
+        if (CheckLedgerKey(path, LedgerKeyFile.EnvironmentVariable, out string? full) is UsageError error)
+        {
+            return error;
+        }
+
+        return command is Serve serve ? serve with { LedgerKeyPath = full } : ((Doctor)command) with { LedgerKeyPath = full };
+    }
+
+    /// <summary>A key file that will not do stops the server before it starts, like a missing workspace.</summary>
+    private static UsageError? CheckLedgerKey(string path, string source, out string? fullPath)
+    {
+        fullPath = null;
+        string full;
+        try
+        {
+            full = Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return new UsageError($"{source} '{path}' is not a usable path: {ex.Message}");
+        }
+
+        if (LedgerKeyFile.Problem(full) is string problem)
+        {
+            return new UsageError($"{source}: {problem}");
+        }
+
+        fullPath = full;
+        return null;
+    }
+
+    private static McpServerCommand ValidateWorkspace(string workspace, McpEgressPolicy egress, bool doctor, string? ledgerKey)
     {
         string full;
         try
@@ -182,20 +248,21 @@ public abstract record McpServerCommand
             return new UsageError($"--workspace '{full}' does not exist. It is never created for you.");
         }
 
-        return Built(doctor, full, egress);
+        return Built(doctor, full, egress, ledgerKey);
     }
 
     /// <summary>
-    /// Run the server. <see cref="WorkspaceRoot"/> is null when no --workspace was given, and
-    /// <see cref="Egress"/> is <see cref="McpEgressPolicy.None"/> when no --egress was.
+    /// Run the server. <see cref="WorkspaceRoot"/> is null when no --workspace was given,
+    /// <see cref="Egress"/> is <see cref="McpEgressPolicy.None"/> when no --egress was, and
+    /// <see cref="LedgerKeyPath"/> is null when the ledger is to chain unkeyed.
     /// </summary>
-    public sealed record Serve(string? WorkspaceRoot, McpEgressPolicy Egress) : McpServerCommand;
+    public sealed record Serve(string? WorkspaceRoot, McpEgressPolicy Egress, string? LedgerKeyPath = null) : McpServerCommand;
 
-    private static McpServerCommand Built(bool doctor, string? workspaceRoot, McpEgressPolicy egress) =>
-        doctor ? new Doctor(workspaceRoot, egress) : new Serve(workspaceRoot, egress);
+    private static McpServerCommand Built(bool doctor, string? workspaceRoot, McpEgressPolicy egress, string? ledgerKey) =>
+        doctor ? new Doctor(workspaceRoot, egress, ledgerKey) : new Serve(workspaceRoot, egress, ledgerKey);
 
     /// <summary>Report what this host will and will not enforce, then exit. Serves nothing.</summary>
-    public sealed record Doctor(string? WorkspaceRoot, McpEgressPolicy Egress) : McpServerCommand;
+    public sealed record Doctor(string? WorkspaceRoot, McpEgressPolicy Egress, string? LedgerKeyPath = null) : McpServerCommand;
 
     /// <summary>
     /// Do what `doctor` reports missing. <see cref="Apply"/> is false by default: the steps write to

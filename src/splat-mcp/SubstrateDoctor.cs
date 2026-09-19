@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using MissionController.Core;
+using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Linux;
 
@@ -30,6 +31,7 @@ public static class SubstrateDoctor
         WslRunner? wsl = null,
         WslSubstrateHealthChecker? health = null,
         string? defaultWorkspace = null,
+        string? ledgerPath = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(doctor);
@@ -60,8 +62,8 @@ public static class SubstrateDoctor
             $"{census.NetworkDenied} of {census.Templates} catalog templates run network-denied; "
             + $"{census.Unconfined} keep a network stack ({census.NeedsNetwork} needs it, "
             + $"{census.LocalSubsystems} would lose WMI, the Event Log, Defender or the SCM inside the container)");
-        Line(output, true, "audit ledger",
-            $"{LedgerPath()} - hash-chained and UNKEYED, so a rewrite by this user is undetectable");
+        var (ledgerMark, ledgerDetail) = await LedgerLineAsync(ledgerPath ?? LedgerPath(), doctor.LedgerKeyPath, ct);
+        Line(output, ledgerMark, "audit ledger", ledgerDetail);
         output.WriteLine();
 
         // The kernel and its boot line are readable whether or not the daemon is up, and they are what
@@ -143,6 +145,39 @@ public static class SubstrateDoctor
 
     private static void Line(TextWriter output, string mark, string what, string detail) =>
         output.WriteLine($"  {mark,-6}{what,-18}{detail}");
+
+    /// <summary>
+    /// Keyed or not is a property of the chain already written, so it is read from the file - without
+    /// creating it - rather than inferred from the options this run was given.
+    /// </summary>
+    private static async Task<(string Mark, string Detail)> LedgerLineAsync(string path, string? keyPath, CancellationToken ct)
+    {
+        byte[]? key;
+        SqliteChainedAuditLedger.ChainState chain;
+        try
+        {
+            key = keyPath is null ? null : LedgerKeyFile.Read(keyPath);
+            chain = await SqliteChainedAuditLedger.InspectAsync(path, key, ct);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or System.Data.Common.DbException)
+        {
+            return ("FAIL", $"{path} - could not be read: {ex.Message}");
+        }
+
+        if (chain.Keyed)
+        {
+            return (key, chain.KeyMatches) switch
+            {
+                (null, _) => ("FAIL", $"{path} - keyed, and no key file was given, so the server would refuse to start"),
+                (_, true) => ("ok", $"{path} - keyed by {keyPath}: no entry can be rewritten unnoticed without that key, and a saved audit anchor catches deleted newest entries"),
+                _ => ("FAIL", $"{path} - keyed, but not by {keyPath}, so the server would refuse to start"),
+            };
+        }
+
+        return key is null
+            ? ("--", $"{path} - hash-chained and UNKEYED, so a rewrite by this user is undetectable; --ledger-key keys it")
+            : ("ok", $"{path} - {(chain.Exists ? "unkeyed so far; its next entry keys it" : "not created yet; its first entry will be keyed")}, by {keyPath}");
+    }
 
     private static string LedgerPath() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SPLAT", "audit_ledger.db");

@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -10,44 +12,40 @@ using MissionController.Core.Models;
 
 namespace MissionController.Infrastructure.Data.Audit;
 
+/// <summary>
+/// The hash-chained audit ledger. Every row says which kind of chain it belongs to, in HashVersion:
+/// 1 is the legacy plaintext chain; 2 is SHA-256 over a salted commitment, unkeyed, so whoever can
+/// write the file can rewrite it and recompute every later hash; 3 is HMAC-SHA256 under the
+/// operator's key, which nobody without the key can recompute.
+///
+/// A chain only ever moves from unkeyed to keyed, and records where. The first keyed append to an
+/// unkeyed ledger writes a <see cref="KeyedAction"/> entry that commits to the history before it.
+/// From then on the ledger refuses to be extended without its key, or with another. What no chain
+/// can see on its own is its newest entries being deleted; a saved audit anchor catches that.
+/// </summary>
 public sealed class SqliteChainedAuditLedger : IAuditLedger
 {
+    public const int PlaintextVersion = 1;
+    public const int UnkeyedVersion = 2;
+    public const int KeyedVersion = 3;
+    public const string KeyedAction = "LEDGER_KEYED";
+
     private readonly SqliteStorageContext _context;
-    private readonly ICredentialVault? _vault;
     private readonly byte[]? _explicitHmacKey;
     private const string GenesisHash = "0000000000000000000000000000000000000000000000000000000000000000";
-    public const string HmacKeyVaultSecretName = "audit-ledger-hmac-key";
 
-    public SqliteChainedAuditLedger(
-        SqliteStorageContext context,
-        ICredentialVault? vault = null,
-        byte[]? explicitHmacKey = null)
+    /// <param name="explicitHmacKey">The operator's key, read from their key file by
+    /// <see cref="LedgerKeyFile"/>; null for an unkeyed chain.</param>
+    public SqliteChainedAuditLedger(SqliteStorageContext context, byte[]? explicitHmacKey = null)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
-        _vault = vault;
-        _explicitHmacKey = explicitHmacKey;
-    }
-
-    private async Task<byte[]?> GetHmacKeyAsync(CancellationToken ct)
-    {
-        if (_explicitHmacKey != null && _explicitHmacKey.Length > 0)
-            return _explicitHmacKey;
-
-        if (_vault != null)
+        // An empty key would read as keyed while HMAC-ing with nothing.
+        if (explicitHmacKey is { Length: 0 })
         {
-            try
-            {
-                var storedKey = await _vault.RetrieveSecretAsync(HmacKeyVaultSecretName, ct);
-                if (storedKey != null && storedKey.Length > 0)
-                    return storedKey;
-            }
-            catch
-            {
-                // Non-blocking fallback if vault is locked
-            }
+            throw new ArgumentException("An empty key keys nothing.", nameof(explicitHmacKey));
         }
 
-        return null;
+        _explicitHmacKey = explicitHmacKey;
     }
 
     public async Task AppendLogAsync(
@@ -61,19 +59,49 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         await using var conn = _context.CreateConnection();
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(cancellationToken);
 
-        // Fetch latest entry hash
-        string previousHash = GenesisHash;
-        await using (var getCmd = conn.CreateCommand())
+        // The newest entry decides everything, and it is read by primary key: an append never scans.
+        LedgerRow? newest = await ReadNewestAsync(conn, tx, cancellationToken);
+        bool keyed = newest is { HashVersion: KeyedVersion };
+
+        if (keyed && _explicitHmacKey is null)
         {
-            getCmd.Transaction = tx;
-            getCmd.CommandText = "SELECT EntryHash FROM AuditLedger ORDER BY Id DESC LIMIT 1;";
-            var result = await getCmd.ExecuteScalarAsync(cancellationToken);
-            if (result != null && result != DBNull.Value)
-            {
-                previousHash = (string)result;
-            }
+            throw new InvalidOperationException(
+                "This audit ledger is keyed and no key was supplied, so it was not extended: an unkeyed entry " +
+                "would let anyone rewrite everything after it. Give SPLAT the operator's key file.");
         }
 
+        if (keyed && !newest!.RecomputesUnder(_explicitHmacKey))
+        {
+            throw new InvalidOperationException("The supplied key did not write this audit ledger, so it was not extended.");
+        }
+
+        string previousHash = newest?.EntryHash ?? GenesisHash;
+        if (_explicitHmacKey is not null && newest is not null && !keyed)
+        {
+            // The recorded migration. One keyed entry commits to the unkeyed history, which from here
+            // on cannot be rewritten without breaking a hash only the key can recompute.
+            previousHash = await InsertAsync(
+                conn, tx, Guid.Empty, "splat.ledger", KeyedAction,
+                "From this entry the chain is keyed: this entry and every later one are HMAC-SHA256 under the operator's key.",
+                "splat", previousHash, cancellationToken);
+        }
+
+        await InsertAsync(conn, tx, missionId, templateId, action, details, operatorIdentity, previousHash, cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>Writes one entry after <paramref name="previousHash"/> and returns its hash.</summary>
+    private async Task<string> InsertAsync(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        Guid missionId,
+        string templateId,
+        string action,
+        string details,
+        string operatorIdentity,
+        string previousHash,
+        CancellationToken cancellationToken)
+    {
         string timestampUtc = DateTime.UtcNow.ToString("O");
 
         // Version 2 chaining: the chain commits to a SALTED DIGEST of Details rather than to the
@@ -82,17 +110,17 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         string detailsSalt = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         string detailsCommitment = ComputeDetailsCommitment(detailsSalt, details);
 
-        byte[]? hmacKey = await GetHmacKeyAsync(cancellationToken);
         string entryHash = ComputeEntryHashV2(
-            previousHash, timestampUtc, missionId.ToString("D"), templateId, action, detailsCommitment, operatorIdentity, hmacKey);
+            previousHash, timestampUtc, missionId.ToString("D"), templateId, action, detailsCommitment, operatorIdentity, _explicitHmacKey);
 
         await using (var insertCmd = conn.CreateCommand())
         {
             insertCmd.Transaction = tx;
             insertCmd.CommandText = @"
                 INSERT INTO AuditLedger (TimestampUtc, MissionId, TemplateId, Action, Details, OperatorIdentity, PreviousHash, EntryHash, DetailsSalt, DetailsCommitment, HashVersion)
-                VALUES ($ts, $mid, $tid, $act, $det, $op, $prev, $entry, $salt, $commit, 2);
+                VALUES ($ts, $mid, $tid, $act, $det, $op, $prev, $entry, $salt, $commit, $ver);
             ";
+            insertCmd.Parameters.AddWithValue("$ver", _explicitHmacKey is null ? UnkeyedVersion : KeyedVersion);
             insertCmd.Parameters.AddWithValue("$ts", timestampUtc);
             insertCmd.Parameters.AddWithValue("$mid", missionId.ToString("D"));
             insertCmd.Parameters.AddWithValue("$tid", templateId);
@@ -107,7 +135,82 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
             await insertCmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        await tx.CommitAsync(cancellationToken);
+        return entryHash;
+    }
+
+    /// <summary>The fields an entry's hash is computed over, for the newest entry only.</summary>
+    private sealed record LedgerRow(
+        long HashVersion,
+        string PreviousHash,
+        string TimestampUtc,
+        string MissionId,
+        string TemplateId,
+        string Action,
+        string? DetailsCommitment,
+        string OperatorIdentity,
+        string EntryHash)
+    {
+        public bool RecomputesUnder(byte[]? key) =>
+            DetailsCommitment is not null && string.Equals(
+                ComputeEntryHashV2(PreviousHash, TimestampUtc, MissionId, TemplateId, Action, DetailsCommitment, OperatorIdentity, key),
+                EntryHash,
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<LedgerRow?> ReadNewestAsync(SqliteConnection conn, SqliteTransaction? tx, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT COALESCE(HashVersion, 1), PreviousHash, TimestampUtc, MissionId, TemplateId, Action, DetailsCommitment, OperatorIdentity, EntryHash FROM AuditLedger ORDER BY Id DESC LIMIT 1;";
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            return null;
+        }
+
+        return new LedgerRow(
+            reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+            reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetString(7), reader.GetString(8));
+    }
+
+    /// <summary>What a ledger file holds, as `doctor` reports it.</summary>
+    /// <param name="KeyMatches">Whether the given key wrote it; null when it is unkeyed or no key was given.</param>
+    public sealed record ChainState(bool Exists, bool Keyed, bool? KeyMatches);
+
+    /// <summary>
+    /// Reads a ledger file's state without creating or changing it: `doctor` serves nothing and creates
+    /// nothing, and a storage context would create the database and its schema just by being built.
+    /// </summary>
+    public static async Task<ChainState> InspectAsync(string databasePath, byte[]? key, CancellationToken ct = default)
+    {
+        if (!File.Exists(databasePath))
+        {
+            return new ChainState(false, false, null);
+        }
+
+        // Unpooled, so no handle outlives the look.
+        string connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false,
+        }.ToString();
+        await using var conn = new SqliteConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        LedgerRow? newest;
+        try
+        {
+            newest = await ReadNewestAsync(conn, null, ct);
+        }
+        catch (SqliteException)
+        {
+            // A database with no ledger table yet holds no chain.
+            return new ChainState(true, false, null);
+        }
+
+        bool keyed = newest is { HashVersion: KeyedVersion };
+        return new ChainState(true, keyed, keyed && key is not null ? newest!.RecomputesUnder(key) : null);
     }
 
     public async Task<IReadOnlyList<AuditLogEntry>> GetAuditLogsAsync(
@@ -135,7 +238,9 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         {
             list.Add(new AuditLogEntry(
                 reader.GetInt64(0),
-                DateTime.Parse(reader.GetString(1)),
+                // RoundtripKind keeps the stored "Z". A bare Parse converts to local time, which reached
+                // MCP clients as "timestampUtc" with a -04:00 offset and made Merkle leaves timezone-dependent.
+                DateTime.Parse(reader.GetString(1), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
                 Guid.Parse(reader.GetString(2)),
                 reader.GetString(3),
                 reader.GetString(4),
@@ -150,17 +255,18 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
 
     public async Task<bool> VerifyLedgerIntegrityAsync(CancellationToken cancellationToken = default)
     {
-        byte[]? hmacKey = await GetHmacKeyAsync(cancellationToken);
-
         await using var conn = _context.CreateConnection();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT Id, TimestampUtc, MissionId, TemplateId, Action, Details, OperatorIdentity, PreviousHash, EntryHash, DetailsCommitment, HashVersion, DetailsSalt, RedactedAtUtc FROM AuditLedger ORDER BY Id ASC;";
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         string expectedPreviousHash = GenesisHash;
+        bool anyEntry = false;
+        bool keyedSeen = false;
 
         while (await reader.ReadAsync(cancellationToken))
         {
+            anyEntry = true;
             string ts = reader.GetString(1);
             string mid = reader.GetString(2);
             string tid = reader.GetString(3);
@@ -173,6 +279,22 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
             long hashVersion = reader.IsDBNull(10) ? 1 : reader.GetInt64(10);
             string? salt = reader.IsDBNull(11) ? null : reader.GetString(11);
             bool isRedacted = !reader.IsDBNull(12);
+
+            if (hashVersion >= KeyedVersion)
+            {
+                // Without the key a keyed entry cannot be checked, and an unchecked entry is no pass.
+                if (_explicitHmacKey is null)
+                {
+                    return false;
+                }
+
+                keyedSeen = true;
+            }
+            else if (keyedSeen)
+            {
+                // An unkeyed entry after a keyed one is a downgrade: whoever wrote it lacked the key.
+                return false;
+            }
 
             // 1. Verify previous hash link matches
             if (!string.Equals(prev, expectedPreviousHash, StringComparison.OrdinalIgnoreCase))
@@ -203,10 +325,10 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
                     return false;
                 }
 
-                // No unkeyed retry. Accepting a hash that verifies WITHOUT the configured key lets a
-                // writer replace a keyed chain with plain SHA-256 and still pass; a ledger written
-                // before the key was provisioned needs a recorded migration, not a silent downgrade.
-                calculatedHash = ComputeEntryHashV2(prev, ts, mid, tid, act, commitment, op, hmacKey);
+                // The row's version says which hash it carries, and never the verifier's hopes: no
+                // unkeyed retry of a keyed row, and no keyed check of a row written before the key.
+                calculatedHash = ComputeEntryHashV2(
+                    prev, ts, mid, tid, act, commitment, op, hashVersion >= KeyedVersion ? _explicitHmacKey : null);
             }
             else
             {
@@ -221,7 +343,10 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
             expectedPreviousHash = entry;
         }
 
-        return true;
+        // A host holding a key vouches only for a chain it keyed. Unkeyed history counts once a keyed
+        // entry commits to it - the migration AppendLogAsync records - and not before: otherwise a
+        // keyed chain rewritten wholesale as SHA-256 would verify.
+        return !(anyEntry && _explicitHmacKey is not null && !keyedSeen);
     }
 
     public async Task<LedgerRedactionResult> RedactDetailsOlderThanAsync(
@@ -261,7 +386,7 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
-    /// <summary>Version 2 chain hash: commits to the details COMMITMENT, with optional HMAC key.</summary>
+    /// <summary>Version 2 and 3 chain hash: commits to the details COMMITMENT; SHA-256 unkeyed, HMAC-SHA256 under a key.</summary>
     public static string ComputeEntryHashV2(
         string previousHash,
         string timestampUtc,

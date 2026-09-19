@@ -105,7 +105,9 @@ public sealed class SubstrateDoctorTests
             new McpServerCommand.Doctor(null, McpEgressPolicy.None),
             report,
             wsl: (_, _) => Task.FromResult((-1, "wsl.exe not found")),
-            health: NoDaemon);
+            health: NoDaemon,
+            // Not this machine's ledger, which the operator may since have keyed.
+            ledgerPath: Path.Combine(Path.GetTempPath(), "splat-no-ledger-" + Guid.NewGuid().ToString("N") + ".db"));
 
         string text = report.ToString();
         Assert.Equal(1, exit);
