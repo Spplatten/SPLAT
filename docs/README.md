@@ -15,6 +15,7 @@ change the code rather than the plan, start with [CONTEXT.md](CONTEXT.md).
 
 | Document | What it is |
 | --- | --- |
+| [END-GOAL.md](END-GOAL.md) | **The destination.** SPLAT as a kit you mount from a drive or a download, and unmount cleanly: what it takes, what exists, and what is yours to decide. A design, never a claim. |
 | [ROADMAP.md](ROADMAP.md) | **The status record.** Every open item, who can do it, what "done" means, and the evidence for its current state — checked against the tree, not carried forward from older plans. |
 | [audits/2026-09-09-oem-subtraction-plan.md](audits/2026-09-09-oem-subtraction-plan.md) | **The current plan.** Phases P0–P3, the monetization argument, the term-sheet defects. Supersedes every plan document below it. |
 | [RUNBOOK-human-steps.md](RUNBOOK-human-steps.md) | What only a human can do — the `sudo` steps, the SDK installs, the reboots. Nothing in it is open right now — Part 0, the .NET 10 SDK, closed 2026-09-09. |

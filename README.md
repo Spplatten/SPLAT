@@ -234,6 +234,9 @@ plans. In order:
 4. **The per-mission run record** — a bundle from which someone who did not run a mission can verify
    what it was permitted to do and what it did. It needs a keyed ledger, which the operator can now
    supply; unkeyed is still the default, as the compliance note above says.
+5. **A kit you mount** — SPLAT on a flash drive or from one downloaded script. It mounts onto a host
+   only after showing what that host can enforce and what mounting will change, and it unmounts
+   cleanly. None of it is built yet; the design is [docs/END-GOAL.md](docs/END-GOAL.md).
 
 ## License
 

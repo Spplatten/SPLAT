@@ -8,7 +8,7 @@
 
 Everything still to do, in the order it pays to do it, with who can do it and what "done" means.
 The argument for this order is [the OEM subtraction plan](audits/2026-09-09-oem-subtraction-plan.md);
-this file is only the state. The
+the destination is [END-GOAL.md](END-GOAL.md); this file is only the state. The
 [competition audit](audits/2026-09-04-competition-and-scope.md) asked for exactly this — "one
 authoritative status record" — and until 2026-09-10 the state was spread across the plan, the wave
 plan, three audits and the runbook, where it drifted in all of them.
@@ -96,6 +96,24 @@ do and what it did. The schema already exists — the six-group evidence contrac
 | 3.4 | Truthful terminal reasons from the bridge | agent | Open. Every cancellation, the caller's own included, is reported as "Process killed by kernel/daemon" (`WslLeasedExecutor.cs:257`), with no confirmation from the daemon | Caller cancellation, local timeout and a confirmed kill are three different results, and only the last claims a kill |
 | 3.5 | The policy compiler refuses a destination it cannot resolve | agent | Open but latent. On a DNS failure `TemplatePolicyCompiler` grants `127.0.0.1` and keeps the network on (`:107`). No production path calls it yet; P3 is where one would start to | Fixed before any production path compiles a policy |
 | 3.6 | F20 — a remediation verdict from a measured postcondition, not an exit code | agent | Open | Each remediation declares what "restored" means, and its verdict is read from that |
+
+---
+
+## Later — P4: SPLAT you can mount
+
+**Exit:** the operator plugs in a drive or runs one downloaded script, is shown what this host can
+enforce and what mounting will change, mounts on consent, and later unmounts to a host that is as it
+was. The design, with what each step needs, is [END-GOAL.md](END-GOAL.md).
+
+| # | Item | Owner | State | Done when |
+| --- | --- | --- | --- | --- |
+| 4.1 | Data beside the executable | agent | Not started. The ledger (`%LOCALAPPDATA%\SPLAT`, `%LOCALAPPDATA%\MissionController\Data`) and the jails are fixed under `%LOCALAPPDATA%`, and the default workspace lives there too | Both hosts keep ledger, workspace and evidence beside the executable when told to, and `doctor` names where |
+| 4.2 | Unmount | agent | Not started. `provision` has no inverse | `splat-mcp unmount` removes exactly what `provision` added, using a manifest `provision` wrote, and names anything it could not restore |
+| 4.3 | A console that needs nothing installed | agent | Partly. The Windows App SDK is already self-contained; .NET is framework-dependent. Done with the move to Windows App SDK 2.x | `dist\App` starts on a machine with no .NET installed |
+| 4.4 | The drive and its launcher | agent builds it; the certificate and the logo are yours | Not started | Opening the drive and running one launcher verifies every file, shows `doctor` and the changes, and mounts only on consent |
+| 4.5 | MCP client entries at mount | agent | Not started | A mount writes `splat-mcp` into the clients the operator chose, and unmount removes exactly those entries |
+| 4.6 | SPLAT's own WSL distro | decision first, then agent | Not started | A mount imports a SPLAT distro and leaves the user's untouched apart from the host-wide boot line |
+| 4.7 | Signed releases and a cloud bootstrap | agent; the accounts and the certificate are yours | Not started | One downloaded script verifies a signed release and runs the same mount |
 
 ---
 
