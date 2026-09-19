@@ -3,18 +3,22 @@ using System.Collections.Generic;
 
 namespace MissionController.Core.Models;
 
+// Throughout these groups a null field means NOT RECORDED: nothing that assembled the record observed
+// it. It is never a default standing in for an observation, because a reader of the bundle cannot
+// tell a filled-in constant from a measured value.
+
 /// <summary>
 /// Group 1: Request Identity
 /// Proves who authorized this specific action and prevents replay/permission substitution.
 /// </summary>
 public record RequestIdentityEvidence(
-    string Principal,
-    string AuthProvenance,
+    string? Principal,
+    string? AuthProvenance,
     Guid MissionId,
     string? IdempotencyToken,
     string? ApprovalReference,
     string PolicyVersionOrHash,
-    DateTimeOffset RequestedAtUtc);
+    DateTimeOffset? FirstRecordedAtUtc);
 
 /// <summary>
 /// Group 2: Effective Permission
@@ -22,14 +26,14 @@ public record RequestIdentityEvidence(
 /// </summary>
 public record EffectivePermissionEvidence(
     string ExecutablePath,
-    IReadOnlyList<string> ArgumentVector,
-    string WorkspaceBoundary,
-    IReadOnlyList<string> AllowedEgressIps,
-    IReadOnlyList<uint> AllowedEgressPorts,
-    bool AllowNetwork,
+    IReadOnlyList<string>? ArgumentVector,
+    string? WorkspaceBoundary,
+    IReadOnlyList<string>? AllowedEgressIps,
+    IReadOnlyList<uint>? AllowedEgressPorts,
+    bool? AllowNetwork,
     ulong MaxMemoryBytes,
     uint MaxCpuPercent,
-    uint LeaseDurationSeconds,
+    uint? LeaseDurationSeconds,
     string? RuntimeCapabilities = null);
 
 /// <summary>
@@ -38,8 +42,8 @@ public record EffectivePermissionEvidence(
 /// </summary>
 public record EnforcementStateEvidence(
     string SubstrateType,
-    string KernelOrOsRelease,
-    IReadOnlyList<string> AttachedControls,
+    string? KernelOrOsRelease,
+    IReadOnlyList<string>? AttachedControls,
     string? CgroupOrJobId,
     string? EffectiveLimitsReadback,
     string AdmissionVerdict);
@@ -53,7 +57,7 @@ public record OutcomeEvidence(
     int? ExitCode,
     int RedactionCount,
     IReadOnlyList<string> RedactedCategories,
-    bool QualityAcceptance,
+    bool? QualityAcceptance,
     string? TerminalReason = null);
 
 /// <summary>
@@ -61,23 +65,23 @@ public record OutcomeEvidence(
 /// Establishes that expiry or disconnect did not leave authority running.
 /// </summary>
 public record CleanupEvidence(
-    bool ProcessesTerminated,
-    IReadOnlyList<string> PolicyRemovalOrder,
-    string WorkspaceDisposition,
-    bool ResidualResourcesCleaned);
+    bool? ProcessesTerminated,
+    IReadOnlyList<string>? PolicyRemovalOrder,
+    string? WorkspaceDisposition,
+    bool? ResidualResourcesCleaned);
 
 /// <summary>
 /// Group 6: Integrity
 /// Makes evidence portable and defines its actual tamper/rewrite/truncation guarantees.
 /// </summary>
 public record IntegrityEvidence(
-    string ChainKind,
-    int HashVersion,
-    string MerkleRootHash,
+    string? ChainKind,
+    int? HashVersion,
+    string? MerkleRootHash,
     int TotalAuditEntries,
-    string AttestationSignature,
-    string SignatureAlgorithm,
-    DateTimeOffset CommittedAtUtc);
+    string? AttestationSignature,
+    string? SignatureAlgorithm,
+    DateTimeOffset AssembledAtUtc);
 
 /// <summary>
 /// Complete per-mission run record fulfilling the six-group evidence contract (ROADMAP P3 / Item 3.1).

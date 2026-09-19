@@ -142,8 +142,8 @@ public interface IComplianceArchiveExporter
 }
 
 /// <summary>
-/// Assembles a per-mission run record fulfilling the six-group evidence schema
-/// across IMerkleProofEngine, IComplianceArchiveExporter, and the audit ledger.
+/// Assembles a per-mission run record in the six-group evidence schema from what it is handed and
+/// what the audit ledger holds for the mission. A field nothing observed is null, not a default.
 /// </summary>
 public interface IMissionRunRecordAssembler
 {
@@ -158,7 +158,8 @@ public interface IMissionRunRecordAssembler
         IReadOnlyList<string> redactedCategories,
         string substrateType,
         string? cgroupOrJobId = null,
-        bool qualityAcceptance = true,
+        bool? qualityAcceptance = null,
+        string? terminalReason = null,
         CancellationToken cancellationToken = default);
 
     Task<string> AssembleAndExportBundleAsync(
@@ -173,7 +174,8 @@ public interface IMissionRunRecordAssembler
         string substrateType,
         string outputDirectory,
         string? cgroupOrJobId = null,
-        bool qualityAcceptance = true,
+        bool? qualityAcceptance = null,
+        string? terminalReason = null,
         CancellationToken cancellationToken = default);
 }
 

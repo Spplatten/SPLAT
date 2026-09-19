@@ -224,12 +224,12 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
 
         if (missionId.HasValue)
         {
-            cmd.CommandText = "SELECT Id, TimestampUtc, MissionId, TemplateId, Action, Details, OperatorIdentity, PreviousHash, EntryHash FROM AuditLedger WHERE MissionId = $mid ORDER BY Id DESC LIMIT $limit;";
+            cmd.CommandText = "SELECT Id, TimestampUtc, MissionId, TemplateId, Action, Details, OperatorIdentity, PreviousHash, EntryHash, COALESCE(HashVersion, 1) FROM AuditLedger WHERE MissionId = $mid ORDER BY Id DESC LIMIT $limit;";
             cmd.Parameters.AddWithValue("$mid", missionId.Value.ToString("D"));
         }
         else
         {
-            cmd.CommandText = "SELECT Id, TimestampUtc, MissionId, TemplateId, Action, Details, OperatorIdentity, PreviousHash, EntryHash FROM AuditLedger ORDER BY Id DESC LIMIT $limit;";
+            cmd.CommandText = "SELECT Id, TimestampUtc, MissionId, TemplateId, Action, Details, OperatorIdentity, PreviousHash, EntryHash, COALESCE(HashVersion, 1) FROM AuditLedger ORDER BY Id DESC LIMIT $limit;";
         }
         cmd.Parameters.AddWithValue("$limit", limit);
 
@@ -247,7 +247,9 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
                 reader.GetString(5),
                 reader.GetString(6),
                 reader.GetString(7),
-                reader.GetString(8)));
+                reader.GetString(8),
+                // A row from before the column existed is plaintext, as VerifyLedgerIntegrityAsync reads it.
+                (int)reader.GetInt64(9)));
         }
 
         return list;

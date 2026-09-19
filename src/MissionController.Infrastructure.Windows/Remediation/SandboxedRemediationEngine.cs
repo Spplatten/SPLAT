@@ -217,15 +217,17 @@ public sealed class SandboxedRemediationEngine : IRemediationEngine
             }
 
             // 5. Audit Result. The action name carries the verdict, so a reader scanning the ledger
-            // for what happened does not have to parse the detail string to find out.
+            // for what happened does not have to parse the detail string to find out. COMPLETED is
+            // kept for a measured postcondition: a clean exit with nothing measured is UNVERIFIED
+            // in the ledger too, or the ledger would say what the UI no longer does.
             string completionTag = (isRollback, verdict) switch
             {
                 (true, RemediationVerdict.Restored) => "REMEDIATION_ROLLBACK_COMPLETED",
-                (true, RemediationVerdict.Unverified) => "REMEDIATION_ROLLBACK_COMPLETED",
+                (true, RemediationVerdict.Unverified) => "REMEDIATION_ROLLBACK_UNVERIFIED",
                 (true, RemediationVerdict.PostconditionFailed) => "REMEDIATION_ROLLBACK_POSTCONDITION_FAILED",
                 (true, RemediationVerdict.ExecutionFailed) => "REMEDIATION_ROLLBACK_FAILED",
                 (false, RemediationVerdict.VerifiedFix) => "REMEDIATION_FIX_COMPLETED",
-                (false, RemediationVerdict.Unverified) => "REMEDIATION_FIX_COMPLETED",
+                (false, RemediationVerdict.Unverified) => "REMEDIATION_FIX_UNVERIFIED",
                 (false, RemediationVerdict.PostconditionFailed) => "REMEDIATION_FIX_POSTCONDITION_FAILED",
                 (false, RemediationVerdict.ExecutionFailed) => "REMEDIATION_FIX_FAILED",
                 _ => isRollback ? "REMEDIATION_ROLLBACK_FAILED" : "REMEDIATION_FIX_FAILED"

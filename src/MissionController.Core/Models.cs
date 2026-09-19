@@ -98,8 +98,11 @@ public record RemediationAction(
     string? RollbackValidationExecutable = null,
     string? RollbackValidationArguments = null,
     string? RollbackValidationExpectedOutput = null,
-    Func<CancellationToken, Task<bool>>? PostconditionCheck = null,
-    Func<CancellationToken, Task<bool>>? RollbackPostconditionCheck = null)
+    // Code, not data: SqliteTemplateRegistry stores templates as JSON, and the serializer refuses a
+    // delegate, so a template carrying one could not be saved. A check declared this way lives only
+    // as long as the catalog that built it.
+    [property: JsonIgnore] Func<CancellationToken, Task<bool>>? PostconditionCheck = null,
+    [property: JsonIgnore] Func<CancellationToken, Task<bool>>? RollbackPostconditionCheck = null)
 {
     public bool HasFixPostcondition => !string.IsNullOrWhiteSpace(ValidationExecutable) || PostconditionCheck != null;
     public bool HasRollbackPostcondition => !string.IsNullOrWhiteSpace(RollbackValidationExecutable) || RollbackPostconditionCheck != null;
@@ -354,7 +357,10 @@ public record AuditLogEntry(
     string Details,
     string OperatorIdentity,
     string PreviousHash,
-    string EntryHash)
+    string EntryHash,
+    // Which chain the row was written into (SqliteChainedAuditLedger's 1, 2 or 3); 0 when the entry
+    // did not come from that ledger and nothing says.
+    int HashVersion = 0)
 {
     public long SequenceNumber => Id;
     public string CurrentHash => EntryHash;

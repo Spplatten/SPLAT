@@ -663,7 +663,7 @@ public class WslLeasedExecutorWireTests
         });
 
         using var callerCts = new CancellationTokenSource();
-        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
 
         var executeTask = executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>(), ct: callerCts.Token);
         await barrier.Task;
@@ -688,7 +688,7 @@ public class WslLeasedExecutorWireTests
 
         var daemon = RunStandInDaemonAsync(listener, Array.Empty<string>());
 
-        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
         var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
         await daemon;
@@ -709,7 +709,7 @@ public class WslLeasedExecutorWireTests
 
         var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":42}");
 
-        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
         var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
 
         await daemon;

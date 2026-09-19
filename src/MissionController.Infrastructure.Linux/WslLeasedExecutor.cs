@@ -278,11 +278,11 @@ public class WslLeasedExecutor : ILeasedExecutor
                 }
             }
 
-            if (terminalReason == null)
-            {
-                terminalReason = "AbruptDisconnect";
-                stderrBuilder.AppendLine("[DAEMON_DISCONNECTED] Connection closed unexpectedly before receiving an EXIT frame.");
-            }
+            // The loop also ends, without throwing, when the deadline fires between two reads; that is
+            // an expiry, not a dropped connection, so it goes through the same classification below.
+            cts.Token.ThrowIfCancellationRequested();
+            terminalReason = "AbruptDisconnect";
+            stderrBuilder.AppendLine("[DAEMON_DISCONNECTED] Connection closed unexpectedly before receiving an EXIT frame.");
         }
         catch (OperationCanceledException)
         {

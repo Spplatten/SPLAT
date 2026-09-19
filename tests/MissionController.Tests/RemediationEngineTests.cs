@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using MissionController.Core.Enums;
@@ -52,7 +53,8 @@ public class RemediationEngineTests
             Assert.False(result.IsRollback);
 
             var logs = await auditLedger.GetAuditLogsAsync();
-            Assert.Contains(logs, l => l.Action == "REMEDIATION_FIX_COMPLETED");
+            Assert.Contains(logs, l => l.Action == "REMEDIATION_FIX_UNVERIFIED");
+            Assert.DoesNotContain(logs, l => l.Action == "REMEDIATION_FIX_COMPLETED");
             Assert.True(await auditLedger.VerifyLedgerIntegrityAsync());
         }
         finally
@@ -106,7 +108,8 @@ public class RemediationEngineTests
             Assert.Contains("ROLLBACK_APPLIED", rollbackResult.Output);
 
             var logs = await auditLedger.GetAuditLogsAsync();
-            Assert.Contains(logs, l => l.Action == "REMEDIATION_ROLLBACK_COMPLETED");
+            Assert.Contains(logs, l => l.Action == "REMEDIATION_ROLLBACK_UNVERIFIED");
+            Assert.DoesNotContain(logs, l => l.Action == "REMEDIATION_ROLLBACK_COMPLETED");
             Assert.True(await auditLedger.VerifyLedgerIntegrityAsync());
         }
         finally
@@ -385,6 +388,11 @@ public class RemediationEngineTests
             Assert.Equal(RemediationVerdict.Unverified, result.Verdict);
             Assert.False(result.IsRestored);
             Assert.Contains("No postcondition declared", result.PostconditionMeasurement);
+
+            // The ledger carries the same verdict the result does.
+            var logs = await auditLedger.GetAuditLogsAsync();
+            Assert.Contains(logs, l => l.Action == "REMEDIATION_ROLLBACK_UNVERIFIED");
+            Assert.DoesNotContain(logs, l => l.Action == "REMEDIATION_ROLLBACK_COMPLETED");
         }
         finally
         {
@@ -396,5 +404,42 @@ public class RemediationEngineTests
                 try { File.Delete(dbPath); } catch { }
             }
         }
+    }
+
+    [Fact]
+    public void ATemplateWhoseFixCarriesACodeCheck_StillSavesAsJson()
+    {
+        // SqliteTemplateRegistry stores a template as exactly this JSON, and the serializer refuses a delegate.
+        var template = new SingleToolTemplate(
+            "sysops-disk-space",
+            "Disk Space",
+            "Reports free space",
+            "SysOps",
+            "claude-sonnet-5",
+            new SingleToolDefinition("disk", "Disk", "cmd.exe", "/c dir", new[] { 0 }),
+            new EgressRule("localhost"),
+            "Report free space.",
+            Array.Empty<TemplateParameterField>(),
+            AvailableRemediations: new[]
+            {
+                new RemediationAction(
+                    "fix-delegate-check",
+                    "sysops-disk-space",
+                    "Fix With Delegate Predicate",
+                    "Measures its postcondition in code",
+                    RemediationRiskLevel.Safe,
+                    CanRollback: false,
+                    FixExecutable: "cmd.exe",
+                    FixArguments: "/c \"echo FIX\"",
+                    PostconditionCheck: _ => Task.FromResult(true),
+                    PostconditionDescription: "Free space above the floor")
+            });
+
+        var loaded = JsonSerializer.Deserialize<SingleToolTemplate>(JsonSerializer.Serialize(template))!;
+
+        var action = Assert.Single(loaded.Remediations);
+        Assert.Equal("fix-delegate-check", action.ActionId);
+        Assert.Equal("Free space above the floor", action.PostconditionDescription);
+        Assert.Null(action.PostconditionCheck);
     }
 }
