@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -164,5 +164,112 @@ public class LinuxSubstrateAndCompilerTests
         Assert.Equal(9999u, vEvent.ProcessId);
         Assert.Equal(KernelViolationHook.Open, vEvent.Hook);
         Assert.Equal("cat", vEvent.ProcessComm);
+    }
+
+    [Fact]
+    public void PolicyCompiler_RefusesUnresolvableHost_WhenToolNetworkRequested()
+    {
+        // R1: A throwing resolver must cause CompileTemplatePolicy to fail closed
+        // and throw PolicyCompilationException rather than silently granting loopback (127.0.0.1).
+        var throwingResolver = new ThrowingHostAddressResolver(
+            new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.HostNotFound));
+        var compiler = new TemplatePolicyCompiler(throwingResolver);
+
+        var template = CreateMockTemplate(
+            fqdn: "unresolvable.mission.internal",
+            port: 443,
+            scope: EgressScope.ToolProcess);
+
+        var ex = Assert.Throws<PolicyCompilationException>(() =>
+            compiler.CompileTemplatePolicy(template, Guid.NewGuid(), "/tmp/splat_test"));
+
+        Assert.Contains("unresolvable.mission.internal", ex.Message);
+    }
+
+    [Fact]
+    public void PolicyCompiler_RefusesIpv6OnlyResolution_WithoutFabricatingIpv4Success()
+    {
+        // R1: Resolving to IPv6-only addresses must fail closed, not produce an empty/broken lease or fabricated IPv4.
+        var ipv6Resolver = new StubHostAddressResolver(System.Net.IPAddress.Parse("2001:db8::1"));
+        var compiler = new TemplatePolicyCompiler(ipv6Resolver);
+
+        var template = CreateMockTemplate(
+            fqdn: "ipv6.mission.internal",
+            port: 443,
+            scope: EgressScope.ToolProcess);
+
+        var ex = Assert.Throws<PolicyCompilationException>(() =>
+            compiler.CompileTemplatePolicy(template, Guid.NewGuid(), "/tmp/splat_test"));
+
+        Assert.Contains("no usable IPv4 addresses", ex.Message);
+    }
+
+    [Fact]
+    public void PolicyCompiler_DeduplicatesAndPinsIpv4Addresses()
+    {
+        var stubResolver = new StubHostAddressResolver(
+            System.Net.IPAddress.Parse("93.184.216.34"),
+            System.Net.IPAddress.Parse("93.184.216.34"),
+            System.Net.IPAddress.Parse("93.184.216.35"));
+        var compiler = new TemplatePolicyCompiler(stubResolver);
+
+        var template = CreateMockTemplate(
+            fqdn: "example.com",
+            port: 8443,
+            scope: EgressScope.ToolProcess);
+
+        var lease = compiler.CompileTemplatePolicy(template, Guid.NewGuid(), "/tmp/splat_test");
+
+        Assert.True(lease.AllowNetwork);
+        Assert.Equal(2, lease.AllowedEgressIps.Count);
+        Assert.Contains("93.184.216.34", lease.AllowedEgressIps);
+        Assert.Contains("93.184.216.35", lease.AllowedEgressIps);
+        Assert.Contains(8443u, lease.AllowedEgressPorts);
+    }
+
+    [Fact]
+    public void PolicyCompiler_ExplicitLoopback_BypassesResolver()
+    {
+        // Explicit localhost/127.0.0.1 should not query the DNS resolver
+        var throwingResolver = new ThrowingHostAddressResolver(
+            new InvalidOperationException("Resolver must not be called for explicit loopback"));
+        var compiler = new TemplatePolicyCompiler(throwingResolver);
+
+        var template = CreateMockTemplate(
+            fqdn: "127.0.0.1",
+            port: 8080,
+            scope: EgressScope.ToolProcess);
+
+        var lease = compiler.CompileTemplatePolicy(template, Guid.NewGuid(), "/tmp/splat_test");
+
+        Assert.True(lease.AllowNetwork);
+        Assert.Contains("127.0.0.1", lease.AllowedEgressIps);
+        Assert.Contains(8080u, lease.AllowedEgressPorts);
+    }
+
+    [Fact]
+    public void PolicyCompiler_RejectsInvalidPortRange()
+    {
+        var templateNegative = CreateMockTemplate(fqdn: "127.0.0.1", port: -5, scope: EgressScope.ToolProcess);
+        Assert.Throws<PolicyCompilationException>(() =>
+            _compiler.CompileTemplatePolicy(templateNegative, Guid.NewGuid(), "/tmp/splat_test"));
+
+        var templateOverflow = CreateMockTemplate(fqdn: "127.0.0.1", port: 70000, scope: EgressScope.ToolProcess);
+        Assert.Throws<PolicyCompilationException>(() =>
+            _compiler.CompileTemplatePolicy(templateOverflow, Guid.NewGuid(), "/tmp/splat_test"));
+    }
+
+    private sealed class ThrowingHostAddressResolver : IHostAddressResolver
+    {
+        private readonly Exception _exceptionToThrow;
+        public ThrowingHostAddressResolver(Exception ex) => _exceptionToThrow = ex;
+        public System.Net.IPAddress[] GetHostAddresses(string hostNameOrAddress) => throw _exceptionToThrow;
+    }
+
+    private sealed class StubHostAddressResolver : IHostAddressResolver
+    {
+        private readonly System.Net.IPAddress[] _addresses;
+        public StubHostAddressResolver(params System.Net.IPAddress[] addresses) => _addresses = addresses;
+        public System.Net.IPAddress[] GetHostAddresses(string hostNameOrAddress) => _addresses;
     }
 }

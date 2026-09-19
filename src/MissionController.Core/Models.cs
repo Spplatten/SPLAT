@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Tasks;
 using MissionController.Core.Enums;
 
 namespace MissionController.Core.Models;
@@ -64,6 +66,20 @@ public enum RemediationRiskLevel
     High
 }
 
+public enum RemediationVerdict
+{
+    /// <summary>Command exited 0, but no postcondition was declared to measure the outcome.</summary>
+    Unverified,
+    /// <summary>Rollback command exited 0 AND measured postcondition confirmed the prior state was restored.</summary>
+    Restored,
+    /// <summary>Fix command exited 0 AND measured postcondition confirmed the desired state was achieved.</summary>
+    VerifiedFix,
+    /// <summary>Process exited non-zero, exceeded execution deadline, or threw an exception.</summary>
+    ExecutionFailed,
+    /// <summary>Process exited 0, but independent postcondition measurement failed to verify the restored/healthy state.</summary>
+    PostconditionFailed
+}
+
 public record RemediationAction(
     string ActionId,
     string TemplateId,
@@ -76,7 +92,21 @@ public record RemediationAction(
     string? RollbackExecutable = null,
     string? RollbackArguments = null,
     string? ValidationExecutable = null,
-    string? ValidationArguments = null);
+    string? ValidationArguments = null,
+    string? PostconditionDescription = null,
+    string? ValidationExpectedOutput = null,
+    string? RollbackValidationExecutable = null,
+    string? RollbackValidationArguments = null,
+    string? RollbackValidationExpectedOutput = null,
+    Func<CancellationToken, Task<bool>>? PostconditionCheck = null,
+    Func<CancellationToken, Task<bool>>? RollbackPostconditionCheck = null)
+{
+    public bool HasFixPostcondition => !string.IsNullOrWhiteSpace(ValidationExecutable) || PostconditionCheck != null;
+    public bool HasRollbackPostcondition => !string.IsNullOrWhiteSpace(RollbackValidationExecutable) || RollbackPostconditionCheck != null;
+    public string RestorationCriteria => !string.IsNullOrWhiteSpace(PostconditionDescription)
+        ? PostconditionDescription
+        : (HasRollbackPostcondition ? "Rollback validation probe exit 0" : "Unspecified");
+}
 
 public record RemediationExecutionResult(
     string ActionId,
@@ -84,10 +114,14 @@ public record RemediationExecutionResult(
     string Output,
     string? ErrorMessage,
     bool IsRollback,
-    DateTime CompletedAtUtc)
+    DateTime CompletedAtUtc,
+    RemediationVerdict Verdict = RemediationVerdict.Unverified,
+    string? PostconditionMeasurement = null)
 {
     public string StandardOutput => Output;
     public string StandardError => ErrorMessage ?? string.Empty;
+    public bool IsRestored => Verdict == RemediationVerdict.Restored;
+    public bool IsVerifiedFix => Verdict == RemediationVerdict.VerifiedFix;
 }
 
 

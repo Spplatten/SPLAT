@@ -108,7 +108,7 @@ internal static class StandInAgent
     public static string[] Frames(byte[] raw) =>
         Encoding.UTF8.GetString(raw).Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
-    private static byte[]? ClientNonce(string? hello)
+    internal static byte[]? ClientNonce(string? hello)
     {
         if (hello is null)
         {
@@ -128,7 +128,7 @@ internal static class StandInAgent
         }
     }
 
-    private static async Task<string?> ReadLineAsync(Stream stream, MemoryStream raw, CancellationToken ct)
+    internal static async Task<string?> ReadLineAsync(Stream stream, MemoryStream raw, CancellationToken ct)
     {
         var line = new MemoryStream();
         var one = new byte[1];
@@ -146,7 +146,7 @@ internal static class StandInAgent
         return line.Length > 0 ? Encoding.UTF8.GetString(line.ToArray()) : null;
     }
 
-    private static async Task WriteLineAsync(Stream stream, string frame, CancellationToken ct)
+    internal static async Task WriteLineAsync(Stream stream, string frame, CancellationToken ct)
     {
         await stream.WriteAsync(Encoding.UTF8.GetBytes(frame + "\n"), ct);
         await stream.FlushAsync(ct);

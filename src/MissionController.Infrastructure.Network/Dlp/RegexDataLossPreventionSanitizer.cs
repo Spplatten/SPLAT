@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using MissionController.Core.Interfaces;
@@ -82,6 +82,48 @@ public sealed class RegexDataLossPreventionSanitizer : IDataLossPreventionSaniti
                 "SSN",
                 new Regex(@"\b\d{3}-\d{2}-\d{4}\b", RegexOptions.Compiled, PatternTimeout),
                 "[REDACTED_SSN]"
+            ),
+
+            // 8. AWS Access Key IDs (AKIA...)
+            new(
+                "AwsKey",
+                new Regex(@"\b(AKIA[0-9A-Z]{16})\b", RegexOptions.Compiled, PatternTimeout),
+                "[REDACTED_AWS_KEY]"
+            ),
+
+            // 9. GitHub Personal/OAuth Access Tokens (ghp_, gho_, ghu_, ghs_, ghr_)
+            new(
+                "GitHubToken",
+                new Regex(@"\b(gh[pousr]_[A-Za-z0-9_]{36,255})\b", RegexOptions.Compiled, PatternTimeout),
+                "[REDACTED_GITHUB_TOKEN]"
+            ),
+
+            // 10. OpenAI API Keys (sk-... or sk-proj-...)
+            new(
+                "OpenAiKey",
+                new Regex(@"\b(sk-(?:proj-)?[a-zA-Z0-9_\-]{20,})\b", RegexOptions.Compiled, PatternTimeout),
+                "[REDACTED_OPENAI_KEY]"
+            ),
+
+            // 11. Stripe Secret / Restricted Keys (sk_live_..., sk_test_..., rk_live_...)
+            new(
+                "StripeKey",
+                new Regex(@"\b((?:sk|rk)_(?:live|test)_[0-9a-zA-Z]{24,})\b", RegexOptions.Compiled, PatternTimeout),
+                "[REDACTED_STRIPE_KEY]"
+            ),
+
+            // 12. Bare JSON Web Tokens (JWT)
+            new(
+                "JwtToken",
+                new Regex(@"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b", RegexOptions.Compiled, PatternTimeout),
+                "[REDACTED_JWT]"
+            ),
+
+            // 13. Google API Keys (AIza...)
+            new(
+                "GoogleApiKey",
+                new Regex(@"\b(AIza[0-9A-Za-z\-_]{35})\b", RegexOptions.Compiled, PatternTimeout),
+                "[REDACTED_GOOGLE_API_KEY]"
             )
         };
     }

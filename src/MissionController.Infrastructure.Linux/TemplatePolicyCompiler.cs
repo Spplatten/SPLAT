@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -14,6 +14,8 @@ namespace MissionController.Infrastructure.Linux;
 /// </summary>
 public class TemplatePolicyCompiler : ITemplatePolicyCompiler
 {
+    private readonly IHostAddressResolver _dnsResolver;
+
     private static readonly IReadOnlyList<string> DefaultProtectedPaths = new[]
     {
         "/etc/shadow",
@@ -25,6 +27,15 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
         "/var/run/docker.sock",
         "/proc/kcore"
     };
+
+    public TemplatePolicyCompiler() : this(new SystemHostAddressResolver())
+    {
+    }
+
+    public TemplatePolicyCompiler(IHostAddressResolver dnsResolver)
+    {
+        _dnsResolver = dnsResolver ?? throw new ArgumentNullException(nameof(dnsResolver));
+    }
 
     public LeaseSpec CompileTemplatePolicy(
         SingleToolTemplate template,
@@ -86,31 +97,58 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
             !targetFqdn.Equals("localhost", StringComparison.OrdinalIgnoreCase) &&
             !targetFqdn.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
-            allowNetwork = true;
+            if (template.EgressRule.AllowedPort is < 0 or > 65535)
+            {
+                throw new PolicyCompilationException(
+                    $"Configured egress port {template.EgressRule.AllowedPort} is out of valid range (1-65535).");
+            }
+
             uint port = template.EgressRule.AllowedPort > 0 ? (uint)template.EgressRule.AllowedPort : 443u;
             allowedPorts.Add(port);
 
             // Attempt DNS resolution to pin /32 IPv4 destinations
+            IPAddress[] hostAddresses;
             try
             {
-                var hostAddresses = Dns.GetHostAddresses(targetFqdn);
-                foreach (var ip in hostAddresses)
+                hostAddresses = _dnsResolver.GetHostAddresses(targetFqdn);
+            }
+            catch (Exception ex)
+            {
+                throw new PolicyCompilationException(
+                    $"Failed to resolve egress destination '{targetFqdn}' for tool process network lease: {ex.Message}", ex);
+            }
+
+            if (hostAddresses == null || hostAddresses.Length == 0)
+            {
+                throw new PolicyCompilationException(
+                    $"Egress destination '{targetFqdn}' resolved to zero IP addresses. Refusing lease.");
+            }
+
+            foreach (var ip in hostAddresses)
+            {
+                if (ip.AddressFamily == AddressFamily.InterNetwork)
                 {
-                    if (ip.AddressFamily == AddressFamily.InterNetwork)
-                    {
-                        allowedIps.Add(ip.ToString());
-                    }
+                    allowedIps.Add(ip.ToString());
                 }
             }
-            catch
+
+            if (allowedIps.Count == 0)
             {
-                // If offline or unresolvable at compile-time, allow localhost loopback only
-                allowedIps.Add("127.0.0.1");
+                throw new PolicyCompilationException(
+                    $"Egress destination '{targetFqdn}' resolved to no usable IPv4 addresses. Refusing lease rather than fabricating permission.");
             }
+
+            allowNetwork = true;
         }
         else if (targetFqdn.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
                  targetFqdn.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
+            if (template.EgressRule.AllowedPort is < 0 or > 65535)
+            {
+                throw new PolicyCompilationException(
+                    $"Configured loopback egress port {template.EgressRule.AllowedPort} is out of valid range (1-65535).");
+            }
+
             allowNetwork = true;
             allowedIps.Add("127.0.0.1");
             allowedPorts.Add(template.EgressRule.AllowedPort > 0 ? (uint)template.EgressRule.AllowedPort : 80u);
@@ -172,4 +210,13 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
             _ => new[] { $"/bin/{toolName}", $"/usr/bin/{toolName}" }
         };
     }
+}
+
+/// <summary>
+/// Default host address resolver delegating to <see cref="Dns.GetHostAddresses(string)"/>.
+/// </summary>
+public sealed class SystemHostAddressResolver : IHostAddressResolver
+{
+    public IPAddress[] GetHostAddresses(string hostNameOrAddress) =>
+        Dns.GetHostAddresses(hostNameOrAddress);
 }

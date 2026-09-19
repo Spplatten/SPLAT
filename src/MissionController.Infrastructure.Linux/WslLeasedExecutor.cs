@@ -96,6 +96,7 @@ public class WslLeasedExecutor : ILeasedExecutor
         var stderrBuilder = new StringBuilder();
         int exitCode = -1;
         bool timedOut = false;
+        string? terminalReason = null;
 
         try
         {
@@ -228,6 +229,7 @@ public class WslLeasedExecutor : ILeasedExecutor
                             {
                                 exitCode = exitProp.GetInt32();
                             }
+                            stopwatch.Stop();
                             return new ProcessExecutionResult(
                                 ExitCode: exitCode,
                                 StandardOutput: stdoutBuilder.ToString(),
@@ -240,7 +242,8 @@ public class WslLeasedExecutor : ILeasedExecutor
                                 // MissionChunkType.Metric as observed values and sealed into the
                                 // ledger as evidence. Report the absence instead; when the daemon
                                 // starts reporting cgroup counters, populate these from the frame.
-                                FinalMetrics: JobResourceMetrics.Unavailable);
+                                FinalMetrics: JobResourceMetrics.Unavailable,
+                                TerminalReason: "ExplicitExit");
                     }
                 }
                 catch (JsonException)
@@ -250,26 +253,45 @@ public class WslLeasedExecutor : ILeasedExecutor
                     stdout?.Report(line + "\n");
                 }
             }
+
+            if (terminalReason == null)
+            {
+                terminalReason = "AbruptDisconnect";
+                stderrBuilder.AppendLine("[DAEMON_DISCONNECTED] Connection closed unexpectedly before receiving an EXIT frame.");
+            }
         }
         catch (OperationCanceledException)
         {
-            timedOut = true;
-            stderrBuilder.AppendLine("[EXECUTION_TIMEOUT] Lease duration expired. Process killed by kernel/daemon.");
+            if (ct.IsCancellationRequested)
+            {
+                timedOut = false;
+                terminalReason = "CallerCancelled";
+                stderrBuilder.AppendLine("[EXECUTION_CANCELLED] Execution was cancelled by the caller.");
+            }
+            else
+            {
+                timedOut = true;
+                terminalReason = "LocalDeadlineExpired";
+                stderrBuilder.AppendLine("[EXECUTION_TIMEOUT] Local lease duration expired before daemon completion.");
+            }
         }
         catch (Exception ex)
         {
+            terminalReason = "TransportError";
             stderrBuilder.AppendLine($"[DAEMON_COMMUNICATION_ERROR] {ex.Message}");
         }
 
         stopwatch.Stop();
+        int finalExitCode = timedOut ? -2 : (ct.IsCancellationRequested ? -3 : exitCode);
         return new ProcessExecutionResult(
-            ExitCode: timedOut ? -2 : exitCode,
+            ExitCode: finalExitCode,
             StandardOutput: stdoutBuilder.ToString(),
             StandardError: stderrBuilder.ToString(),
             TimedOut: timedOut,
             // Timeout / transport-failure path: the run was cut short, so there is even less to
             // report than on the EXIT path. Nothing measured, nothing claimed.
-            FinalMetrics: JobResourceMetrics.Unavailable);
+            FinalMetrics: JobResourceMetrics.Unavailable,
+            TerminalReason: terminalReason);
     }
 
     /// <summary>

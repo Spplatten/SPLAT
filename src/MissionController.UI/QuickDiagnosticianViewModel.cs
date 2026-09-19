@@ -221,12 +221,24 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
             var result = await _remediationEngine.ExecuteFixAsync(fix, await ResolveActorAsync());
             if (result.Success)
             {
-                RemediationStatusMessage = $"⚡ Fix Applied Successfully: {fix.Title}";
-                ExecutiveFindings.Add($"✓ Self-Healing Fix Applied: {fix.Title}");
+                if (result.Verdict == RemediationVerdict.VerifiedFix)
+                {
+                    RemediationStatusMessage = $"⚡ Fix Applied & Verified: {fix.Title}";
+                    ExecutiveFindings.Add($"✓ Self-Healing Fix Verified: {fix.Title} (postcondition confirmed)");
+                }
+                else
+                {
+                    RemediationStatusMessage = $"⚡ Fix Executed (Unverified): {fix.Title}";
+                    ExecutiveFindings.Add($"⚡ Fix Executed: {fix.Title} (unverified: no postcondition declared)");
+                }
             }
             else
             {
                 RemediationStatusMessage = $"🔴 Fix Failed: {result.ErrorMessage}";
+                if (result.Verdict == RemediationVerdict.PostconditionFailed)
+                {
+                    ExecutiveFindings.Add($"🔴 Fix Postcondition Failed: {fix.Title} - {result.ErrorMessage}");
+                }
             }
         }
         catch (Exception ex)
@@ -252,12 +264,24 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
             var result = await _remediationEngine.ExecuteRollbackAsync(fix, await ResolveActorAsync());
             if (result.Success)
             {
-                RemediationStatusMessage = $"↩️ Rollback Completed: {fix.Title} restored.";
-                ExecutiveFindings.Add($"↩️ Rollback Verified: Restored previous state for {fix.Title}");
+                if (result.Verdict == RemediationVerdict.Restored)
+                {
+                    RemediationStatusMessage = $"↩️ Rollback Completed & Restored: {fix.Title}";
+                    ExecutiveFindings.Add($"↩️ Rollback Verified: Restored previous state for {fix.Title} (postcondition confirmed)");
+                }
+                else
+                {
+                    RemediationStatusMessage = $"↩️ Rollback Executed (Unverified): {fix.Title}";
+                    ExecutiveFindings.Add($"↩️ Rollback Executed: {fix.Title} (unverified: no postcondition declared)");
+                }
             }
             else
             {
                 RemediationStatusMessage = $"🔴 Rollback Failed: {result.ErrorMessage}";
+                if (result.Verdict == RemediationVerdict.PostconditionFailed)
+                {
+                    ExecutiveFindings.Add($"🔴 Rollback Postcondition Failed: {fix.Title} - {result.ErrorMessage}");
+                }
             }
         }
         catch (Exception ex)

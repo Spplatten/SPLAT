@@ -1,4 +1,4 @@
-﻿using MissionController.Infrastructure.Network.Dlp;
+using MissionController.Infrastructure.Network.Dlp;
 using Xunit;
 
 namespace MissionController.Tests;
@@ -79,5 +79,59 @@ in user directory.";
         Assert.Contains("PrivateKey", result.RedactedCategories);
         Assert.DoesNotContain("secret_private_key_payload", result.SanitizedContent);
         Assert.Contains("[REDACTED_PRIVATE_KEY_BLOCK]", result.SanitizedContent);
+    }
+
+    [Fact]
+    public void Sanitize_MasksBareCloudTokens_WithoutAssignmentOperators()
+    {
+        // AG-F06: High-entropy bare tokens appearing without assignment keywords (key=, secret:)
+        // must be caught and redacted with their category recorded.
+        var sanitizer = new RegexDataLossPreventionSanitizer();
+        string input = @"Environment dump from container:
+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+Token: ghp_1234567890abcdefghijklmnopqrstuvwxyz1234
+OpenAI: sk-proj-1234567890abcdefghijklmnopqrstuvwxyz123456
+Stripe: sk_live_1234567890abcdefghijklmnop
+Google: AIzaSyD1234567890abcdefghijklmnopqrstuv
+Auth: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+
+        var result = sanitizer.Sanitize(input);
+
+        Assert.True(result.RedactedCount >= 6, $"Expected at least 6 redactions, got {result.RedactedCount}");
+        Assert.Contains("AwsKey", result.RedactedCategories);
+        Assert.Contains("GitHubToken", result.RedactedCategories);
+        Assert.Contains("OpenAiKey", result.RedactedCategories);
+        Assert.Contains("StripeKey", result.RedactedCategories);
+        Assert.Contains("GoogleApiKey", result.RedactedCategories);
+        Assert.Contains("JwtToken", result.RedactedCategories);
+
+        Assert.DoesNotContain("AKIAIOSFODNN7EXAMPLE", result.SanitizedContent);
+        Assert.DoesNotContain("ghp_1234567890abcdefghijklmnopqrstuvwxyz1234", result.SanitizedContent);
+        Assert.DoesNotContain("sk-proj-1234567890abcdefghijklmnopqrstuvwxyz123456", result.SanitizedContent);
+        Assert.DoesNotContain("sk_live_1234567890abcdefghijklmnop", result.SanitizedContent);
+        Assert.DoesNotContain("AIzaSyD1234567890abcdefghijklmnopqrstuv", result.SanitizedContent);
+        Assert.DoesNotContain("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", result.SanitizedContent);
+
+        Assert.Contains("[REDACTED_AWS_KEY]", result.SanitizedContent);
+        Assert.Contains("[REDACTED_GITHUB_TOKEN]", result.SanitizedContent);
+        Assert.Contains("[REDACTED_OPENAI_KEY]", result.SanitizedContent);
+        Assert.Contains("[REDACTED_STRIPE_KEY]", result.SanitizedContent);
+        Assert.Contains("[REDACTED_GOOGLE_API_KEY]", result.SanitizedContent);
+        Assert.Contains("[REDACTED_JWT]", result.SanitizedContent);
+    }
+
+    [Fact]
+    public void Sanitize_MasksStandaloneJwt_InToolStderr()
+    {
+        var sanitizer = new RegexDataLossPreventionSanitizer();
+        string rawJwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDAwMDAwMDB9.signatureBytes1234567890";
+        string input = $"Unhandled error processing request with raw token: {rawJwt} at stack trace";
+
+        var result = sanitizer.Sanitize(input);
+
+        Assert.Equal(1, result.RedactedCount);
+        Assert.Contains("JwtToken", result.RedactedCategories);
+        Assert.DoesNotContain(rawJwt, result.SanitizedContent);
+        Assert.Contains("[REDACTED_JWT]", result.SanitizedContent);
     }
 }

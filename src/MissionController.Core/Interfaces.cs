@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using Microsoft.Win32.SafeHandles;
 using System.Collections.Generic;
 using System.Threading;
@@ -45,7 +46,8 @@ public record ProcessExecutionResult(
     string StandardOutput,
     string StandardError,
     bool TimedOut,
-    JobResourceMetrics FinalMetrics);
+    JobResourceMetrics FinalMetrics,
+    string? TerminalReason = null);
 
 public interface IJailManager
 {
@@ -130,6 +132,48 @@ public interface IComplianceArchiveExporter
         string outputDirectory,
         IReadOnlyList<AuditLogEntry> entries,
         string operatorIdentity,
+        CancellationToken cancellationToken = default);
+
+    Task<string> ExportMissionRunRecordPackageAsync(
+        MissionRunRecord runRecord,
+        IReadOnlyList<AuditLogEntry> entries,
+        string outputDirectory,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Assembles a per-mission run record fulfilling the six-group evidence schema
+/// across IMerkleProofEngine, IComplianceArchiveExporter, and the audit ledger.
+/// </summary>
+public interface IMissionRunRecordAssembler
+{
+    Task<MissionRunRecord> AssembleRunRecordAsync(
+        Guid missionId,
+        SingleToolTemplate template,
+        LeaseSpec? leaseSpec,
+        string operatorIdentity,
+        string executionState,
+        int? exitCode,
+        int redactionCount,
+        IReadOnlyList<string> redactedCategories,
+        string substrateType,
+        string? cgroupOrJobId = null,
+        bool qualityAcceptance = true,
+        CancellationToken cancellationToken = default);
+
+    Task<string> AssembleAndExportBundleAsync(
+        Guid missionId,
+        SingleToolTemplate template,
+        LeaseSpec? leaseSpec,
+        string operatorIdentity,
+        string executionState,
+        int? exitCode,
+        int redactionCount,
+        IReadOnlyList<string> redactedCategories,
+        string substrateType,
+        string outputDirectory,
+        string? cgroupOrJobId = null,
+        bool qualityAcceptance = true,
         CancellationToken cancellationToken = default);
 }
 
@@ -345,6 +389,26 @@ public interface ITemplatePolicyCompiler
         Guid missionId,
         string workingDirectory,
         uint leaseDurationSeconds = 30);
+}
+
+/// <summary>
+/// Resolves a host name or IP address string to an array of <see cref="IPAddress"/> instances.
+/// Allows injecting mocked or throwing network resolvers for deterministic policy compilation.
+/// </summary>
+public interface IHostAddressResolver
+{
+    IPAddress[] GetHostAddresses(string hostNameOrAddress);
+}
+
+/// <summary>
+/// Thrown when a governed template cannot be safely compiled into an in-kernel capability lease,
+/// such as when an egress destination cannot be resolved to valid IP addresses or specifies invalid port ranges.
+/// Enforces fail-closed semantics: refuses authority rather than substituting unintended permissions.
+/// </summary>
+public sealed class PolicyCompilationException : Exception
+{
+    public PolicyCompilationException(string message) : base(message) { }
+    public PolicyCompilationException(string message, Exception innerException) : base(message, innerException) { }
 }
 
 /// <summary>

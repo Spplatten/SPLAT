@@ -562,4 +562,89 @@ public class WslLeasedExecutorWireTests
         Assert.Null(result.FinalMetrics.TotalCpuKernelTimeMs);
         Assert.Null(result.FinalMetrics.ActiveProcessCount);
     }
+
+    [Fact]
+    public async Task CallerCancellation_IsNotReportedAsLeaseTimeout()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var barrier = new TaskCompletionSource<bool>();
+        var daemon = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync();
+            using var stream = client.GetStream();
+            var raw = new MemoryStream();
+            byte[]? clientNonce = StandInAgent.ClientNonce(await StandInAgent.ReadLineAsync(stream, raw, default));
+            byte[] key = Encoding.UTF8.GetBytes(TestToken);
+            byte[] serverNonce = RandomNumberGenerator.GetBytes(WslAgentSession.ProofBytes);
+            await StandInAgent.WriteLineAsync(stream, StandInAgent.Challenge(serverNonce, WslAgentSession.DaemonProof(key, clientNonce!, serverNonce)), default);
+            string? frame = await StandInAgent.ReadLineAsync(stream, raw, default);
+            barrier.SetResult(true);
+            try
+            {
+                await Task.Delay(10000);
+            }
+            catch (Exception) { }
+            return true;
+        });
+
+        using var callerCts = new CancellationTokenSource();
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
+
+        var executeTask = executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>(), ct: callerCts.Token);
+        await barrier.Task;
+        callerCts.Cancel();
+
+        var result = await executeTask;
+        listener.Stop();
+
+        Assert.False(result.TimedOut, "Caller cancellation was misreported as lease timeout");
+        Assert.Equal("CallerCancelled", result.TerminalReason);
+        Assert.Equal(-3, result.ExitCode);
+        Assert.Contains("[EXECUTION_CANCELLED]", result.StandardError);
+        Assert.DoesNotContain("Process killed by kernel/daemon", result.StandardError);
+    }
+
+    [Fact]
+    public async Task AbruptDisconnect_IsNotSuccess_AndReportsDisconnect()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var daemon = RunStandInDaemonAsync(listener, Array.Empty<string>());
+
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
+        var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
+
+        await daemon;
+        listener.Stop();
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.False(result.TimedOut);
+        Assert.Equal("AbruptDisconnect", result.TerminalReason);
+        Assert.Contains("[DAEMON_DISCONNECTED]", result.StandardError);
+    }
+
+    [Fact]
+    public async Task ExplicitExit_PreservesCodeAndTerminalReason()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":42}");
+
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken);
+        var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/id", Array.Empty<string>());
+
+        await daemon;
+        listener.Stop();
+
+        Assert.Equal(42, result.ExitCode);
+        Assert.False(result.TimedOut);
+        Assert.Equal("ExplicitExit", result.TerminalReason);
+    }
 }

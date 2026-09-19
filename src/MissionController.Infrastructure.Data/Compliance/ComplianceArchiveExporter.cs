@@ -104,6 +104,126 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
         return zipFilePath;
     }
 
+    public async Task<string> ExportMissionRunRecordPackageAsync(
+        MissionRunRecord runRecord,
+        IReadOnlyList<AuditLogEntry> entries,
+        string outputDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(runRecord);
+        ArgumentNullException.ThrowIfNull(entries);
+
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+        {
+            outputDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MissionController", "MissionRunRecords");
+        }
+
+        Directory.CreateDirectory(outputDirectory);
+
+        string packageId = $"RUN-RECORD-{runRecord.MissionId:N}";
+        string timestampStr = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+        string zipFileName = $"{packageId}_{timestampStr}.zip";
+        string zipFilePath = Path.Combine(outputDirectory, zipFileName);
+
+        // 1. Build Merkle Tree & Generate Proofs for entries
+        var tree = _merkleEngine.BuildTree(entries);
+        var proofs = new List<MerkleProof>();
+        foreach (var entry in entries)
+        {
+            proofs.Add(_merkleEngine.GenerateProof(tree, entry.Id));
+        }
+
+        // 2. Create Zip Archive
+        await using (var fileStream = new FileStream(zipFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var archive = new ZipArchive(fileStream, ZipArchiveMode.Create))
+        {
+            // mission_run_record.json
+            await WriteTextToArchiveAsync(archive, "mission_run_record.json", JsonSerializer.Serialize(runRecord, JsonOpts));
+
+            // audit_chain.json
+            await WriteTextToArchiveAsync(archive, "audit_chain.json", JsonSerializer.Serialize(entries, JsonOpts));
+
+            // merkle_proofs.json
+            await WriteTextToArchiveAsync(archive, "merkle_proofs.json", JsonSerializer.Serialize(proofs, JsonOpts));
+
+            // run_record_summary.md
+            string summaryMd = GenerateMissionRunRecordSummary(runRecord);
+            await WriteTextToArchiveAsync(archive, "run_record_summary.md", summaryMd);
+
+            // verify_proofs.py
+            string pythonScript = GeneratePythonVerificationScript();
+            await WriteTextToArchiveAsync(archive, "verify_proofs.py", pythonScript);
+
+            // verify_proofs.ps1
+            string psScript = GeneratePowerShellVerificationScript();
+            await WriteTextToArchiveAsync(archive, "verify_proofs.ps1", psScript);
+        }
+
+        return zipFilePath;
+    }
+
+    private static string GenerateMissionRunRecordSummary(MissionRunRecord record)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"# Mission Run Record & Evidence Bundle: `{record.MissionId:D}`");
+        sb.AppendLine();
+        sb.AppendLine("## 1. Request Identity");
+        sb.AppendLine($"- **Principal:** `{record.RequestIdentity.Principal}`");
+        sb.AppendLine($"- **Auth Provenance:** `{record.RequestIdentity.AuthProvenance}`");
+        sb.AppendLine($"- **Mission ID:** `{record.RequestIdentity.MissionId:D}`");
+        sb.AppendLine($"- **Idempotency Token:** `{record.RequestIdentity.IdempotencyToken ?? "N/A"}`");
+        sb.AppendLine($"- **Approval Reference:** `{record.RequestIdentity.ApprovalReference ?? "N/A"}`");
+        sb.AppendLine($"- **Policy Version/Hash:** `{record.RequestIdentity.PolicyVersionOrHash}`");
+        sb.AppendLine($"- **Requested At:** `{record.RequestIdentity.RequestedAtUtc:O}`");
+        sb.AppendLine();
+        sb.AppendLine("## 2. Effective Permission");
+        sb.AppendLine($"- **Executable:** `{record.EffectivePermission.ExecutablePath}`");
+        sb.AppendLine($"- **Arguments:** `{string.Join(" ", record.EffectivePermission.ArgumentVector)}`");
+        sb.AppendLine($"- **Workspace Boundary:** `{record.EffectivePermission.WorkspaceBoundary}`");
+        sb.AppendLine($"- **Network Allowed:** `{record.EffectivePermission.AllowNetwork}`");
+        sb.AppendLine($"- **Allowed Egress IPs:** `{(record.EffectivePermission.AllowedEgressIps.Count > 0 ? string.Join(", ", record.EffectivePermission.AllowedEgressIps) : "None (Airgapped)")}`");
+        sb.AppendLine($"- **Allowed Egress Ports:** `{(record.EffectivePermission.AllowedEgressPorts.Count > 0 ? string.Join(", ", record.EffectivePermission.AllowedEgressPorts) : "None")}`");
+        sb.AppendLine($"- **Resource Limits:** `{record.EffectivePermission.MaxMemoryBytes / (1024 * 1024)} MB RAM, {record.EffectivePermission.MaxCpuPercent}% CPU, {record.EffectivePermission.LeaseDurationSeconds}s TTL`");
+        sb.AppendLine($"- **Runtime Capabilities:** `{record.EffectivePermission.RuntimeCapabilities ?? "Default"}`");
+        sb.AppendLine();
+        sb.AppendLine("## 3. Enforcement State");
+        sb.AppendLine($"- **Substrate:** `{record.EnforcementState.SubstrateType}`");
+        sb.AppendLine($"- **Kernel / OS:** `{record.EnforcementState.KernelOrOsRelease}`");
+        sb.AppendLine($"- **Attached Controls:** `{string.Join(", ", record.EnforcementState.AttachedControls)}`");
+        sb.AppendLine($"- **Cgroup / Job ID:** `{record.EnforcementState.CgroupOrJobId ?? "N/A"}`");
+        sb.AppendLine($"- **Limits Readback:** `{record.EnforcementState.EffectiveLimitsReadback ?? "N/A"}`");
+        sb.AppendLine($"- **Admission Verdict:** `{record.EnforcementState.AdmissionVerdict}`");
+        sb.AppendLine();
+        sb.AppendLine("## 4. Outcome");
+        sb.AppendLine($"- **Execution State:** `{record.Outcome.ExecutionState}`");
+        sb.AppendLine($"- **Exit Code:** `{(record.Outcome.ExitCode.HasValue ? record.Outcome.ExitCode.Value.ToString() : "N/A")}`");
+        sb.AppendLine($"- **Terminal Reason:** `{record.Outcome.TerminalReason ?? "N/A"}`");
+        sb.AppendLine($"- **DLP Redactions:** `{record.Outcome.RedactionCount}` (Categories: `{(record.Outcome.RedactedCategories.Count > 0 ? string.Join(", ", record.Outcome.RedactedCategories) : "None")}`)");
+        sb.AppendLine($"- **Quality Acceptance:** `{record.Outcome.QualityAcceptance}`");
+        sb.AppendLine();
+        sb.AppendLine("## 5. Cleanup");
+        sb.AppendLine($"- **Processes Terminated:** `{record.Cleanup.ProcessesTerminated}`");
+        sb.AppendLine($"- **Policy Removal Order:** `{string.Join(" -> ", record.Cleanup.PolicyRemovalOrder)}`");
+        sb.AppendLine($"- **Workspace Disposition:** `{record.Cleanup.WorkspaceDisposition}`");
+        sb.AppendLine($"- **Residual Resources Cleaned:** `{record.Cleanup.ResidualResourcesCleaned}`");
+        sb.AppendLine();
+        sb.AppendLine("## 6. Integrity");
+        sb.AppendLine($"- **Ledger Chain Kind:** `{record.Integrity.ChainKind}` (HashVersion: `{record.Integrity.HashVersion}`)");
+        sb.AppendLine($"- **Merkle Root Hash:** `{record.Integrity.MerkleRootHash}`");
+        sb.AppendLine($"- **Total Audit Log Entries:** `{record.Integrity.TotalAuditEntries}`");
+        sb.AppendLine($"- **Attestation Signature:** `{record.Integrity.AttestationSignature}` (`{record.Integrity.SignatureAlgorithm}`)");
+        sb.AppendLine($"- **Committed At:** `{record.Integrity.CommittedAtUtc:O}`");
+        sb.AppendLine();
+        sb.AppendLine("## Independent Verification");
+        sb.AppendLine("Run either verification script in this folder to independently verify Merkle proofs against the committed root:");
+        sb.AppendLine("```bash");
+        sb.AppendLine("python verify_proofs.py");
+        sb.AppendLine("# OR");
+        sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\verify_proofs.ps1");
+        sb.AppendLine("```");
+        return sb.ToString();
+    }
+
     private static async Task WriteTextToArchiveAsync(ZipArchive archive, string entryName, string content)
     {
         var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);

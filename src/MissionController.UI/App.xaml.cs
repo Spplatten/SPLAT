@@ -172,6 +172,7 @@ public partial class App : Application
         services.AddSingleton<ISemanticMemoryIndex, SqliteSemanticMemoryIndex>();
         services.AddSingleton<IMerkleProofEngine, MerkleTreeEngine>();
         services.AddSingleton<IComplianceArchiveExporter, ComplianceArchiveExporter>();
+        services.AddSingleton<IMissionRunRecordAssembler, MissionRunRecordAssembler>();
 
         // Infrastructure - Identity & Zero-Trust Auth
         services.AddSingleton<ITokenValidator, JwtTokenValidator>();
