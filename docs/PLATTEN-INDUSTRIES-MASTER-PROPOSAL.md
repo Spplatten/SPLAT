@@ -24,7 +24,7 @@ However, **enterprise CISOs and Security Architects are actively vetoing and blo
 
 ### The Three Blockers Halting Enterprise Agent Adoption:
 1. **Unconstrained Ambient Privilege (The Blast-Radius Dilemma):** Traditional AI agent frameworks execute CLI commands, PowerShell scripts, and Python routines using the user’s ambient Windows access token. If a model hallucinates or is coerced via prompt injection, it can wipe filesystems, access DPAPI secrets, read LSASS/SAM hashes, or move laterally across corporate networks.
-2. **The MicroVM Latency & Cost Trap:** Cloud-based execution sandboxes (e.g. E2B, Modal, Daytona) require offloading enterprise workloads to external cloud virtual machines. This introduces 200–800ms of network latency per tool call, exposes proprietary data to public clouds, and incurs recurring compute costs (\$0.05–\$0.20 per active hour per seat) that destroy software margins.
+2. **The MicroVM Latency & Cost Trap:** Cloud-based execution sandboxes (e.g. E2B, Modal, Daytona) require offloading enterprise workloads to external cloud virtual machines. That puts a network round trip on every tool call, moves proprietary data to public clouds, and adds recurring compute costs. We have not measured them, so no numbers here.
 3. **The Non-Repudiation Void (Audit Non-Compliance):** Regulatory bodies (HIPAA, SOC 2, NIST 800-207, CMMC) demand tamper-evident proof of every state-changing operational action. Standard orchestrator application logs can be truncated, deleted, or forged by a compromised host process.
 
 ### The Platten Industries Thesis:
@@ -35,7 +35,7 @@ However, **enterprise CISOs and Security Architects are actively vetoing and blo
 
 ## 2. Product Architecture & The Defensible Moat
 
-SPLAT provides a local-first, dual-OS containment substrate that runs on stock, unmodified kernels with near-zero overhead (**4.12 ms p50 / 9.88 ms p95 measured on Windows 10.0.26200**).
+SPLAT provides a local-first, dual-OS containment substrate that runs on stock, unmodified kernels with measured overhead (**4.12 ms p50 / 9.88 ms p95 measured on Windows 10.0.26200**).
 
 ```
                             THE SPLAT ENTERPRISE TOPOLOGY
@@ -45,7 +45,7 @@ SPLAT provides a local-first, dual-OS containment substrate that runs on stock, 
   │  • Microsoft Copilot / Semantic Kernel    • LangGraph / Python Multi-Agent      │
   │  • n8n Community Workflows               • Claude Code / MCP Clients            │
   └──────────────────────────────────────┬──────────────────────────────────────────┘
-                                         │ Authenticated REST (:5678) / MCP Stdio
+                                         │ MCP stdio (a REST trigger on :5678 is designed, not started)
   ┌──────────────────────────────────────▼──────────────────────────────────────────┐
   │  SPLAT CONTROL PLANE (.NET 10 / MissionController.Infrastructure)                │
   │  • Capability Lease Compiler: Single-use, bounded seconds-scale execution lease │
@@ -59,20 +59,20 @@ SPLAT provides a local-first, dual-OS containment substrate that runs on stock, 
   │ • Win32 Job Object (Hard CPU/RAM caps)  │  │ • Unmodified stock WSL2 kernel     │
   │ • Low-Privilege AppContainer isolation │  │ • BPF-LSM hooks (bprm, open, sock) │
   │ • Stripped Admin Token (S-1-5-32-544)   │  │ • -EPERM kernel veto on rogue call │
-  │ • Ephemeral NT ACL Jails                │  │ • Discard-on-failure OverlayFS CoW │
-  │ • TransactionalScope Scratch Overlays   │  │ • Unified cgroup v2 resource clamps│
+  │ • Ephemeral NT ACL Jails                │  │ • OverlayFS CoW: roadmap P2        │
+  │ • Scratch overlays: NOT BUILT           │  │ • Unified cgroup v2 resource clamps│
   └─────────────────────────────────────────┘  └────────────────────────────────────┘
 ```
 
 ### Core Technological Differentiators:
 1. **Task-Level Capability Leases (Not Machine Perimeters):** While cloud sandboxes isolate by creating an entire virtual machine, SPLAT isolates at the granularity of a **single task** (*1 Template $\rightarrow$ 1 Model $\rightarrow$ 1 Tool $\rightarrow$ 1 Egress FQDN*).
-2. **Stock Microsoft Kernel Compatibility:** Zero custom kernel forks or CVE burdens. Operates on standard Microsoft Windows 10/11 Enterprise and stock WSL2 Linux kernels (6.6+/6.18+) via standard `.wslconfig` BPF-LSM directives.
-3. **Filesystem Atomicity (Ephemeral Scratch Overlays):** Speculative operations execute inside isolated, access-controlled directory overlays. If the assertion passes, changes commit; if the tool fails or times out, the overlay is instantly purged—guaranteeing the host filesystem remains untouched.
-4. **Cryptographic Non-Repudiation:** Every action produces a SHA-256 chained entry where:
+2. **Stock Microsoft Kernel Compatibility:** Zero custom kernel forks or CVE burdens. Proven on Windows 11 with the stock WSL2 kernel 6.18, using one standard `.wslconfig` boot-line directive.
+3. **Filesystem Atomicity (Ephemeral Scratch Overlays), planned:** the goal is for speculative operations to run in a copy-on-write overlay that commits on success and is purged on failure. It is not built; roadmap P2 is the work, and until then the daemon refuses the request rather than pretending to honour it.
+4. **Tamper-Evident Chaining (non-repudiation is half done):** Every action produces a chained entry where:
    ```
-EntryHash = SHA256(PreviousHash || Timestamp || MissionId || Action || Details)
+EntryHash = SHA256(PreviousHash || Timestamp || MissionId || TemplateId || Action || DetailsCommitment || Operator)
 ```
-   Audit anchors are returned directly to calling orchestrators (LangGraph checkpointers, n8n payloads, Sentinel workbooks).
+   With the operator's key file, HMAC-SHA256 under that key replaces SHA-256. Audit anchors are returned directly to calling orchestrators (LangGraph checkpointers, n8n payloads, Sentinel workbooks).
 
 ---
 
@@ -90,14 +90,14 @@ flowchart LR
 * **Target Customer:** Solo SysAdmins, IT Contractors, Tier-1/2 Helpdesk Technicians.
 * **Pricing:** **\$49 – \$99 / technician / month** (or \$499 billed annually).
 * **Delivery:** Standalone signed desktop application with BYOK (Bring Your Own Key for Anthropic / Gemini).
-* **Value Metric:** Instant frontline diagnostic runbooks, automated ticket drafts, zero-privilege remediation scripts with rollback guarantees.
+* **Value Metric:** Instant frontline diagnostic runbooks, automated ticket drafts, remediation scripts run with stripped privileges, each with a declared risk level (an undo is optional today).
 
 ### Track B: Enterprise Fleet License (Primary Annual Recurring Revenue Engine)
 * **Target Customer:** Mid-Market to Global Enterprise IT & SecOps (500 to 50,000+ endpoints).
 * **Pricing:** **\$5 – \$12 / managed endpoint / month** (Annual contracts: \$30k – \$250k+ ARR).
 * **Delivery:** Silent Microsoft Intune / SCCM MSIX deployment with central group policy management.
 * **Features Included:**
-  * Fleet-wide template distribution and policy enforcement.
+  * Fleet-wide template distribution and policy enforcement (planned, not built).
   * Direct streaming to **Microsoft Sentinel** (CEF / RFC 5424 / REST API).
   * Cryptographic Merkle compliance archive export for external SOC 2 / HIPAA audits.
   * Windows DPAPI enterprise credential management.
@@ -107,16 +107,16 @@ flowchart LR
 * **Pricing:** **\$2 – \$4 / managed seat / month** (Tiered wholesale volume pricing).
 * **Features Included:**
   * Multi-tenant reporting and billing attribution.
-  * White-labeled executive remediation reports proving service value with signed cryptographic proof.
-  * Zero liability: guarantees client endpoints cannot be compromised by MSP technician agents.
+  * White-labeled executive remediation reports built on the audit ledger (planned, not built).
+  * Per-client containment evidence: what each technician agent was allowed to do, and the refusals when it tried more (planned, not built). No containment product can guarantee an endpoint is never compromised, and this one does not claim to.
 
 ### Track D: Sovereign & Air-Gapped Edition
 * **Target Customer:** Defense, Intelligence Community, National Labs, Critical Infrastructure, Healthcare.
 * **Pricing:** **\$100k – \$500k+ / year** (Perpetual or high-value annual subscription).
 * **Features Included:**
-  * 100% offline air-gapped operation with local LLM inference engines (vLLM / Ollama).
-  * Strict physical hardware token (YubiKey / SmartCard) enforcement.
-  * Zero cloud telemetry or external network calls.
+  * Offline operation with a local model (vLLM / Ollama): planned; no local model client exists yet.
+  * Hardware token (YubiKey / SmartCard) enforcement: planned, not built.
+  * No cloud telemetry: the containment substrate makes no external calls; the app's own reasoning needs the local model above to go fully offline.
 
 ---
 
@@ -186,8 +186,8 @@ all-in operating cost measured against the existing workflow, not model runs com
 
 SPLAT offers immense strategic value to Microsoft CorpDev and Azure leadership:
 1. **Unlocks the \$30/user/month M365 Copilot Expansion:** Enterprise CISOs currently restrict Copilot to read-only document search. SPLAT turns Copilot on Windows 11 into an autonomous, safe coworker.
-2. **Accelerates Microsoft Sentinel Data Consumption:** SPLAT streams continuous HMAC-signed telemetry into Azure Log Analytics, directly driving Azure consumption revenue.
-3. **Hardware-Anchored Windows 11 Enterprise Moat:** Establishes Windows 11 as the only operating system with kernel-enforced AI process confinement natively built into the enterprise OS fabric.
+2. **Accelerates Microsoft Sentinel Data Consumption:** SPLAT forwards HMAC-authenticated telemetry into Azure Log Analytics when a workspace is configured, driving Azure consumption.
+3. **A Windows 11 Enterprise Moat:** kernel-enforced AI process confinement on the stock WSL2 kernel Windows already ships.
 
 ---
 

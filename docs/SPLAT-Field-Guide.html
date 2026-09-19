@@ -502,14 +502,14 @@
     <p class="part">Part 2 — The big idea</p>
     <h2>Agents don't get trust. They get a lease.</h2>
     <p>The core concept in SPLAT is the <strong>lease</strong>. When an AI agent gets a job, it doesn't receive the keys to your computer — it receives something more like a visitor badge at a secure facility: valid for one task, for a limited time, opening exactly one workshop door, with a hard cap on how much power and material it can use. When the task ends, the badge dies.</p>
-    <p>Every job in SPLAT follows a strict rule the project calls <strong>1:1:1</strong> — one task template gets exactly <em>one</em> AI model, <em>one</em> pre-approved tool it may run, and <em>one</em> internet address it may talk to. Not "a browser." Not "the internet." One tool, one destination, spelled out in advance. Anything else is refused automatically — not by policy, but by plumbing.</p>
+    <p>Every job in SPLAT follows a strict rule the project calls <strong>1:1:1</strong> — one task template gets exactly <em>one</em> AI model, <em>one</em> pre-approved tool it may run, and at most <em>one</em> internet address it may talk to. Not "a browser." Not "the internet." One tool, one destination, spelled out in advance. For two-thirds of the tools the plumbing allows no network at all; Part 7 is exact about the rest.</p>
     <p>Here's what one leased job looks like from the outside in:</p>
 
     <div class="rings">
       <div class="ring">
         <span class="ring-label">Ring 5 · The ledger — every action inside is written to a tamper-evident logbook</span>
         <div class="ring">
-          <span class="ring-label">Ring 4 · One phone line — outbound traffic allowed to exactly one approved address</span>
+          <span class="ring-label">Ring 4 · The phone — most tools get no network at all; on Windows, the rest are not held to one address</span>
           <div class="ring">
             <span class="ring-label">Ring 3 · The censor — outgoing text is scrubbed of passwords &amp; secrets first</span>
             <div class="ring">
@@ -525,7 +525,7 @@
           </div>
         </div>
       </div>
-      <p class="rings-caption">The rings aren't SPLAT asking nicely — rings 1, 2 and 5 are enforced by the Windows kernel's own object system, and the tool is spawned <em>suspended</em> (frozen) so every ring is locked in place before it ever wakes up.</p>
+      <p class="rings-caption">Most of the rings aren't SPLAT asking nicely — rings 1 and 2 are enforced by the Windows kernel's own object system, and so is ring 4 where a tool gets no network at all; the censor and the logbook are SPLAT's own code. The tool is spawned <em>suspended</em> (frozen) so every ring is locked in place before it ever wakes up.</p>
     </div>
   </section>
 
@@ -561,7 +561,7 @@
     <div class="pull">
       <p>SPLAT is an <strong>execution containment substrate and governance zone</strong>. It does not send bots wandering across the web; it locks down execution on your machine.</p>
     </div>
-    <p><strong>How SPLAT runs native tasks:</strong> When a specialist runs a task (such as inspecting local event logs, diagnosing network drops, or auditing OAuth configurations), it runs a single pre-vetted tool inside an OS-enforced sandbox. Privileges are stripped, filesystem access is jailed, DLP scrubs secrets, and about two-thirds of the specialists run with no network at all — the glossary entry for network denial says which ones do not, and why. It audits, diagnoses, and drafts — it never roams the web unchecked.</p>
+    <p><strong>How SPLAT runs native tasks:</strong> When a specialist runs a task (such as inspecting local event logs, diagnosing network drops, or auditing OAuth configurations), it runs a single pre-vetted tool inside an OS-enforced sandbox. Privileges are stripped, each tool works in its own fenced folder, DLP scrubs secrets, and about two-thirds of the specialists run with no network at all — the glossary entry for network denial says which ones do not, and why. It audits, diagnoses, and drafts — it never roams the web unchecked.</p>
     <p><strong>Locked rooms for external agents:</strong> If you use external general agents (like Claude Code, Cursor, or LangGraph) that need to run commands or manipulate files, they plug into SPLAT via <code>splat-mcp</code>. The external agent provides the reasoning; SPLAT provides the bouncer, ensuring out-of-bounds actions die before touching your system.</p>
   </section>
 
@@ -580,13 +580,13 @@
       <li data-step="04"><span class="step-title">The tool starts frozen</span>
         <p>The specialist's one allowed tool is launched <em>suspended</em> — created but not yet running — while the sandbox clamps on: memory and CPU caps, admin rights stripped, folder jail sealed. Only then is it thawed.</p></li>
       <li data-step="05"><span class="step-title">Evidence is gathered inside the rings</span>
-        <p>The tool runs its diagnostic and produces raw output. It can't wander the filesystem, can't gulp your RAM, and can't call anywhere except its one approved address.</p></li>
+        <p>The tool runs its diagnostic and produces raw output, under hard caps on memory and CPU. Two-thirds of the tools also run with no network and no access to your own files; the rest run with your ordinary, non-admin rights, which is why each is one pre-vetted tool rather than anything an AI asks for.</p></li>
       <li data-step="06"><span class="step-title">The censor scrubs the output</span>
         <p>Before one byte leaves your machine, a data-loss-prevention filter masks passwords, keys, tokens, email addresses, card and social-security patterns — in memory, before transmission.</p></li>
       <li data-step="07"><span class="step-title">The AI reasons over clean evidence</span>
         <p>The scrubbed evidence travels down the single approved line to the reasoning model (Claude or Gemini — whichever key you connected), which interprets it and streams its thinking back live.</p></li>
       <li data-step="08"><span class="step-title">You get a verdict in plain English</span>
-        <p>A clear status — healthy, warning, or critical — with findings that cite the actual evidence, plus suggested one-click fixes. Risky fixes come with a rollback: an undo button, not just an apology.</p></li>
+        <p>A clear status — healthy, warning, or critical — with findings that cite the actual evidence, plus suggested one-click fixes. Each fix is labeled with its risk and runs only when you click it; a fix can carry an undo, but nothing yet requires a risky one to.</p></li>
       <li data-step="09"><span class="step-title">Everything lands in the ledger</span>
         <p>Every step — every command, argument, and result — is sealed into a cryptographic logbook. More on why that matters below.</p></li>
     </ol>
@@ -605,7 +605,7 @@
           <tr><td class="screen">Template Catalog</td><td class="what">Browse all 49 specialists, see exactly what tool and destination each one is allowed, and launch them directly.</td></tr>
           <tr><td class="screen">Project Studio</td><td class="what">Chain up to six agents into a staged project — investigate, then verify, then summarize — with filtered hand-offs between stages.</td></tr>
           <tr><td class="screen">Security Audit</td><td class="what">Read the tamper-evident ledger: every action ever taken, verifiable, in one place.</td></tr>
-          <tr><td class="screen">Memory</td><td class="what">Search past incidents by meaning, not keywords — "that time the printer broke" finds the right mission.</td></tr>
+          <tr><td class="screen">Memory</td><td class="what">Search past incidents by the words they share — "printer broke" finds the missions that mention printers.</td></tr>
           <tr><td class="screen">Jail Inspector</td><td class="what">Look inside the sandboxes themselves: see the fenced folders and locks each mission ran under.</td></tr>
           <tr><td class="screen">Settings</td><td class="what">Manage your AI keys (encrypted by Windows), providers, and app preferences.</td></tr>
         </tbody>
@@ -643,7 +643,7 @@
     <h2>Your first five minutes</h2>
     <p>SPLAT runs on Windows 11. On first launch, the Welcome wizard walks you through three steps: meet the agent squad, connect one AI key, go.</p>
     <p>The one thing you need is an API key from Anthropic (starts with <em>sk-ant-</em>) or Google Gemini (starts with <em>AIza</em>) — that's the reasoning brain your agents will think with. Paste it once; SPLAT verifies it live, figures out which provider it belongs to, and locks it in Windows' own encrypted vault. It never sits on disk in readable form.</p>
-    <p>Then head to the Quick Diagnostician: tap a tile for a one-click checkup, or type what's bothering you — <em>"my laptop fan won't stop"</em>, <em>"is someone trying to log into my PC?"</em> — and watch the squad go to work. Every finding comes back in plain English, every suggested fix has a clearly labeled risk level, and anything risky ships with an undo.</p>
+    <p>Then head to the Quick Diagnostician: tap a tile for a one-click checkup, or type what's bothering you — <em>"my laptop fan won't stop"</em>, <em>"is someone trying to log into my PC?"</em> — and watch the squad go to work. Every finding comes back in plain English, every suggested fix has a clearly labeled risk level, and nothing runs until you click it.</p>
     <p>And if you're the type who wants to see the machinery: the Live Mission Monitor shows the reasoning as it streams, the Jail Inspector shows the locked rooms, and the Security Audit screen shows the receipts. Nothing in SPLAT is a black box — that's rather the point.</p>
   </section>
 
@@ -697,7 +697,7 @@
       <div class="term"><dt>Egress firewall</dt><dd>The single approved phone line. Any attempt to call anywhere else is refused.</dd></div>
       <div class="term"><dt>Network denial</dt><dd>Stronger than the phone line: no phone at all. The tool runs in a Windows AppContainer with no network permission, so it cannot dial <em>any</em> number — not even by skipping the phone book and punching in an address directly. About two-thirds of the specialists get this. The rest are still given a phone: the one that genuinely reads a public grants database, which Windows cannot yet stop from dialling elsewhere (it is read-only and carries no password), and the ones that read Windows' own event logs, management data or Defender status — the wall that takes the phone away would cut those off too, so for now they keep a phone they do not need.</dd></div>
       <div class="term"><dt>Audit ledger</dt><dd>The chained, tamper-evident logbook of everything every agent ever did.</dd></div>
-      <div class="term"><dt>Remediation</dt><dd>A suggested fix, run in its own sandbox, with a rollback (undo) for anything that changes state.</dd></div>
+      <div class="term"><dt>Remediation</dt><dd>A suggested fix, run in its own sandbox, that can carry a rollback (undo), though nothing yet requires one.</dd></div>
       <div class="term"><dt>Kernel</dt><dd>The deepest layer of an operating system. When enforcement lives there, programs above it — including AIs — can't opt out.</dd></div>
       <div class="term"><dt>MCP</dt><dd>Model Context Protocol — the standard plug that lets outside AI tools request work through SPLAT's containment instead of running loose.</dd></div>
       <div class="term"><dt>Trace id</dt><dd>A case number an outside AI framework hands over with a request, written into the ledger so both sides' records join on one value.</dd></div>

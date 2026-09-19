@@ -30,14 +30,14 @@ Today, most AI orchestration tools execute commands through unconstrained subshe
  ┌────────────────────────────────────────────────────────────────────────┐
  │ 1. CONTROL PLANE (.NET 10 / WinUI 3)                                    │
  │    • MissionExecutionEngine: Enforces strict 1:1:1 Governed Flow       │
- │    • Merkle Audit Ledger: Cryptographically chained SOC2/HIPAA record  │
+ │    • Audit ledger: SHA-256 hash chain; HMAC-keyed by operator file     │
  │    • Capability Compiler: Translates tool contracts to kernel leases   │
  └──────────────────────────────────┬─────────────────────────────────────┘
-                                    │ Hyper-V VSOCK (latency not yet measured)
+                                    │ loopback TCP; each side proves the token (protocol 3)
  ┌──────────────────────────────────▼─────────────────────────────────────┐
  │ 2. LINUX SUBSTRATE (WSL2 MicroVM / Resident Rust Daemon)               │
  │    • Ephemeral cgroups v2: Hard CPU, Memory, and PID clamps            │
- │    • OverlayFS CoW: Discard-on-failure scratch spaces (atomic rollback)│
+ │    • Read-only roots, CoW scratch: NOT BUILT YET (roadmap P2)          │
  └──────────────────────────────────┬─────────────────────────────────────┘
                                     │
  ┌──────────────────────────────────▼─────────────────────────────────────┐
@@ -47,7 +47,7 @@ Today, most AI orchestration tools execute commands through unconstrained subshe
  │   • file_open           ──► Access protected inode?   ──► -EPERM     │
  │   • socket_connect      ──► Rogue egress destination? ──► -EPERM     │
  │                                                                        │
- │   ⚡ Direct BPF Ringbuffer: Instant violation telemetry streamed to HUD│
+ │   BPF ring buffer: kernel violations reach the MCP client, not the UI │
  └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -64,7 +64,7 @@ we have not run is the fastest way to lose a technical reader.
 | **Direct Subshell (`bash`/`cmd`)** | none — no boundary to cross | Local | **None** (full user compromise risk) | Low |
 | **Cloud MicroVMs (E2B, Modal)** | a network round trip, not measured here | High Risk (cloud transmission) | Hypervisor | Per-hour active VM |
 | **Standard Docker on Host** | not measured here | Local | Container daemon (root escape risk) | Medium |
-| **SPLAT Substrate** | **4.12 ms p50 / 9.88 ms p95, measured** | **100% local** | **Kernel BPF-LSM + Job Sandbox** | **Zero cloud infrastructure** |
+| **SPLAT Substrate** | **4.12 ms p50 / 9.88 ms p95, measured** | **Execution stays local**; SPLAT's own reasoning calls a cloud model after scrubbing | **Kernel BPF-LSM + Job Sandbox** | **Zero cloud infrastructure** |
 
 ---
 
@@ -74,7 +74,7 @@ we have not run is the fastest way to lose a technical reader.
 Cloud sandboxes (E2B, Modal, Daytona, Fly) hand an agent an entire microVM where it can do whatever it wants inside the machine perimeter. Isolation is real, but the unit of containment is "the machine." Runtime observability tools (Falco, Tetragon) enforce eBPF policies, but their unit is a persistent cluster workload managed by a security team. SPLAT's unit is **one mission**: *this model, this binary, this destination, for this many seconds*. That is a single-use, seconds-scale **Capability Lease**, not a perimeter. Enforcing at this granularity requires a policy compiler, a dynamic lease lifecycle, and an in-kernel hook—stopping at the container is no longer sufficient.
 
 #### 2. Local Host Execution on Unmodified Stock Kernels (The Commercial Wedge)
-Every cloud sandbox requires shipping workloads, proprietary code, and sensitive enterprise data to third-party cloud infrastructure. This is an absolute non-starter for the exact buyers who most need containment: health systems, defense, finance, intelligence, and anyone operating under strict data residency or air-gap mandates. SPLAT contains agents locally on stock Microsoft WSL2 Linux kernels (6.6+ / 6.18+), leveraging native `CONFIG_BPF_LSM`, `CONFIG_DEBUG_INFO_BTF`, and unified `cgroup v2` without requiring proprietary kernel builds, custom forks, or breaking OS updates. That is an on-premises deployment story cloud sandboxes structurally cannot tell.
+Every cloud sandbox requires shipping workloads, proprietary code, and sensitive enterprise data to third-party cloud infrastructure. This is an absolute non-starter for the exact buyers who most need containment: health systems, defense, finance, intelligence, and anyone operating under strict data residency or air-gap mandates. SPLAT contains agents locally on the stock Microsoft WSL2 kernel (6.18, the version it is proven on), leveraging native `CONFIG_BPF_LSM`, `CONFIG_DEBUG_INFO_BTF`, and unified `cgroup v2` without requiring proprietary kernel builds, custom forks, or breaking OS updates. That is an on-premises deployment story cloud sandboxes structurally cannot tell.
 
 #### 3. Evidence-Backed Engineering Discipline
 In an emerging security category where 90% of claims are aspirational, SPLAT makes every claim load-bearing:
@@ -85,17 +85,17 @@ In an emerging security category where 90% of claims are aspirational, SPLAT mak
 #### 4. Transparent Architectural Boundaries: Defense-in-Depth vs The Defensive Moat
 SPLAT maintains clear distinctions between standard isolation and genuine moats. The Windows control plane implements the Chromium sandbox architecture (Win32 Job Objects, restricted tokens with `USE_FOR_DENY_ONLY` on the Administrators SID, Medium integrity drops, and NTFS ACL jails)—well-trodden and proven in production browsers since 2008. It is competently executed and asserted against `whoami` inside the sandbox, serving as robust local defense-in-depth. The defensible technological moat is the Linux capability lease enforced by BPF-LSM directly inside unmodified stock kernels.
 
-#### 5. Discard-on-Failure Atomic Rollback (OverlayFS CoW)
-Every mission operates inside an ephemeral OverlayFS Copy-on-Write workspace. Changes are isolated to temporary scratch memory. If an operation fails, triggers a policy violation, or is revoked by the operator, the workspace is discarded instantly with zero side effects on the host filesystem.
+#### 5. Discard-on-Failure Scratch (OverlayFS CoW): Not Built Yet
+The goal is for every mission to work in an ephemeral OverlayFS copy-on-write workspace that is discarded when the mission fails or is revoked. It is not built. Today the daemon refuses `readOnlyFs` and `overlayFs.enableCow` rather than pretending to honour them, and roadmap P2 is the work that makes them real.
 
-#### 6. Tamper-Evident Merkle Audit Ledger (SOC2 / HIPAA Compliance)
-Every tool invocation, standard output stream, and security violation is cryptographically signed and chained using SHA-256 into a tamper-evident audit ledger (`SqliteChainedAuditLedger`). SecOps and compliance teams have mathematical proof of execution integrity.
+#### 6. Tamper-Evident Audit Ledger
+Every governed action is written to a hash-chained audit ledger (`SqliteChainedAuditLedger`), and a Merkle tree can prove any entry is in it. It is chained, not signed. Unkeyed, the default, anyone who can write the file can recompute the chain; with the operator's key file, nobody without that key can rewrite it unnoticed. It is built with SOC 2 and HIPAA evidence in mind, but no auditor has assessed it, and it certifies nothing.
 
 #### 7. Containment Substrate, Not an RPA Workflow Bot
 A fundamental architectural boundary separates SPLAT from Robotic Process Automation (RPA) tools and unconstrained web bots. SPLAT does not build agents that scrape consumer inboxes (e.g. Gmail/Outlook) or puppeteer browser sessions across advertising dashboards (e.g. configuring TikTok or Meta OAuth consoles). 
 
 In SPLAT's threat model, granting an LLM unconstrained browser access, broad egress, and administrative credentials creates an uncontainable blast radius where prompt injection leads directly to data exfiltration or credential theft. Instead, SPLAT operates strictly as an **execution containment substrate**:
-- **Native Governed Tasks:** Operates through declarative 1:1:1 templates (1 Model : 1 Tool : 1 Jail : 1 Egress FQDN) to execute local telemetry probes, log audits, and draft-only operational artifacts.
+- **Native Governed Tasks:** Operates through declarative 1:1:1 templates (1 Model : 1 Tool : 1 Jail : at most 1 declared destination) to execute local telemetry probes, log audits, and draft-only operational artifacts.
 - **Substrate for External Agents (`splat-mcp`):** Provides the kernel-enforced sandbox, resource clamps, and tamper-evident audit ledger that allow external orchestrators (Claude Code, LangGraph, Cursor) to execute terminal commands and code safely without exposing the host system.
 
 ---
@@ -105,9 +105,9 @@ In SPLAT's threat model, granting an LLM unconstrained browser access, broad egr
 - **1:1:1 Invariant:** Strict governance ensuring 1 Model Session : 1 Tool Execution : 1 Ephemeral Jail.
 - **BPF-LSM Enforcement Hooks:**
   - `lsm/bprm_check_security`: Restricts execution exclusively to declared binary inodes.
-  - `lsm/file_open`: Blocks access to sensitive OS and credential paths (e.g. `/etc/shadow`, `.ssh`).
-  - `lsm/socket_connect`: Hardware-level network egress clamping to approved destination /32 IPv4 addresses.
-- **Hardware Clamps:** Strict cgroup v2 memory limits (e.g., 256MB), CPU quotas, and process count limits to prevent fork-bombs and resource exhaustion attacks.
+  - `lsm/file_open`: Refuses the lease's protected files; for `run_command` today those are `/etc/shadow` and `/etc/sudoers`.
+  - `lsm/socket_connect`: Kernel-level egress clamping to the lease's approved IPv4 and IPv6 addresses.
+- **Resource Clamps:** Strict cgroup v2 memory limits (e.g., 256MB), CPU quotas, and process count limits, read back after they are written, to prevent fork-bombs and resource exhaustion attacks.
 
 ---
 
@@ -116,14 +116,14 @@ In SPLAT's threat model, granting an LLM unconstrained browser access, broad egr
 1. **Enterprise SecOps & Incident Response:** Safely grant AI agents terminal access to investigate live telemetry and logs without risk of unauthorized lateral movement.
 2. **Autonomous Software Engineering & DevOps:** Execute LLM-generated code, build scripts, and test runners in a local sandbox on developer workstations, with no round trip off the machine.
 3. **CI/CD & Supply-Chain Pipeline Execution:** Secure automated build steps, untrusted PR test execution, and third-party action runs. A build step is inherently declarative, short-lived, and manifest-driven—making it an ideal fit for kernel capability leases.
-4. **Regulated Workloads (FinTech, Healthcare, Defense):** Enable autonomous agent tooling on strictly air-gapped, on-premises workstations where cloud-based sandboxes violate compliance and data sovereignty mandates.
+4. **Regulated Workloads (FinTech, Healthcare, Defense):** Enable autonomous agent tooling on strictly air-gapped, on-premises workstations where cloud-based sandboxes violate compliance and data sovereignty mandates. The containment runs offline; SPLAT's own reasoning calls a cloud model today, so an air-gapped deployment needs a local model that is not built.
 
 ---
 
 ### Summary
 
-**SPLAT converts dangerous "AI code execution" into a hardened, high-speed, enterprise-grade primitive.** 
+**SPLAT turns "AI code execution" into a contained, measured primitive.**
 
-By bridging .NET control plane governance with kernel-level eBPF enforcement, SPLAT enables organizations to deploy truly autonomous agents with total confidence.
+By bridging .NET control plane governance with kernel-level eBPF enforcement, SPLAT limits what an agent can reach on its worst day, and says plainly what it does not yet police.
 
 *Copyright © 2026 Platten Industries. All rights reserved.*

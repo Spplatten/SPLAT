@@ -14,12 +14,12 @@
 
 Microsoft is currently driving the largest platform transition in enterprise computing history: embedding autonomous AI agents into Windows 11, Microsoft 365 Copilot, Copilot Studio, and Semantic Kernel.
 
-However, **Fortune 500 CISOs and enterprise security architects are actively vetoing and blocking autonomous local tool execution on employee workstations.**
+However, **enterprise security teams are reluctant to allow autonomous local tool execution on employee workstations**, for the reasons below.
 
 ### Why Enterprise CISOs Are Blocking Local Copilot Tool Execution
 1. **Unconstrained Execution:** When an LLM decides to run a PowerShell command, bash script, or file tool, it traditionally executes with the user's full ambient Windows token (often with Local Administrator or domain rights).
 2. **Prompt Injection & Hallucination Blast-Radius:** A malicious web page, email, or document can inject prompts that coerce Copilot into reading credentials (`%APPDATA%`, `LSASS`, `SAM`, `.ssh/id_rsa`), writing ransomware, or moving laterally.
-3. **The MicroVM Trap:** Cloud-based execution sandboxes (e.g. E2B, Modal, Azure Container Instances) introduce 200–800ms of network latency, leak private corporate IP over the internet, and cost \$0.05–\$0.20 per active hour per user.
+3. **The MicroVM Trap:** Cloud-based execution sandboxes (e.g. E2B, Modal, Azure Container Instances) put a network round trip on every tool call and move private corporate data off the machine. We have not benchmarked them, so this brief gives them no numbers.
 
 ---
 
@@ -55,7 +55,7 @@ However, **Fortune 500 CISOs and enterprise security architects are actively vet
 
 ## Core Capabilities & Architecture
 
-### 1. In-Kernel Hardware Clamps & Zero-Ambient Privilege
+### 1. Kernel-Object Clamps & Stripped Privilege
 - **Win32 Job Object Isolation:** Enforces hard caps on CPU percentage (e.g. 50%) and physical RAM (e.g. 256MB), preventing fork-bombs, cryptocurrency miners, or runaway Copilot loops.
 - **Restricted Token Provider:** Strips administrative privileges and high integrity levels from Copilot tool execution processes before thread resumption (`CreateProcessAsUserW`).
 - **Ephemeral NT ACL Jails:** Provisions single-use, access-controlled directories with stripped inheritance. Tools cannot wander outside their designated scratch space.
@@ -83,10 +83,10 @@ kernel.FunctionInvocationFilters.Add(serviceProvider.GetRequiredService<SplatCop
 ```
 
 ### 3. Direct Streaming into Microsoft Sentinel & Azure Monitor
-Every Copilot tool execution—whether successful, denied by policy, or killed by resource clamps—is cryptographically signed into a SHA-256 Merkle tree and streamed via HMAC-authenticated HTTPS directly to **Microsoft Sentinel**.
+Every Copilot tool execution—whether successful, denied by policy, or killed by resource clamps—is written to SPLAT's hash-chained audit ledger and, when a Sentinel workspace is configured, forwarded over HMAC-authenticated HTTPS to **Microsoft Sentinel**.
 
-- **Zero configuration:** SecOps teams see instant alerts in Sentinel workbooks when Copilot agents attempt unauthorized file accesses or blocked commands.
-- **Forensic Guarantee:** Every action is linked to the session ID, agent ID, parameter hash, kernel resource metrics, and Merkle leaf hash.
+- **One configuration block:** the workspace ID and shared key above; after that, denied file accesses and blocked commands are forwarded to Sentinel.
+- **Forensic linkage:** Every action is linked to the session ID, agent ID and parameter hash, and any entry can be proven in the ledger's Merkle tree.
 
 ---
 
@@ -98,11 +98,11 @@ Every Copilot tool execution—whether successful, denied by policy, or killed b
 | **Execution Location** | Local Workstation | 3rd Party Cloud Infrastructure | **Local Workstation (Zero Infrastructure Export)** |
 | **Kernel Requirements** | Standard OS | Remote Hypervisor Guest | **Unmodified Stock Kernel (Windows + stock WSL2, zero forks)** |
 | **Added execution latency** | none (no boundary crossed) | a network round trip, not measured by us | **4.12 ms p50 / 9.88 ms p95, measured on Windows 10.0.26200** |
-| **Data Residency** | Local | 3rd Party Cloud (Data Exfiltration Risk) | **100% Air-Gapped Local Workstation** |
+| **Data Residency** | Local | 3rd Party Cloud | **Execution stays on the workstation** |
 | **Security Boundary** | None (Full User Token) | Hypervisor (Cloud) | **Windows Job Sandbox + eBPF-LSM + Token De-escalation** |
-| **Cost per Seat** | \$0 | \$50–\$200 / user / month | **\$0 Cloud Compute (Native OS Hardware)** |
+| **Cost per Seat** | \$0 | per-hour VM pricing, not measured by us | **No cloud compute** |
 | **Microsoft Sentinel Ingestion** | Requires custom scripts | Fragmented logs | **Native Real-Time RFC-5424 / CEF / Sentinel REST** |
-| **CISO Approval Feasibility** | **Rejected (Zero Trust failure)** | **High friction (Compliance risk)** | **Instant Approval (Mathematical Containment)** |
+| **What a reviewer can check** | Nothing to check | The provider's attestations | **Committed kernel evidence, and `splat-mcp doctor` on their own host** |
 
 ---
 
@@ -113,14 +113,14 @@ Every Copilot tool execution—whether successful, denied by policy, or killed b
 ### Strategic Value to Microsoft
 1. **Unlocks the \$30/user/month Microsoft 365 Copilot Expansion:** Enterprise customers currently restrict Copilot to passive search and document summarization. SPLAT turns Copilot into an active, autonomous coworker on Windows 11 endpoints safely.
 2. **Deepens Microsoft Sentinel & Azure Revenue:** Every enterprise Copilot seat running SPLAT streams structured telemetry directly into Microsoft Sentinel and Azure Log Analytics, accelerating Azure data consumption.
-3. **Strengthens Windows 11 Commercial Differentiation:** Windows 11 becomes the only enterprise OS with a kernel-enforced AI execution substrate built directly into the operating system fabric.
+3. **Strengthens Windows 11 Commercial Differentiation:** Windows 11 would carry a kernel-enforced AI execution substrate on the stock WSL2 kernel it already ships.
 
 ---
 
 ## Technical Proof of Validation
 
 The SPLAT Copilot Safety Primitive has been implemented and validated across our .NET 10 control plane:
-- **185 Passing Unit and Integration Tests** covering:
+- **578 passing unit and integration tests (2026-09-18)**, including:
   - Pre-execution CISO policy evaluation and regex heuristics
   - Win32 Job Object hardware limit clamping
   - Restricted Token creation and administrative privilege drops

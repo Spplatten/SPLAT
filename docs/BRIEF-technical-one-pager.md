@@ -13,7 +13,9 @@ agent behaving fails at exactly that moment, because behaviour is what got compr
 
 **The approach.** Stop trying to keep the agent well-behaved. Contain it. Each job gets a *lease*:
 one model, one pre-approved tool, one allowed destination — declared in advance and enforced by the
-operating system, not by the agent's cooperation or by our own front end.
+operating system, not by the agent's cooperation. On the Linux lease the kernel enforces the
+destination itself. On Windows the operating system enforces whether a tool reaches the network at
+all (33 of 49 catalog tools get none), not where it goes.
 
 ---
 
@@ -82,7 +84,7 @@ while an unleased one was refused, egress was denied with networking off, and ev
 
 **The documentation cannot drift away from the evidence.** An automated test fails the build if the
 docs claim the substrate is pending while passing evidence exists, *and* fails if they drop the
-qualification when it does not — in both directions. 455 automated tests currently pass.
+qualification when it does not — in both directions. 578 automated tests passed on 2026-09-18.
 
 ---
 
@@ -92,9 +94,10 @@ qualification when it does not — in both directions. 455 automated tests curre
   bridge into the daemon and the kernel refused an undeclared exec and an out-of-lease connect,
   with the permitted command and endpoint as controls. What is still *not* demonstrated is a
   **governed mission** on that path — the console never routes one through the daemon.
-- **The audit ledger is unkeyed.** Editing a historical row breaks the hash chain verifiably. It does
-  **not** stop a determined local administrator from deleting the tail and recomputing. This is
-  integrity against accident and casual editing, not against an adversary with write access.
+- **The audit ledger is unkeyed by default.** Editing a historical row breaks the hash chain
+  verifiably. Unkeyed, it does **not** stop anyone with write access from recomputing the chain.
+  Since 2026-09-18 the operator can key it with a file they keep. Keyed, nobody without that file can
+  rewrite it unnoticed; deleting the newest entries is caught only by a saved audit anchor.
 - **Latency is now measured, and it is not sub-millisecond.** On Windows `10.0.26200`, over 50
   alternating iterations, the governed path added **4.12 ms at p50 and 9.88 ms at p95** over the same
   tool run bare. About 2.4 ms of that is the locks; the rest is process creation both paths pay. Any
