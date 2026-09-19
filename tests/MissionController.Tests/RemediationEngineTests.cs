@@ -1,12 +1,16 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using MissionController.Core.Enums;
+using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
+using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Windows.Jails;
 using MissionController.Infrastructure.Windows.JobObjects;
 using MissionController.Infrastructure.Windows.Process;
@@ -44,17 +48,20 @@ public class RemediationEngineTests
                 RemediationRiskLevel.Safe,
                 CanRollback: false,
                 FixExecutable: "cmd.exe",
-                FixArguments: "/c \"echo REMEDIATION_SUCCESSFUL\"");
+                FixArguments: "/c \"echo REMEDIATION_SUCCESSFUL\"",
+                ValidationExecutable: "cmd.exe",
+                ValidationArguments: "/c \"echo STATE_HEALTHY\"",
+                ValidationExpectedOutput: "STATE_HEALTHY");
 
             var result = await engine.ExecuteFixAsync(action, "Operator_SecOpsTier2");
 
             Assert.True(result.Success);
+            Assert.Equal(RemediationVerdict.VerifiedFix, result.Verdict);
             Assert.Contains("REMEDIATION_SUCCESSFUL", result.Output);
             Assert.False(result.IsRollback);
 
             var logs = await auditLedger.GetAuditLogsAsync();
-            Assert.Contains(logs, l => l.Action == "REMEDIATION_FIX_UNVERIFIED");
-            Assert.DoesNotContain(logs, l => l.Action == "REMEDIATION_FIX_COMPLETED");
+            Assert.Contains(logs, l => l.Action == "REMEDIATION_FIX_COMPLETED");
             Assert.True(await auditLedger.VerifyLedgerIntegrityAsync());
         }
         finally
@@ -97,7 +104,13 @@ public class RemediationEngineTests
                 FixExecutable: "cmd.exe",
                 FixArguments: "/c \"echo FIX_APPLIED\"",
                 RollbackExecutable: "cmd.exe",
-                RollbackArguments: "/c \"echo ROLLBACK_APPLIED\"");
+                RollbackArguments: "/c \"echo ROLLBACK_APPLIED\"",
+                ValidationExecutable: "cmd.exe",
+                ValidationArguments: "/c \"echo FIXED_STATE\"",
+                ValidationExpectedOutput: "FIXED_STATE",
+                RollbackValidationExecutable: "cmd.exe",
+                RollbackValidationArguments: "/c \"echo PRIOR_STATE\"",
+                RollbackValidationExpectedOutput: "PRIOR_STATE");
 
             var fixResult = await engine.ExecuteFixAsync(action, "Operator_Admin");
             Assert.True(fixResult.Success);
@@ -105,11 +118,12 @@ public class RemediationEngineTests
             var rollbackResult = await engine.ExecuteRollbackAsync(action, "Operator_Admin");
             Assert.True(rollbackResult.Success);
             Assert.True(rollbackResult.IsRollback);
+            Assert.Equal(RemediationVerdict.Restored, rollbackResult.Verdict);
             Assert.Contains("ROLLBACK_APPLIED", rollbackResult.Output);
 
             var logs = await auditLedger.GetAuditLogsAsync();
-            Assert.Contains(logs, l => l.Action == "REMEDIATION_ROLLBACK_UNVERIFIED");
-            Assert.DoesNotContain(logs, l => l.Action == "REMEDIATION_ROLLBACK_COMPLETED");
+            Assert.Contains(logs, l => l.Action == "REMEDIATION_FIX_COMPLETED");
+            Assert.Contains(logs, l => l.Action == "REMEDIATION_ROLLBACK_COMPLETED");
             Assert.True(await auditLedger.VerifyLedgerIntegrityAsync());
         }
         finally
@@ -351,48 +365,48 @@ public class RemediationEngineTests
         }
     }
 
-    [Fact]
-    public async Task ExecuteRollbackAsync_WithoutPostcondition_YieldsUnverifiedVerdict()
+    [Theory]
+    [InlineData(false, "REMEDIATION_FIX_REFUSED")]
+    [InlineData(true, "REMEDIATION_ROLLBACK_REFUSED")]
+    public async Task AStepThatDeclaresNoPostcondition_IsRefused_BeforeAnythingRuns(bool rollback, string refusedTag)
     {
-        string dbPath = Path.Combine(Path.GetTempPath(), $"UnverifiedRollback_{Guid.NewGuid():N}.db");
+        string dbPath = Path.Combine(Path.GetTempPath(), $"RefusedStep_{Guid.NewGuid():N}.db");
         try
         {
-            var context = new SqliteStorageContext(dbPath);
-            var auditLedger = new SqliteChainedAuditLedger(context);
-            var jailManager = new NtAclJailManager();
-            var restrictedTokenProvider = new RestrictedTokenProvider();
-            var processLauncher = new SuspendedProcessLauncher(restrictedTokenProvider);
-
+            var auditLedger = new SqliteChainedAuditLedger(new SqliteStorageContext(dbPath));
+            var launcher = new MustNotRunLauncher();
             var engine = new SandboxedRemediationEngine(
-                jailManager,
-                processLauncher,
+                new NtAclJailManager(),
+                launcher,
                 auditLedger,
                 name => new Win32JobSandbox(name));
 
+            // Each step declares its own postcondition, so the other step's probe does not count.
             var action = new RemediationAction(
-                "rollback-no-probe",
+                "no-probe",
                 "secops-auth",
-                "Rollback Without Declared Postcondition",
-                "Rollback has no probe; cannot claim verified restoration",
+                "A Step Without Its Own Postcondition",
+                "Nothing says what success would look like",
                 RemediationRiskLevel.Moderate,
                 CanRollback: true,
                 FixExecutable: "cmd.exe",
                 FixArguments: "/c \"echo FIX\"",
                 RollbackExecutable: "cmd.exe",
-                RollbackArguments: "/c \"echo ROLLBACK\"");
+                RollbackArguments: "/c \"echo ROLLBACK\"",
+                ValidationExecutable: rollback ? "cmd.exe" : null,
+                RollbackValidationExecutable: rollback ? null : "cmd.exe");
 
-            var result = await engine.ExecuteRollbackAsync(action, "Operator_SecOps");
+            var result = rollback
+                ? await engine.ExecuteRollbackAsync(action, "Operator_SecOps")
+                : await engine.ExecuteFixAsync(action, "Operator_SecOps");
 
-            Assert.True(result.Success);
-            // Crucial: It executed cleanly, but verdict is Unverified and IsRestored is FALSE.
-            Assert.Equal(RemediationVerdict.Unverified, result.Verdict);
-            Assert.False(result.IsRestored);
-            Assert.Contains("No postcondition declared", result.PostconditionMeasurement);
+            Assert.False(result.Success);
+            Assert.Equal(RemediationVerdict.Refused, result.Verdict);
+            Assert.Equal(0, launcher.Calls);
 
-            // The ledger carries the same verdict the result does.
             var logs = await auditLedger.GetAuditLogsAsync();
-            Assert.Contains(logs, l => l.Action == "REMEDIATION_ROLLBACK_UNVERIFIED");
-            Assert.DoesNotContain(logs, l => l.Action == "REMEDIATION_ROLLBACK_COMPLETED");
+            Assert.Contains(logs, l => l.Action == refusedTag);
+            Assert.DoesNotContain(logs, l => l.Action.EndsWith("_INITIATED", StringComparison.Ordinal));
         }
         finally
         {
@@ -441,5 +455,42 @@ public class RemediationEngineTests
         Assert.Equal("fix-delegate-check", action.ActionId);
         Assert.Equal("Free space above the floor", action.PostconditionDescription);
         Assert.Null(action.PostconditionCheck);
+    }
+
+    [Fact]
+    public void EveryFixTheCatalogShips_DeclaresItsPostconditionAsData()
+    {
+        // As data, not as a check in code: the console reads templates back from the registry, which
+        // stores JSON, and a coded check does not survive that trip - the engine would then refuse
+        // the very fix the catalog offers.
+        var undeclared = GovernedTemplateCatalog.All
+            .SelectMany(t => t.Remediations.Select(r => (Template: t.TemplateId, Fix: r)))
+            .Where(x => string.IsNullOrWhiteSpace(x.Fix.ValidationExecutable)
+                     || (x.Fix.CanRollback && string.IsNullOrWhiteSpace(x.Fix.RollbackValidationExecutable)))
+            .Select(x => $"{x.Template}/{x.Fix.ActionId}")
+            .ToList();
+
+        Assert.Empty(undeclared);
+    }
+
+    private sealed class MustNotRunLauncher : IProcessLauncher
+    {
+        public int Calls { get; private set; }
+
+        public Task<ProcessExecutionResult> LaunchSuspendedInJobAsync(
+            string executable,
+            string arguments,
+            string workingDirectory,
+            IJobSandbox jobSandbox,
+            bool dropAdminPrivileges,
+            int timeoutSeconds,
+            IProgress<string>? stdoutProgress = null,
+            IProgress<string>? stderrProgress = null,
+            CancellationToken cancellationToken = default,
+            bool denyNetworkAccess = false)
+        {
+            Calls++;
+            throw new InvalidOperationException("A refused step must not launch anything.");
+        }
     }
 }

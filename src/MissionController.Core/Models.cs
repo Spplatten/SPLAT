@@ -68,8 +68,12 @@ public enum RemediationRiskLevel
 
 public enum RemediationVerdict
 {
-    /// <summary>Command exited 0, but no postcondition was declared to measure the outcome.</summary>
-    Unverified,
+    /// <summary>
+    /// Not run: the action declares no postcondition for this step, so no verdict could be read from a
+    /// measurement. Refusing is what makes "each remediation declares what restored means" a rule the
+    /// engine keeps rather than a convention an author can skip.
+    /// </summary>
+    Refused,
     /// <summary>Rollback command exited 0 AND measured postcondition confirmed the prior state was restored.</summary>
     Restored,
     /// <summary>Fix command exited 0 AND measured postcondition confirmed the desired state was achieved.</summary>
@@ -100,15 +104,13 @@ public record RemediationAction(
     string? RollbackValidationExpectedOutput = null,
     // Code, not data: SqliteTemplateRegistry stores templates as JSON, and the serializer refuses a
     // delegate, so a template carrying one could not be saved. A check declared this way lives only
-    // as long as the catalog that built it.
+    // as long as the catalog that built it; a template read back from the registry has lost it, and
+    // the engine then refuses the step rather than run it unmeasured.
     [property: JsonIgnore] Func<CancellationToken, Task<bool>>? PostconditionCheck = null,
     [property: JsonIgnore] Func<CancellationToken, Task<bool>>? RollbackPostconditionCheck = null)
 {
     public bool HasFixPostcondition => !string.IsNullOrWhiteSpace(ValidationExecutable) || PostconditionCheck != null;
     public bool HasRollbackPostcondition => !string.IsNullOrWhiteSpace(RollbackValidationExecutable) || RollbackPostconditionCheck != null;
-    public string RestorationCriteria => !string.IsNullOrWhiteSpace(PostconditionDescription)
-        ? PostconditionDescription
-        : (HasRollbackPostcondition ? "Rollback validation probe exit 0" : "Unspecified");
 }
 
 public record RemediationExecutionResult(
@@ -118,7 +120,7 @@ public record RemediationExecutionResult(
     string? ErrorMessage,
     bool IsRollback,
     DateTime CompletedAtUtc,
-    RemediationVerdict Verdict = RemediationVerdict.Unverified,
+    RemediationVerdict Verdict,
     string? PostconditionMeasurement = null)
 {
     public string StandardOutput => Output;

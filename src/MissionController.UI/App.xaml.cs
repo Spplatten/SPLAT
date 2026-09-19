@@ -205,7 +205,6 @@ public partial class App : Application
             auditLedger: sp.GetRequiredService<IAuditLedger>(),
             modelClient: sp.GetRequiredService<IModelStreamClient>(),
             semanticMemoryIndex: sp.GetRequiredService<ISemanticMemoryIndex>(),
-            remediationEngine: sp.GetRequiredService<IRemediationEngine>(),
             missionEngine: sp.GetRequiredService<IMissionExecutionEngine>(),
             templateRegistry: sp.GetRequiredService<ITemplateRegistry>()));
 

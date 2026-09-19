@@ -246,7 +246,10 @@ public class FailureIsNotEvidenceTests
             RemediationRiskLevel.Safe,
             CanRollback: false,
             FixExecutable: "cmd.exe",
-            FixArguments: "/c \"echo working\"");
+            FixArguments: "/c \"echo working\"",
+            // Declared so the fix is run at all; the timeout means the probe is never reached.
+            ValidationExecutable: "cmd.exe",
+            ValidationArguments: "/c exit 0");
 
         var result = await engine.ExecuteFixAsync(action, "operator");
 

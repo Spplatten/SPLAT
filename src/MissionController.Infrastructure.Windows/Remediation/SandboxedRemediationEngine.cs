@@ -73,6 +73,31 @@ public sealed class SandboxedRemediationEngine : IRemediationEngine
         string executable = isRollback ? action.RollbackExecutable! : action.FixExecutable;
         string arguments = isRollback ? (action.RollbackArguments ?? string.Empty) : action.FixArguments;
 
+        // F20: the verdict is read from a declared postcondition, so a step that declares none is not
+        // run. Running it and calling the result "unverified" left the judgement to whoever read the
+        // result; refusing makes the declaration the price of running at all.
+        if (!(isRollback ? action.HasRollbackPostcondition : action.HasFixPostcondition))
+        {
+            string reason = $"{(isRollback ? "The rollback" : "The fix")} declares no postcondition to measure its result by, so it was not run.";
+            await _auditLedger.AppendLogAsync(
+                missionId,
+                action.TemplateId,
+                isRollback ? "REMEDIATION_ROLLBACK_REFUSED" : "REMEDIATION_FIX_REFUSED",
+                $"ActionId: {action.ActionId} | {reason}",
+                operatorIdentity,
+                cancellationToken);
+
+            return new RemediationExecutionResult(
+                action.ActionId,
+                false,
+                string.Empty,
+                reason,
+                isRollback,
+                DateTime.UtcNow,
+                Verdict: RemediationVerdict.Refused,
+                PostconditionMeasurement: "Not run: no postcondition declared.");
+        }
+
         try
         {
             // 1. Audit Intention with declared postcondition
@@ -129,105 +154,90 @@ public sealed class SandboxedRemediationEngine : IRemediationEngine
                     ? (action.RollbackValidationExecutable, action.RollbackValidationArguments, action.RollbackValidationExpectedOutput, action.RollbackPostconditionCheck, action.PostconditionDescription ?? "Prior state restored")
                     : (action.ValidationExecutable, action.ValidationArguments, action.ValidationExpectedOutput, action.PostconditionCheck, action.PostconditionDescription ?? "Remediation fix applied");
 
-                bool hasPostcondition = !string.IsNullOrWhiteSpace(valExec) || delegateCheck != null;
+                // The step was refused before launch unless one of these is declared (see above).
+                bool measurementPassed = false;
+                string measurementDetail = string.Empty;
 
-                if (!hasPostcondition)
+                if (delegateCheck != null)
                 {
-                    // Command exited 0, but no postcondition was declared to measure the actual machine state.
-                    success = true;
-                    verdict = RemediationVerdict.Unverified;
-                    failureReason = null;
-                    postconditionMeasurement = "No postcondition declared; outcome unverified by measurement.";
+                    try
+                    {
+                        measurementPassed = await delegateCheck(cancellationToken);
+                        measurementDetail = measurementPassed
+                            ? $"Delegate postcondition verified: {desc}"
+                            : $"Delegate postcondition failed: {desc} was not satisfied";
+                    }
+                    catch (Exception ex)
+                    {
+                        measurementPassed = false;
+                        measurementDetail = $"Delegate postcondition verification threw: {ex.Message}";
+                    }
                 }
                 else
                 {
-                    bool measurementPassed = false;
-                    string measurementDetail = string.Empty;
+                    var valResult = await _processLauncher.LaunchSuspendedInJobAsync(
+                        valExec!,
+                        valArgs ?? string.Empty,
+                        jailPath,
+                        jobSandbox,
+                        dropAdminPrivileges: false,
+                        timeoutSeconds: 30,
+                        cancellationToken: cancellationToken);
 
-                    if (delegateCheck != null)
+                    if (valResult.TimedOut)
                     {
-                        try
-                        {
-                            measurementPassed = await delegateCheck(cancellationToken);
-                            measurementDetail = measurementPassed
-                                ? $"Delegate postcondition verified: {desc}"
-                                : $"Delegate postcondition failed: {desc} was not satisfied";
-                        }
-                        catch (Exception ex)
-                        {
-                            measurementPassed = false;
-                            measurementDetail = $"Delegate postcondition verification threw: {ex.Message}";
-                        }
+                        measurementPassed = false;
+                        measurementDetail = $"Validation probe timed out after 30s: {desc}";
                     }
-                    else if (!string.IsNullOrWhiteSpace(valExec))
+                    else if (valResult.ExitCode != 0)
                     {
-                        var valResult = await _processLauncher.LaunchSuspendedInJobAsync(
-                            valExec,
-                            valArgs ?? string.Empty,
-                            jailPath,
-                            jobSandbox,
-                            dropAdminPrivileges: false,
-                            timeoutSeconds: 30,
-                            cancellationToken: cancellationToken);
-
-                        if (valResult.TimedOut)
-                        {
-                            measurementPassed = false;
-                            measurementDetail = $"Validation probe timed out after 30s: {desc}";
-                        }
-                        else if (valResult.ExitCode != 0)
-                        {
-                            measurementPassed = false;
-                            string valErr = string.IsNullOrWhiteSpace(valResult.StandardError)
-                                ? $"exit code {valResult.ExitCode}"
-                                : valResult.StandardError.Trim();
-                            measurementDetail = $"Validation probe failed ({valErr}): {desc}";
-                        }
-                        else if (!string.IsNullOrEmpty(valExpected) && !valResult.StandardOutput.Contains(valExpected))
-                        {
-                            measurementPassed = false;
-                            measurementDetail = $"Validation probe output did not contain expected token '{valExpected}': {desc}";
-                        }
-                        else
-                        {
-                            measurementPassed = true;
-                            string stdoutTrim = valResult.StandardOutput.Trim();
-                            measurementDetail = string.IsNullOrWhiteSpace(stdoutTrim)
-                                ? $"Validation probe confirmed postcondition: {desc}"
-                                : $"Validation probe confirmed postcondition: {desc} ({stdoutTrim})";
-                        }
+                        measurementPassed = false;
+                        string valErr = string.IsNullOrWhiteSpace(valResult.StandardError)
+                            ? $"exit code {valResult.ExitCode}"
+                            : valResult.StandardError.Trim();
+                        measurementDetail = $"Validation probe failed ({valErr}): {desc}";
                     }
-
-                    if (measurementPassed)
+                    else if (!string.IsNullOrEmpty(valExpected) && !valResult.StandardOutput.Contains(valExpected))
                     {
-                        success = true;
-                        verdict = isRollback ? RemediationVerdict.Restored : RemediationVerdict.VerifiedFix;
-                        failureReason = null;
-                        postconditionMeasurement = measurementDetail;
+                        measurementPassed = false;
+                        measurementDetail = $"Validation probe output did not contain expected token '{valExpected}': {desc}";
                     }
                     else
                     {
-                        // Fail-closed: Even though process exited 0, the measured state proved failure.
-                        success = false;
-                        verdict = RemediationVerdict.PostconditionFailed;
-                        failureReason = $"Process exited 0, but measured postcondition failed: {measurementDetail}";
-                        postconditionMeasurement = measurementDetail;
+                        measurementPassed = true;
+                        string stdoutTrim = valResult.StandardOutput.Trim();
+                        measurementDetail = string.IsNullOrWhiteSpace(stdoutTrim)
+                            ? $"Validation probe confirmed postcondition: {desc}"
+                            : $"Validation probe confirmed postcondition: {desc} ({stdoutTrim})";
                     }
+                }
+
+                if (measurementPassed)
+                {
+                    success = true;
+                    verdict = isRollback ? RemediationVerdict.Restored : RemediationVerdict.VerifiedFix;
+                    failureReason = null;
+                    postconditionMeasurement = measurementDetail;
+                }
+                else
+                {
+                    // Fail-closed: Even though process exited 0, the measured state proved failure.
+                    success = false;
+                    verdict = RemediationVerdict.PostconditionFailed;
+                    failureReason = $"Process exited 0, but measured postcondition failed: {measurementDetail}";
+                    postconditionMeasurement = measurementDetail;
                 }
             }
 
             // 5. Audit Result. The action name carries the verdict, so a reader scanning the ledger
-            // for what happened does not have to parse the detail string to find out. COMPLETED is
-            // kept for a measured postcondition: a clean exit with nothing measured is UNVERIFIED
-            // in the ledger too, or the ledger would say what the UI no longer does.
+            // for what happened does not have to parse the detail string to find out. COMPLETED
+            // only ever follows a measured postcondition.
             string completionTag = (isRollback, verdict) switch
             {
                 (true, RemediationVerdict.Restored) => "REMEDIATION_ROLLBACK_COMPLETED",
-                (true, RemediationVerdict.Unverified) => "REMEDIATION_ROLLBACK_UNVERIFIED",
                 (true, RemediationVerdict.PostconditionFailed) => "REMEDIATION_ROLLBACK_POSTCONDITION_FAILED",
                 (true, RemediationVerdict.ExecutionFailed) => "REMEDIATION_ROLLBACK_FAILED",
                 (false, RemediationVerdict.VerifiedFix) => "REMEDIATION_FIX_COMPLETED",
-                (false, RemediationVerdict.Unverified) => "REMEDIATION_FIX_UNVERIFIED",
                 (false, RemediationVerdict.PostconditionFailed) => "REMEDIATION_FIX_POSTCONDITION_FAILED",
                 (false, RemediationVerdict.ExecutionFailed) => "REMEDIATION_FIX_FAILED",
                 _ => isRollback ? "REMEDIATION_ROLLBACK_FAILED" : "REMEDIATION_FIX_FAILED"

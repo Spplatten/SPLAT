@@ -118,6 +118,9 @@ per-template verification is the durable fix.
 - [`SandboxedRemediationEngine`](../src/MissionController.Infrastructure.Windows/Remediation/SandboxedRemediationEngine.cs)
   runs a template's declared fix — and its rollback, where the action declares one — through the
   same jail, job object and launcher, with a ledger row for each. Wired in the console only.
+  Each step runs only if it declares a postcondition, a probe and the output it expects, and its
+  verdict is that measurement, never the exit code; a step that declares none is refused unrun.
+  The shipped catalog defines no fixes yet.
 - [`DpapiCredentialVault`](../src/MissionController.Infrastructure.Windows/DpapiCredentialVault.cs)
   keeps one file per secret under `%LOCALAPPDATA%\MissionController\Vault`, protected with DPAPI
   `CurrentUser` scope and fixed application entropy. That protects against other accounts and

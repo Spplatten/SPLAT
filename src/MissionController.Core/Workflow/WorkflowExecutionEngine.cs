@@ -38,7 +38,6 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
     private readonly IAuditLedger? _auditLedger;
     private readonly IModelStreamClient? _modelClient;
     private readonly ISemanticMemoryIndex? _semanticMemoryIndex;
-    private readonly IRemediationEngine? _remediationEngine;
 
     /// <summary>
     /// The mission engine every governed step runs through.
@@ -69,7 +68,6 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         IAuditLedger? auditLedger = null,
         IModelStreamClient? modelClient = null,
         ISemanticMemoryIndex? semanticMemoryIndex = null,
-        IRemediationEngine? remediationEngine = null,
         bool allowSimulatedExecution = false,
         IMissionExecutionEngine? missionEngine = null,
         ITemplateRegistry? templateRegistry = null)
@@ -80,7 +78,6 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         _auditLedger = auditLedger;
         _modelClient = modelClient;
         _semanticMemoryIndex = semanticMemoryIndex;
-        _remediationEngine = remediationEngine;
         _allowSimulatedExecution = allowSimulatedExecution;
         _missionEngine = missionEngine;
         _templateRegistry = templateRegistry;
@@ -779,20 +776,6 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
                     $"{(rollback.TimedOut ? " (timed out)" : string.Empty)}; the speculative change may still be applied.",
                     $"[TRANSACTION_ROLLBACK_FAILED] {rollbackOutput.Trim()}");
             }
-        }
-
-        if (_remediationEngine != null && node.Configuration.TryGetValue("RemediationActionId", out var actId))
-        {
-            var action = new RemediationAction(
-                actId,
-                node.NodeId,
-                "Transactional remediation rollback",
-                "Rollback executed on assertion failure",
-                RemediationRiskLevel.Safe,
-                true,
-                "powershell.exe",
-                rollbackCommand);
-            await _remediationEngine.ExecuteRollbackAsync(action, "WorkflowEngine", ct);
         }
 
         if (_auditLedger != null)
