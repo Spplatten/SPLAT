@@ -2,7 +2,7 @@
 
 **Project Identity:** AI-Native IT & SysOps Mission Controller (SPLAT)  
 **Target Platform:** Windows 10/11 Enterprise & Pro (Microsoft Intune / SCCM Managed)  
-**Primary Runtime & Stack:** C# 13 / .NET 9 LTS, WinUI 3 (Windows App SDK 1.6), Native Win32 Interop  
+**Primary Runtime & Stack:** C# 14 / .NET 10 LTS, WinUI 3 (Windows App SDK 2.5), Native Win32 Interop  
 **Execution Paradigm:** Trunk-First, Zero-Mock Production Pipeline  
 
 ---

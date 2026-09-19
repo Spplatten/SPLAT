@@ -36,10 +36,9 @@ the short form.
   and running code an agent just wrote. AF_VSOCK too, if it fits.
 - **P3, the per-mission run record** — a bundle from which someone who did not run a mission can
   verify what it was permitted to do and what it did.
-- **The WinUI console is off the critical path.** It stays on `net9.0-windows10.0.19041.0` and
-  Windows App SDK 1.6, still builds, and ships nothing. Because it references four of the shared
-  libraries, those multi-target — so **no .NET-10-only API may appear in Core, Data, Linux,
-  Network or Windows while that leg lives.** .NET 9 leaves support on 2026-11-10.
+- **The WinUI console is off the critical path, but not frozen.** It moved to
+  `net10.0-windows10.0.19041.0` and Windows App SDK 2.5.1 on 2026-09-18, and `dist\App` carries its
+  own .NET, so it runs where none is installed. The operator uses it to see what the product does.
 
 ## The rules this repository holds itself to
 
@@ -98,11 +97,10 @@ The code and the tests enforce most of these; review enforces the rest.
 | **`Fnn`**, **`AG-Fnn`** | Finding ids from [the clinical audit](audits/2026-09-04-clinical-audit.md) and [the antigravity audit](audits/2026-09-05-antigravity-deep-audit.md) |
 | **Wave** | A batch of remediations; [WAVE-PLAN.md](audits/WAVE-PLAN.md) records the commit that closed each |
 | **P0–P3** | The phases of the live plan |
-| **The net9 leg** | The `net9.0` target the shared libraries keep so the frozen console still compiles |
 
 ## Working in this tree
 
-**Build and test.** The solution needs the .NET 10 SDK, plus the .NET 9 SDK for the console's leg.
+**Build and test.** The solution needs the .NET 10 SDK.
 On the reference machine both are installed user-local under `%LOCALAPPDATA%\Microsoft\dotnet` and
 are **not on `PATH`**, so call that `dotnet.exe` by its full path:
 

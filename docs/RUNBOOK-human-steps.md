@@ -293,11 +293,11 @@ back.** Back it up first:
 robocopy C:\C_AGENT_BUILDER\dist\App "C:\C_AGENT_BUILDER\dist\App.backup-$(Get-Date -Format yyyyMMdd)" /E
 ```
 
-Publish framework-dependent — the shape `dist\App` has always held, with the .NET runtime coming
-from the machine rather than the folder:
+Publish self-contained: since the move to .NET 10 on 2026-09-18, `dist\App` carries its own runtime,
+because this machine's global .NET is 9 and a framework-dependent build would not start:
 
 ```powershell
-& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" publish C:\C_AGENT_BUILDER\src\MissionController.UI\MissionController.UI.csproj -c Release -r win-x64 --self-contained false -p:Platform=x64 -p:WindowsPackageType=None
+& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" publish C:\C_AGENT_BUILDER\src\MissionController.UI\MissionController.UI.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:WindowsPackageType=None
 ```
 
 **Close the app before the mirror:** `Stop-Process -Name MissionController.UI`. A running app holds its
@@ -307,12 +307,13 @@ that stalled this step until the app was closed.
 Then mirror the result in:
 
 ```powershell
-robocopy C:\C_AGENT_BUILDER\src\MissionController.UI\bin\x64\Release\net9.0-windows10.0.19041.0\win-x64\publish C:\C_AGENT_BUILDER\dist\App /MIR
+robocopy C:\C_AGENT_BUILDER\src\MissionController.UI\bin\x64\Release\net10.0-windows10.0.19041.0\win-x64\publish C:\C_AGENT_BUILDER\dist\App /MIR
 ```
 
 `robocopy` reports success as exit codes 0–7 — `1` means "files copied" — so a red exit status from
 it is not a failure; 8 and above is. Then repeat the launch check. This sequence ran on 2026-09-09 to
-ship the patched `e_sqlite3.dll`; the folder held 290 files before and after.
+ship the patched `e_sqlite3.dll`; the folder held 290 files before and after. Self-contained, it
+holds 545 (2026-09-18).
 
 ---
 
@@ -425,9 +426,8 @@ distro and anything else using WSL, including Docker Desktop.
 
 ## What is deliberately not in this runbook
 
-- **Building the MSIX package** — deferred. Before reviving it: `packaging/build-msix.ps1` publishes
-  `--self-contained true`, a different artifact from the framework-dependent build `dist\App`
-  actually holds. Reconcile the two first.
+- **Building the MSIX package** — deferred. `packaging/build-msix.ps1` publishes self-contained, as
+  `dist\App` now is too, so reviving it is packaging and signing, not reconciling two builds.
 - **Windows network denial for the sixteen templates without it** — still open, and a design
   decision before it is anything to run. Of the 49 catalog templates, 33 launch their tool in an
   AppContainer with no capabilities, so their network denial is enforced. One needs the network

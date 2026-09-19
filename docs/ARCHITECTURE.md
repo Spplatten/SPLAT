@@ -102,7 +102,7 @@ them.
 | | Console — [`App.xaml.cs`](../src/MissionController.UI/App.xaml.cs) | MCP server — [`Program.cs`](../src/splat-mcp/Program.cs) |
 | --- | --- | --- |
 | Construction | `Microsoft.Extensions.DependencyInjection` container | Hand-wired, in dependency order |
-| Runtime | `net9.0-windows10.0.19041.0`, Windows App SDK 1.6 — the frozen leg | `net10.0-windows` |
+| Runtime | `net10.0-windows10.0.19041.0`, Windows App SDK 2.5.1, self-contained | `net10.0-windows` |
 | Database | `%LOCALAPPDATA%\MissionController\Data\missioncontroller.db` | `%LOCALAPPDATA%\SPLAT\audit_ledger.db` |
 | Operator identity | `WindowsOperatorIdentityProvider("winui-console")` | `McpOperatorIdentityProvider` — the logon session, or a validated `SPLAT_MCP_CLIENT_CREDENTIAL` |
 | Revocation check before a mission | Wired | Not wired — the engine is constructed with `null` |

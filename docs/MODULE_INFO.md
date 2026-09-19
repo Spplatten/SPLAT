@@ -10,12 +10,12 @@
 
 | Module | Path | Language · target | Ships | Role |
 | --- | --- | --- | --- | --- |
-| **MissionController.Core** | [`src/MissionController.Core`](../src/MissionController.Core) | C# · `net9.0;net10.0` | Yes | Contracts, models, the mission pipeline and every engine that composes it |
-| **MissionController.Infrastructure.Windows** | [`src/MissionController.Infrastructure.Windows`](../src/MissionController.Infrastructure.Windows) | C# · `net9.0-windows;net10.0-windows` | Yes | Jail, job object, restricted token, AppContainer launch, DPAPI vault, remediation, Copilot adapter |
-| **MissionController.Infrastructure.Network** | [`src/MissionController.Infrastructure.Network`](../src/MissionController.Infrastructure.Network) | C# · `net9.0;net10.0` | Yes | Egress firewall, model clients, DLP, identity, SIEM and EDR, trigger listeners |
-| **MissionController.Infrastructure.Data** | [`src/MissionController.Infrastructure.Data`](../src/MissionController.Infrastructure.Data) | C# · `net9.0;net10.0` | Yes | SQLite storage, chained ledger, Merkle proofs and compliance export, retention, memory, catalogs, registries |
-| **MissionController.Infrastructure.Linux** | [`src/MissionController.Infrastructure.Linux`](../src/MissionController.Infrastructure.Linux) | C# · `net9.0;net10.0` | Yes, inside `splat-mcp` | The Windows-side bridge to `splat-agent` |
-| **MissionController.UI** | [`src/MissionController.UI`](../src/MissionController.UI) | C# · WinUI 3 · `net9.0-windows10.0.19041.0` | No — frozen | The operator console; composition root one |
+| **MissionController.Core** | [`src/MissionController.Core`](../src/MissionController.Core) | C# · `net10.0` | Yes | Contracts, models, the mission pipeline and every engine that composes it |
+| **MissionController.Infrastructure.Windows** | [`src/MissionController.Infrastructure.Windows`](../src/MissionController.Infrastructure.Windows) | C# · `net10.0-windows` | Yes | Jail, job object, restricted token, AppContainer launch, DPAPI vault, remediation, Copilot adapter |
+| **MissionController.Infrastructure.Network** | [`src/MissionController.Infrastructure.Network`](../src/MissionController.Infrastructure.Network) | C# · `net10.0` | Yes | Egress firewall, model clients, DLP, identity, SIEM and EDR, trigger listeners |
+| **MissionController.Infrastructure.Data** | [`src/MissionController.Infrastructure.Data`](../src/MissionController.Infrastructure.Data) | C# · `net10.0` | Yes | SQLite storage, chained ledger, Merkle proofs and compliance export, retention, memory, catalogs, registries |
+| **MissionController.Infrastructure.Linux** | [`src/MissionController.Infrastructure.Linux`](../src/MissionController.Infrastructure.Linux) | C# · `net10.0` | Yes, inside `splat-mcp` | The Windows-side bridge to `splat-agent` |
+| **MissionController.UI** | [`src/MissionController.UI`](../src/MissionController.UI) | C# · WinUI 3 · `net10.0-windows10.0.19041.0` | As `dist\App`, self-contained | The operator console; composition root one |
 | **splat-mcp** | [`src/splat-mcp`](../src/splat-mcp) | C# · `net10.0-windows` · exe | Yes — the licensee-facing surface | The MCP server; composition root two |
 | **splat-bench** | [`src/splat-bench`](../src/splat-bench) | C# · `net10.0-windows` · exe | No | Measures the governed launch path against a bare one |
 | **MissionController.Tests** | [`tests/MissionController.Tests`](../tests/MissionController.Tests) | C# · xUnit · `net10.0-windows` | No | The suite |
@@ -64,7 +64,7 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 
 ## MissionController.Core
 
-- **Target:** `net9.0;net10.0`. The net9 leg exists only for the console; no .NET-10-only API here.
+- **Target:** `net10.0`.
 - **References:** none. **Packages:** none. **Referenced by:** every other C# project.
 - **Contracts:** [`Interfaces.cs`](../src/MissionController.Core/Interfaces.cs) — the platform
   seams, plus the Linux lease records (`LeaseSpec`, `LeaseResourceLimits`, `LeaseViolationEvent`);
@@ -100,7 +100,7 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 
 ## MissionController.Infrastructure.Windows
 
-- **Target:** `net9.0-windows;net10.0-windows`, with `AllowUnsafeBlocks`.
+- **Target:** `net10.0-windows`, with `AllowUnsafeBlocks`.
 - **References:** Core. **Packages:** `System.Security.Cryptography.ProtectedData` for DPAPI;
   `Microsoft.Extensions.DependencyInjection.Abstractions` for `AddSplatCopilotSafety`.
 - **Referenced by:** the console, `splat-mcp`, `splat-bench`, the tests.
@@ -127,7 +127,7 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 
 ## MissionController.Infrastructure.Network
 
-- **Target:** `net9.0;net10.0`. **References:** Core. **Packages:** none.
+- **Target:** `net10.0`. **References:** Core. **Packages:** none.
 - **Referenced by:** the console, `splat-mcp`, the tests.
 - **Namespaces do not follow folders** for the root files: `.Egress` (`EgressFirewallHandler`),
   `.Http` (`HardenedHttpClientFactory`), `.Identity` (`PkceLoopbackAuthService`,
@@ -151,7 +151,7 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 
 ## MissionController.Infrastructure.Data
 
-- **Target:** `net9.0;net10.0`. **References:** Core.
+- **Target:** `net10.0`. **References:** Core.
 - **Packages:** `Microsoft.Data.Sqlite`, versioned **per target framework** in the project file:
   the single shared version it replaced pulled a native SQLite carrying `GHSA-2m69-gcr7-jv3q` into
   both legs.
@@ -174,7 +174,7 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 
 ## MissionController.Infrastructure.Linux
 
-- **Target:** `net9.0;net10.0`. **References:** Core. **Packages:** none.
+- **Target:** `net10.0`. **References:** Core. **Packages:** none.
 - **Referenced by:** `splat-mcp` and the tests — not the console.
 - **Owns:** [`WslLeasedExecutor.cs`](../src/MissionController.Infrastructure.Linux/WslLeasedExecutor.cs),
   [`TemplatePolicyCompiler.cs`](../src/MissionController.Infrastructure.Linux/TemplatePolicyCompiler.cs),
@@ -186,11 +186,10 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 
 ## MissionController.UI
 
-- **Target:** `net9.0-windows10.0.19041.0`, minimum platform `10.0.17763.0`, `win-x64`, unpackaged
-  (`WindowsPackageType` `None`) with the Windows App SDK self-contained.
+- **Target:** `net10.0-windows10.0.19041.0`, minimum platform `10.0.17763.0`, `win-x64`, unpackaged
+  (`WindowsPackageType` `None`), with both .NET and the Windows App SDK self-contained in `dist\App`.
 - **References:** Core, Windows, Network, Data.
-- **Packages:** `Microsoft.WindowsAppSDK` **1.6** — out of support, and the reason this project is
-  frozen rather than migrated; `Microsoft.Graphics.Win2D`; `Microsoft.Windows.SDK.BuildTools`;
+- **Packages:** `Microsoft.WindowsAppSDK` **2.5.1**, since 2026-09-18; `Microsoft.Graphics.Win2D`; `Microsoft.Windows.SDK.BuildTools`;
   `CommunityToolkit.Mvvm`; `CommunityToolkit.WinUI.Controls.Primitives`;
   `Microsoft.Extensions.DependencyInjection`.
 - **Composition root:** [`App.xaml.cs`](../src/MissionController.UI/App.xaml.cs), which also routes
@@ -295,7 +294,7 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 
 - [`build-msix.ps1`](../packaging/build-msix.ps1) publishes the console self-contained for
   `win-x64` and packs and signs an MSIX when the Windows SDK's `makeappx` and `signtool` are
-  present. That is a different artifact from `dist\App`, which is framework-dependent.
+  present. `dist\App` is self-contained too since 2026-09-18, so the two differ only in packaging.
 - [`install-enterprise.ps1`](../packaging/install-enterprise.ps1) and
   [`uninstall-enterprise.ps1`](../packaging/uninstall-enterprise.ps1) are the silent Intune and
   SCCM install and removal.

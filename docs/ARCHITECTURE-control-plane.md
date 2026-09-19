@@ -25,9 +25,9 @@ consumes them — and the infrastructure assemblies implement them.
 | `ITemplateRegistry`, `IProjectTemplateRegistry`, `IGovernedCrewRegistry` | `SqliteTemplateRegistry`, `SqliteProjectTemplateRegistry`, `SqliteGovernedCrewRegistry` | Infrastructure.Data |
 | `IOperatorIdentityProvider` ([`OperatorIdentity.cs`](../src/MissionController.Core/OperatorIdentity.cs)) | `WindowsOperatorIdentityProvider`; `McpOperatorIdentityProvider` in `splat-mcp` | Infrastructure.Windows, splat-mcp |
 
-Core, Data, Linux and Network target `net9.0;net10.0`, and Infrastructure.Windows targets
-`net9.0-windows;net10.0-windows`. The net9 leg exists only so the frozen console still compiles,
-and it carries a rule: **no .NET-10-only API in these five projects** while it lives.
+Core, Data, Linux and Network target `net10.0`, and Infrastructure.Windows targets
+`net10.0-windows`. The `net9.0` leg they carried for the console went when the console moved to
+.NET 10 on 2026-09-18.
 
 ## The governed template
 
