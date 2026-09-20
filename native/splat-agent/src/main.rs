@@ -20,6 +20,7 @@ use tracing::{error, info, warn};
 mod auth;
 mod cgroup;
 mod cow;
+mod jail;
 mod lease;
 mod violation;
 
@@ -410,6 +411,12 @@ async fn main() -> Result<()> {
             error!("Refusing to start: an orphaned lease cgroup could not be drained: {e:#}");
             std::process::exit(1);
         }
+    }
+    // The skeletons of their jails go the same way; only empty directories and links are removed.
+    match jail::reap_leftover_roots(Path::new(jail::ROOTS_BASE)) {
+        Ok(0) => {}
+        Ok(n) => warn!("Removed {n} jail skeleton(s) a previous daemon left under {}", jail::ROOTS_BASE),
+        Err(e) => warn!("Could not sweep {}: {e:#}", jail::ROOTS_BASE),
     }
 
     let lease_manager = LeaseManager::new(bpf_sync);
@@ -830,11 +837,21 @@ async fn handle_client(
                 // anything outside it is refused here rather than accepted and dropped.
                 let mut unsupported: Vec<&str> = Vec::new();
 
-                if parsed.get("readOnlyFs").and_then(|v| v.as_bool()).unwrap_or(false) {
+                // readOnlyFs is real now: every jailed workload has a read-only root, and the flag
+                // makes its working directory read-only too. What cannot honour it is a daemon that
+                // jails nothing - the openly non-enforcing dev path - and that one still refuses.
+                let read_only_fs = parsed.get("readOnlyFs").and_then(|v| v.as_bool()).unwrap_or(false);
+                if read_only_fs && !lease_mgr.is_enforcing() {
                     unsupported.push(
-                        "readOnlyFs: no mount namespace is established for the workload, so a \
-                         read-only root cannot be imposed on it",
+                        "readOnlyFs: this daemon is not enforcing, so no mount namespace is established \
+                         for the workload and a read-only root cannot be imposed on it",
                     );
+                }
+
+                // The mission id names a cgroup and a jail root. A path separator or a '..' in it
+                // would name something else.
+                if !mission_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.') {
+                    unsupported.push("missionId: only letters, digits, '-', '_' and '.' can name a lease");
                 }
 
                 if parsed
@@ -981,9 +998,8 @@ async fn handle_client(
                         .and_then(|v| v.as_array())
                         .map(|a| a.iter().filter_map(|p| p.as_u64().map(|n| n as u32)).collect())
                         .unwrap_or_default(),
-                    // Always false by the time we get here - a true value was refused above.
-                    // Kept on the config so the shape of the lease still names the dimension.
-                    read_only_fs: false,
+                    // Honoured by the jail: the working directory is bound read-only.
+                    read_only_fs,
                     // Union, never replacement: a caller may add protected paths but must not be
                     // able to unprotect the ones this daemon always guards.
                     protected_paths: {
@@ -1046,9 +1062,46 @@ async fn handle_client(
                 }
 
                 // 2. Spawn Subprocess
+                let effective_work_dir = if Path::new(work_dir).exists() { work_dir } else { "/tmp" };
+
+                // The jail's root, built here in the parent where allocation is allowed. A real
+                // cgroup means a root daemon, and a root daemon jails every workload: there is no
+                // configuration in which a leased tool runs with the host's root as its own. A root
+                // that cannot be prepared refuses the request, as a cgroup that cannot be does.
+                let jail_plan = if cgroup_is_real {
+                    match jail::JailPlan::prepare(
+                        Path::new(jail::ROOTS_BASE),
+                        mission_id,
+                        Path::new(effective_work_dir),
+                        read_only_fs,
+                        Path::new("/"),
+                    ) {
+                        Ok(plan) => Some(Arc::new(plan)),
+                        Err(e) => {
+                            error!("Refusing to execute for mission {mission_id}: the jail root could not be prepared: {e:#}");
+                            lease_mgr.revoke_lease(cg.cgroup_id);
+                            let err_chunk = serde_json::json!({
+                                "type": "STDERR",
+                                "data": format!("SPLAT refused to execute: the workload's root could not be prepared ({e}).\n")
+                            });
+                            writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                            let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                            writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                            line.clear();
+                            continue;
+                        }
+                    }
+                } else {
+                    None
+                };
+
                 let mut cmd = Command::new(command);
                 cmd.args(&argv);
-                cmd.current_dir(if Path::new(work_dir).exists() { work_dir } else { "/tmp" });
+                if jail_plan.is_none() {
+                    // Jailed, the child changes directory itself after pivot_root; std's chdir would
+                    // land in the old root, which is detached by then.
+                    cmd.current_dir(effective_work_dir);
+                }
                 cmd.stdout(Stdio::piped());
                 cmd.stderr(Stdio::piped());
 
@@ -1074,6 +1127,7 @@ async fn handle_client(
                 let (wl_uid, wl_gid) = (workload.uid, workload.gid);
                 if cgroup_is_real {
                     let procs = cg.path.join("cgroup.procs");
+                    let plan_for_child = jail_plan.clone();
                     match std::ffi::CString::new(procs.as_os_str().as_bytes()) {
                         Ok(procs_c) => unsafe {
                             cmd.pre_exec(move || {
@@ -1085,6 +1139,13 @@ async fn handle_client(
                                 libc::close(fd);
                                 if joined < 0 {
                                     return Err(std::io::Error::last_os_error());
+                                }
+
+                                // Between the join and the drop: the mounts need root, and the
+                                // workload must not have it. The cgroup.procs path above was the
+                                // host's; after this the host's tree is not there to name.
+                                if let Some(plan) = &plan_for_child {
+                                    jail::enter(plan)?;
                                 }
 
                                 drop_privileges(wl_uid, wl_gid)

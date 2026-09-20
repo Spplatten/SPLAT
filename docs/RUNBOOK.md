@@ -25,6 +25,8 @@ are in [SCHEMA.md](SCHEMA.md). This file is about the ground it stands on.
 | `CONFIG_DEBUG_INFO_BTF=y` and `/sys/kernel/btf/vmlinux` | CO-RE relocations against the running kernel's types | `test -r /sys/kernel/btf/vmlinux` |
 | cgroup v2, unified hierarchy | Lease identity is the cgroup id `bpf_get_current_cgroup_id()` returns on the default hierarchy | `stat -fc %T /sys/fs/cgroup` prints `cgroup2fs` |
 | `memory`, `cpu` and `pids` controllers available at `/sys/fs/cgroup` | The daemon delegates them to `splat_leases/` and reads every clamp back; a controller the root does not offer refuses the lease | `cat /sys/fs/cgroup/cgroup.controllers` |
+| `/run` on tmpfs, writable by root | The jail's roots are built under `/run/splat/roots` and must not survive a reboot | `df -T /run` prints `tmpfs` |
+| Mount namespaces and `pivot_root` | Every jailed workload gets its own; a kernel that refuses `unshare(CLONE_NEWNS)` refuses every lease | Any Linux since 2.6; WSL2's kernel has both |
 | Kernel release | BPF-LSM programs: 5.7. BPF ring buffer: 5.8. Fetching atomics (the program is built for the v3 instruction set, for its sequence counter): 5.12. `cgroup.kill`: 5.14 (older kernels fall back to a SIGKILL loop). These floors are from kernel history, not re-measured here | `uname -r` |
 
 Recorded and proven on: `6.18.33.2-microsoft-standard-WSL2`, with `CONFIG_BPF_LSM=y`,
@@ -79,8 +81,9 @@ wsl --shutdown
 ```
 
 Guest side: systemd for cgroup v2, and Windows drives closed to `nobody` — a leased command runs
-as `nobody`, and WSL otherwise mounts your profile with every mode bit open
-([`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md), *Ambient reads*).
+as `nobody`, and WSL otherwise mounts your profile with every mode bit open. `splat-mcp provision
+--apply` writes the `[automount]` line itself when `/etc/wsl.conf` has no such section, and
+measures the mode of `/mnt/c` to say whether it has taken effect; by hand:
 
 ```bash
 sudo tee -a /etc/wsl.conf >/dev/null <<'EOF'
@@ -206,7 +209,7 @@ production host would need instead, and **none of it is built** unless the row s
 | --- | --- | --- |
 | The daemon is root | It loads BPF, owns the cgroup tree and drops the *workload* to `nobody`; that drop is what the probes check | A unit with `CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SETUID CAP_SETGID CAP_KILL CAP_DAC_READ_SEARCH`, `AmbientCapabilities=` of the same, `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ReadWritePaths=/etc/splat /sys/fs/cgroup`. **Unverified** — the cgroup writes and the `cgroup.procs` join under a bounded set have not been tried |
 | Loopback TCP with a shared secret | An unprivileged guest process cannot read the 0600 token, and a squatter on the port gets one nonce | A transport carrying peer identity: `AF_VSOCK` with a guest-side allow-list, or `SO_PEERCRED` over `AF_UNIX`. Closes the gap that any Windows process running as the same user can read the token exactly as the bridge does |
-| No mount namespace for the workload | The deny-list names inodes; the privilege drop carries the rest | `unshare(CLONE_NEWNS)` and `pivot_root` in the same `pre_exec` closure; then `readOnlyFs` and the overlay in [`cow.rs`](../native/splat-agent/src/cow.rs) stop being refusals. P2 of the plan |
+| The workload's mount namespace holds `/etc` whole, read-only | The resolver, certificates and passwd live there; what `nobody` may not read is denied by mode or by the inode deny-list, which bind mounts preserve. Built 2026-09-20, root proof pending | A curated slice of `/etc`, and the overlay in [`cow.rs`](../native/splat-agent/src/cow.rs) mounted inside the namespace as the working directory, which lifts the last refusal |
 | Maps and programs die with the daemon | Simple ownership; nothing to clean in `/sys/fs/bpf` | Pinned maps under `/sys/fs/bpf/splat`, so a daemon restart re-attaches instead of unpolicing. Today the daemon compensates by **killing** every leftover lease at startup and on SIGTERM |
 | Violations fan out through a 128-slot broadcast channel | A lease's forwarder tolerates lagging and says so | A per-lease queue with a drop counter surfaced in the `EXIT` frame |
 | A full 1 MiB ring buffer drops events, counted host-wide | 18 000 records of headroom on a machine running a handful of leases, and the count moves when it is not enough | A per-lease count, which needs the counter keyed by cgroup — another source change, another re-probe |
@@ -229,6 +232,8 @@ production host would need instead, and **none of it is built** unless the row s
 | A clamp reads back looser than requested | The request is refused; the cgroup is removed | `cgroup.rs` |
 | A map write fails partway through a lease | The partial write is rolled back and the request refused | `lease.rs` |
 | A protected path does not resolve | The request is refused — a missing deny entry fails open | `lease.rs` |
+| The jail's root cannot be prepared, or a mount inside it fails | The request is refused; the spawn fails in the child before the exec, so a workload never runs half-jailed | `jail.rs`, `main.rs` |
+| A mission id carries a path separator or `..` | Refused before a cgroup or a root is named by it | `main.rs` |
 | The client disconnects mid-run | The cgroup is killed, then the lease withdrawn | `main.rs` |
 | The lease expires with the workload running | Killed inside the policy, then withdrawn; a tree that will not drain keeps its policy and is retried every second | `main.rs`, reaper |
 | The ring buffer poll returns an error | Logged; polling continues. It used to end the drain thread silently | `main.rs` |

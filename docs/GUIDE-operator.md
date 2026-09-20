@@ -50,6 +50,8 @@ mattered:
 | An expired lease whose process would not die was forgotten while its policy stayed installed | Kernel map entries leaked; nobody retried | Fixed; retried every second |
 | A request the guard did not understand got no answer | The bridge waited out its whole time limit | Fixed; refused with a reason |
 | Documents disagreed with the code in five places | A reader would act on the wrong fact | Fixed; see the list below |
+| The lease was a deny-list on files, not a jail: everything not named was reachable, your Windows drives included | The one boundary that mattered most was a list of exceptions | Built: every leased command now runs in its own root with the system read-only, its working directory, a fresh `/tmp`, and no `/home` or `/mnt` at all. Unproven until step 1 |
+| Closing the Windows drives was a runbook line to remember | A host whose operator forgot it stayed open | `provision --apply` writes it and measures whether it took |
 
 Then, on your say-so, the kernel program itself changed: each refusal record now carries the
 kernel's own clock and a sequence number, the program counts the refusals it had no room to
@@ -142,7 +144,11 @@ cd /mnt/c/C_AGENT_BUILDER/native/splat-agent && bash probe-daemon.sh
 ```
 
 Expect a last line `evidence written: ... (verdict PASS)` and a rewritten
-`evidence/daemon-probe.json`. Then, from PowerShell, against the same running guard:
+`evidence/daemon-probe.json`. Five of its lines are new and are the jail's first proof: `jail
+hides /home and /mnt`, `system dirs read-only in jail`, `workdir, /tmp writable, /etc visible`
+and `readOnlyFs makes workdir read-only`, with `host has /home and /mnt` as their control. A
+`False` among them is the finding of the day; paste the whole run. Then, from PowerShell, against
+the same running guard:
 
 ```powershell
 C:\C_AGENT_BUILDER\native\splat-agent\probe-last-hop.ps1

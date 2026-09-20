@@ -22,8 +22,9 @@ travelling from `splat-mcp` through the C# bridge into the daemon, is recorded, 
 daemon's copy of the program changed** — each denial record gained the kernel's clock, a sequence
 number and a drop counter, and the connect hook refuses an address too short to hold one — so the
 daemon and last-hop evidence no longer name the program that ships, and the root probes are pending;
-[GUIDE-operator.md](GUIDE-operator.md) has the steps. The canary's frozen copy, and its evidence,
-are unaffected. The README's status table is the test-bound statement of this; where it and this
+[GUIDE-operator.md](GUIDE-operator.md) has the steps. The same day the daemon gained the workload's
+mount namespace, which the daemon probe now checks and has not yet recorded. The canary's frozen
+copy, and its evidence, are unaffected. The README's status table is the test-bound statement of this; where it and this
 paragraph disagree, trust the README.
 
 ## The pieces, and where they run
@@ -125,7 +126,9 @@ including a protocol 2 request carrying the token itself — is refused, and the
 
 1. Require `protocolVersion` 3 and an `argv` array. Version 1 carried arguments as one string the
    daemon split on whitespace, and nothing can reconstruct that correctly.
-2. Refuse policy it cannot enforce: `readOnlyFs: true`, `overlayFs.enableCow: true`.
+2. Refuse policy it cannot enforce: `overlayFs.enableCow: true`, and `readOnlyFs: true` from a
+   daemon that is not enforcing, since that one jails nothing. A mission id that is not a safe
+   path component is refused here too.
 3. Resolve the clamps. A request may lower the daemon-wide ceilings (`MAX_MEMORY_BYTES_CEILING`,
    `MAX_CPU_PERCENT_CEILING`, `MAX_PIDS_CEILING`), never raise them.
 4. Create `splat_leases/mission_<id>`, delegate the controllers to it, write `memory.max`,
@@ -138,14 +141,25 @@ including a protocol 2 request carrying the token itself — is refused, and the
 6. Refuse a lease that does not permit its own command.
 7. Register the lease: resolve each path to an inode, write every map entry, and roll back the
    partial writes on failure.
-8. Spawn. In `pre_exec` — async-signal-safe code in the forked child of a multithreaded process —
-   write `0` to the cgroup's `cgroup.procs`, then `setgroups(0)`, `setresgid` and `setresuid` to the
-   workload identity (`nobody` by default), then refuse if anything is still root. Joining before
-   exec is what puts the tool's *own* exec under the allow-list.
-9. Verify from outside: the child's cgroup membership and effective uid, logged loudly if wrong.
-10. Stream `STDOUT` and `STDERR` in frames of at most 64 KiB — a tool's single long line no longer
+8. Prepare the jail's root under `/run/splat/roots/mission_<id>`
+   ([`jail.rs`](../native/splat-agent/src/jail.rs)): the skeleton of empty directories and the
+   `CString` paths the child will need, built here in the parent where allocating is allowed. A
+   root that cannot be prepared refuses the request.
+9. Spawn. In `pre_exec` — async-signal-safe code in the forked child of a multithreaded process —
+   write `0` to the cgroup's `cgroup.procs`; then, still root, `unshare(CLONE_NEWNS)`, make `/`
+   private, bind `/usr`, `/bin`, `/sbin`, `/lib*` and `/etc` read-only, mount a fresh `tmpfs` on
+   `/tmp`, bind the working directory (read-only under `readOnlyFs`), bind six device nodes, mount
+   `/proc`, `pivot_root` and detach the old root; then `setgroups(0)`, `setresgid` and `setresuid`
+   to the workload identity (`nobody` by default), and refuse if anything is still root. Joining
+   the cgroup before exec is what puts the tool's *own* exec under the allow-list; the mounts sit
+   between the join and the drop because they need root and the workload must not have it. Bind
+   mounts keep inode identity, so the allow-list and the deny-list hold unchanged inside.
+10. Verify from outside: the child's cgroup membership and effective uid, logged loudly if wrong.
+11. Stream `STDOUT` and `STDERR` in frames of at most 64 KiB — a tool's single long line no longer
     sits whole in a root process's memory before a byte of it is forwarded — and `VIOLATION` frames
-    for this lease's cgroup, then `EXIT`, then revoke the lease.
+    for this lease's cgroup, then `EXIT`, then revoke the lease and remove the jail's skeleton,
+    one entry at a time and never recursively, so a mount that somehow leaked would stop the
+    removal rather than be descended into.
 
 A client that disconnects mid-run ends the lease the way expiry does: **kill inside the policy,
 then withdraw it.** The reaper follows the same order every second. Deleting the map entries first
@@ -259,10 +273,11 @@ the daemon, the BPF program or the lease path, the root probe is the test.
 
 ## Where it goes next
 
-Three refusals — `readOnlyFs`, copy-on-write scratch, and executing code an agent just wrote — are
-one missing piece: the workload has no mount namespace of its own. `unshare(CLONE_NEWNS)` plus
-`pivot_root`, inside the same `pre_exec` closure, is P2 of
-[the live plan](audits/2026-09-09-oem-subtraction-plan.md). `cow.rs` holds the overlay half, parked
-until then. [The hardening note of 2026-09-20](audits/2026-09-20-substrate-hardening.md) puts that
-first and sets out the four behind it — UDP, pinning, a guest-side ceiling policy, and cheap
-re-proof — with how each is proven.
+The workload's mount namespace — P2 of [the live plan](audits/2026-09-09-oem-subtraction-plan.md)
+— was built on 2026-09-20 and awaits its root probe, which now carries five checks for it.
+`readOnlyFs` left the refused list with it. Two things still stand on that namespace:
+`overlayFs.enableCow`, which is `cow.rs` mounted as the working directory inside the jail and is
+still refused until it is; and executing code an agent just wrote, which the exec allow-list
+refuses by inode and which the jail does not change.
+[The hardening note of 2026-09-20](audits/2026-09-20-substrate-hardening.md) sets out what comes
+after — UDP, pinning, a guest-side ceiling policy, and cheap re-proof — with how each is proven.

@@ -344,6 +344,47 @@ print("   Protocol 2 put the token in every request, so a caller handed it to wh
 print("   A daemon that still accepted that form would make capturing the token worth something.")
 clear_health = show(call({"type": "HEALTH_CHECK"}, "health-protocol-2", clear=True), "health-protocol-2")
 
+print()
+print("== 15. JAIL: the workload's root holds the system, the workdir and nothing else ==")
+print("   /home and /mnt are not hidden by a deny-list; they are absent from the root the workload")
+print("   sees. The system directories are read-only, /tmp is fresh and writable, the working")
+print("   directory is writable unless readOnlyFs says otherwise. All from sh builtins, so each")
+print("   lease needs nothing but /bin/sh. The host's own /home and /mnt are the control.")
+jail_ws = "/tmp/splat-probe-ws"
+os.makedirs(jail_ws, exist_ok=True)
+os.chmod(jail_ws, 0o777)  # the workload is nobody, and the write below is the measurement
+jail_absent = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-jail-absent",
+    "command": "/bin/sh",
+    "argv": ["-c", "for d in /home /mnt /root /var /sys; do [ -e \"$d\" ] && echo \"VISIBLE $d\" || echo \"ABSENT $d\"; done"],
+    "allowedExecPaths": ["/bin/sh"], "workingDirectory": jail_ws,
+    "leaseDurationSeconds": 20,
+}, "jail-absent"), "jail-absent")
+jail_ro = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-jail-ro",
+    "command": "/bin/sh",
+    "argv": ["-c", "( echo x > /usr/bin/splat-probe-write ) 2>&1; [ -e /usr/bin/splat-probe-write ] && echo WROTE_SYSTEM || echo SYSTEM_READONLY"],
+    "allowedExecPaths": ["/bin/sh"], "workingDirectory": jail_ws,
+    "leaseDurationSeconds": 20,
+}, "jail-ro"), "jail-ro")
+jail_rw = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-jail-rw",
+    "command": "/bin/sh",
+    "argv": ["-c", "echo x > ./probe-rw && echo WROTE_WORKDIR; echo y > /tmp/probe-tmp && echo WROTE_TMP; [ -e /etc/hostname ] && echo ETC_VISIBLE"],
+    "allowedExecPaths": ["/bin/sh"], "workingDirectory": jail_ws,
+    "leaseDurationSeconds": 20,
+}, "jail-rw"), "jail-rw")
+jail_rofs = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-jail-rofs",
+    "command": "/bin/sh",
+    "argv": ["-c", "( echo x > ./probe-ro ) 2>&1; [ -e ./probe-ro ] && echo WROTE_WORKDIR || echo WORKDIR_READONLY"],
+    "allowedExecPaths": ["/bin/sh"], "workingDirectory": jail_ws, "readOnlyFs": True,
+    "leaseDurationSeconds": 20,
+}, "jail-readonly"), "jail-readonly")
+host_has_the_dirs = os.path.isdir("/home") and os.path.isdir("/mnt")
+import shutil
+shutil.rmtree(jail_ws, ignore_errors=True)
+
 def had(msgs, t):
     return any(m.get("type") == t for m in (msgs or []))
 
@@ -450,6 +491,26 @@ print(f"  health check refuses a stranger: {unauth_health_refused}")
 print(f"  daemon proved it holds token   : {daemon_proved_itself}")
 print(f"  token in the clear refused     : {clear_token_refused}")
 
+# The jail. Absence is only a measurement when the host has the directory: a guest with no /mnt
+# would score "absent" for the wrong reason, so the host's own view is the control.
+jail_absent_text = text(jail_absent)
+jail_hides_host = (
+    host_has_the_dirs
+    and "ABSENT /home" in jail_absent_text
+    and "ABSENT /mnt" in jail_absent_text
+    and "VISIBLE" not in jail_absent_text
+)
+jail_system_ro = "SYSTEM_READONLY" in text(jail_ro) and "WROTE_SYSTEM" not in text(jail_ro)
+jail_rw_text = text(jail_rw)
+jail_workdir_rw = "WROTE_WORKDIR" in jail_rw_text and "WROTE_TMP" in jail_rw_text and "ETC_VISIBLE" in jail_rw_text
+jail_readonly_fs = "WORKDIR_READONLY" in text(jail_rofs) and "WROTE_WORKDIR" not in text(jail_rofs)
+print()
+print(f"  host has /home and /mnt        : {host_has_the_dirs}  (the control for the line below)")
+print(f"  jail hides /home and /mnt      : {jail_hides_host}")
+print(f"  system dirs read-only in jail  : {jail_system_ro}")
+print(f"  workdir, /tmp writable, /etc visible : {jail_workdir_rw}")
+print(f"  readOnlyFs makes workdir read-only   : {jail_readonly_fs}")
+
 # A run that is not recorded is not proof - the same rule the canary follows.
 import datetime
 # Hash the daemon's kernel program into the record. Without it a months-old PASS kept standing
@@ -506,6 +567,12 @@ evidence = {
         # collect - is refused even with the right token.
         "daemon_proved_it_holds_the_token": daemon_proved_itself,
         "protocol_2_token_in_the_clear_refused": clear_token_refused,
+        # P2: the workload's root is its own mount namespace, not the host's tree minus a deny-list.
+        "jail_control_host_has_home_and_mnt": host_has_the_dirs,
+        "jail_hides_home_and_mnt": jail_hides_host,
+        "jail_system_dirs_read_only": jail_system_ro,
+        "jail_workdir_and_tmp_writable": jail_workdir_rw,
+        "read_only_fs_makes_workdir_read_only": jail_readonly_fs,
     },
     "violations": [
         {k: m.get(k) for k in ("hook", "pid", "detail", "detailText", "comm") if k in m}
@@ -541,6 +608,12 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["unauthenticated_health_check_refused"]
     and evidence["results"]["daemon_proved_it_holds_the_token"]
     and evidence["results"]["protocol_2_token_in_the_clear_refused"]
+    # The jail, with its control: hidden directories only count when the host has them to hide.
+    and evidence["results"]["jail_control_host_has_home_and_mnt"]
+    and evidence["results"]["jail_hides_home_and_mnt"]
+    and evidence["results"]["jail_system_dirs_read_only"]
+    and evidence["results"]["jail_workdir_and_tmp_writable"]
+    and evidence["results"]["read_only_fs_makes_workdir_read_only"]
 ) else "INCOMPLETE"
 
 out_dir = os.environ.get("SPLAT_EVIDENCE_DIR", "/mnt/c/C_AGENT_BUILDER/native/splat-agent/evidence")

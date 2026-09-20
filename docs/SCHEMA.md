@@ -179,7 +179,8 @@ dimension the caller did not declare.
 | `allowNetwork` | bool | no (`false`) | |
 | `allowedEgressIps` | string[] of dotted quads | when `allowNetwork` | Installed × `allowedEgressPorts`. Empty means nothing permitted |
 | `allowedEgressPorts` | int[] | when `allowNetwork` | 1–65535 |
-| `readOnlyFs` | bool | no | `true` is **refused** (no mount namespace) |
+| `readOnlyFs` | bool | no | The working directory is bound read-only inside the jail. Refused only by a daemon that is not enforcing |
+| `missionId` (again) | | | Letters, digits, `-`, `_` and `.` only: it names a cgroup and a jail root |
 | `protectedPaths` | string[] | no | Unioned with the daemon's `/etc/shadow` and `/etc/sudoers`; a path that does not resolve refuses the lease |
 | `allowedExecPaths` | string[] | yes | The only executables, including the command itself |
 | `leaseDurationSeconds` | int | no (`30`) | Clamped to 5–300 |
@@ -225,7 +226,7 @@ by [`WslLeasedExecutor`](../src/MissionController.Infrastructure.Linux/WslLeased
 | `AllowNetwork` | `allowNetwork` | |
 | `AllowedEgressIps` | `allowedEgressIps` | |
 | `AllowedEgressPorts` | `allowedEgressPorts` | |
-| `ReadOnlyFs` | `readOnlyFs` | Always `false` from every live caller |
+| `ReadOnlyFs` | `readOnlyFs` | `run_command` passes its caller's `readOnlyFs`; the template compiler sends `false` |
 | `ProtectedInodes[].SourcePath` | `protectedPaths` | `InodeNumber` and `DeviceId` are `0` and never sent: an inode number read on Windows means nothing in the guest |
 | `AllowedExecInodes[].SourcePath` | `allowedExecPaths` | Same |
 | `LeaseDurationSeconds` | `leaseDurationSeconds` | Also the bridge's local deadline, floored at 5 s |

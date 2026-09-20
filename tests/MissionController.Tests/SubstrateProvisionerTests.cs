@@ -39,6 +39,11 @@ public sealed class SubstrateProvisionerTests
 
         public bool ShippedAgentAlteredInTransit { get; init; }
 
+        /// <summary>The mode of /mnt/c: 700 once umask=077 has taken effect, 777 as WSL mounts it by default.</summary>
+        public string WindowsDriveMode { get; init; } = "700";
+
+        public string WslConf { get; init; } = string.Empty;
+
         public Task<(int ExitCode, string Output)> RunAsync(IReadOnlyList<string> args, CancellationToken ct)
         {
             string line = string.Join(' ', args);
@@ -47,6 +52,8 @@ public sealed class SubstrateProvisionerTests
             (int, string) answer = line switch
             {
                 _ when line.EndsWith("echo ok", StringComparison.Ordinal) => (0, "ok"),
+                _ when line.Contains("stat -c %a /mnt/c", StringComparison.Ordinal) => (0, WindowsDriveMode),
+                _ when line.Contains("cat /etc/wsl.conf", StringComparison.Ordinal) => (0, WslConf),
                 _ when line.Contains("os-release", StringComparison.Ordinal) => (0, "Ubuntu 26.04 LTS"),
                 _ when line.Contains("ps -p 1", StringComparison.Ordinal) => (0, HasSystemd ? "systemd" : "init"),
                 _ when line.Contains("/proc/cmdline", StringComparison.Ordinal) => (0, BpfOnBootLine ? "initrd=\\initrd.img lsm=landlock,yama,bpf" : "initrd=\\initrd.img lsm=landlock,yama"),
@@ -141,6 +148,43 @@ public sealed class SubstrateProvisionerTests
         Assert.Equal(1, exit);
         Assert.Contains("`wsl --shutdown` is yours", report.ToString());
         Assert.Contains(guest.Commands, command => command.Contains(">> /etc/wsl.conf", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// WSL mounts the Windows drives with every mode bit open, so a leased command running as nobody
+    /// read the operator's whole profile through /mnt/c. The fix was a runbook line; now --apply writes
+    /// it, and the restart that makes it take effect stays the user's.
+    /// </summary>
+    [Fact]
+    public async Task OpenWindowsDrives_AreClosedByApply_AndTheRestartIsTheUsers()
+    {
+        using var daemon = new SubstrateDoctorTests.StandInDaemon(EnforcingAnswer);
+        var guest = new ScriptedGuest { WindowsDriveMode = "777" };
+        var report = new StringWriter();
+
+        await SubstrateProvisioner.RunAsync(
+            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
+
+        Assert.Contains(guest.Commands, command => command.Contains("umask=077", StringComparison.Ordinal) && command.Contains(">> /etc/wsl.conf", StringComparison.Ordinal));
+        Assert.Contains("Windows drives", report.ToString());
+        Assert.Contains("`wsl --shutdown` is yours", report.ToString());
+    }
+
+    /// <summary>An [automount] section the operator wrote is theirs; the tool names the edit rather than making it.</summary>
+    [Fact]
+    public async Task OpenWindowsDrives_WithAnExistingAutomountSection_AreNotEditedBlindly()
+    {
+        using var daemon = new SubstrateDoctorTests.StandInDaemon(EnforcingAnswer);
+        var guest = new ScriptedGuest { WindowsDriveMode = "777", WslConf = "[automount]\noptions = \"metadata\"\n" };
+        var report = new StringWriter();
+
+        await SubstrateProvisioner.RunAsync(
+            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
+
+        Assert.DoesNotContain(guest.Commands, command => command.Contains(">> /etc/wsl.conf", StringComparison.Ordinal));
+        Assert.Contains("add `options = \"umask=077\"` under it yourself", report.ToString());
     }
 
     [Fact]

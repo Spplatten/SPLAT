@@ -22,6 +22,12 @@ than a fact, it says so.
 
 ## 1. From a deny-list to a jail
 
+> **Done the same evening, pending the root probe.** [`jail.rs`](../../native/splat-agent/src/jail.rs)
+> builds the root in the parent and enters it in `pre_exec` exactly as set out below, with `/etc`
+> whole rather than sliced, and `readOnlyFs` is now honoured. `probe-daemon.sh` carries five checks
+> for it. `provision --apply` writes the umask line. What follows is the reasoning as it stood
+> before the code; the code is the reference now.
+
 **What is true today.** The lease names inodes the workload may not open: `/etc/shadow`,
 `/etc/sudoers`, and whatever the caller adds. Everything else on the guest is reachable at
 `nobody`'s permissions, which on WSL includes the Windows drives under `/mnt` unless the

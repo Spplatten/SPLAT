@@ -30,6 +30,8 @@ revoking one does not remove an entry another still holds.
 
 | Dimension | Where | What is checked |
 | --- | --- | --- |
+| The workload's root | mount namespace and `pivot_root`, in `pre_exec` | A root holding `/usr`, `/bin`, `/sbin`, `/lib*` and `/etc` read-only, the working directory, a fresh `/tmp`, `/proc` and six device nodes. `/home`, `/root`, `/mnt`, `/var`, `/opt` and `/sys` are absent, not hidden. **Built 2026-09-20, pending the root probe** - see the note below. |
+| `readOnlyFs` | the same | The working directory bound read-only as well. Refused only by a daemon that is not enforcing, which jails nothing. |
 | Memory, CPU, PID ceilings | cgroup v2 | Written to `memory.max`, `cpu.max`, `pids.max`, then **read back**; a controller that did not take the clamp fails the request. |
 | Lease lifetime | expiry reaper | On expiry the cgroup is killed and drained *before* its policy is withdrawn. |
 | Caller identity | protocol 3 handshake | A root-owned 0600 shared secret that never crosses the wire. Every connection opens with `HELLO`, and the daemon answers with an HMAC-SHA256 over the caller's nonce and its own, which the caller checks before it sends anything more. Every request then travels in an `AUTHENTICATED` frame whose proof covers both nonces, its place on the connection and its exact bytes, checked in fixed time before the request is parsed. Required on **every** request, `HEALTH_CHECK` included since 2026-09-11: that answer carries `enforcing`, the kernel version and the live lease count, so leaving it open told an unauthenticated caller exactly when this daemon would run work it cannot contain. |
@@ -40,8 +42,7 @@ revoking one does not remove an entry another still holds.
 
 | Field | Why |
 | --- | --- |
-| `readOnlyFs: true` | No mount namespace is established for the workload, so a read-only root cannot be imposed on it. |
-| `overlayFs.enableCow: true` | The overlay would mount in the daemon's own mount namespace, and a merged directory handed to a child as its working directory is a starting point rather than a jail — the tool can `cd /` out of it. `cow.rs` holds the mount code; what is missing is `unshare(CLONE_NEWNS)` plus `pivot_root` in the pre-exec closure. |
+| `overlayFs.enableCow: true` | The overlay is not yet mounted inside the workload's namespace. `cow.rs` holds the mount code and `jail.rs` now holds the namespace; joining them, so the merged directory is the working directory the jail binds, is the next step. |
 | `protocolVersion` ≠ 3 | A version 1 envelope carried arguments as a pre-quoted string that the daemon then split on whitespace. There is no correct way to reconstruct it here. |
 | A first frame that is not a `HELLO`, or a request outside an `AUTHENTICATED` frame | Protocol 2 put the token itself in every request, so a caller handed it to whatever answered on the port — and while the daemon was down, any process in the guest could answer. Refused even with the right token, so capturing one is worth nothing, and the connection is closed. |
 | Any `argv` that is not an array | Same reason. |
@@ -57,8 +58,7 @@ These are reachable by a leased process. They are listed so nobody has to discov
 | **UDP to an unconnected socket** | `socket_connect` does not fire for `sendto()` on an unconnected UDP socket. A `socket_sendmsg` hook would close it; it is not written, and shipping an unverified BPF program that the loader might reject would take the whole substrate down rather than tighten it. |
 | **AF_UNIX / AF_NETLINK** | Local IPC is untouched. Denying it wholesale would break name resolution and logging for the shipped catalogue; a per-socket allow-list is the real answer and does not exist. A leased tool can talk to any local daemon socket its uid can reach. |
 | **Inherited file descriptors** | The hooks fire on `open` and `connect`. A descriptor the tool inherits was opened by the daemon, before any of them ran. |
-| **Filesystem writes outside the workspace** | The deny-list names specific inodes. It is not a jail: everything not named is reachable at the workload's uid, which is why the privilege drop matters more than the deny-list does. |
-| **Ambient reads** | `file_open` denies a listed inode. It does not confine reads to an allow-list — the policy is a denylist, and a denylist is not a boundary. On WSL that includes the Windows drives. `/mnt/c` is mounted with every mode bit open, so the workload's `nobody` reaches the Windows user's profile: on 2026-09-18, `nobody` read a public key in that profile's `.ssh` folder and passed the read check on the private key beside it. A mount namespace without `/mnt` would close it (P2). Until then, an `[automount]` umask of 077 in the guest's `/etc/wsl.conf` shuts `nobody` out of the Windows drives; the runbook's 1.6 has the line. |
+| **Filesystem writes and reads outside the jail's contents** | Closed by the jail since 2026-09-20, pending its proof: the workload's root holds the system directories read-only, its working directory, a fresh `/tmp`, `/proc` and six device nodes, and nothing else. `/etc` travels whole and read-only; what `nobody` may not read there is still denied by mode, and the inode deny-list still applies inside the jail because bind mounts keep inode identity. Until the probe has run, treat the deny-list as the boundary it was: on 2026-09-18, `nobody` read a public key in the Windows user's `.ssh` folder through `/mnt/c`. Two things close that today: `/mnt` is absent from the jail, and `splat-mcp provision --apply` now writes the `[automount]` umask of 077 into the guest's `/etc/wsl.conf` when it is missing, which shuts `nobody` out of the Windows drives for anything not jailed once WSL restarts. |
 
 ## What has been proven, and where
 
@@ -70,8 +70,10 @@ enforcement while the hash does not match what ships — so the proof cannot out
 > **Pending since 2026-09-20.** The program changed that day — each denial record gained the
 > kernel's clock, a sequence number and a drop counter, and the connect hook refuses an AF_INET
 > address too short to hold one — so the daemon and last-hop evidence below name the program as it
-> was, not as it ships. The README's claims are withdrawn until `probe-daemon.sh` and
-> `probe-last-hop.ps1` are re-run under root; `docs/GUIDE-operator.md` has the steps.
+> was, not as it ships. The same day the daemon gained the jail above, which `probe-daemon.sh` now
+> checks with five results of its own, none yet recorded. The README's claims are withdrawn until
+> `probe-daemon.sh` and `probe-last-hop.ps1` are re-run under root; `docs/GUIDE-operator.md` has
+> the steps.
 
 | Claim | Evidence |
 | --- | --- |

@@ -119,6 +119,14 @@ public static class SubstrateProvisioner
 
         Line(output, "ok", "BPF-LSM", "bpf is on the boot command line, so the kernel initialised it");
 
+        // 3b. The Windows drives. WSL mounts them with every mode bit open, so a leased command
+        //     running as nobody read the operator's whole profile through /mnt/c - SSH keys included,
+        //     checked on 2026-09-18. The jail leaves /mnt out of a workload's root; this closes the
+        //     same door for anything outside a jail, and it was a runbook line every operator had to
+        //     remember. It is measured, as the mode of /mnt/c, rather than read from the config,
+        //     because the config takes effect only on a restart that is the user's to take.
+        await WindowsDrivesStepAsync(output, wsl, apply, ct);
+
         // 4. The daemon binary, at a path that survives a restart. /tmp does not: it is tmpfs, and the
         //    distro stops seconds after its last process exits, taking the build with it.
         //
@@ -408,6 +416,71 @@ public static class SubstrateProvisioner
 
         Line(output, "ok", "daemon binary", $"built and installed to {AgentPath}");
         return true;
+    }
+
+    /// <summary>
+    /// Closes the Windows drives to a leased command's uid, or says what stands in the way. The
+    /// [automount] stanza is appended only when /etc/wsl.conf has none; a section that exists is the
+    /// operator's, and an edit inside it is theirs to make. The line never changes the verdict: it is
+    /// about what a leased command can read, not whether a lease reaches the kernel.
+    /// </summary>
+    private static async Task WindowsDrivesStepAsync(TextWriter output, SubstrateDoctor.WslRunner wsl, bool apply, CancellationToken ct)
+    {
+        var (modeExit, mode) = await wsl(new[] { "-e", "stat", "-c", "%a", "/mnt/c" }, ct);
+        string bits = mode.Trim();
+        if (modeExit != 0 || bits.Length == 0)
+        {
+            Line(output, "ok", "Windows drives", "no /mnt/c in the guest, so nothing there for a leased command to read");
+            return;
+        }
+
+        // 700 or 000: whatever the owner keeps, the other bits are closed.
+        if (bits.EndsWith("00", StringComparison.Ordinal))
+        {
+            Line(output, "ok", "Windows drives", $"/mnt/c is mode {bits}: closed to a leased command's uid");
+            return;
+        }
+
+        var (_, conf) = await wsl(new[] { "-e", "sh", "-c", "cat /etc/wsl.conf 2>/dev/null" }, ct);
+        string[] lines = conf.ReplaceLineEndings("\n").Split('\n');
+        int section = Array.FindIndex(lines, l => l.Trim().Equals("[automount]", StringComparison.OrdinalIgnoreCase));
+        bool asked = section >= 0 && lines
+            .Skip(section + 1)
+            .TakeWhile(l => !l.TrimStart().StartsWith('['))
+            .Select(l => l.Trim())
+            .Where(l => !l.StartsWith('#') && !l.StartsWith(';'))
+            .Any(l => l.StartsWith("options", StringComparison.OrdinalIgnoreCase) && l.Contains("umask=077", StringComparison.Ordinal));
+
+        if (asked)
+        {
+            Line(output, "todo", "Windows drives",
+                $"/mnt/c is mode {bits}, and /etc/wsl.conf already asks for umask=077. `wsl --shutdown` is yours - it "
+                + "ends every WSL session you have open - and then it takes effect.");
+            return;
+        }
+
+        if (section >= 0)
+        {
+            Line(output, "todo", "Windows drives",
+                $"/mnt/c is mode {bits}. /etc/wsl.conf has an [automount] section without umask=077: add "
+                + "`options = \"umask=077\"` under it yourself, then `wsl --shutdown`.");
+            return;
+        }
+
+        if (!apply)
+        {
+            Line(output, "todo", "Windows drives",
+                $"/mnt/c is mode {bits}, so a leased command running as nobody can read your Windows profile through it. "
+                + "--apply appends [automount] options = \"umask=077\" to /etc/wsl.conf; `wsl --shutdown` then applies it.");
+            return;
+        }
+
+        var (writeExit, writeOut) = await wsl(Root("printf '\\n[automount]\\noptions = \"umask=077\"\\n' >> /etc/wsl.conf"), ct);
+        Line(output, writeExit == 0 ? "todo" : "FAIL", "Windows drives",
+            writeExit == 0
+                ? "wrote [automount] umask=077 to /etc/wsl.conf. `wsl --shutdown` is yours - it ends every WSL session you "
+                  + "have open - and then /mnt/c closes to a leased command."
+                : $"could not write /etc/wsl.conf: {Short(writeOut)}");
     }
 
     /// <summary>

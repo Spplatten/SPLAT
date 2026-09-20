@@ -89,6 +89,7 @@ Two things the picture says on purpose.
 | The sensor command line | [`GovernedArgumentBinder`](../src/MissionController.Core/GovernedArgumentBinder.cs) — one pass, position-aware allow-lists, refuse rather than repair | Check in SPLAT's process | Injection through operator- or agent-supplied parameters |
 | Linux exec, file open, IPv4 connect | [`lease_lsm.bpf.c`](../native/splat-agent/src/bpf/lease_lsm.bpf.c) — every map key carries the lease's cgroup id | Kernel LSM | A leased process of any uid, root included |
 | Linux CPU, memory, PIDs | cgroup v2, written then **read back** by the daemon | Kernel (cgroup) | The leased process tree |
+| What a Linux workload can see on disk | [`jail.rs`](../native/splat-agent/src/jail.rs) — a mount namespace and `pivot_root` in `pre_exec`: the system directories read-only, the working directory, a fresh `/tmp`, `/proc`, six device nodes | Kernel (mount namespace) | Every read or write outside those; `/home`, `/mnt`, `/var`, `/sys` are absent. Built 2026-09-20, root proof pending |
 | Linux workload identity | `pre_exec`: `setgroups`, `setresgid`, `setresuid` to `nobody` | Kernel (credentials) | The workload keeping or regaining root |
 | Linux lease lifetime | Daemon reaper — kill inside the policy, then withdraw it | Daemon | An overrunning workload |
 | Who may request a lease | Root-owned 0600 shared secret, loopback TCP | Daemon check | Unprivileged guest processes — **not** another Windows process running as the same user |
@@ -194,7 +195,7 @@ The code holds itself to these; each one exists because its absence shipped once
   daemon exits rather than serve without live BPF maps. A cgroup that did not take its clamp
   refuses the request. None of them fall back to running uncontained.
 - **Refuse what cannot be enforced, rather than accept it and drop it.** The daemon refuses
-  `readOnlyFs`, `overlayFs.enableCow` and version-1 envelopes;
+  `overlayFs.enableCow`, version-1 envelopes, and `readOnlyFs` when it is not enforcing;
   [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md) is the list. A tool whose
   parameter is not enforced says so in its description.
 - **Scrub at the boundary.** Tool output is sanitized before the stream yields it, because the
@@ -222,7 +223,7 @@ A class that no host constructs is not a capability, however well it is tested. 
 | [`EmbeddedWebhookListener`](../src/MissionController.Infrastructure.Network/Triggers/EmbeddedWebhookListener.cs), `OAuthCallbackCoordinator`, `WorkflowScheduler` | Trigger hosting, constructed by neither host — the orchestration plan's Phase 1, subtracted on 2026-09-09 |
 | `InMemoryWorkflowRegistry`, `SqliteGovernedCrewRegistry` | Tests only |
 | `IWorkflowExecutionEngine`, `ICopilotSafetySubstrate` in the console | Registered in the container; no view model resolves them |
-| [`cow.rs`](../native/splat-agent/src/cow.rs) | Overlay mount code, parked; the daemon refuses `overlayFs.enableCow` until the workload has its own mount namespace |
+| [`cow.rs`](../native/splat-agent/src/cow.rs) | Overlay mount code, parked; the workload has had its own mount namespace since 2026-09-20, and mounting the overlay inside it as the working directory is the step that lifts the `overlayFs.enableCow` refusal |
 
 To re-check a row: `git grep -lw <TypeName> -- src`. A type named only by its own file, and by
 files under `tests/`, is not wired.
