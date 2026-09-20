@@ -1,20 +1,9 @@
 namespace MissionController.Core.Enums;
 
-public enum MissionStatus
-{
-    Draft,
-    Queued,
-    ProvisioningJail,
-    SpawningSuspended,
-    BindingJobObject,
-    Executing,
-    StreamingAiAnalysis,
-    DrainingJail,
-    Completed,
-    Failed,
-    Terminated,
-    Quarantined
-}
+// There was a twelve-value MissionStatus here that no engine, view model or test ever read. The
+// mission's states are the MissionChunkType.StatusChange chunks the engine emits, in the one order
+// MissionExecutionEngine runs them; an enum beside that, consulted by nothing, only suggested a
+// second state machine that could drift from the first.
 
 public enum ProcessIntegrityLevel
 {

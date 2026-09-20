@@ -92,6 +92,8 @@ than installed partially ([`LeaseManager::register_lease`](../native/splat-agent
   forwarding.
 - Framing: one JSON object per line, `\n`-terminated, UTF-8 **without** a byte-order mark. A
   request frame longer than 1 MiB (excluding the newline) is refused and the connection closed.
+  The bridge holds the same cap the other way: a daemon frame that passes 1 MiB without ending is
+  abandoned with the connection.
 - Protocol version: `3`. A first frame that is not a `HELLO`, or any request outside an
   `AUTHENTICATED` frame, closes the connection.
 

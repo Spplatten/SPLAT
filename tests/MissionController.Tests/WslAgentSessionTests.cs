@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -70,6 +71,22 @@ public sealed class WslAgentSessionTests
         var refused = Assert.IsType<WslAgentHandshakeException>(failure);
         Assert.Contains("missing or invalid authToken", refused.Message);
         Assert.Contains("older than this bridge", refused.Message);
+    }
+
+    /// <summary>
+    /// Whatever sits on the daemon's port can send a line it never ends. A StreamReader grew with it without
+    /// limit; the bridge now abandons the connection at the daemon's own frame cap, having sent only the HELLO.
+    /// </summary>
+    [Fact]
+    public async Task AFrameWithoutAnEnd_IsAbandonedAtTheCap_NotBufferedForever()
+    {
+        string endless = new string('x', WslAgentSession.MaxFrameBytes * 2);
+
+        var (failure, sent) = await HandshakeAgainstAsync(_ => endless);
+
+        Assert.IsType<InvalidDataException>(failure);
+        Assert.Contains("without ending a frame", failure!.Message);
+        Assert.Single(StandInAgent.Frames(sent));
     }
 
     /// <summary>Two identical requests on one connection carry different proofs, so neither stands in for the other.</summary>

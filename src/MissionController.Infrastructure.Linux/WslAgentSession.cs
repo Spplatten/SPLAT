@@ -36,14 +36,21 @@ public sealed class WslAgentSession : IDisposable
     private static readonly byte[] DaemonLabel = Encoding.ASCII.GetBytes("splat-agent/3 daemon");
     private static readonly byte[] RequestLabel = Encoding.ASCII.GetBytes("splat-agent/3 request");
 
-    private readonly StreamReader _reader;
+    /// <summary>
+    /// The most of one frame this side will hold while waiting for its newline: the daemon's own cap on a
+    /// request, so the two sides bound each other alike. A StreamReader had no ceiling, so whatever sat on
+    /// the daemon's port could grow this host by the size of a line it never ended.
+    /// </summary>
+    public const int MaxFrameBytes = 1024 * 1024;
+
+    private readonly FrameReader _reader;
     private readonly StreamWriter _writer;
     private readonly byte[] _key;
     private readonly byte[] _clientNonce;
     private readonly byte[] _serverNonce;
     private ulong _sequence;
 
-    private WslAgentSession(StreamReader reader, StreamWriter writer, byte[] key, byte[] clientNonce, byte[] serverNonce)
+    private WslAgentSession(FrameReader reader, StreamWriter writer, byte[] key, byte[] clientNonce, byte[] serverNonce)
     {
         _reader = reader;
         _writer = writer;
@@ -62,7 +69,7 @@ public sealed class WslAgentSession : IDisposable
         ArgumentException.ThrowIfNullOrEmpty(token);
 
         var encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-        var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true);
+        var reader = new FrameReader(stream);
         // UTF-8 WITHOUT a byte order mark. `Encoding.UTF8` emits one, so a StreamWriter built on it prepended
         // EF BB BF to the first write and the daemon answered every request with "Invalid JSON request:
         // expected value at line 1 column 1". A BOM is meaningless on a socket and fatal to a line-delimited
@@ -125,7 +132,6 @@ public sealed class WslAgentSession : IDisposable
         }
         catch
         {
-            reader.Dispose();
             writer.Dispose();
             throw;
         }
@@ -171,8 +177,73 @@ public sealed class WslAgentSession : IDisposable
 
     public void Dispose()
     {
-        _reader.Dispose();
         _writer.Dispose();
+    }
+
+    /// <summary>
+    /// Newline-delimited frames off the socket, holding at most <see cref="MaxFrameBytes"/> of one while
+    /// waiting for its end. Decoded as UTF-8, a trailing carriage return dropped, null once the peer has
+    /// closed with nothing pending: the shape StreamReader.ReadLineAsync gave, minus its unbounded growth.
+    /// </summary>
+    private sealed class FrameReader
+    {
+        private readonly Stream _stream;
+        private byte[] _buffer = new byte[4096];
+        private int _length;
+
+        public FrameReader(Stream stream) => _stream = stream;
+
+        public async ValueTask<string?> ReadLineAsync(CancellationToken ct)
+        {
+            while (true)
+            {
+                int newline = Array.IndexOf(_buffer, (byte)'\n', 0, _length);
+                if (newline >= 0)
+                {
+                    string line = Decode(newline);
+                    int rest = _length - (newline + 1);
+                    Buffer.BlockCopy(_buffer, newline + 1, _buffer, 0, rest);
+                    _length = rest;
+                    return line;
+                }
+
+                if (_length > MaxFrameBytes)
+                {
+                    throw new InvalidDataException(
+                        $"The daemon's port sent more than {MaxFrameBytes} bytes without ending a frame, so the connection was abandoned.");
+                }
+
+                if (_length == _buffer.Length)
+                {
+                    Array.Resize(ref _buffer, Math.Min(_buffer.Length * 2, MaxFrameBytes + 4096));
+                }
+
+                int read = await _stream.ReadAsync(_buffer.AsMemory(_length), ct);
+                if (read == 0)
+                {
+                    if (_length == 0)
+                    {
+                        return null;
+                    }
+
+                    string tail = Decode(_length);
+                    _length = 0;
+                    return tail;
+                }
+
+                _length += read;
+            }
+        }
+
+        private string Decode(int end)
+        {
+            if (end > 0 && _buffer[end - 1] == (byte)'\r')
+            {
+                end--;
+            }
+
+            return Encoding.UTF8.GetString(_buffer, 0, end);
+        }
     }
 
     /// <summary>A 32-byte value from a hex string property, or null for anything else.</summary>
