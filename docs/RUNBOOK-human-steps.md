@@ -131,7 +131,7 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 626`, on a line ending `(net10.0)`. The `dotnet` on this
+**Expect:** `Passed! - Failed: 0, Passed: 634`, on a line ending `(net10.0)`. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
 
@@ -461,8 +461,8 @@ distro and anything else using WSL, including Docker Desktop.
 
 - **Building the MSIX package** — deferred. `packaging/build-msix.ps1` publishes self-contained, as
   `dist\App` now is too, so reviving it is packaging and signing, not reconciling two builds.
-- **Windows network denial for the fifteen templates without it** — still open, and a design
-  decision before it is anything to run. Of the 49 catalog templates, 34 launch their tool in an
+- **Windows network denial for the sixteen templates without it** — still open, and a design
+  decision before it is anything to run. Of the 49 catalog templates, 33 launch their tool in an
   AppContainer with no capabilities, so their network denial is enforced. One needs the network
   (Grant Opportunity Ingestion, `EgressScope.ToolProcess`); an AppContainer chooses network or none,
   not a host, so its destination is a claim, not a control. Fourteen are built on WMI, the Event Log

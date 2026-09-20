@@ -461,7 +461,30 @@ public class McpServerHandler
         // CIRCUIT BREAKER BEFORE EFFECTS: If this principal/actor is revoked, fail closed immediately.
         if (_revocationManager != null)
         {
-            var revStatus = await _revocationManager.CheckRevocationAsync(actor, ct);
+            RevocationStatus revStatus;
+            try
+            {
+                revStatus = await _revocationManager.CheckRevocationAsync(actor, ct);
+            }
+            catch (RevocationUnavailableException ex)
+            {
+                // No answer is not the same as "not revoked". The call is refused, and the refusal
+                // is recorded, so a revocation database that quietly went missing shows up as
+                // refused calls rather than as calls that were never checked.
+                await _auditLedger.AppendLogAsync(
+                    Guid.NewGuid(),
+                    $"mcp-tool-{toolName}",
+                    "CALL_REFUSED_REVOCATION_UNREADABLE",
+                    $"Whether principal '{actor}' is revoked could not be established: {ex.Message}",
+                    actor,
+                    ct);
+
+                return CreateErrorResponse(
+                    request.Id,
+                    -32003,
+                    $"Execution refused. Whether principal '{actor}' has been revoked could not be established: {ex.Message}");
+            }
+
             if (revStatus.IsRevoked)
             {
                 await _auditLedger.AppendLogAsync(

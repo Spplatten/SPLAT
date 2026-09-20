@@ -112,6 +112,25 @@ then checked the same way as everything above. The rows marked "…" are from
 | … P3 an "unforgeable" bundle showing "what syscalls were attempted"; P4 "zero residual footprint" | **False** | The bundle is unsigned and holds no syscall trace. `END-GOAL.md` keeps the kernel boot line as the one host-wide change | Rewritten to the roadmap's exits |
 | … "hardware-grade", "sub-second lifecycle" | **Unsupported** | No measurement | Removed |
 
+## Second parallel session, 2026-09-19 afternoon
+
+The same session left a second batch in the shared tree and marked five roadmap rows closed. Three
+of them were, or were most of the way there. Two were not, and one had shipped a template that no
+longer works. Checked the same way as the rest: by running it.
+
+| Claim | Verdict | Evidence | Action |
+| --- | --- | --- | --- |
+| "`sysops-event-triage` swapped `Get-WinEvent` for native `wevtutil.exe qe`, eliminating the local subsystem marker and moving the template into network-denied AppContainer containment" | **False** | The template's own bound command line, run in the container it had been moved into, returns `Failed to open event query. Access is denied.` three times, exit 5. The same command outside the container returns events. The Event Log service is reached over RPC either way | Reverted: the template is back on `Get-WinEvent` with its marker, and the census is back to 33 of 49. The measurement is kept as a test that fails if a later Windows build opens the path |
+| F19: "revocations survive a restart; the manager hydrates on cold start" | **Partly** | The store and the schema are real and a revocation does survive a restart. The manager set its loaded flag before the read finished, so a check arriving during cold start read an empty index and cleared a revoked principal, and it caught every read failure silently, so an unreadable list cleared everyone for the life of the process | Load blocks every caller, a failed load is retried, and an unreadable list refuses the call at both gates instead of answering it. Four tests, each run against the code it replaced |
+| AG-F07: "recalled memories and working observations are fenced… system prompts instruct models never to execute recalled text" | **Partly** | True of the goal decomposer, which is what the row had asked for. The workflow `MemoryRecall` node still emitted recalled snippets raw, fences included, into output that is substituted into later nodes and their prompts | The header and the fence rule are one shared `RecalledContext`; the workflow node uses it. A test recalls a snippet that closes its own fence and issues an instruction |
+| F23: "sweeps verify that physical WAL truncation actually occurred" | **True**, and not the whole row | The busy column is read and reported. But nothing in `src/` constructs `DataRetentionService`; its only caller is its own test, so no host ever sweeps | Row returned to half done, with the reason stated |
+| "Two ledgers: closed, unified via `SPLAT_DB_PATH`" | **False** as closed | Both hosts read the variable, which is the mechanism. Unset — every default install — the console still chains into `missioncontroller.db` and `splat-mcp` into `audit_ledger.db` | Row returned to open, crediting the mechanism. An empty variable is now treated as unset rather than as the empty path |
+| `docs/SPLAT-Field-Guide.published` recorded a hash for a page that was never published | **False** | The live page was version 32 and did not carry the edit whose hash was recorded. That file is what the build checks, so the page could have rotted behind a passing test | Recorded again at the republish this landing makes |
+
+The pattern is the one from the first pass, in a different place: the work is mostly real, and the
+sentence describing it is written as though the last mile were done. A row that says **Closed** is
+read by someone deciding what to build next.
+
 ## Not yet audited
 
 - **The compliance package's summary** (`ComplianceArchiveExporter.GenerateComplianceSummary`). It

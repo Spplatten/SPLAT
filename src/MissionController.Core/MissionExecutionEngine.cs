@@ -106,9 +106,45 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         };
 
         // 1.1 Revocation Circuit Breaker Check
+        // The check runs outside the yielding path because C# forbids yield inside a try that
+        // catches, and this one has to catch: an unreadable revocation list refuses the mission
+        // rather than escaping as an unhandled exception into whatever is enumerating.
+        RevocationStatus? revocation = null;
+        string? revocationUnreadable = null;
         if (_revocationManager != null)
         {
-            var revStatus = await _revocationManager.CheckRevocationAsync(operatorIdentity, cancellationToken);
+            try
+            {
+                revocation = await _revocationManager.CheckRevocationAsync(operatorIdentity, cancellationToken);
+            }
+            catch (RevocationUnavailableException ex)
+            {
+                revocationUnreadable = ex.Message;
+            }
+        }
+
+        if (revocationUnreadable != null)
+        {
+            facts.Admission = "Refused: the revocation list could not be read";
+            facts.ExecutionState = "Refused";
+            await SealRunFactsAsync(facts);
+
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.Stderr,
+                $"SECURITY ABORT: whether '{operatorIdentity}' is revoked could not be established. {revocationUnreadable}",
+                DateTime.UtcNow);
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.StatusChange,
+                "Mission aborted by Circuit Breaker (Revocation List Unreadable).",
+                DateTime.UtcNow);
+            yield break;
+        }
+
+        if (revocation != null)
+        {
+            var revStatus = revocation;
             if (revStatus.IsRevoked)
             {
                 facts.Admission = "Refused: the principal is revoked";

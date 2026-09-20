@@ -120,6 +120,16 @@ public interface IIncidentRevocationManager
     Task<bool> IsRevokedAsync(string identifier, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// The revocation list could not be read. A revocation check that cannot see its own list has no
+/// answer to give: reporting "not revoked" would turn an unreachable database into a principal
+/// that passes the circuit breaker. Both gates refuse the call instead.
+/// </summary>
+public sealed class RevocationUnavailableException : Exception
+{
+    public RevocationUnavailableException(string message, Exception? inner = null) : base(message, inner) { }
+}
+
 public interface IRevocationStore
 {
     Task<IReadOnlyList<RevocationEntry>> LoadRevocationsAsync(CancellationToken cancellationToken = default);

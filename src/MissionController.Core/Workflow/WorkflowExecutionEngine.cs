@@ -720,10 +720,13 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         {
             var results = await _semanticMemoryIndex.SearchSimilarMissionsAsync(query, topK, minScore, ct);
             var sb = new StringBuilder();
-            sb.AppendLine($"[MEMORY_RECALL_RESULTS] Query: '{query}' | Matches: {results.Count}");
+            // This node's output is substituted into later nodes, model prompts included, so it
+            // carries the same header and the same fence rule as every other recall site: what a
+            // past mission wrote is material to read, not a step to follow.
+            sb.AppendLine($"[MEMORY_RECALL_RESULTS — {RecalledContext.Header}] Query: '{RecalledContext.Fence(query)}' | Matches: {results.Count}");
             foreach (var r in results)
             {
-                sb.AppendLine($"- [Score {r.SimilarityScore:F4}] {r.TemplateId}: {r.ContentSnippet}");
+                sb.AppendLine($"- [Score {r.SimilarityScore:F4}] {r.TemplateId}: {RecalledContext.Fence(r.ContentSnippet)}");
             }
             return sb.ToString().TrimEnd();
         }

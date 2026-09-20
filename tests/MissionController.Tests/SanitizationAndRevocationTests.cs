@@ -226,4 +226,66 @@ public class SanitizationAndRevocationTests
             }
         }
     }
+
+    /// <summary>A revocation store that cannot be read, which is the case that used to clear everyone.</summary>
+    private sealed class UnreadableRevocationStore : IRevocationStore
+    {
+        public Task<IReadOnlyList<RevocationEntry>> LoadRevocationsAsync(CancellationToken cancellationToken = default)
+            => throw new SqliteException("database disk image is malformed", 11);
+
+        public Task SaveRevocationAsync(RevocationEntry entry, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task AMissionWhoseRevocationListCannotBeRead_IsRefusedRatherThanRun()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), $"engine_revocation_unreadable_{Guid.NewGuid():N}.db");
+        try
+        {
+            var ctx = new SqliteStorageContext(dbPath);
+            var ledger = new SqliteChainedAuditLedger(ctx);
+            var launcher = new MockProcessLauncher();
+            var engine = new MissionExecutionEngine(
+                new MockJailManager(),
+                launcher,
+                new MockVertexStreamClient(),
+                ledger,
+                name => new MockJobSandbox(),
+                semanticMemoryIndex: null,
+                dlpSanitizer: null,
+                credentialSanitizer: null,
+                revocationManager: new IncidentRevocationManager(ledger, new UnreadableRevocationStore()));
+
+            var template = new SingleToolTemplate(
+                "dns-test", "DNS Audit", "Tests DNS", "Net", "gemini-2.0-flash",
+                new SingleToolDefinition("tool-1", "ping", "cmd.exe", "/c ping 127.0.0.1", new[] { 0 }),
+                new EgressRule("googleapis.com"), "Analyze output", new Dictionary<string, string>());
+
+            var chunks = new List<MissionChunk>();
+            await foreach (var chunk in engine.ExecuteMissionAsync(template, new Dictionary<string, string>(), "operator"))
+            {
+                chunks.Add(chunk);
+            }
+
+            Assert.False(launcher.WasLaunched);
+            Assert.Contains(chunks, c => c.Content.Contains("SECURITY ABORT") && c.Content.Contains("could not be established"));
+            Assert.Contains(chunks, c => c.Content.Contains("Revocation List Unreadable"));
+
+            // And the mission's own record says why it never ran.
+            var facts = (await ledger.GetAuditLogsAsync(chunks[0].MissionId))
+                .Single(r => r.Action == MissionRunFacts.LedgerAction);
+            Assert.Contains("revocation list could not be read", facts.Details);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            if (File.Exists(dbPath))
+            {
+                try { File.Delete(dbPath); } catch { }
+            }
+        }
+    }
 }

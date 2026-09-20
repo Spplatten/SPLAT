@@ -10,12 +10,20 @@ public sealed class SqliteStorageContext
     private readonly string _connectionString;
     private static readonly object Lock = new();
 
+    /// <summary>
+    /// The one place both hosts can be pointed at a single chain. An empty variable is treated as
+    /// unset rather than as the empty path, which would otherwise open a database beside whatever
+    /// the working directory happened to be.
+    /// </summary>
     public static string GetDefaultDatabasePath() =>
-        Environment.GetEnvironmentVariable("SPLAT_DB_PATH") ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "MissionController",
-            "Data",
-            "missioncontroller.db");
+        Environment.GetEnvironmentVariable("SPLAT_DB_PATH") is { Length: > 0 } configured
+        && !string.IsNullOrWhiteSpace(configured)
+            ? configured
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "MissionController",
+                "Data",
+                "missioncontroller.db");
 
     public SqliteStorageContext(string? dbPath = null)
     {

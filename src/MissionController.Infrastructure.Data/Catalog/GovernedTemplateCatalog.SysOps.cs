@@ -113,16 +113,15 @@ public static partial class GovernedTemplateCatalog
             new SingleToolDefinition(
                 "event_triage_tool",
                 "System & Application Channel Sweep",
-                CmdExe,
-                // System and Application are user-readable channels by default. Using wevtutil.exe
-                // instead of Get-WinEvent allows this tool to execute inside the network-denied
-                // AppContainer sandbox because native wevtutil can query the event log without
-                // triggering managed RPC/DCOM subsystem barriers.
-                "/c echo --- SYSTEM CHANNEL (CRITICAL/ERROR/WARNING) --- & wevtutil.exe qe System \"/q:*[System[(Level=1 or Level=2 or Level=3)]]\" /c:{MaxEventCount} /rd:true /f:text & echo --- APPLICATION CHANNEL (CRITICAL/ERROR) --- & wevtutil.exe qe Application \"/q:*[System[(Level=1 or Level=2)]]\" /c:{MaxEventCount} /rd:true /f:text & echo --- UNEXPECTED SHUTDOWNS --- & wevtutil.exe qe System \"/q:*[System[(EventID=41 or EventID=1001 or EventID=6008)]]\" /c:{MaxEventCount} /rd:true /f:text",
+                PowerShellExe,
+                // System and Application are user-readable channels by default, so this sweep
+                // works for an unprivileged Tier-1 technician - unlike the Security channel,
+                // which needs an explicit Event Log Readers delegation.
+                Ps(@"Write-Output '--- SYSTEM CHANNEL (CRITICAL/ERROR/WARNING) ---'; Get-WinEvent -LogName System -MaxEvents {MaxEventCount} -ErrorAction SilentlyContinue | Where-Object Level -le 3 | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,Message | Format-List; Write-Output '--- APPLICATION CHANNEL (CRITICAL/ERROR) ---'; Get-WinEvent -LogName Application -MaxEvents {MaxEventCount} -ErrorAction SilentlyContinue | Where-Object Level -le 2 | Select-Object TimeCreated,Id,ProviderName,LevelDisplayName,Message | Format-List; Write-Output '--- UNEXPECTED SHUTDOWNS ---'; Get-WinEvent -LogName System -MaxEvents {MaxEventCount} -ErrorAction SilentlyContinue | Where-Object Id -in 41,1001,6008 | Select-Object TimeCreated,Id,ProviderName,Message | Format-List"),
                 ExitOkOrPartial,
                 TimeoutSeconds: 150,
-                MaxMemoryBytes: Mb(128),
-                MaxCpuPercent: 50),
+                MaxMemoryBytes: Mb(384),
+                MaxCpuPercent: 60),
             "You are a Tier-2 Escalation Engineer. Do not list events chronologically - cluster them by provider and root cause, then rank clusters by operational impact and state how many occurrences each represents. Event 41 with 6008 means the machine lost power or hard-hung rather than shutting down, which points at hardware, thermal, or driver faults, not software. Disk provider errors (Event 7, 51, 153) indicate failing storage and outrank everything else on the list. Explicitly separate benign recurring noise from genuine faults, and name the single most likely root cause with the evidence supporting it.",
             new Dictionary<string, string>
             {
