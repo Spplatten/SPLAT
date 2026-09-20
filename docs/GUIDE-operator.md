@@ -200,10 +200,11 @@ accepts the program and the hooks still refuse what they should — and that is 
 
 ### What does not need you
 
-The mount namespace for the workload (P2 of the plan), a transport that carries the caller's
-identity instead of a shared secret, and pinned kernel maps are all real work and none of it is
-blocked on root to *write*. Each is blocked on being *proven*, which comes back to step 1's
-probes, and each is large enough to deserve its own conversation rather than a line here.
+The mount namespace for the workload (P2 of the plan), policing UDP, pinned kernel maps and a
+guest-side ceiling policy are all real work and none of it is blocked on root to *write*. Each is
+blocked on being *proven*, which comes back to step 1's probes. What I think should be done about
+each, and in what order, is in
+[the hardening note](audits/2026-09-20-substrate-hardening.md).
 
 ### What to send back
 

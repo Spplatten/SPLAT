@@ -20,6 +20,7 @@ change the code rather than the plan, start with [CONTEXT.md](CONTEXT.md).
 | [audits/2026-09-09-oem-subtraction-plan.md](audits/2026-09-09-oem-subtraction-plan.md) | **The current plan.** Phases P0–P3, the monetization argument, the term-sheet defects. Supersedes every plan document below it. |
 | [RUNBOOK-human-steps.md](RUNBOOK-human-steps.md) | What only a human can do — the `sudo` steps, the SDK installs, the reboots. Nothing in it is open right now — Part 0, the .NET 10 SDK, closed 2026-09-09. |
 | [GUIDE-operator.md](GUIDE-operator.md) | For the operator, after the 2026-09-20 substrate audit: what changed and why, a reading order for the Linux side, and the root steps that are theirs, with commands and expected output. |
+| [audits/2026-09-20-substrate-hardening.md](audits/2026-09-20-substrate-hardening.md) | The five weaknesses of the Linux lease after the audit — deny-list not jail, UDP unpoliced, nothing survives the daemon, the shared secret, the unproven record change — with a recommendation, an order and a proof for each. Feeds P2 of the plan. |
 | [audits/2026-09-05-orchestration-plan.md](audits/2026-09-05-orchestration-plan.md) | Re-sequenced, not retired. Its Phase 1 was subtracted and its Phase 2 rescoped, but its ordering argument still holds. |
 
 ## How the code is put together

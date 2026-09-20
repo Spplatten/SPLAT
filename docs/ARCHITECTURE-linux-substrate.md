@@ -263,4 +263,6 @@ Three refusals — `readOnlyFs`, copy-on-write scratch, and executing code an ag
 one missing piece: the workload has no mount namespace of its own. `unshare(CLONE_NEWNS)` plus
 `pivot_root`, inside the same `pre_exec` closure, is P2 of
 [the live plan](audits/2026-09-09-oem-subtraction-plan.md). `cow.rs` holds the overlay half, parked
-until then.
+until then. [The hardening note of 2026-09-20](audits/2026-09-20-substrate-hardening.md) puts that
+first and sets out the four behind it — UDP, pinning, a guest-side ceiling policy, and cheap
+re-proof — with how each is proven.
