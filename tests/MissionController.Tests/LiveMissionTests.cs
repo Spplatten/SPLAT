@@ -148,8 +148,9 @@ public sealed class LiveMissionTests
             _out.WriteLine($"mission {missionId}: {chunks.Count} chunks, {analysis.Length} chars of analysis");
             _out.WriteLine(analysis.Length > 600 ? analysis[..600] + "…" : analysis);
 
-            Assert.DoesNotContain("MODEL REQUEST FAILED", analysis);
-            Assert.NotEqual(0, analysis.Trim().Length);
+            // The model is asserted at the END of this test, not here: everything below runs on the
+            // mission's own evidence, so a provider outage still leaves that proven rather than
+            // costing the whole live run.
 
             // The record is built from what the mission sealed, and nothing else.
             var assembler = new MissionRunRecordAssembler(ledger, merkle, new ComplianceArchiveExporter(merkle, signer));
@@ -179,7 +180,7 @@ public sealed class LiveMissionTests
 
             var signature = JsonSerializer.Deserialize<Dictionary<string, string>>(
                 File.ReadAllText(Path.Combine(bundle, "signature.json")))!;
-            Assert.Equal(keyId, signature["keyId"]);
+            Assert.Equal(keyId, signature["KeyId"]);
 
             var python = Process.Start(new ProcessStartInfo("python", "verify_proofs.py")
             {
@@ -193,6 +194,10 @@ public sealed class LiveMissionTests
             _out.WriteLine(verifierOutput);
 
             Assert.True(python.ExitCode == 0, $"the verifier refused a bundle this run produced: {verifierOutput}");
+
+            // Last, because it is the only part that depends on the provider being reachable.
+            Assert.DoesNotContain("MODEL REQUEST FAILED", analysis);
+            Assert.NotEqual(0, analysis.Trim().Length);
         }
         finally
         {

@@ -131,6 +131,18 @@ The pattern is the one from the first pass, in a different place: the work is mo
 sentence describing it is written as though the last mile were done. A row that says **Closed** is
 read by someone deciding what to build next.
 
+## The live run, 2026-09-20
+
+The operator supplied a key, so a mission ran against the real model for the first time. Three things
+came out of it.
+
+| Claim | Verdict | Evidence | Action |
+| --- | --- | --- | --- |
+| "of the 49 agents in the catalog, 33 launch their tool with no network access whatsoever. That wall is real" | **True about the wall, misleading about the agents** | A live `net-dns-audit` returned "Unable to contact IP driver. General failure." and the model reported a Critical network-stack fault on a machine whose network was fine. Sweeping all 33 the same way - each template's own bound command line, run inside the container and outside it, same jail, same restricted token - **21 answer differently inside**. Three (`network-smb-posture`, `endpoint-firewall-audit`, `secops-process-scan`) return nothing at all and exit 0 | Both guide copies now say so in the same paragraph as the count. A roadmap row carries the measurement and the per-template decision. `NetworkToolsUnderDenialTests` pins the 21 |
+| The 30-second stream stall against a thinking model | **Settled: it does not trip** | Sonnet 5 with adaptive thinking, first bytes at 2.8 s | Roadmap row closed with the measurement |
+| `ClaudeStreamClient` "never fabricates findings" | **True, observed** | An organisation-scoped key is refused by the API; the client passed the provider's message through verbatim and produced no analysis | Guide notes the workspace-scoped key requirement |
+| Roadmap 3.1's exit: "someone who did not run a mission can verify from the bundle alone" | **True, on real data** | A live mission's bundle was signed, and `verify_proofs.py` verified the proofs, the file hashes and the signature from the extracted folder | `LiveMissionTests` keeps that run repeatable |
+
 ## Not yet audited
 
 - **The compliance package's summary** (`ComplianceArchiveExporter.GenerateComplianceSummary`). It

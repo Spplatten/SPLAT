@@ -74,13 +74,18 @@ public static class CapabilityManifest
         new("Caller identity", LeaseEnforcement.Daemon),
         new("Workload privilege", LeaseEnforcement.Daemon),
         new("Command coherence", LeaseEnforcement.Daemon),
-        new("readOnlyFs", LeaseEnforcement.Refused),
+        // The workload's own root, added to the substrate's policy on 2026-09-20: the system
+        // directories read-only, the working directory, a fresh /tmp, /proc and six device nodes,
+        // and nothing else. It is Daemon rather than Kernel because a mount namespace is the
+        // daemon's doing, and it stays here rather than under the two rows it replaced because the
+        // policy still calls it pending its probe.
+        new("The workload's root", LeaseEnforcement.Daemon),
+        new("readOnlyFs", LeaseEnforcement.Daemon),
         new("overlayFs.enableCow", LeaseEnforcement.Refused),
         new("UDP to an unconnected socket", LeaseEnforcement.NotPoliced),
         new("AF_UNIX / AF_NETLINK", LeaseEnforcement.NotPoliced),
         new("Inherited file descriptors", LeaseEnforcement.NotPoliced),
-        new("Filesystem writes outside the workspace", LeaseEnforcement.NotPoliced),
-        new("Ambient reads", LeaseEnforcement.NotPoliced),
+        new("Filesystem writes and reads outside the jail's contents", LeaseEnforcement.NotPoliced),
     };
 
     /// <summary>
