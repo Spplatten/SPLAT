@@ -461,15 +461,15 @@ distro and anything else using WSL, including Docker Desktop.
 
 - **Building the MSIX package** — deferred. `packaging/build-msix.ps1` publishes self-contained, as
   `dist\App` now is too, so reviving it is packaging and signing, not reconciling two builds.
-- **Windows network denial for the sixteen templates without it** — still open, and a design
-  decision before it is anything to run. Of the 49 catalog templates, 33 launch their tool in an
+- **Windows network denial for the fifteen templates without it** — still open, and a design
+  decision before it is anything to run. Of the 49 catalog templates, 34 launch their tool in an
   AppContainer with no capabilities, so their network denial is enforced. One needs the network
   (Grant Opportunity Ingestion, `EgressScope.ToolProcess`); an AppContainer chooses network or none,
-  not a host, so its destination is a claim, not a control. Fifteen are built on WMI, the Event Log
+  not a host, so its destination is a claim, not a control. Fourteen are built on WMI, the Event Log
   service, Defender or the service manager, which the container would also cut off, so they keep a
   network stack they do not need. Closing both needs an egress control that is not also an RPC
   wall — a WFP filter is the candidate. `IEgressFirewall` covers neither; it guards SPLAT's own
-  model-API client. Counted from the shipped catalog on 2026-09-10, and corrected here from "four"
+  model-API client. Counted from the shipped catalog on 2026-09-19, and corrected here from "four"
   and from "every tool that needs no network is denied".
 - **The rest of the plan** — P1 (the `splat-mcp` CLI, `doctor`, first-run provisioning) has no
   human-only step. P2, the mount namespace, will: its proof comes from the daemon probe, which needs

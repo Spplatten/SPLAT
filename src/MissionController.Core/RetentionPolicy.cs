@@ -97,7 +97,8 @@ public sealed record RetentionSweepResult(
     int AuditDetailsRedacted,
     int LegacyAuditEntriesSkipped,
     int VaultSecretsPurged,
-    bool Vacuumed)
+    bool Vacuumed,
+    bool WalTruncated = true)
 {
     public int TotalErased =>
         RawOutputsScrubbed + InputParametersScrubbed + AiAnalysesScrubbed +
@@ -107,5 +108,5 @@ public sealed record RetentionSweepResult(
         $"Retention sweep: {RawOutputsScrubbed} raw outputs, {InputParametersScrubbed} parameter sets, " +
         $"{AiAnalysesScrubbed} analyses scrubbed; {SemanticRowsDeleted} index rows and " +
         $"{VaultSecretsPurged} expired secrets deleted; {AuditDetailsRedacted} audit payloads redacted " +
-        $"({LegacyAuditEntriesSkipped} legacy entries not redactable); vacuum={Vacuumed}.";
+        $"({LegacyAuditEntriesSkipped} legacy entries not redactable); vacuum={Vacuumed}; walTruncated={WalTruncated}.";
 }

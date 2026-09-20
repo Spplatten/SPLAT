@@ -32,6 +32,7 @@ public class McpServerHandler
     private readonly IGovernedCrewEngine? _crewEngine;
     private readonly IGovernedCrewRegistry? _crewRegistry;
     private readonly IOperatorIdentityProvider _identityProvider;
+    private readonly IIncidentRevocationManager? _revocationManager;
 
     /// <summary>
     /// The ledger actor for the call in flight, resolved through <see cref="_identityProvider"/>.
@@ -112,7 +113,8 @@ public class McpServerHandler
         IOperatorIdentityProvider? identityProvider = null,
         string? workspaceRoot = null,
         McpEgressPolicy? egressPolicy = null,
-        IMissionRunRecordAssembler? runRecords = null)
+        IMissionRunRecordAssembler? runRecords = null,
+        IIncidentRevocationManager? revocationManager = null)
     {
         _runRecords = runRecords;
         _leasedExecutor = leasedExecutor ?? throw new ArgumentNullException(nameof(leasedExecutor));
@@ -133,6 +135,7 @@ public class McpServerHandler
         _workspaceRoot = _workspace.Root;
         // No policy means no network for run_command, not the caller's choice of network.
         _egressPolicy = egressPolicy ?? McpEgressPolicy.None;
+        _revocationManager = revocationManager;
     }
 
     /// <summary>
@@ -453,7 +456,28 @@ public class McpServerHandler
         // behind, and because the throw skipped the append that followed it, no ledger row either.
         // Resolving here means an unauthenticated caller reaches no executor and no filesystem.
         CurrentActor.Value = null;
-        await ResolveActorAsync(ct);
+        string actor = await ResolveActorAsync(ct);
+
+        // CIRCUIT BREAKER BEFORE EFFECTS: If this principal/actor is revoked, fail closed immediately.
+        if (_revocationManager != null)
+        {
+            var revStatus = await _revocationManager.CheckRevocationAsync(actor, ct);
+            if (revStatus.IsRevoked)
+            {
+                await _auditLedger.AppendLogAsync(
+                    Guid.NewGuid(),
+                    $"mcp-tool-{toolName}",
+                    "CALL_REFUSED_REVOKED_PRINCIPAL",
+                    $"Principal '{actor}' is revoked: {revStatus.Entry?.Reason}",
+                    actor,
+                    ct);
+
+                return CreateErrorResponse(
+                    request.Id,
+                    -32003,
+                    $"Execution refused. Principal '{actor}' has been revoked: {revStatus.Entry?.Reason}");
+            }
+        }
 
         McpToolCallResult toolResult;
 

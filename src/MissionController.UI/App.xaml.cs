@@ -187,6 +187,7 @@ public partial class App : Application
         services.AddSingleton<IApiKeyValidator, ApiKeyValidator>();
         services.AddSingleton<ITokenLifecycleManager, TokenLifecycleManager>();
         services.AddSingleton<ICredentialSanitizer, PromptCredentialSanitizer>();
+        services.AddSingleton<IRevocationStore, SqliteRevocationStore>();
         services.AddSingleton<IIncidentRevocationManager, IncidentRevocationManager>();
 
         // Core Engine & Cognitive Brain
