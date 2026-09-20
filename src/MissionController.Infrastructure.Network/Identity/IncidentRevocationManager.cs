@@ -10,11 +10,36 @@ namespace MissionController.Infrastructure.Network.Identity;
 public sealed class IncidentRevocationManager : IIncidentRevocationManager
 {
     private readonly IAuditLedger _auditLedger;
+    private readonly IRevocationStore? _revocationStore;
     private readonly ConcurrentDictionary<string, RevocationEntry> _revocationIndex = new(StringComparer.OrdinalIgnoreCase);
+    private int _initialized;
 
-    public IncidentRevocationManager(IAuditLedger auditLedger)
+    public IncidentRevocationManager(IAuditLedger auditLedger, IRevocationStore? revocationStore = null)
     {
-        _auditLedger = auditLedger;
+        _auditLedger = auditLedger ?? throw new ArgumentNullException(nameof(auditLedger));
+        _revocationStore = revocationStore;
+    }
+
+    private async ValueTask EnsureInitializedAsync(CancellationToken cancellationToken = default)
+    {
+        if (Interlocked.CompareExchange(ref _initialized, 1, 0) == 0)
+        {
+            if (_revocationStore != null)
+            {
+                try
+                {
+                    var persisted = await _revocationStore.LoadRevocationsAsync(cancellationToken);
+                    foreach (var entry in persisted)
+                    {
+                        _revocationIndex[entry.Identifier] = entry;
+                    }
+                }
+                catch
+                {
+                    // Fall back to in-memory index if persistent store fails
+                }
+            }
+        }
     }
 
     public async Task RevokeAsync(
@@ -27,6 +52,8 @@ public sealed class IncidentRevocationManager : IIncidentRevocationManager
         if (string.IsNullOrWhiteSpace(identifier))
             throw new ArgumentException("Identifier to revoke cannot be empty.", nameof(identifier));
 
+        await EnsureInitializedAsync(cancellationToken);
+
         var entry = new RevocationEntry(
             Identifier: identifier,
             RevocationType: revocationType,
@@ -35,6 +62,11 @@ public sealed class IncidentRevocationManager : IIncidentRevocationManager
             RevokedAtUtc: DateTimeOffset.UtcNow);
 
         _revocationIndex[identifier] = entry;
+
+        if (_revocationStore != null)
+        {
+            await _revocationStore.SaveRevocationAsync(entry, cancellationToken);
+        }
 
         // Log emergency revocation event to immutable audit ledger
         await _auditLedger.AppendLogAsync(
@@ -46,28 +78,41 @@ public sealed class IncidentRevocationManager : IIncidentRevocationManager
             cancellationToken: cancellationToken);
     }
 
-    public Task<RevocationStatus> CheckRevocationAsync(string identifier, CancellationToken cancellationToken = default)
+    public async Task<RevocationStatus> CheckRevocationAsync(string identifier, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(identifier))
         {
-            return Task.FromResult(new RevocationStatus(false));
+            return new RevocationStatus(false);
         }
+
+        await EnsureInitializedAsync(cancellationToken);
 
         if (_revocationIndex.TryGetValue(identifier, out var entry))
         {
-            return Task.FromResult(new RevocationStatus(true, entry));
+            return new RevocationStatus(true, entry);
         }
 
-        return Task.FromResult(new RevocationStatus(false));
+        int colonIdx = identifier.IndexOf(':');
+        if (colonIdx > 0 && colonIdx < identifier.Length - 1)
+        {
+            string suffix = identifier[(colonIdx + 1)..];
+            if (_revocationIndex.TryGetValue(suffix, out var suffixEntry))
+            {
+                return new RevocationStatus(true, suffixEntry);
+            }
+        }
+
+        return new RevocationStatus(false);
     }
 
-    public Task<bool> IsRevokedAsync(string identifier, CancellationToken cancellationToken = default)
+    public async Task<bool> IsRevokedAsync(string identifier, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(identifier))
         {
-            return Task.FromResult(false);
+            return false;
         }
 
-        return Task.FromResult(_revocationIndex.ContainsKey(identifier));
+        var status = await CheckRevocationAsync(identifier, cancellationToken);
+        return status.IsRevoked;
     }
 }

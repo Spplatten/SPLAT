@@ -102,6 +102,12 @@ public interface IIncidentRevocationManager
     Task<bool> IsRevokedAsync(string identifier, CancellationToken cancellationToken = default);
 }
 
+public interface IRevocationStore
+{
+    Task<IReadOnlyList<RevocationEntry>> LoadRevocationsAsync(CancellationToken cancellationToken = default);
+    Task SaveRevocationAsync(RevocationEntry entry, CancellationToken cancellationToken = default);
+}
+
 public interface ITokenValidator
 {
     Task<TokenValidationResult> ValidateTokenAsync(string rawToken, CancellationToken cancellationToken = default);

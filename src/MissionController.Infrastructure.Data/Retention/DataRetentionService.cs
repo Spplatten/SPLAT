@@ -84,7 +84,7 @@ public sealed class DataRetentionService
 
         // Checkpoint before vacuum: the -wal sidecar still holds pre-purge page images, and a
         // vacuum that runs ahead of the checkpoint leaves them readable on disk.
-        await CheckpointWalAsync(conn, cancellationToken);
+        bool walTruncated = await CheckpointWalAsync(conn, cancellationToken);
 
         bool vacuumed = false;
         if (policy.VacuumAfterSweep)
@@ -103,7 +103,8 @@ public sealed class DataRetentionService
             redaction.EntriesRedacted,
             redaction.LegacyEntriesSkipped,
             secretsPurged,
-            vacuumed);
+            vacuumed,
+            walTruncated);
     }
 
     /// <summary>
@@ -167,11 +168,20 @@ public sealed class DataRetentionService
         }
     }
 
-    private static async Task CheckpointWalAsync(SqliteConnection conn, CancellationToken cancellationToken)
+    private static async Task<bool> CheckpointWalAsync(SqliteConnection conn, CancellationToken cancellationToken)
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
-        await cmd.ExecuteNonQueryAsync(cancellationToken);
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (await reader.ReadAsync(cancellationToken))
+        {
+            // SQLite PRAGMA wal_checkpoint returns 3 integer columns:
+            // 0: busy (0 = checkpoint succeeded, 1 = checkpoint blocked because a reader held lock)
+            // 1: log (number of modified pages in WAL)
+            // 2: checkpointed (number of modified pages checkpointed to database)
+            int busy = reader.GetInt32(0);
+            return busy == 0;
+        }
+        return false;
     }
-
 }

@@ -73,7 +73,8 @@ public static class Program
             : $"splat-mcp: run_command and run_code may connect only to {serve.Egress}");
 
         // 1. Data & Storage Layer
-        string dbPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SPLAT", "audit_ledger.db");
+        string dbPath = Environment.GetEnvironmentVariable("SPLAT_DB_PATH")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SPLAT", "audit_ledger.db");
         byte[]? ledgerKey;
         SqliteChainedAuditLedger.ChainState chain;
         try
@@ -102,6 +103,8 @@ public static class Program
             : $"splat-mcp: the audit ledger is keyed by {serve.LedgerKeyPath}");
         var storageContext = new SqliteStorageContext(dbPath);
         var auditLedger = new SqliteChainedAuditLedger(storageContext, ledgerKey);
+        var revocationStore = new SqliteRevocationStore(storageContext);
+        var revocationManager = new IncidentRevocationManager(auditLedger, revocationStore);
         var templateRegistry = new SqliteTemplateRegistry(storageContext);
         var semanticMemory = new SqliteSemanticMemoryIndex(storageContext);
 
@@ -136,7 +139,7 @@ public static class Program
             semanticMemory,
             dlpSanitizer,
             credSanitizer,
-            null,
+            revocationManager,
             findingsExtractor);
 
         var investigationLoop = new GovernedInvestigationLoop(
@@ -190,7 +193,8 @@ public static class Program
                 new JwtTokenValidator(),
                 new ApiKeyValidator()),
             workspaceRoot: workspaceRoot,
-            egressPolicy: serve.Egress);
+            egressPolicy: serve.Egress,
+            revocationManager: revocationManager);
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (s, e) =>

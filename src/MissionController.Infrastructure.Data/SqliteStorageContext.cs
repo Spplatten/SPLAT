@@ -10,13 +10,16 @@ public sealed class SqliteStorageContext
     private readonly string _connectionString;
     private static readonly object Lock = new();
 
-    public SqliteStorageContext(string? dbPath = null)
-    {
-        string path = dbPath ?? Path.Combine(
+    public static string GetDefaultDatabasePath() =>
+        Environment.GetEnvironmentVariable("SPLAT_DB_PATH") ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "MissionController",
             "Data",
             "missioncontroller.db");
+
+    public SqliteStorageContext(string? dbPath = null)
+    {
+        string path = dbPath ?? GetDefaultDatabasePath();
 
         string? dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
@@ -122,6 +125,14 @@ public sealed class SqliteStorageContext
                     Name TEXT NOT NULL,
                     ProcessType TEXT NOT NULL,
                     CrewJson TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE TABLE IF NOT EXISTS Revocations (
+                    Identifier TEXT PRIMARY KEY,
+                    RevocationType TEXT NOT NULL,
+                    Reason TEXT NOT NULL,
+                    RevokedBy TEXT NOT NULL,
+                    RevokedAtUtc TEXT NOT NULL
                 );
             ";
             cmd.ExecuteNonQuery();
