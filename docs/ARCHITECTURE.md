@@ -1,5 +1,6 @@
 <!-- The map. Four companion documents hold the detail, MODULE_INFO.md holds the inventory, and
-     CONTEXT.md holds the why. Read out of the tree at 0027e57 on 2026-09-10. Relative links are
+     CONTEXT.md holds the why. Read out of the tree at 0027e57 on 2026-09-10; the substrate and
+     ledger rows and the continuum map re-read at 965366b on 2026-09-20. Relative links are
      checked by DocumentationDriftTests; everything else is only as current as the last person who
      re-read the code - so where a sentence here disagrees with the code, the code wins and this
      file has the bug. -->
@@ -20,6 +21,8 @@ tell which, for every boundary, without opening a file.
 | [ARCHITECTURE-windows-substrate.md](ARCHITECTURE-windows-substrate.md) | What a sensor process experiences on Windows — jail, job object, restricted token, AppContainer — and which apply when |
 | [ARCHITECTURE-linux-substrate.md](ARCHITECTURE-linux-substrate.md) | The BPF-LSM lease, the `splat-agent` daemon, the bridge on Windows, who authors a lease, and the evidence |
 | [ARCHITECTURE-agent-surface.md](ARCHITECTURE-agent-surface.md) | How an external agent gets in: `splat-mcp`, the LangGraph adapter, the Copilot / Semantic Kernel adapter |
+| [SCHEMA.md](SCHEMA.md) | The lease's contracts byte for byte and frame by frame — map keys, the ring-buffer record, protocol 3, the C# records — and what none of them promise |
+| [RUNBOOK.md](RUNBOOK.md) | What a kernel and a guest need for the daemon to enforce, the setup, the unit, and where developer shortcuts diverge from a hardened host |
 | [MODULE_INFO.md](MODULE_INFO.md) | Every buildable unit: target, references, what it owns, its tests, whether it ships |
 
 ---
@@ -92,7 +95,7 @@ Two things the picture says on purpose.
 | Which endpoints a `run_command` / `run_code` lease names | [`McpEgressPolicy`](../src/splat-mcp/McpEgressPolicy.cs) — the operator's `--egress` list; a caller may request part of it, never more | Check in `splat-mcp` | An agent writing its own destinations into the lease the kernel then enforces |
 | MCP `fs_read` / `fs_write` | [`WorkspaceGuard`](../src/splat-mcp/WorkspaceGuard.cs) — the final path of the opened handle | Check in `splat-mcp` | `..`, string-prefix tricks, junctions, symlinks |
 | Who acted | Windows logon session; in `splat-mcp`, optionally a validated credential | Check in SPLAT's process | Caller-supplied names |
-| The record of what happened | [`SqliteChainedAuditLedger`](../src/MissionController.Infrastructure.Data/SqliteChainedAuditLedger.cs) — SHA-256 chain over salted commitments, or HMAC-SHA256 under the operator's key file | Tamper evidence | Editing a row in place — **not** a rewrite by anyone who can write the database file, because no shipped code provisions the ledger's HMAC key |
+| The record of what happened | [`SqliteChainedAuditLedger`](../src/MissionController.Infrastructure.Data/SqliteChainedAuditLedger.cs) — SHA-256 chain over salted commitments; HMAC-SHA256 under the operator's key file once one is given (`SPLAT_LEDGER_KEY_FILE`, or `--ledger-key` on `splat-mcp`) | Tamper evidence | Unkeyed: editing a row in place, **not** a rewrite by anyone who can write the database file. Keyed: the rewrite too, since no one without the key can recompute a hash. Neither: the deletion of the newest rows, which only a saved anchor catches |
 
 ## Two hosts, one pipeline
 
@@ -157,6 +160,31 @@ of them runs a process itself.
 | [`WorkflowExecutionEngine`](../src/MissionController.Core/Workflow/WorkflowExecutionEngine.cs) | A node graph; `GovernedMission` nodes run through the mission engine and `SandboxedScript` nodes are refused |
 
 The detail is in [ARCHITECTURE-control-plane.md](ARCHITECTURE-control-plane.md#engines-that-compose-missions).
+
+## Architectural continuum map
+
+Every layer sits somewhere between two ends. At one end, **coupled on purpose**: one process,
+static dispatch, a struct laid out the way the kernel lays it out, because the boundary is on a
+latency- or safety-critical path and a seam there would only add a place to be wrong. At the other,
+**decoupled behind an interface**: because more than one implementation exists, or a test has to
+stand one in. The table says where each layer is, where it should be, and why. "Should be" is
+judged on what the layer has to hold, not on how enterprise it looks.
+
+| Layer | Today | Should be | Why |
+| --- | --- | --- | --- |
+| BPF hooks ↔ kernel structs | Coupled: CO-RE reads of `linux_binprm`, `file`, `inode` and `sockaddr_in`; fixed-layout map keys; no serialization | Coupled | The hooks run inside the syscall. Three straight-line programs, no loops, 79–116 instructions, 40 bytes of stack. Any abstraction here is instructions the verifier must prove and latency on every exec, open and connect on the host |
+| Ring-buffer record ↔ daemon | Coupled: a `#[repr(C)]` cast of the record, its size asserted at compile time | Coupled | A serializer between kernel and daemon would cost a copy per event and could not make the layout safer than the assertion already does |
+| Lease keys ↔ maps | One trait, `BpfMapSync`, with a live implementation and a recording one | As is | The one seam the daemon needs: the isolation tests exercise the real key construction against a fake map, and the rollback test needs a map that fails on purpose |
+| Daemon ↔ bridge | Decoupled: JSON lines, a versioned protocol, proofs over exact bytes | Decoupled | Two languages, two machines, a trust boundary. Zero-copy would buy nothing at the rate a tool prints; what matters is that a frame is refused before it is parsed and that neither side can drift from the other's test vectors |
+| Bridge ↔ control plane | Decoupled: `ILeasedExecutor`, `ITemplatePolicyCompiler`, `IHostAddressResolver` | Decoupled | The wire tests need a stand-in daemon and the compiler tests a stand-in resolver; nothing on this path is hot |
+| Mission engine | Coupled: one sequence in one process, a `try`/`finally` around the jail | Coupled | The order — validate, bind, record, launch, scrub, judge — *is* the safety property. A pluggable pipeline would let a step be reordered or skipped by configuration |
+| Engines that compose missions | Decoupled from each other, all coupled to `IMissionExecutionEngine` | As is | They decide what runs next and never run a process; one execution tier is the invariant |
+| Ledger | Behind `IAuditLedger`, one implementation, SQLite in the host's own process | As is — **not** a remote sink | A hash chain's guarantee is local: an entry commits to the one before it in the same file, under one transaction. A remote ledger needs its own chain and an anchor to be worth anything, and this chain already cannot see its newest rows deleted; a network hop would widen that gap, not close it |
+| Windows substrate | Coupled to Win32 — job object, restricted token, AppContainer — with one interface per object | As is | The kernel objects are the boundary; the interfaces exist for the doubles in tests, not for a second substrate |
+
+No layer today is more coupled than its row says it should be. The temptation runs the other way:
+the ledger and the mission engine would each be *weakened* by the abstraction that would make them
+look more configurable.
 
 ## Invariants
 

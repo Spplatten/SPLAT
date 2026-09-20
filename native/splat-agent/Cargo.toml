@@ -8,7 +8,6 @@ description = "SPLAT Layer-2 Resident eBPF Daemon & Kernel Containment Substrate
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
-ctrlc = "3.4"
 hmac = "0.12"
 libc = "0.2"
 libbpf-rs = "0.24"

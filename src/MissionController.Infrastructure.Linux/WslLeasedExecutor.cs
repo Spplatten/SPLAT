@@ -234,6 +234,13 @@ public class WslLeasedExecutor : ILeasedExecutor
                             ulong detail = root.TryGetProperty("detail", out var detailProp) ? detailProp.GetUInt64() : 0;
                             string detailText = root.TryGetProperty("detailText", out var dtProp) ? dtProp.GetString() ?? "" : "";
                             string comm = root.TryGetProperty("comm", out var commProp) ? commProp.GetString() ?? "" : "";
+                            // The daemon's clock at the moment it drained the event, when it says so. The
+                            // kernel record carries no time of its own, and this host's clock is a further
+                            // remove from even that. A daemon older than the field sends none, and then
+                            // this host's now is all there is.
+                            DateTime stamped = root.TryGetProperty("timestampMs", out var tsProp) && tsProp.TryGetInt64(out long drainedMs)
+                                ? DateTimeOffset.FromUnixTimeMilliseconds(drainedMs).UtcDateTime
+                                : DateTime.UtcNow;
 
                             var vEvent = new LeaseViolationEvent(
                                 CgroupId: cgid,
@@ -242,7 +249,7 @@ public class WslLeasedExecutor : ILeasedExecutor
                                 Detail: detail,
                                 DetailText: detailText,
                                 ProcessComm: comm,
-                                TimestampUtc: DateTime.UtcNow);
+                                TimestampUtc: stamped);
 
                             violations?.Report(vEvent);
                             stderr?.Report($"[KERNEL -EPERM BLOCK] [{comm} pid {pid}] {detailText}\n");

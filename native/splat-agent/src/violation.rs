@@ -13,6 +13,13 @@ pub struct RawViolationEvent {
     pub comm: [u8; 16],
 }
 
+// Mirrors `struct violation_event` in lease_lsm.bpf.c: 8 + 4 + 4 + 4 + 16 = 36, padded to 40 by the
+// u64's alignment. The drain casts the ring buffer record straight to this type, so a layout that
+// drifted would read the pid out of the hook and never say so. The lease keys already fail the build
+// this way; this was the one struct crossing that boundary that did not.
+const _: () = assert!(std::mem::size_of::<RawViolationEvent>() == 40);
+const _: () = assert!(std::mem::align_of::<RawViolationEvent>() == 8);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ViolationEvent {
@@ -33,6 +40,10 @@ impl ViolationEvent {
         let detail_text = match raw.hook {
             1 => format!("bprm_check_security: denied execution of unleased binary (inode {})", raw.detail),
             2 => format!("file_open: denied access to protected sensitive file (inode {})", raw.detail),
+            // The hook reports 0 for an IPv6 destination, which it denies without an address to name;
+            // an IPv4 connect to 0.0.0.0 reports the same word, so the text says both rather than
+            // rendering a v6 denial as a v4 address nobody dialled.
+            3 if raw.detail == 0 => "socket_connect: denied outbound network connection (IPv6 destination, or IPv4 0.0.0.0)".to_string(),
             3 => format!("socket_connect: denied outbound network connection to unapproved IPv4 {}", be_u32_to_ipv4(raw.detail)),
             _ => format!("unspecified kernel hook violation (hook {}, detail {})", raw.hook, raw.detail),
         };
@@ -114,6 +125,17 @@ mod tests {
             let raw = ipv4_to_be_u32(addr).unwrap();
             assert_eq!(be_u32_to_ipv4(raw), addr, "{addr} must survive parse then render");
         }
+    }
+
+    /// An IPv6 denial reaches the ring buffer with detail 0, which the old text rendered as a denial
+    /// of "0.0.0.0" - an IPv4 address nobody dialled, in the ledger.
+    #[test]
+    fn a_detail_of_zero_on_the_connect_hook_is_not_rendered_as_an_ipv4_address() {
+        let raw = RawViolationEvent { cgroup_id: 7, pid: 1, hook: 3, detail: 0, comm: *b"curl\0\0\0\0\0\0\0\0\0\0\0\0" };
+        let event = ViolationEvent::from_raw(&raw);
+        assert!(event.detail_text.contains("IPv6"), "{}", event.detail_text);
+        assert!(!event.detail_text.contains("unapproved IPv4 0.0.0.0"), "{}", event.detail_text);
+        assert_eq!(event.comm, "curl");
     }
 
     #[test]

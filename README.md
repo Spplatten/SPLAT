@@ -67,7 +67,7 @@ flowchart TD
         JAIL["NTFS ACL jails<br/>inheritance severed"]
         JO --> RT --> JAIL
     end
-    subgraph LNX["Linux substrate — in bring-up (WSL2)"]
+    subgraph LNX["Linux substrate — proven under root (WSL2)"]
         AGENT["splat-agent<br/>Rust / libbpf-rs / tokio"]
         LSM["lease_lsm.bpf.c (BPF-LSM)<br/>bprm_check_security · file_open · socket_connect"]
         EPERM["out-of-lease operation<br/>blocked with -EPERM, in-kernel"]
@@ -95,7 +95,7 @@ Sensor tools never run as trusted children of the app. Each execution passes thr
 | Governed remediation | [`SandboxedRemediationEngine.cs`](src/MissionController.Infrastructure.Windows/Remediation/SandboxedRemediationEngine.cs) — a template's fix, and its rollback, run in their own sandbox only when each declares a postcondition, and the verdict is that measurement, not the exit code. The shipped catalog defines no fixes yet |
 | Secrets at rest | [`DpapiCredentialVault.cs`](src/MissionController.Infrastructure.Windows/DpapiCredentialVault.cs) — Windows DPAPI CurrentUser vault |
 
-## Linux kernel substrate (in bring-up)
+## Linux kernel substrate (proven under root, WSL2)
 
 The Linux side is a per-cgroup **capability lease** enforced by a BPF-LSM program ([`native/splat-agent/src/bpf/lease_lsm.bpf.c`](native/splat-agent/src/bpf/lease_lsm.bpf.c)), loaded by a resident Rust daemon ([`native/splat-agent`](native/splat-agent), libbpf-rs 0.24 + tokio, CO-RE via `vmlinux.h`):
 

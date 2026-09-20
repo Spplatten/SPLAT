@@ -1,6 +1,7 @@
 <!-- Companion to ARCHITECTURE.md. Covers native/splat-agent (the daemon and its BPF program),
      native/splat-canary (the standalone proof) and MissionController.Infrastructure.Linux (the
-     Windows-side bridge). Read out of the tree at 0027e57 on 2026-09-10. What a lease enforces,
+     Windows-side bridge). Read out of the tree at 0027e57 on 2026-09-10; the daemon section
+     re-read at 965366b on 2026-09-20, when SCHEMA.md and RUNBOOK.md were added. What a lease enforces,
      refuses and does not police is deliberately NOT restated here - SUPPORTED_POLICY.md owns that
      list, and two copies of it would drift. -->
 
@@ -11,7 +12,8 @@ much CPU, memory and PIDs, for this many seconds. The kernel enforces the first 
 BPF-LSM hooks; the daemon enforces the rest.
 [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md) is the authoritative list of
 what is enforced, what is refused and what is not policed — read it before relying on anything
-below.
+below. [SCHEMA.md](SCHEMA.md) has the frames and the byte layouts; [RUNBOOK.md](RUNBOOK.md) has
+what a kernel and a guest need, and how the daemon is installed.
 
 **Status.** The program is proven in operation on a stock WSL2 kernel — standalone, and through the
 daemon under root — with evidence bound to the source it ran. The last hop, an agent's request
@@ -90,8 +92,19 @@ line from a TCP socket.
 **Startup, in order.** Load and attach the skeleton, start the ring-buffer drain, and duplicate the
 four map descriptors. If any of that failed and `--mock-bpf` was not passed, the daemon **exits**
 rather than serve work it cannot contain. Then it loads or creates the auth token — root-owned,
-0600, and refuses to start without one — refuses a workload uid or gid of 0, starts the expiry
-reaper, and binds, loopback by default.
+0600, and refuses to start without one — refuses a workload uid or gid of 0, and ends any
+`splat_leases/mission_*` cgroup a previous daemon left behind: those workloads have run unpoliced
+since that daemon's maps died with it, nothing can re-police them, and a tree that will not drain
+is a reason to exit rather than serve beside it. It installs a SIGTERM handler that does the same
+for every live lease before exiting, starts the expiry reaper, and binds, loopback by default.
+
+**The ring buffer.** Each denial is a 40-byte record ([SCHEMA.md](SCHEMA.md#struct-violation_event--one-ring-buffer-record-per-denial))
+in a 1 MiB `BPF_MAP_TYPE_RINGBUF`. A dedicated thread polls it every 100 ms and fans each event out
+through a 128-slot broadcast channel; every `EXECUTE_TOOL` subscribes before it spawns and forwards
+only the events for its own cgroup. A forwarder that falls behind a burst is told how many events
+it missed and carries on — treating that as the end of the stream once silenced every later
+denial of a lease while the kernel went on denying. A full ring buffer drops the record and counts
+nothing; the `-EPERM` still happens.
 
 **Every connection, first.** Protocol 3 opens with a handshake, and nothing else is read until it
 holds. The caller's `HELLO` names a nonce; the daemon answers with its own and an HMAC-SHA256 of both
@@ -111,26 +124,31 @@ including a protocol 2 request carrying the token itself — is refused, and the
    `cpu.max` and `pids.max`, and **read them back**. A clamp that did not take refuses the request.
 5. Build the lease. Egress addresses and ports come from the request, and an explicit empty list
    means nothing is permitted. Protected paths are the daemon's own defaults **unioned** with the
-   request's — a caller can add protection, never remove it. Exec paths come from the request; a
-   legacy default applies only when the field is absent, with a warning.
+   request's — a caller can add protection, never remove it. Exec paths come from the request. An
+   absent `allowedExecPaths`, or an absent egress list with the network on, is **refused**, never
+   defaulted: an empty list is a decision, a missing key is the absence of one.
 6. Refuse a lease that does not permit its own command.
 7. Register the lease: resolve each path to an inode, write every map entry, and roll back the
    partial writes on failure.
-9. Spawn. In `pre_exec` — async-signal-safe code in the forked child of a multithreaded process —
+8. Spawn. In `pre_exec` — async-signal-safe code in the forked child of a multithreaded process —
    write `0` to the cgroup's `cgroup.procs`, then `setgroups(0)`, `setresgid` and `setresuid` to the
    workload identity (`nobody` by default), then refuse if anything is still root. Joining before
    exec is what puts the tool's *own* exec under the allow-list.
-10. Verify from outside: the child's cgroup membership and effective uid, logged loudly if wrong.
-11. Stream `STDOUT`, `STDERR` and `VIOLATION` frames, then `EXIT`, then revoke the lease.
+9. Verify from outside: the child's cgroup membership and effective uid, logged loudly if wrong.
+10. Stream `STDOUT` and `STDERR` in frames of at most 64 KiB — a tool's single long line no longer
+    sits whole in a root process's memory before a byte of it is forwarded — and `VIOLATION` frames
+    for this lease's cgroup, then `EXIT`, then revoke the lease.
 
 A client that disconnects mid-run ends the lease the way expiry does: **kill inside the policy,
 then withdraw it.** The reaper follows the same order every second. Deleting the map entries first
 would leave a live process in a cgroup the hooks no longer recognise — and an unlisted cgroup is
 allowed everything.
 
-`HEALTH_CHECK` needs no token. It returns `bpfLsmActive`, `cgroupV2Active`, `overlayFsSupported`,
-`kernelVersion`, `activeLeaseCount` and **`enforcing`**, which is the field to gate on: reachable is
-not enforcing.
+`HEALTH_CHECK` is answered only inside a session, like everything else — since 2026-09-11, because
+it returns `bpfLsmActive`, `cgroupV2Active`, `overlayFsSupported`, `kernelVersion`,
+`activeLeaseCount` and **`enforcing`**, which told an unauthenticated caller exactly when this
+daemon would run work it cannot contain. `enforcing` is the field to gate on: reachable is not
+enforcing.
 
 Supporting modules: [`auth.rs`](../native/splat-agent/src/auth.rs) — the token's lifecycle, and a
 precise account of what a shared secret does and does not stop;

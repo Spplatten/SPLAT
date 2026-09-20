@@ -10,7 +10,7 @@ absent feature, because the caller reads its own request back as accepted — wh
 `readOnlyFs` and `overlayFs.enableCow` travelled on every compiled template for months while
 nothing on the far end consumed either one.
 
-Protocol version 2. Anything else is refused; see `main.rs`.
+Protocol version 3. Anything else is refused; see `main.rs`, and `docs/SCHEMA.md` for the frames.
 
 ---
 

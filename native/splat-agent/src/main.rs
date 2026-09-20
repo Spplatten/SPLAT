@@ -10,9 +10,10 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use libbpf_rs::skel::{OpenSkel, Skel, SkelBuilder};
 use libbpf_rs::{MapCore, MapFlags, MapHandle, RingBufferBuilder};
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
@@ -287,8 +288,19 @@ async fn main() -> Result<()> {
                             0
                         }) {
                             if let Ok(built_rb) = rb.build() {
-                                std::thread::spawn(move || {
-                                    while let Ok(_) = built_rb.poll(Duration::from_millis(100)) {}
+                                // The drain must outlive every lease. This loop used to end on the
+                                // first poll error, so one EINTR - one signal - silently stopped
+                                // every VIOLATION frame for the rest of the daemon's life while the
+                                // hooks went on denying: enforcement intact, evidence gone.
+                                std::thread::spawn(move || loop {
+                                    match built_rb.poll(Duration::from_millis(100)) {
+                                        Ok(()) => {}
+                                        Err(e) if e.kind() == libbpf_rs::ErrorKind::Interrupted => {}
+                                        Err(e) => {
+                                            error!("Ring buffer poll failed: {e}; violations are delayed until it recovers.");
+                                            std::thread::sleep(Duration::from_millis(100));
+                                        }
+                                    }
                                 });
                                 info!("BPF ringbuffer violation monitor active.");
                             }
@@ -362,7 +374,43 @@ async fn main() -> Result<()> {
 
     let workload_ids = WorkloadIdentity { uid: args.workload_uid, gid: args.workload_gid };
 
+    // A daemon that stopped - crashed, or stopped by systemd - took its maps and hooks with it and
+    // left any workload still running under splat_leases with nothing policing it. None can be
+    // re-policed: the lease that described it died with the process that held it. So they are ended
+    // here, before this daemon accepts a request, and again on the way out below. A tree that will
+    // not drain is a workload running uncontained, and serving beside it would report a containment
+    // this daemon does not have.
+    match EphemeralCgroup::reap_orphans(Path::new(cgroup::BASE_PATH)) {
+        Ok(drained) if drained.is_empty() => {}
+        Ok(drained) => warn!(
+            "Ended {} orphaned lease(s) a previous daemon left running unpoliced: {drained:?}",
+            drained.len()
+        ),
+        Err(e) => {
+            error!("Refusing to start: an orphaned lease cgroup could not be drained: {e:#}");
+            std::process::exit(1);
+        }
+    }
+
     let lease_manager = LeaseManager::new(bpf_sync);
+
+    // systemd stops this daemon with SIGTERM, and the workloads it leased are not in its own cgroup,
+    // so they would outlive the stop - unpoliced, once the maps went with the process. End them while
+    // the policy is still installed, then exit cleanly; the unit restarts only on failure.
+    tokio::spawn(async move {
+        let mut terminate = signal(SignalKind::terminate()).expect("install the SIGTERM handler");
+        let mut interrupt = signal(SignalKind::interrupt()).expect("install the SIGINT handler");
+        tokio::select! {
+            _ = terminate.recv() => {}
+            _ = interrupt.recv() => {}
+        }
+        match EphemeralCgroup::reap_orphans(Path::new(cgroup::BASE_PATH)) {
+            Ok(drained) if drained.is_empty() => info!("Stopping; no lease was running."),
+            Ok(drained) => warn!("Stopping; ended {} leased workload(s) still running: {drained:?}", drained.len()),
+            Err(e) => error!("Stopping, but a leased workload could not be drained and is now unpoliced: {e:#}"),
+        }
+        std::process::exit(0);
+    });
 
     // Background expiration reaper
     let reaper_mgr = lease_manager.clone();
@@ -450,6 +498,68 @@ async fn read_frame(reader: &mut (impl AsyncBufRead + Unpin), line: &mut String)
     }
 
     Ok(read)
+}
+
+/// The most of a tool's output one STDOUT or STDERR frame carries.
+///
+/// The pumps used to `read_line` into a String, which grows until it meets a newline - so a tool that
+/// printed one long line, or no newline at all, grew a root process's memory by the size of its output
+/// before a byte of it was forwarded. A line longer than this arrives as several frames, which the
+/// bridge concatenates; nothing in the protocol promised one frame per line.
+const MAX_OUTPUT_CHUNK_BYTES: usize = 64 * 1024;
+
+/// Forwards one of the child's output streams as `kind` frames of at most [`MAX_OUTPUT_CHUNK_BYTES`]
+/// each, never holding more than that in memory.
+///
+/// Frames carry text, so a chunk boundary must not fall inside a multi-byte character: the tail of an
+/// incomplete one waits for the next read. A sequence that is not UTF-8 at all is replaced, as it
+/// always was, rather than held for a completion that never comes.
+async fn pump_output(reader: impl AsyncRead + Unpin, kind: &'static str, tx: mpsc::Sender<serde_json::Value>) {
+    let mut reader = BufReader::new(reader);
+    let mut buf: Vec<u8> = Vec::with_capacity(MAX_OUTPUT_CHUNK_BYTES);
+    loop {
+        // Room left after any held-back tail, so a frame never exceeds the cap even by that tail.
+        let room = (MAX_OUTPUT_CHUNK_BYTES - buf.len()) as u64;
+        match (&mut reader).take(room).read_until(b'\n', &mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+
+        let held_back = match std::str::from_utf8(&buf) {
+            Ok(_) => 0,
+            // error_len() is None only for a sequence cut short by the end of the buffer.
+            Err(e) if e.error_len().is_none() => buf.len() - e.valid_up_to(),
+            Err(_) => 0,
+        };
+        let emit = buf.len() - held_back;
+        if emit > 0 {
+            let text = String::from_utf8_lossy(&buf[..emit]).into_owned();
+            if tx.send(serde_json::json!({ "type": kind, "data": text })).await.is_err() {
+                return;
+            }
+            buf.drain(..emit);
+        }
+    }
+
+    if !buf.is_empty() {
+        let text = String::from_utf8_lossy(&buf).into_owned();
+        let _ = tx.send(serde_json::json!({ "type": kind, "data": text })).await;
+    }
+}
+
+/// One VIOLATION frame, as the bridge reads it. `timestampMs` is this daemon's clock at the moment the
+/// event was drained from the ring buffer; the kernel record carries no time of its own.
+fn violation_frame(v: &ViolationEvent) -> serde_json::Value {
+    serde_json::json!({
+        "type": "VIOLATION",
+        "cgroupId": v.cgroup_id,
+        "pid": v.pid,
+        "hook": v.hook,
+        "detail": v.detail,
+        "detailText": v.detail_text,
+        "comm": v.comm,
+        "timestampMs": v.timestamp_ms
+    })
 }
 
 /// Opens protocol 3's session: reads the caller's HELLO and answers it with this daemon's proof that it
@@ -994,19 +1104,12 @@ async fn handle_client(
                             while tokio::time::Instant::now() < deadline {
                                 match tokio::time::timeout(Duration::from_millis(60), viol_rx.recv()).await {
                                     Ok(Ok(v)) if v.cgroup_id == target_cgid => {
-                                        let chunk = serde_json::json!({
-                                            "type": "VIOLATION",
-                                            "cgroupId": v.cgroup_id,
-                                            "pid": v.pid,
-                                            "hook": v.hook,
-                                            "detail": v.detail,
-                                            "detailText": v.detail_text,
-                                            "comm": v.comm
-                                        });
-                                        writer.write_all(format!("{chunk}\n").as_bytes()).await?;
+                                        writer.write_all(format!("{}\n", violation_frame(&v)).as_bytes()).await?;
                                         break;
                                     }
                                     Ok(Ok(_)) => continue,
+                                    // Overtaken by a burst, not closed: the event may still be behind it.
+                                    Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
                                     _ => break,
                                 }
                             }
@@ -1077,18 +1180,14 @@ async fn handle_client(
                                 // the child can still be in flight as it exits. Wait briefly, then
                                 // flush whatever queued, so the last violation is not lost.
                                 tokio::time::sleep(Duration::from_millis(250)).await;
-                                while let Ok(v) = viol_rx.try_recv() {
-                                    if v.cgroup_id == target_cgid {
-                                        let chunk = serde_json::json!({
-                                            "type": "VIOLATION",
-                                            "cgroupId": v.cgroup_id,
-                                            "pid": v.pid,
-                                            "hook": v.hook,
-                                            "detail": v.detail,
-                                            "detailText": v.detail_text,
-                                            "comm": v.comm
-                                        });
-                                        let _ = tx_viol.send(chunk).await;
+                                loop {
+                                    match viol_rx.try_recv() {
+                                        Ok(v) if v.cgroup_id == target_cgid => {
+                                            let _ = tx_viol.send(violation_frame(&v)).await;
+                                        }
+                                        Ok(_) => {}
+                                        Err(broadcast::error::TryRecvError::Lagged(_)) => {}
+                                        Err(_) => break,
                                     }
                                 }
                                 break;
@@ -1096,56 +1195,29 @@ async fn handle_client(
                             recv = viol_rx.recv() => match recv {
                                 Ok(v) => {
                                     if v.cgroup_id == target_cgid {
-                                        let chunk = serde_json::json!({
-                                            "type": "VIOLATION",
-                                            "cgroupId": v.cgroup_id,
-                                            "pid": v.pid,
-                                            "hook": v.hook,
-                                            "detail": v.detail,
-                                            "detailText": v.detail_text,
-                                            "comm": v.comm
-                                        });
-                                        let _ = tx_viol.send(chunk).await;
+                                        let _ = tx_viol.send(violation_frame(&v)).await;
                                     }
                                 }
-                                Err(_) => break,
+                                // A burst across every lease overran this subscriber's slot of the
+                                // broadcast channel. The events it missed are gone, and that is said;
+                                // the stream is not over. Treating it as closed ended this forwarder
+                                // before, and every later denial of this lease was lost to the caller
+                                // while the kernel went on denying.
+                                Err(broadcast::error::RecvError::Lagged(missed)) => warn!(
+                                    "Violation forwarder for cgroup {target_cgid} lagged; {missed} event(s) across all leases were not inspected"
+                                ),
+                                Err(broadcast::error::RecvError::Closed) => break,
                             },
                         }
                     }
                 });
 
                 if let Some(out) = stdout {
-                    let tx_out = tx.clone();
-                    tokio::spawn(async move {
-                        let mut reader = BufReader::new(out);
-                        let mut buf = String::new();
-                        while let Ok(n) = reader.read_line(&mut buf).await {
-                            if n == 0 { break; }
-                            let chunk = serde_json::json!({
-                                "type": "STDOUT",
-                                "data": buf.clone()
-                            });
-                            let _ = tx_out.send(chunk).await;
-                            buf.clear();
-                        }
-                    });
+                    tokio::spawn(pump_output(out, "STDOUT", tx.clone()));
                 }
 
                 if let Some(err) = stderr {
-                    let tx_err = tx.clone();
-                    tokio::spawn(async move {
-                        let mut reader = BufReader::new(err);
-                        let mut buf = String::new();
-                        while let Ok(n) = reader.read_line(&mut buf).await {
-                            if n == 0 { break; }
-                            let chunk = serde_json::json!({
-                                "type": "STDERR",
-                                "data": buf.clone()
-                            });
-                            let _ = tx_err.send(chunk).await;
-                            buf.clear();
-                        }
-                    });
+                    tokio::spawn(pump_output(err, "STDERR", tx.clone()));
                 }
 
                 drop(tx);
@@ -1263,6 +1335,64 @@ mod frame_tests {
 
         assert_eq!(read, 0);
         assert!(line.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::{pump_output, MAX_OUTPUT_CHUNK_BYTES};
+    use std::io::Cursor;
+    use tokio::sync::mpsc;
+
+    async fn frames_for(input: Vec<u8>) -> Vec<String> {
+        let (tx, mut rx) = mpsc::channel(8);
+        let pump = tokio::spawn(pump_output(Cursor::new(input), "STDOUT", tx));
+        let mut out = Vec::new();
+        while let Some(frame) = rx.recv().await {
+            assert_eq!(frame["type"], "STDOUT");
+            out.push(frame["data"].as_str().unwrap().to_string());
+        }
+        pump.await.unwrap();
+        out
+    }
+
+    #[tokio::test]
+    async fn a_line_arrives_as_one_frame() {
+        assert_eq!(frames_for(b"hello\nworld\n".to_vec()).await, vec!["hello\n", "world\n"]);
+    }
+
+    /// The whole point of the cap: a tool's single long line no longer sits in a root process's
+    /// memory in full before the first byte of it is forwarded.
+    #[tokio::test]
+    async fn a_line_longer_than_the_cap_is_split_and_reassembles_intact() {
+        let line = "x".repeat(MAX_OUTPUT_CHUNK_BYTES * 3 + 17) + "\n";
+        let frames = frames_for(line.clone().into_bytes()).await;
+        assert!(frames.len() >= 4, "{} frames", frames.len());
+        assert!(frames.iter().all(|f| f.len() <= MAX_OUTPUT_CHUNK_BYTES));
+        assert_eq!(frames.concat(), line);
+    }
+
+    #[tokio::test]
+    async fn a_multibyte_character_cut_by_the_cap_is_not_torn() {
+        // 'é' is two bytes; its first byte lands exactly at the cap.
+        let mut input = "a".repeat(MAX_OUTPUT_CHUNK_BYTES - 1).into_bytes();
+        input.extend_from_slice("é".as_bytes());
+        input.extend_from_slice(b"z\n");
+        let frames = frames_for(input.clone()).await;
+        assert_eq!(frames.concat(), String::from_utf8(input).unwrap());
+        assert!(frames.iter().all(|f| !f.contains('\u{FFFD}')), "a character was torn: {frames:?}");
+    }
+
+    #[tokio::test]
+    async fn output_with_no_trailing_newline_is_still_delivered() {
+        assert_eq!(frames_for(b"no newline".to_vec()).await, vec!["no newline"]);
+    }
+
+    #[tokio::test]
+    async fn bytes_that_are_not_utf8_are_replaced_rather_than_held_forever() {
+        let frames = frames_for(b"ok\xff\xfe\n".to_vec()).await;
+        assert_eq!(frames.len(), 1);
+        assert!(frames[0].starts_with("ok") && frames[0].ends_with('\n'));
     }
 }
 

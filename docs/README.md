@@ -33,6 +33,8 @@ Reference, not plan: these describe the tree as it is, and are corrected when th
 | [ARCHITECTURE-windows-substrate.md](ARCHITECTURE-windows-substrate.md) | What a Windows sensor process experiences — jail, job object, restricted token, AppContainer — and which apply when. |
 | [ARCHITECTURE-linux-substrate.md](ARCHITECTURE-linux-substrate.md) | The BPF-LSM lease, the `splat-agent` daemon, the bridge on Windows, who authors a lease, and the evidence behind it. |
 | [ARCHITECTURE-agent-surface.md](ARCHITECTURE-agent-surface.md) | How an external agent gets in: `splat-mcp`, the LangGraph adapter, the Copilot / Semantic Kernel adapter. |
+| [SCHEMA.md](SCHEMA.md) | The lease's three contracts: BPF map keys and the ring-buffer record byte for byte, the protocol 3 frames and proofs, and the C# records they map to — with what the protocol does not promise. Added 2026-09-20. |
+| [RUNBOOK.md](RUNBOOK.md) | What a kernel and a guest need for the daemon to enforce, copy-paste setup for WSL2, the installed unit, and where a developer's shortcuts diverge from a hardened deployment. Added 2026-09-20. |
 | [MODULE_INFO.md](MODULE_INFO.md) | Every buildable unit: target, references, packages, what it owns, its tests, and whether it ships. |
 
 ## Coursework

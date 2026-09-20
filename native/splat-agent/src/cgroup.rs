@@ -29,6 +29,10 @@ pub struct EphemeralCgroup {
     pub effective: CgroupLimits,
 }
 
+/// The parent of every lease cgroup. Its `mission_*` children are the only cgroups this daemon ever
+/// creates, so at startup anything under it is a lease a previous daemon left behind.
+pub const BASE_PATH: &str = "/sys/fs/cgroup/splat_leases";
+
 /// The cpu.max period, in microseconds. Quota is expressed against it.
 const CPU_PERIOD_US: u64 = 100_000;
 
@@ -40,7 +44,7 @@ impl EphemeralCgroup {
     /// limit it inherited while the caller was told its request had been accepted. A clamp nobody
     /// checked is not a clamp.
     pub fn create(mission_id: &str, limits: CgroupLimits) -> Result<Self> {
-        let base = Path::new("/sys/fs/cgroup/splat_leases");
+        let base = Path::new(BASE_PATH);
         if !base.exists() {
             fs::create_dir_all(base).context("create base splat_leases cgroup")?;
         }
@@ -275,6 +279,36 @@ impl EphemeralCgroup {
             .with_context(|| format!("read {}", procs.display()))?;
         Ok(body.lines().filter_map(|l| l.trim().parse::<u32>().ok()).collect())
     }
+
+    /// Kills and removes every lease cgroup left under `base` by a daemon that is no longer running.
+    ///
+    /// The BPF maps and programs die with the daemon that loaded them - nothing is pinned - so a
+    /// workload that outlived a crash or a `systemctl stop` is still running with every hook gone,
+    /// in a cgroup the next daemon knows nothing about. It cannot be re-policed: the lease that
+    /// described it died with the process that held it. Ending it is the only state that matches
+    /// what its caller was told. Returns the paths drained; a tree that would not drain is an error
+    /// for the caller to act on, not a directory quietly left behind.
+    pub fn reap_orphans(base: &Path) -> Result<Vec<PathBuf>> {
+        let mut drained = Vec::new();
+        if !base.exists() {
+            return Ok(drained);
+        }
+
+        for entry in fs::read_dir(base).with_context(|| format!("read {}", base.display()))? {
+            let path = entry?.path();
+            let is_lease = path.is_dir()
+                && path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("mission_"));
+            if !is_lease {
+                continue;
+            }
+
+            Self::kill_tree(&path)?;
+            fs::remove_dir(&path).with_context(|| format!("remove orphan lease cgroup {}", path.display()))?;
+            drained.push(path);
+        }
+
+        Ok(drained)
+    }
 }
 
 impl Drop for EphemeralCgroup {
@@ -332,6 +366,36 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn orphaned_lease_cgroups_are_drained_and_removed_and_nothing_else_is_touched() {
+        let base = std::env::temp_dir().join(format!("splat_cg_orphans_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        // Empty directories stand in for the lease cgroups: cgroupfs lets rmdir remove a cgroup
+        // that still shows its interface files, a plain directory does not, and kill_tree treats
+        // an unreadable cgroup.procs as already drained.
+        for name in ["mission_a", "mission_b"] {
+            std::fs::create_dir_all(base.join(name)).unwrap();
+        }
+        std::fs::create_dir_all(base.join("not_a_lease")).unwrap();
+        std::fs::write(base.join("not_a_lease").join("cgroup.procs"), "").unwrap();
+
+        let drained = EphemeralCgroup::reap_orphans(&base).expect("reap");
+
+        assert_eq!(drained.len(), 2);
+        assert!(!base.join("mission_a").exists());
+        assert!(!base.join("mission_b").exists());
+        assert!(base.join("not_a_lease").exists(), "only lease cgroups are the daemon's to remove");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_missing_base_holds_no_orphans() {
+        let base = std::env::temp_dir().join(format!("splat_cg_nobase_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(EphemeralCgroup::reap_orphans(&base).unwrap().is_empty());
     }
 
     #[test]
