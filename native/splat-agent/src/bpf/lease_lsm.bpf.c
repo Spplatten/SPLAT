@@ -74,13 +74,34 @@ enum splat_hook {
     HOOK_CONNECT = 3,
 };
 
+// One denial, as the daemon reads it: 56 bytes, 8-byte alignment, mirrored by RawViolationEvent in
+// violation.rs with a size assertion. The record used to carry no time and no number, so a consumer
+// could neither say when a denial happened nor tell that one had been lost.
 struct violation_event {
     __u64 cgroup_id;
+    __u64 ktime_ns; // bpf_ktime_get_ns() at the denial: the kernel's monotonic clock, not wall time
+    __u64 seq;      // taken from `counters` BEFORE the reservation, so a number never delivered was dropped
     __u32 pid;
-    __u32 hook;   // enum splat_hook
-    __u32 detail; // exec/open: inode number; connect: destination IPv4 (network byte order)
+    __u32 hook;     // enum splat_hook
+    __u32 detail;   // exec/open: inode number (low 32 bits); connect: destination IPv4 (network byte order)
     char comm[16];
 };
+
+enum splat_counter {
+    COUNTER_NEXT_SEQ = 0, // the next sequence number; every denial takes one, delivered or not
+    COUNTER_DROPPED = 1,  // denials the ring buffer had no room for. The -EPERM still happened
+    COUNTER_MAX,
+};
+
+// Two words the daemon reads back: how many denials have been numbered and how many were never
+// delivered. A denial the buffer dropped used to vanish without a trace; now it leaves a gap in the
+// sequence and a count here.
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, COUNTER_MAX);
+    __type(key, __u32);
+    __type(value, __u64);
+} counters SEC(".maps");
 
 // cgroup id -> 1. Presence means "this cgroup holds a lease and is subject to policy".
 struct {
@@ -129,10 +150,26 @@ static __always_inline __u8 is_leased(__u64 cgid)
 
 static __always_inline void report(__u64 cgid, __u32 hook, __u32 detail)
 {
-    struct violation_event *e = bpf_ringbuf_reserve(&violations, sizeof(*e), 0);
-    if (!e)
+    __u32 seq_key = COUNTER_NEXT_SEQ;
+    __u32 dropped_key = COUNTER_DROPPED;
+    __u64 *next_seq = bpf_map_lookup_elem(&counters, &seq_key);
+    __u64 *dropped = bpf_map_lookup_elem(&counters, &dropped_key);
+    if (!next_seq || !dropped) // An array lookup inside max_entries cannot fail; the verifier still asks.
         return;
+
+    // Numbered before the reservation, so a dropped denial still consumes its number and the gap
+    // is visible to a consumer. Two CPUs may deliver neighbouring numbers out of order; a number
+    // that never arrives at all was dropped, and `dropped` says how many.
+    __u64 seq = __sync_fetch_and_add(next_seq, 1);
+
+    struct violation_event *e = bpf_ringbuf_reserve(&violations, sizeof(*e), 0);
+    if (!e) {
+        __sync_fetch_and_add(dropped, 1);
+        return;
+    }
     e->cgroup_id = cgid;
+    e->ktime_ns = bpf_ktime_get_ns();
+    e->seq = seq;
     e->pid = bpf_get_current_pid_tgid() >> 32;
     e->hook = hook;
     e->detail = detail;
@@ -243,6 +280,13 @@ int BPF_PROG(splat_socket_connect, struct socket *sock, struct sockaddr *address
     // for the shipped catalogue; claiming it is contained when it is not would be worse than both.
     if (family != AF_INET)
         return 0;
+
+    // An AF_INET address shorter than a sockaddr_in has no destination in it to check. Reading one
+    // anyway would judge bytes past the caller's buffer, so it is refused rather than guessed.
+    if (addrlen < (int)sizeof(struct sockaddr_in)) {
+        report(cgid, HOOK_CONNECT, 0);
+        return -EPERM;
+    }
 
     struct sockaddr_in *in = (struct sockaddr_in *)address;
     __u32 daddr = BPF_CORE_READ(in, sin_addr.s_addr); // network byte order

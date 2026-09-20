@@ -5,7 +5,7 @@
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](src/)
 [![Rust](https://img.shields.io/badge/Rust-libbpf--rs%20%2B%20eBPF-CE412B?logo=rust&logoColor=white)](native/splat-agent/)
 [![WinUI 3](https://img.shields.io/badge/UI-WinUI%203%20%2F%20Windows%20App%20SDK-0078D6?logo=windows&logoColor=white)](src/MissionController.UI/)
-[![Tests](https://img.shields.io/badge/Tests-638%2F638%20passing-success)](tests/MissionController.Tests/)
+[![Tests](https://img.shields.io/badge/Tests-639%2F639%20passing-success)](tests/MissionController.Tests/)
 [![Build](https://img.shields.io/badge/Build-0%20errors-success)](src/)
 
 **New here, or allergic to jargon?** Start with **[The SPLAT Field Guide](docs/TUTORIAL.md)** — the whole system explained in plain English.
@@ -39,11 +39,11 @@ Technical evaluations of agent sandboxes tend to blur together into generic "iso
 | Component | State |
 | :--- | :--- |
 | Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
-| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 638/638 automated tests passing |
+| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 639/639 automated tests passing |
 | Zero-warning build gate | **Enforced** — [`src`](src/Directory.Build.props) and [`tests`](tests/Directory.Build.props) compile with `TreatWarningsAsErrors`, so a cold solution build reports 0 warnings and 0 errors. No project is exempt: the console joined on 2026-09-18, when it moved to Windows App SDK 2.5.1 on .NET 10 and built without a warning, and `WarningGateTests` fails if an exemption appears |
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 12 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining ten run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
-| Linux lease daemon (`splat-agent`) | **Enforcing, proven under root** — nineteen checks in one run against a root daemon on kernel 6.18.33.2, recorded in [evidence/daemon-probe.json](native/splat-agent/evidence/daemon-probe.json) and bound to the SHA-256 of the BPF source that ships, so the proof cannot outlive the program it tested. All three hooks: a protected file the workload *could* read (`/etc/hostname`, 644 — a control run reads it, the leased run is denied, so only the lease accounts for the difference), an unleased second exec refused mid-`sh`, and egress held to one address and one port. Two concurrent leases proven not to lend each other permissions. The tool runs as `uid=65534(nobody)` with supplementary groups cleared, not as the daemon's root. IPv6 denied outright. An overrunning workload killed by the reaper 5.5s into a 60s sleep rather than merely unpoliced. A lease dimension the caller did not declare refused rather than defaulted. It proves it holds its token before a caller sends anything, and refuses the token sent in the clear. The daemon refuses to start at all unless enforcement is live |
+| Linux lease daemon (`splat-agent`) | **Enforcing under root as last recorded on 2026-09-15; re-proof pending** — the kernel program gained a per-record clock, sequence number and drop counter on 2026-09-20, so the recorded run no longer names the program that ships, and the claim stays withdrawn until the probe is re-run ([docs/GUIDE-operator.md](docs/GUIDE-operator.md)). That run: nineteen checks against a root daemon on kernel 6.18.33.2, recorded in [evidence/daemon-probe.json](native/splat-agent/evidence/daemon-probe.json) and bound to the SHA-256 of the BPF source it exercised, so the proof cannot outlive the program it tested. All three hooks: a protected file the workload *could* read (`/etc/hostname`, 644 — a control run reads it, the leased run is denied, so only the lease accounts for the difference), an unleased second exec refused mid-`sh`, and egress held to one address and one port. Two concurrent leases proven not to lend each other permissions. The tool runs as `uid=65534(nobody)` with supplementary groups cleared, not as the daemon's root. IPv6 denied outright. An overrunning workload killed by the reaper 5.5s into a 60s sleep rather than merely unpoliced. A lease dimension the caller did not declare refused rather than defaulted. It proves it holds its token before a caller sends anything, and refuses the token sent in the clear. The daemon refuses to start at all unless enforcement is live |
 | Host↔guest caller identity | **Partly built** — the bridge speaks a versioned JSON protocol over loopback TCP, and protocol 3 authenticates both ends with a root-owned shared secret that never crosses the wire: the daemon proves it holds the secret before the bridge sends anything but a nonce, and every request proves it back. A process that takes the port while the daemon is down learns nothing it can use. It does not stop another process running as the same Windows user, which can read the secret exactly as the bridge does. The code's own notes name AF_VSOCK, or `SO_PEERCRED` over a Unix socket, as the way to identify the peer instead — which callers either would actually exclude is not yet worked out. See the [roadmap](docs/ROADMAP.md) |
 | Launch-overhead benchmark ([`src/splat-bench`](src/splat-bench)) | **Recorded** — the governed Windows path adds **4.12 ms p50 / 9.88 ms p95** over the same tool run bare, on Windows `10.0.26200`, 50 alternating iterations ([evidence](src/splat-bench/evidence)). The locks account for ~2.4 ms; the rest is process creation both arms pay. This retired the inherited `<1ms` marketing figure, which the measurement missed by about 4× |
 
@@ -67,7 +67,7 @@ flowchart TD
         JAIL["NTFS ACL jails<br/>inheritance severed"]
         JO --> RT --> JAIL
     end
-    subgraph LNX["Linux substrate — proven under root (WSL2)"]
+    subgraph LNX["Linux substrate — proven under root, re-proof pending (WSL2)"]
         AGENT["splat-agent<br/>Rust / libbpf-rs / tokio"]
         LSM["lease_lsm.bpf.c (BPF-LSM)<br/>bprm_check_security · file_open · socket_connect"]
         EPERM["out-of-lease operation<br/>blocked with -EPERM, in-kernel"]
@@ -95,7 +95,7 @@ Sensor tools never run as trusted children of the app. Each execution passes thr
 | Governed remediation | [`SandboxedRemediationEngine.cs`](src/MissionController.Infrastructure.Windows/Remediation/SandboxedRemediationEngine.cs) — a template's fix, and its rollback, run in their own sandbox only when each declares a postcondition, and the verdict is that measurement, not the exit code. The shipped catalog defines no fixes yet |
 | Secrets at rest | [`DpapiCredentialVault.cs`](src/MissionController.Infrastructure.Windows/DpapiCredentialVault.cs) — Windows DPAPI CurrentUser vault |
 
-## Linux kernel substrate (proven under root, WSL2)
+## Linux kernel substrate (proven under root; re-proof pending since 2026-09-20)
 
 The Linux side is a per-cgroup **capability lease** enforced by a BPF-LSM program ([`native/splat-agent/src/bpf/lease_lsm.bpf.c`](native/splat-agent/src/bpf/lease_lsm.bpf.c)), loaded by a resident Rust daemon ([`native/splat-agent`](native/splat-agent), libbpf-rs 0.24 + tokio, CO-RE via `vmlinux.h`):
 
@@ -117,7 +117,7 @@ Policy matches on inode identity, not path strings — full-path resolution in B
 
 | Tool | Enforced by |
 | :--- | :--- |
-| `run_command`, `run_code` | The Linux lease daemon. **Demonstrated end to end** — a recorded run drove `splat-mcp` over stdio as a client does, and the kernel refused both an undeclared exec and a connect outside the lease while the permitted command ran as `nobody` ([evidence](native/splat-agent/evidence/last-hop-probe.json)) |
+| `run_command`, `run_code` | The Linux lease daemon. **Last recorded end to end on 2026-09-15; re-proof pending** after the 2026-09-20 change to the kernel program — a recorded run drove `splat-mcp` over stdio as a client does, and the kernel refused both an undeclared exec and a connect outside the lease while the permitted command ran as `nobody` ([evidence](native/splat-agent/evidence/last-hop-probe.json)) |
 | `fs_read`, `fs_write` | Windows control plane. Confined by canonical-path containment to a governed workspace root — a user-space boundary, not a kernel one |
 | `diagnose_system`, `investigate_system`, `run_agent_brain`, `run_governed_crew` | The full 1:1:1 mission pipeline: validated argument binding, Job Object clamps, restricted token, ACL jail, DLP, audit ledger, Layer-2 cognitive planning, and multi-agent crew execution |
 | `get_substrate_health`, `list_diagnostic_templates`, `search_incident_memory`, `list_governed_crews` | Read-only queries against the local host, catalog, memory, and crew registry |
@@ -179,10 +179,10 @@ Every call lands in the audit ledger attributed to a resolved principal — the 
 
 ```text
 $ dotnet test tests/MissionController.Tests/MissionController.Tests.csproj
-Passed!  - Failed: 0, Passed: 638, Skipped: 0, Total: 638, Duration: 25 s - MissionController.Tests.dll (net10.0)
+Passed!  - Failed: 0, Passed: 639, Skipped: 0, Total: 639, Duration: 25 s - MissionController.Tests.dll (net10.0)
 ```
 
-638 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
+639 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
 
 **On the warning count.** An incremental `dotnet build` reports zero warnings, but that is an artifact of caching rather than a property of the source: a cold `--no-incremental` build re-runs the CommunityToolkit source generators and emits **186 `MVVMTK0045` warnings**, one per `[ObservableProperty]` field that should be declared as a partial property for WinRT marshalling. They are cosmetic and confined to the view models, but a "zero warnings" claim would only have been true on the build nobody runs from clean. Converting the fields is tracked work; the badge above claims zero *errors*, which holds either way.
 
@@ -201,7 +201,7 @@ SPLAT/
 ├── native/
 │   ├── splat-agent/                             # Rust eBPF daemon: lease_lsm.bpf.c + libbpf-rs loader
 │   └── splat-canary/                            # Minimal -EPERM proof harness (preflight → canary)
-├── tests/MissionController.Tests/               # 638 xUnit unit / integration / security tests
+├── tests/MissionController.Tests/               # 639 xUnit unit / integration / security tests
 ├── packaging/                                   # Signed MSIX build + Intune/SCCM silent install scripts
 └── docs/                                        # Architecture, context and module maps; briefs, plans, audits - index in docs/README.md
 ```

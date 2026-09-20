@@ -1,8 +1,10 @@
 <!-- Companion to ARCHITECTURE-linux-substrate.md. The three contracts a lease crosses, as the code
      defines them: the kernel's binary layouts, the daemon's JSON line protocol, and the C# records
-     the bridge maps them to. Layouts were measured on 2026-09-20 with clang 21 and bpftool 7.7
-     against lease_lsm.bpf.c at SHA-256 8ac49790…, the source the recorded evidence names. Where
-     this file and the code disagree, the code wins and this file has the bug. -->
+     the bridge maps them to. Layouts were measured on 2026-09-20 with clang 21 against
+     lease_lsm.bpf.c as it stood that evening, after the record gained its clock, number and drop
+     counter. The recorded root evidence predates that change and is pending re-run; see
+     GUIDE-operator.md. Where this file and the code disagree, the code wins and this file has the
+     bug. -->
 
 # Wire protocol and contract specification — the Linux lease
 
@@ -57,20 +59,29 @@ entry.
 
 ### `struct violation_event` — one ring-buffer record per denial
 
-40 bytes, 8-byte alignment. Written by `report()` in [`lease_lsm.bpf.c`](../native/splat-agent/src/bpf/lease_lsm.bpf.c), read by the cast in `main.rs`.
+56 bytes, 8-byte alignment. Written by `report()` in [`lease_lsm.bpf.c`](../native/splat-agent/src/bpf/lease_lsm.bpf.c), read by the cast in `main.rs`.
 
 | Offset | Size | Field | Meaning |
 | --- | --- | --- | --- |
 | 0 | 8 | `cgroup_id` | The lease that was denied |
-| 8 | 4 | `pid` | The thread-group id (`bpf_get_current_pid_tgid() >> 32`) |
-| 12 | 4 | `hook` | `1` exec (`bprm_check_security`), `2` open (`file_open`), `3` connect (`socket_connect`) |
-| 16 | 4 | `detail` | Exec and open: the **low 32 bits** of the inode number. Connect: the destination IPv4 address in network byte order, or `0` for an IPv6 destination |
-| 20 | 16 | `comm` | The task's `comm`, NUL-terminated within the 16 bytes |
-| 36 | 4 | — | Padding. Unspecified; the reservation is not zeroed, so a consumer must not read it |
+| 8 | 8 | `ktime_ns` | `bpf_ktime_get_ns()` at the denial: the kernel's monotonic clock, nanoseconds since boot. Not wall time |
+| 16 | 8 | `seq` | The denial's number, taken from `counters[0]` **before** the reservation. Global across every lease |
+| 24 | 4 | `pid` | The thread-group id (`bpf_get_current_pid_tgid() >> 32`) |
+| 28 | 4 | `hook` | `1` exec (`bprm_check_security`), `2` open (`file_open`), `3` connect (`socket_connect`) |
+| 32 | 4 | `detail` | Exec and open: the **low 32 bits** of the inode number. Connect: the destination IPv4 address in network byte order, or `0` for an IPv6 destination or an address too short to hold one |
+| 36 | 16 | `comm` | The task's `comm`, NUL-terminated within the 16 bytes |
+| 52 | 4 | — | Padding. Unspecified; the reservation is not zeroed, so a consumer must not read it |
 
 The ring buffer (`violations`) is `BPF_MAP_TYPE_RINGBUF` of 1 MiB. Records are delivered in
 reservation order. When the buffer is full, `bpf_ringbuf_reserve` returns NULL and the denial is
-**not recorded** — the `-EPERM` still happens, only the event is lost, and nothing counts the loss.
+**not recorded** — the `-EPERM` still happens — but its number was already taken, so the sequence
+shows a gap, and `counters[1]` is incremented.
+
+### `counters` — two words the daemon reads back
+
+`BPF_MAP_TYPE_ARRAY`, key `__u32`, value `__u64`, two entries. `[0]` is the next sequence number;
+`[1]` is the count of denials dropped for want of room. Both are updated with a fetching atomic
+add, which is why the program is compiled for the v3 instruction set (kernel 5.12 or later).
 
 ### Map capacities
 
@@ -184,8 +195,8 @@ then exactly one `EXIT`. Every `VIOLATION` belonging to the lease precedes `EXIT
 | Frame | Fields | Notes |
 | --- | --- | --- |
 | `STDOUT` / `STDERR` | `data`: string | At most 64 KiB of text per frame. Not line-aligned: a longer line arrives as several frames, which the bridge concatenates. A multi-byte character is never split across frames |
-| `VIOLATION` | `cgroupId`, `pid`, `hook`, `detail` (u64 holding the record's u32), `detailText`, `comm`, `timestampMs` | Only events for **this** lease's cgroup. `timestampMs` is the daemon's clock, milliseconds since the Unix epoch, taken when the event was drained; daemons before 2026-09-20 omit it |
-| `EXIT` | `exitCode`: int | The child's exit status; `-1` when it died by signal, could not be spawned, or the request was refused |
+| `VIOLATION` | `cgroupId`, `pid`, `hook`, `detail` (u64 holding the record's u32), `detailText`, `comm`, `timestampMs`, `ktimeNs`, `seq` | Only events for **this** lease's cgroup. `timestampMs` is the daemon's clock, milliseconds since the Unix epoch, taken when the event was drained; `ktimeNs` and `seq` are the record's own. Daemons before 2026-09-20 omit all three |
+| `EXIT` | `exitCode`: int; `violationsDropped`: int | The child's exit status; `-1` when it died by signal, could not be spawned, or the request was refused. `violationsDropped` is how far the kernel's drop counter moved while this lease ran, across every lease on the host; anything but `0` means the `VIOLATION` frames above are incomplete |
 
 A refused request (policy the daemon cannot enforce, an undeclared dimension, a command outside its
 own lease, a cgroup or map that could not be provisioned) is answered with a `STDERR` frame whose
@@ -222,8 +233,10 @@ by [`WslLeasedExecutor`](../src/MissionController.Infrastructure.Linux/WslLeased
 | `OverlayFs` | `overlayFs` | Sent with `enableCow: false` when present |
 
 `LeaseViolationEvent` is the `VIOLATION` frame one to one: `Hook` is `KernelViolationHook`
-(`Exec = 1`, `Open = 2`, `Connect = 3`, `Unspecified = 0`), and `TimestampUtc` is `timestampMs`
-when the daemon sent one, else the host's clock at receipt.
+(`Exec = 1`, `Open = 2`, `Connect = 3`, `Unspecified = 0`), `TimestampUtc` is `timestampMs`
+when the daemon sent one, else the host's clock at receipt, and `Sequence` and `KernelTimeNs` are
+`seq` and `ktimeNs`, `0` from a daemon that predates them. A non-zero `violationsDropped` in
+`EXIT` is written into `StandardError` as a `[KERNEL_EVENTS_DROPPED]` line.
 
 `ProcessExecutionResult` after a lease:
 
@@ -242,7 +255,7 @@ accounting, and the bridge reports the absence rather than a number nobody measu
 
 | Where | Clock | Meaning |
 | --- | --- | --- |
-| Kernel record | none | The event carries no time |
+| Kernel record, `ktime_ns` | kernel, monotonic | The denial itself, in nanoseconds since the guest booted. Comparable between records; not a wall-clock time |
 | `VIOLATION.timestampMs` | daemon, `SystemTime::now()` | When the event was drained — the ring buffer is polled every ~100 ms, so up to that much after the denial |
 | `LeaseViolationEvent.TimestampUtc` | `timestampMs`, else host | |
 | Ledger row | host, at append | Written by the MCP handler after the lease ends |
@@ -251,11 +264,13 @@ accounting, and the bridge reports the absence rather than a number nobody measu
 
 ## What is not guaranteed
 
-- **No event sequence numbers**, in the record or the frame. Order within one lease is the ring
-  buffer's reservation order; nothing lets a consumer detect a gap.
-- **No kernel timestamp.** Adding `bpf_ktime_get_ns()` to the record changes the BPF source, and
-  changing it withdraws every recorded proof until the root probes are re-run.
-- **Drops are silent.** A full ring buffer loses events without a counter.
+- **Sequence numbers are global and taken before reservation.** They count every denial on the
+  host, not one lease's; two CPUs can deliver neighbouring numbers out of order; a number that
+  never arrives was dropped. They restart at 0 when the daemon loads the program.
+- **`ktime_ns` is monotonic, not wall time.** It says how far apart two denials were, and nothing
+  about the date; `timestampMs` is the daemon's wall clock some 100 ms later.
+- **Drops are counted, not attributed.** `violationsDropped` is the host-wide count's movement
+  during one lease; a busy neighbour's denials can put a number in another lease's `EXIT`.
 - **`detail` truncates the inode number** to 32 bits. The denial is real; the number in the text
   may not be the whole inode number on a filesystem that uses the high bits.
 - **`STDOUT` and `STDERR` interleave arbitrarily** relative to each other; each is ordered within

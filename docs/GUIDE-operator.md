@@ -51,9 +51,12 @@ mattered:
 | A request the guard did not understand got no answer | The bridge waited out its whole time limit | Fixed; refused with a reason |
 | Documents disagreed with the code in five places | A reader would act on the wrong fact | Fixed; see the list below |
 
-What was **not** changed: the kernel program itself. Every recorded proof carries the SHA-256 of
-that file, and the test suite withdraws the README's "proven" claims the moment the file changes,
-until the proofs are re-run. Re-running them needs root. That is Part 2.
+Then, on your say-so, the kernel program itself changed: each refusal record now carries the
+kernel's own clock and a sequence number, the program counts the refusals it had no room to
+record, and the connect hook refuses a network address too short to hold one. Every recorded proof
+carries the SHA-256 of that file, so the daemon and last-hop proofs no longer name the program
+that ships. The README's "proven" claims are withdrawn until they are re-run, and re-running them
+needs root. That is Part 2.
 
 ### How to learn it, in order
 
@@ -116,10 +119,10 @@ Two kinds of root exist here, and only one of them needs you.
 
 ### Step 1 — Re-run the guard's proofs against the new build
 
-The guard's code changed today. The kernel program did not, so the recorded proofs still name
-the program that ships and the suite still passes. But the daemon probe exercised the guard as a
-whole, and the honest reading of the repository's own rule is that after touching the daemon the
-root probe is the test. Three runs, in two terminals.
+Both the guard and its kernel program changed today, so this step is required, not optional: the
+recorded daemon and last-hop proofs name a program that no longer ships, and the README says so
+until you have run this. The standalone canary is a frozen copy and does not need re-running.
+Three runs, in two terminals.
 
 Terminal one, inside WSL. This builds the guard and starts it with `sudo`, which prompts:
 
@@ -147,8 +150,10 @@ C:\C_AGENT_BUILDER\native\splat-agent\probe-last-hop.ps1
 
 Expect the same `(verdict PASS)` line and a rewritten `evidence/last-hop-probe.json`. Stop the
 guard in terminal one with
-Ctrl-C. The new shutdown path should print `Stopping; no lease was running.` Commit the two
-evidence files, or paste both results to me and I will.
+Ctrl-C. The new shutdown path should print `Stopping; no lease was running.` Paste both results
+to me: with two passes on record I restore the README's "Enforcing, proven under root" and
+"Demonstrated end to end" wording, which the suite then holds to the new evidence, and commit the
+evidence with it. A failure is a finding, not a setup problem; paste it whole.
 
 ### Step 2 — Watch the shutdown behaviour once, with your own eyes
 
@@ -183,20 +188,15 @@ splat-mcp provision --apply
 
 Expect `daemon binary ... replaces it and restarts the service` followed by `enforcement live`.
 
-### Step 4 — Decide on the kernel-side change, and if yes, re-run the proofs again
+### Step 4 — The kernel-side change is in; step 1 is what proves it
 
-The audit proposed one change to the kernel program: give each refusal note a kernel clock, a
-sequence number for gap detection, and a count of notes dropped when the buffer is full, and
-check the length of a network address before reading it. It is written up in the audit reply and
-is a small edit. It is not applied because the moment it lands, every recorded proof stops
-counting until step 1 is repeated, and this time the standalone canary too:
-
-```bash
-cd /mnt/c/C_AGENT_BUILDER/native/splat-canary && bash run-canary.sh
-```
-
-If you want it, say so. I will make the edit, update the byte layouts in SCHEMA.md and the Rust
-assertions, and hand you exactly this step to run.
+Applied 2026-09-20 on your say-so: each refusal record carries the kernel's clock and a sequence
+number, the program counts what it could not record, and the connect hook refuses an address too
+short to hold one. What could be checked without root was: the program compiles for the v3
+instruction set it now needs, its three hooks are still straight-line code with 40 bytes of stack,
+the Rust side asserts the new 56-byte layout, and the bridge's tests see the new fields arrive.
+What cannot be checked without root is the only thing that matters — that the kernel's verifier
+accepts the program and the hooks still refuse what they should — and that is step 1.
 
 ### What does not need you
 

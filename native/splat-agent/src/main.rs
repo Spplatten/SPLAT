@@ -196,7 +196,12 @@ struct LiveBpfSync {
     protected_inodes: MapHandle,
     allowed_exec_inodes: MapHandle,
     allowed_connect_ipv4: MapHandle,
+    /// The program's two counters: the next sequence number, and the denials it could not record.
+    counters: MapHandle,
 }
+
+/// Index of the dropped-denials word in the `counters` map; mirrors `COUNTER_DROPPED` in the program.
+const COUNTER_DROPPED: u32 = 1;
 
 impl BpfMapSync for LiveBpfSync {
     fn add_lease(&self, lease: &lease::ActiveLease) -> Result<()> {
@@ -247,6 +252,19 @@ impl BpfMapSync for LiveBpfSync {
             let _ = self.allowed_connect_ipv4.delete(bytes_of(key));
         }
         Ok(())
+    }
+
+    fn dropped_events(&self) -> u64 {
+        // A counter that cannot be read is reported as nothing dropped, and said so: the alternative,
+        // failing the lease over a diagnostic, would refuse work the kernel is containing fine.
+        match self.counters.lookup(&COUNTER_DROPPED.to_ne_bytes(), MapFlags::ANY) {
+            Ok(Some(word)) if word.len() >= 8 => u64::from_ne_bytes(word[..8].try_into().unwrap_or([0; 8])),
+            Ok(_) => 0,
+            Err(e) => {
+                warn!("Could not read the dropped-denials counter: {e}");
+                0
+            }
+        }
     }
 }
 
@@ -314,13 +332,15 @@ async fn main() -> Result<()> {
                             MapHandle::try_from(&skel.maps.protected_inodes),
                             MapHandle::try_from(&skel.maps.allowed_exec_inodes),
                             MapHandle::try_from(&skel.maps.allowed_connect_ipv4),
+                            MapHandle::try_from(&skel.maps.counters),
                         ) {
-                            (Ok(leased_cgroups), Ok(protected_inodes), Ok(allowed_exec_inodes), Ok(allowed_connect_ipv4)) => {
+                            (Ok(leased_cgroups), Ok(protected_inodes), Ok(allowed_exec_inodes), Ok(allowed_connect_ipv4), Ok(counters)) => {
                                 bpf_sync = Some(Arc::new(LiveBpfSync {
                                     leased_cgroups,
                                     protected_inodes,
                                     allowed_exec_inodes,
                                     allowed_connect_ipv4,
+                                    counters,
                                 }));
                                 info!("Lease maps bound; kernel enforcement is live.");
                             }
@@ -563,7 +583,9 @@ fn violation_frame(v: &ViolationEvent) -> serde_json::Value {
         "detail": v.detail,
         "detailText": v.detail_text,
         "comm": v.comm,
-        "timestampMs": v.timestamp_ms
+        "timestampMs": v.timestamp_ms,
+        "ktimeNs": v.ktime_ns,
+        "seq": v.seq
     })
 }
 
@@ -1098,6 +1120,9 @@ async fn handle_client(
                 // binary". That is exactly what the first root run showed.
                 let target_cgid = cg.cgroup_id;
                 let mut viol_rx = viol_tx.subscribe();
+                // The program's drop counter is global; what this lease can honestly report is how
+                // far it moved while the lease ran.
+                let dropped_before = lease_mgr.dropped_events();
 
                 let mut child = match cmd.spawn() {
                     Ok(c) => c,
@@ -1277,7 +1302,11 @@ async fn handle_client(
 
                 let exit_chunk = serde_json::json!({
                     "type": "EXIT",
-                    "exitCode": exit_code
+                    "exitCode": exit_code,
+                    // Denials the kernel refused but could not record while this lease ran, across
+                    // every lease on the host. Zero is the normal case; anything else means the
+                    // VIOLATION frames above are incomplete, which the caller must be told.
+                    "violationsDropped": lease_mgr.dropped_events().saturating_sub(dropped_before)
                 });
                 writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
 

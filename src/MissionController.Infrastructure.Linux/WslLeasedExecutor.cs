@@ -249,7 +249,9 @@ public class WslLeasedExecutor : ILeasedExecutor
                                 Detail: detail,
                                 DetailText: detailText,
                                 ProcessComm: comm,
-                                TimestampUtc: stamped);
+                                TimestampUtc: stamped,
+                                Sequence: root.TryGetProperty("seq", out var seqProp) ? seqProp.GetUInt64() : 0,
+                                KernelTimeNs: root.TryGetProperty("ktimeNs", out var ktProp) ? ktProp.GetUInt64() : 0);
 
                             violations?.Report(vEvent);
                             stderr?.Report($"[KERNEL -EPERM BLOCK] [{comm} pid {pid}] {detailText}\n");
@@ -260,6 +262,18 @@ public class WslLeasedExecutor : ILeasedExecutor
                             {
                                 exitCode = exitProp.GetInt32();
                             }
+
+                            // Refusals the kernel made but had no room to record while this lease ran.
+                            // The VIOLATION events above are then an undercount, and a result that looked
+                            // complete would be the kind of evidence this product exists not to produce.
+                            if (root.TryGetProperty("violationsDropped", out var droppedProp)
+                                && droppedProp.TryGetUInt64(out ulong droppedCount) && droppedCount > 0)
+                            {
+                                string note = $"[KERNEL_EVENTS_DROPPED] {droppedCount} kernel refusal record(s) were dropped by a full ring buffer while this lease ran; the refusals themselves still happened, and the violation list above is incomplete.";
+                                stderrBuilder.Note(note);
+                                stderr?.Report(note + "\n");
+                            }
+
                             stopwatch.Stop();
                             return new ProcessExecutionResult(
                                 ExitCode: exitCode,

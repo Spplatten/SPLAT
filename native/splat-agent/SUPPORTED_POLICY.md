@@ -67,6 +67,12 @@ Everything in the two "enforced" tables above is proven against a root daemon on
 the BPF source it exercised, and `DocumentationDriftTests` fails the build if the README claims
 enforcement while the hash does not match what ships — so the proof cannot outlive the program.
 
+> **Pending since 2026-09-20.** The program changed that day — each denial record gained the
+> kernel's clock, a sequence number and a drop counter, and the connect hook refuses an AF_INET
+> address too short to hold one — so the daemon and last-hop evidence below name the program as it
+> was, not as it ships. The README's claims are withdrawn until `probe-daemon.sh` and
+> `probe-last-hop.ps1` are re-run under root; `docs/GUIDE-operator.md` has the steps.
+
 | Claim | Evidence |
 | --- | --- |
 | Out-of-lease exec, open and connect are vetoed **through the daemon**, under root | `evidence/daemon-probe.json` (verdict PASS, 17 checks) |

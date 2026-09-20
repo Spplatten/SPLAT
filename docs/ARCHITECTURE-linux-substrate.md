@@ -18,8 +18,13 @@ what a kernel and a guest need, and how the daemon is installed.
 **Status.** The program is proven in operation on a stock WSL2 kernel — standalone, and through the
 daemon under root — with evidence bound to the source it ran. The last hop, an agent's request
 travelling from `splat-mcp` through the C# bridge into the daemon, is recorded, most recently on 2026-09-15 under protocol 3, in
-[`last-hop-probe.json`](../native/splat-agent/evidence/last-hop-probe.json). The README's status
-table is the test-bound statement of this; where it and this paragraph disagree, trust the README.
+[`last-hop-probe.json`](../native/splat-agent/evidence/last-hop-probe.json). **On 2026-09-20 the
+daemon's copy of the program changed** — each denial record gained the kernel's clock, a sequence
+number and a drop counter, and the connect hook refuses an address too short to hold one — so the
+daemon and last-hop evidence no longer name the program that ships, and the root probes are pending;
+[GUIDE-operator.md](GUIDE-operator.md) has the steps. The canary's frozen copy, and its evidence,
+are unaffected. The README's status table is the test-bound statement of this; where it and this
+paragraph disagree, trust the README.
 
 ## The pieces, and where they run
 
@@ -59,13 +64,14 @@ a libbpf-rs skeleton.
 | `allowed_exec_inodes` | cgroup id, dev, ino | The only executables this lease may exec |
 | `protected_inodes` | cgroup id, dev, ino | Files this lease may not open |
 | `allowed_connect_ipv4` | cgroup id, address, port | The only IPv4 endpoints this lease may connect to |
-| `violations` | ring buffer | One event per denial: cgroup, pid, hook, detail, `comm` |
+| `violations` | ring buffer | One 56-byte record per denial: cgroup, kernel clock, sequence number, pid, hook, detail, `comm` |
+| `counters` | two words | The next sequence number, and how many denials the ring buffer had no room for |
 
 | Hook | Decision for a leased cgroup |
 | --- | --- |
 | `lsm/bprm_check_security` | Exec allowed only when `(cgroup, dev, ino)` is on this lease's allow-list — including an exec by a tool that is already running |
 | `lsm/file_open` | Denied when `(cgroup, dev, ino)` is on this lease's deny-list |
-| `lsm/socket_connect` | IPv4 allowed only to an approved `(address, port)`; IPv6 denied outright; other families, such as AF_UNIX and AF_NETLINK, not policed |
+| `lsm/socket_connect` | IPv4 allowed only to an approved `(address, port)`; IPv6 denied outright; an AF_INET address too short to hold a `sockaddr_in` denied rather than read past; other families, such as AF_UNIX and AF_NETLINK, not policed |
 
 Three properties are load-bearing:
 
@@ -98,13 +104,15 @@ since that daemon's maps died with it, nothing can re-police them, and a tree th
 is a reason to exit rather than serve beside it. It installs a SIGTERM handler that does the same
 for every live lease before exiting, starts the expiry reaper, and binds, loopback by default.
 
-**The ring buffer.** Each denial is a 40-byte record ([SCHEMA.md](SCHEMA.md#struct-violation_event--one-ring-buffer-record-per-denial))
-in a 1 MiB `BPF_MAP_TYPE_RINGBUF`. A dedicated thread polls it every 100 ms and fans each event out
-through a 128-slot broadcast channel; every `EXECUTE_TOOL` subscribes before it spawns and forwards
-only the events for its own cgroup. A forwarder that falls behind a burst is told how many events
-it missed and carries on — treating that as the end of the stream once silenced every later
-denial of a lease while the kernel went on denying. A full ring buffer drops the record and counts
-nothing; the `-EPERM` still happens.
+**The ring buffer.** Each denial is a 56-byte record ([SCHEMA.md](SCHEMA.md#struct-violation_event--one-ring-buffer-record-per-denial))
+carrying the kernel's monotonic clock and a sequence number, in a 1 MiB `BPF_MAP_TYPE_RINGBUF`. A
+dedicated thread polls it every 100 ms and fans each event out through a 128-slot broadcast
+channel; every `EXECUTE_TOOL` subscribes before it spawns and forwards only the events for its own
+cgroup. A forwarder that falls behind a burst is told how many events it missed and carries on —
+treating that as the end of the stream once silenced every later denial of a lease while the
+kernel went on denying. A full ring buffer drops the record; the `-EPERM` still happens, the
+record's number is skipped so the gap is visible, the program's drop counter moves, and the lease's
+`EXIT` frame reports how far it moved while the lease ran.
 
 **Every connection, first.** Protocol 3 opens with a handshake, and nothing else is read until it
 holds. The caller's `HELLO` names a nonce; the daemon answers with its own and an HMAC-SHA256 of both

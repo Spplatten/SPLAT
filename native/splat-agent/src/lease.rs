@@ -168,6 +168,13 @@ pub fn lease_map_keys(lease: &ActiveLease) -> LeaseMapKeys {
 pub trait BpfMapSync: Send + Sync {
     fn add_lease(&self, lease: &ActiveLease) -> Result<()>;
     fn remove_lease(&self, lease: &ActiveLease) -> Result<()>;
+
+    /// How many denials the kernel could not record because the ring buffer was full, since the
+    /// program was loaded. Global, not per lease: the counter lives in the program, and a lease can
+    /// only report the difference across its own lifetime.
+    fn dropped_events(&self) -> u64 {
+        0
+    }
 }
 
 #[derive(Clone)]
@@ -291,6 +298,11 @@ impl LeaseManager {
     pub fn get_active_count(&self) -> usize {
         let lock = self.leases.lock().unwrap();
         lock.len()
+    }
+
+    /// See [`BpfMapSync::dropped_events`]. Zero when nothing reaches the kernel.
+    pub fn dropped_events(&self) -> u64 {
+        self.bpf_sync.as_ref().map_or(0, |sync| sync.dropped_events())
     }
 
     /// Takes the expired leases out of the table WITHOUT touching the kernel.

@@ -25,7 +25,7 @@ are in [SCHEMA.md](SCHEMA.md). This file is about the ground it stands on.
 | `CONFIG_DEBUG_INFO_BTF=y` and `/sys/kernel/btf/vmlinux` | CO-RE relocations against the running kernel's types | `test -r /sys/kernel/btf/vmlinux` |
 | cgroup v2, unified hierarchy | Lease identity is the cgroup id `bpf_get_current_cgroup_id()` returns on the default hierarchy | `stat -fc %T /sys/fs/cgroup` prints `cgroup2fs` |
 | `memory`, `cpu` and `pids` controllers available at `/sys/fs/cgroup` | The daemon delegates them to `splat_leases/` and reads every clamp back; a controller the root does not offer refuses the lease | `cat /sys/fs/cgroup/cgroup.controllers` |
-| Kernel release | BPF-LSM programs: 5.7. BPF ring buffer: 5.8. `cgroup.kill`: 5.14 (older kernels fall back to a SIGKILL loop). These floors are from kernel history, not re-measured here | `uname -r` |
+| Kernel release | BPF-LSM programs: 5.7. BPF ring buffer: 5.8. Fetching atomics (the program is built for the v3 instruction set, for its sequence counter): 5.12. `cgroup.kill`: 5.14 (older kernels fall back to a SIGKILL loop). These floors are from kernel history, not re-measured here | `uname -r` |
 
 Recorded and proven on: `6.18.33.2-microsoft-standard-WSL2`, with `CONFIG_BPF_LSM=y`,
 `CONFIG_DEBUG_INFO_BTF=y`, boot line
@@ -209,7 +209,7 @@ production host would need instead, and **none of it is built** unless the row s
 | No mount namespace for the workload | The deny-list names inodes; the privilege drop carries the rest | `unshare(CLONE_NEWNS)` and `pivot_root` in the same `pre_exec` closure; then `readOnlyFs` and the overlay in [`cow.rs`](../native/splat-agent/src/cow.rs) stop being refusals. P2 of the plan |
 | Maps and programs die with the daemon | Simple ownership; nothing to clean in `/sys/fs/bpf` | Pinned maps under `/sys/fs/bpf/splat`, so a daemon restart re-attaches instead of unpolicing. Today the daemon compensates by **killing** every leftover lease at startup and on SIGTERM |
 | Violations fan out through a 128-slot broadcast channel | A lease's forwarder tolerates lagging and says so | A per-lease queue with a drop counter surfaced in the `EXIT` frame |
-| A full 1 MiB ring buffer drops events silently | 26 000 records of headroom on a machine running a handful of leases | A drop counter in a BPF array map, read at `EXIT` — a source change, so it costs a re-probe |
+| A full 1 MiB ring buffer drops events, counted host-wide | 18 000 records of headroom on a machine running a handful of leases, and the count moves when it is not enough | A per-lease count, which needs the counter keyed by cgroup — another source change, another re-probe |
 | One guest, one tenant | WSL2 is the developer's own VM | A dedicated guest per tenant; the lease keys cannot separate two tenants who share a kernel and a token |
 | `Restart=on-failure` with a 2 s delay | A refusing daemon should be seen, not hidden behind a restart | The same, plus journal shipping — a daemon that exits `1` every two seconds is only useful if someone reads why |
 | The build tree lives on `/mnt/c` | Convenient from Windows | Build in the guest's own filesystem; DrvFS is slow and every guest process can write to it, which is why `provision` hashes the daemon before it installs it |
@@ -232,6 +232,8 @@ production host would need instead, and **none of it is built** unless the row s
 | The client disconnects mid-run | The cgroup is killed, then the lease withdrawn | `main.rs` |
 | The lease expires with the workload running | Killed inside the policy, then withdrawn; a tree that will not drain keeps its policy and is retried every second | `main.rs`, reaper |
 | The ring buffer poll returns an error | Logged; polling continues. It used to end the drain thread silently | `main.rs` |
+| The ring buffer is full when a denial happens | The `-EPERM` still happens; the record is dropped, its sequence number is skipped, the program's drop counter moves, and the lease's `EXIT` frame reports how far it moved | `lease_lsm.bpf.c`, `main.rs` |
+| A leased process connects with an AF_INET address shorter than `sockaddr_in` | Refused with a violation of detail `0` rather than judged on bytes past the caller's buffer | `lease_lsm.bpf.c` |
 | A tool prints a line longer than 64 KiB | Forwarded in 64 KiB frames, never buffered whole | `main.rs`, `pump_output` |
 | A request frame over 1 MiB | Refused; connection closed | `main.rs`, `read_frame` |
 | A request of unknown `type` | Refused with a `STDERR` frame naming the type; the connection stays open | `main.rs` |

@@ -644,6 +644,47 @@ public class WslLeasedExecutorWireTests
         Assert.DoesNotContain("[OUTPUT_TRUNCATED]", result.StandardError, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A full ring buffer loses refusal records. The kernel program counts those losses and the daemon reports
+    /// the count in EXIT; a result that omitted it would present an incomplete violation list as complete.
+    /// The record's own number and kernel clock ride along on each violation.
+    /// </summary>
+    [Fact]
+    public async Task DroppedKernelRecords_AreSaidInTheResult_AndEachViolationCarriesItsNumber()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var daemon = RunStandInDaemonAsync(
+            listener,
+            "{\"type\":\"VIOLATION\",\"cgroupId\":4020,\"pid\":8540,\"hook\":1,\"detail\":1633," +
+            "\"detailText\":\"bprm_check_security: denied execution of unleased binary (inode 1633)\",\"comm\":\"sh\"," +
+            "\"timestampMs\":1758300000000,\"ktimeNs\":123456789,\"seq\":41}",
+            "{\"type\":\"EXIT\",\"exitCode\":1,\"violationsDropped\":3}");
+
+        var seen = new List<LeaseViolationEvent>();
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
+        var result = await executor.ExecuteLeasedAsync(
+            SampleLease(), "/bin/sh", new[] { "-c", "ls" },
+            violations: new Progress<LeaseViolationEvent>(v => { lock (seen) { seen.Add(v); } }));
+
+        await daemon;
+        listener.Stop();
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("[KERNEL_EVENTS_DROPPED] 3", result.StandardError, StringComparison.Ordinal);
+        for (int i = 0; i < 50 && seen.Count == 0; i++)
+        {
+            await Task.Delay(20);
+        }
+
+        var violation = Assert.Single(seen);
+        Assert.Equal(41ul, violation.Sequence);
+        Assert.Equal(123456789ul, violation.KernelTimeNs);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1758300000000).UtcDateTime, violation.TimestampUtc);
+    }
+
     /// <summary>Counts what a streaming consumer received, on whatever thread it arrived.</summary>
     private sealed class CountingProgress : IProgress<string>
     {

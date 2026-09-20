@@ -7,17 +7,19 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy)]
 pub struct RawViolationEvent {
     pub cgroup_id: u64,
+    pub ktime_ns: u64,
+    pub seq: u64,
     pub pid: u32,
     pub hook: u32,
     pub detail: u32,
     pub comm: [u8; 16],
 }
 
-// Mirrors `struct violation_event` in lease_lsm.bpf.c: 8 + 4 + 4 + 4 + 16 = 36, padded to 40 by the
-// u64's alignment. The drain casts the ring buffer record straight to this type, so a layout that
-// drifted would read the pid out of the hook and never say so. The lease keys already fail the build
-// this way; this was the one struct crossing that boundary that did not.
-const _: () = assert!(std::mem::size_of::<RawViolationEvent>() == 40);
+// Mirrors `struct violation_event` in lease_lsm.bpf.c: 8 + 8 + 8 + 4 + 4 + 4 + 16 = 52, padded to
+// 56 by the u64s' alignment. The drain casts the ring buffer record straight to this type, so a
+// layout that drifted would read the pid out of the hook and never say so. The lease keys already
+// fail the build this way; this was the one struct crossing that boundary that did not.
+const _: () = assert!(std::mem::size_of::<RawViolationEvent>() == 56);
 const _: () = assert!(std::mem::align_of::<RawViolationEvent>() == 8);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,7 +31,12 @@ pub struct ViolationEvent {
     pub detail: u64,
     pub detail_text: String,
     pub comm: String,
+    /// The daemon's wall clock when the record was drained, milliseconds since the Unix epoch.
     pub timestamp_ms: u64,
+    /// The kernel's monotonic clock at the denial itself, nanoseconds since boot.
+    pub ktime_ns: u64,
+    /// The denial's number, taken before the record was reserved: a number never seen was dropped.
+    pub seq: u64,
 }
 
 impl ViolationEvent {
@@ -61,6 +68,8 @@ impl ViolationEvent {
             detail_text,
             comm,
             timestamp_ms: now,
+            ktime_ns: raw.ktime_ns,
+            seq: raw.seq,
         }
     }
 }
@@ -131,11 +140,20 @@ mod tests {
     /// of "0.0.0.0" - an IPv4 address nobody dialled, in the ledger.
     #[test]
     fn a_detail_of_zero_on_the_connect_hook_is_not_rendered_as_an_ipv4_address() {
-        let raw = RawViolationEvent { cgroup_id: 7, pid: 1, hook: 3, detail: 0, comm: *b"curl\0\0\0\0\0\0\0\0\0\0\0\0" };
+        let raw = RawViolationEvent {
+            cgroup_id: 7,
+            ktime_ns: 1_000,
+            seq: 9,
+            pid: 1,
+            hook: 3,
+            detail: 0,
+            comm: *b"curl\0\0\0\0\0\0\0\0\0\0\0\0",
+        };
         let event = ViolationEvent::from_raw(&raw);
         assert!(event.detail_text.contains("IPv6"), "{}", event.detail_text);
         assert!(!event.detail_text.contains("unapproved IPv4 0.0.0.0"), "{}", event.detail_text);
         assert_eq!(event.comm, "curl");
+        assert_eq!((event.ktime_ns, event.seq), (1_000, 9), "the kernel's clock and number survive the decode");
     }
 
     #[test]

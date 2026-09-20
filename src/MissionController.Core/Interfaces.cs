@@ -367,7 +367,12 @@ public record LeaseViolationEvent(
     ulong Detail,
     string DetailText,
     string ProcessComm,
-    DateTime TimestampUtc);
+    DateTime TimestampUtc,
+    // The denial's number, assigned by the kernel program before the record was reserved: a number
+    // that never arrives was dropped. The kernel's monotonic clock at the denial, in nanoseconds
+    // since the guest booted. Both 0 from a daemon that predates them.
+    ulong Sequence = 0,
+    ulong KernelTimeNs = 0);
 
 public record LeaseSpec(
     Guid MissionId,
