@@ -32,6 +32,11 @@ public sealed partial class SecurityAuditView : Page
         await ViewModel.VerifyChainIntegrityAsync();
     }
 
+    private async void ExportRunRecord_Click(object sender, RoutedEventArgs e)
+    {
+        await ViewModel.ExportRunRecordAsync();
+    }
+
     private async void ExportSoc2_Click(object sender, RoutedEventArgs e)
     {
         await ViewModel.ExportSoc2CompliancePackageAsync();

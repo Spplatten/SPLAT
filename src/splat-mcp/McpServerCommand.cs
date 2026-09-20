@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using MissionController.Infrastructure.Data.Audit;
+using MissionController.Infrastructure.Data.Compliance;
 
 namespace SplatMcp;
 
@@ -21,9 +22,10 @@ public abstract record McpServerCommand
     public const int UsageExitCode = 2;
 
     public static string Usage => $"""
-        Usage: splat-mcp [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>]
-               splat-mcp doctor [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>]
+        Usage: splat-mcp [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>] [--run-record-key <file>]
+               splat-mcp doctor [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>] [--run-record-key <file>]
                splat-mcp provision [--apply]
+               splat-mcp new-run-record-key <file>
 
         Serves SPLAT's governed tools to an MCP client: JSON-RPC, one message per line, on stdin
         and stdout. Diagnostics go to stderr, never stdout.
@@ -50,6 +52,15 @@ public abstract record McpServerCommand
                               entry is HMAC-SHA256 under the key, and a keyed ledger is never
                               extended without it. Without the option, the path in
                               {LedgerKeyFile.EnvironmentVariable} is used; with neither, the ledger is unkeyed.
+          new-run-record-key  Make a run record signing key at the path given, readable only
+                              by you, and print its fingerprint. It refuses to overwrite a
+                              file. Publish the fingerprint: it is how anyone you hand a
+                              bundle to tells your bundles from a forgery.
+          --run-record-key <file>
+                              The operator's key for signing run record bundles: an RSA
+                              private key in PEM, read and never written or printed. Without
+                              the option, the path in {RunRecordKeyFile.EnvironmentVariable}
+                              is used; with neither, bundles are exported unsigned and say so.
           -h, --help          Show this and exit.
 
         """;
@@ -74,6 +85,23 @@ public abstract record McpServerCommand
         // must never be able to turn into one.
         bool doctor = args.Count > 0 && args[0] == "doctor";
         bool provision = args.Count > 0 && args[0] == "provision";
+        if (args.Count > 0 && args[0] == "new-run-record-key")
+        {
+            if (args.Count != 2 || args[1].StartsWith('-'))
+            {
+                return new UsageError("`new-run-record-key` takes one argument: the path of the key file to make.");
+            }
+
+            try
+            {
+                return new NewRunRecordKey(Path.GetFullPath(args[1]));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                return new UsageError($"'{args[1]}' is not a usable path: {ex.Message}");
+            }
+        }
+
         IReadOnlyList<string> options = doctor || provision ? args.Skip(1).ToArray() : args;
 
         var given = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -107,7 +135,7 @@ public abstract record McpServerCommand
                 continue;
             }
 
-            if (option is not ("--workspace" or "--egress" or "--ledger-key"))
+            if (option is not ("--workspace" or "--egress" or "--ledger-key" or "--run-record-key"))
             {
                 return arg.StartsWith('-')
                     ? new UsageError($"unknown option '{arg}'.")
@@ -130,6 +158,7 @@ public abstract record McpServerCommand
                 {
                     "--workspace" => "--workspace needs a directory.",
                     "--ledger-key" => "--ledger-key needs the key file's path.",
+                    "--run-record-key" => "--run-record-key needs the key file's path.",
                     _ => "--egress needs a list of a.b.c.d:port endpoints.",
                 });
             }
@@ -158,21 +187,29 @@ public abstract record McpServerCommand
         if (provision)
         {
             // Neither option changes what provisioning does, and accepting one would say otherwise.
-            string? irrelevant = given.Keys.FirstOrDefault(key => key is "--workspace" or "--egress" or "--ledger-key");
+            string? irrelevant = given.Keys.FirstOrDefault(key => key is "--workspace" or "--egress" or "--ledger-key" or "--run-record-key");
             return irrelevant is null
                 ? new Provision(given.ContainsKey("--apply"))
                 : new UsageError($"`provision` takes only --apply; {irrelevant} belongs to the server or to `doctor`.");
         }
 
         string? ledgerKey = null;
-        if (given.TryGetValue("--ledger-key", out string? keyPath) && CheckLedgerKey(keyPath, "--ledger-key", out ledgerKey) is UsageError keyError)
+        if (given.TryGetValue("--ledger-key", out string? keyPath)
+            && CheckKeyFile(keyPath, "--ledger-key", LedgerKeyFile.Problem, out ledgerKey) is UsageError keyError)
         {
             return keyError;
         }
 
+        string? runRecordKey = null;
+        if (given.TryGetValue("--run-record-key", out string? signingPath)
+            && CheckKeyFile(signingPath, "--run-record-key", RunRecordKeyFile.Problem, out runRecordKey) is UsageError signingError)
+        {
+            return signingError;
+        }
+
         return given.TryGetValue("--workspace", out string? workspace)
-            ? ValidateWorkspace(workspace, egress, doctor, ledgerKey)
-            : Built(doctor, null, egress, ledgerKey);
+            ? ValidateWorkspace(workspace, egress, doctor, ledgerKey, runRecordKey)
+            : Built(doctor, null, egress, ledgerKey, runRecordKey);
     }
 
     /// <summary>
@@ -195,7 +232,7 @@ public abstract record McpServerCommand
             return command;
         }
 
-        if (CheckLedgerKey(path, LedgerKeyFile.EnvironmentVariable, out string? full) is UsageError error)
+        if (CheckKeyFile(path, LedgerKeyFile.EnvironmentVariable, LedgerKeyFile.Problem, out string? full) is UsageError error)
         {
             return error;
         }
@@ -203,8 +240,32 @@ public abstract record McpServerCommand
         return command is Serve serve ? serve with { LedgerKeyPath = full } : ((Doctor)command) with { LedgerKeyPath = full };
     }
 
+    /// <summary>The same for the run record signing key, from <see cref="RunRecordKeyFile.EnvironmentVariable"/>.</summary>
+    public static McpServerCommand WithRunRecordKeyFromEnvironment(McpServerCommand command, Func<string, string?> environment)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ArgumentNullException.ThrowIfNull(environment);
+        if (command is not (Serve { RunRecordKeyPath: null } or Doctor { RunRecordKeyPath: null }))
+        {
+            return command;
+        }
+
+        string? path = environment(RunRecordKeyFile.EnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return command;
+        }
+
+        if (CheckKeyFile(path, RunRecordKeyFile.EnvironmentVariable, RunRecordKeyFile.Problem, out string? full) is UsageError error)
+        {
+            return error;
+        }
+
+        return command is Serve serve ? serve with { RunRecordKeyPath = full } : ((Doctor)command) with { RunRecordKeyPath = full };
+    }
+
     /// <summary>A key file that will not do stops the server before it starts, like a missing workspace.</summary>
-    private static UsageError? CheckLedgerKey(string path, string source, out string? fullPath)
+    private static UsageError? CheckKeyFile(string path, string source, Func<string, string?> problemWith, out string? fullPath)
     {
         fullPath = null;
         string full;
@@ -217,7 +278,7 @@ public abstract record McpServerCommand
             return new UsageError($"{source} '{path}' is not a usable path: {ex.Message}");
         }
 
-        if (LedgerKeyFile.Problem(full) is string problem)
+        if (problemWith(full) is string problem)
         {
             return new UsageError($"{source}: {problem}");
         }
@@ -226,7 +287,7 @@ public abstract record McpServerCommand
         return null;
     }
 
-    private static McpServerCommand ValidateWorkspace(string workspace, McpEgressPolicy egress, bool doctor, string? ledgerKey)
+    private static McpServerCommand ValidateWorkspace(string workspace, McpEgressPolicy egress, bool doctor, string? ledgerKey, string? runRecordKey)
     {
         string full;
         try
@@ -248,7 +309,7 @@ public abstract record McpServerCommand
             return new UsageError($"--workspace '{full}' does not exist. It is never created for you.");
         }
 
-        return Built(doctor, full, egress, ledgerKey);
+        return Built(doctor, full, egress, ledgerKey, runRecordKey);
     }
 
     /// <summary>
@@ -256,13 +317,18 @@ public abstract record McpServerCommand
     /// <see cref="Egress"/> is <see cref="McpEgressPolicy.None"/> when no --egress was, and
     /// <see cref="LedgerKeyPath"/> is null when the ledger is to chain unkeyed.
     /// </summary>
-    public sealed record Serve(string? WorkspaceRoot, McpEgressPolicy Egress, string? LedgerKeyPath = null) : McpServerCommand;
+    public sealed record Serve(string? WorkspaceRoot, McpEgressPolicy Egress, string? LedgerKeyPath = null, string? RunRecordKeyPath = null) : McpServerCommand;
 
-    private static McpServerCommand Built(bool doctor, string? workspaceRoot, McpEgressPolicy egress, string? ledgerKey) =>
-        doctor ? new Doctor(workspaceRoot, egress, ledgerKey) : new Serve(workspaceRoot, egress, ledgerKey);
+    private static McpServerCommand Built(bool doctor, string? workspaceRoot, McpEgressPolicy egress, string? ledgerKey, string? runRecordKey) =>
+        doctor
+            ? new Doctor(workspaceRoot, egress, ledgerKey, runRecordKey)
+            : new Serve(workspaceRoot, egress, ledgerKey, runRecordKey);
 
     /// <summary>Report what this host will and will not enforce, then exit. Serves nothing.</summary>
-    public sealed record Doctor(string? WorkspaceRoot, McpEgressPolicy Egress, string? LedgerKeyPath = null) : McpServerCommand;
+    public sealed record Doctor(string? WorkspaceRoot, McpEgressPolicy Egress, string? LedgerKeyPath = null, string? RunRecordKeyPath = null) : McpServerCommand;
+
+    /// <summary>Make a run record signing key at this path, print its fingerprint, and exit.</summary>
+    public sealed record NewRunRecordKey(string Path) : McpServerCommand;
 
     /// <summary>
     /// Do what `doctor` reports missing. <see cref="Apply"/> is false by default: the steps write to

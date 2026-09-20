@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,9 +11,11 @@ using MissionController.Infrastructure.Data.Audit;
 namespace MissionController.Infrastructure.Data.Compliance;
 
 /// <summary>
-/// Assembles and exports a per-mission run record in the six-group evidence schema (ROADMAP P3, item
-/// 3.1). It records what its caller hands it and what the ledger holds for the mission, and nothing
-/// else: every field neither source gives is null, which the bundle prints as "not recorded".
+/// Assembles and exports a mission's run record in the six-group evidence schema (ROADMAP P3, item
+/// 3.1), from the ledger alone. The mission engine seals what it observed as a MISSION_RUN_FACTS row
+/// when the mission ends; this reads that row and the mission's other rows, and adds nothing of its
+/// own beyond the Merkle root over them. A field the facts do not carry is null in the record, which
+/// the bundle prints as "not recorded".
 /// </summary>
 public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
 {
@@ -36,103 +37,108 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
         _archiveExporter = archiveExporter ?? throw new ArgumentNullException(nameof(archiveExporter));
     }
 
-    public async Task<MissionRunRecord> AssembleRunRecordAsync(
-        Guid missionId,
-        SingleToolTemplate template,
-        LeaseSpec? leaseSpec,
-        string operatorIdentity,
-        string executionState,
-        int? exitCode,
-        int redactionCount,
-        IReadOnlyList<string> redactedCategories,
-        string substrateType,
-        string? cgroupOrJobId = null,
-        bool? qualityAcceptance = null,
-        string? terminalReason = null,
-        CancellationToken cancellationToken = default)
+    public async Task<MissionRunRecord> AssembleRunRecordAsync(Guid missionId, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(template);
         var entries = await ReadMissionEntriesAsync(missionId, cancellationToken);
-        return Assemble(entries, missionId, template, leaseSpec, operatorIdentity, executionState, exitCode,
-            redactionCount, redactedCategories, substrateType, cgroupOrJobId, qualityAcceptance, terminalReason);
+        return Assemble(missionId, entries);
     }
 
-    private MissionRunRecord Assemble(
-        IReadOnlyList<AuditLogEntry> entries,
-        Guid missionId,
-        SingleToolTemplate template,
-        LeaseSpec? leaseSpec,
-        string? operatorIdentity,
-        string executionState,
-        int? exitCode,
-        int redactionCount,
-        IReadOnlyList<string>? redactedCategories,
-        string substrateType,
-        string? cgroupOrJobId,
-        bool? qualityAcceptance,
-        string? terminalReason)
+    public async Task<string> AssembleAndExportBundleAsync(Guid missionId, string outputDirectory, CancellationToken cancellationToken = default)
     {
+        // One read serves the record and the bundle. Two reads let an entry appended between them into
+        // the proofs but not under the record's root, and the bundle then failed its own verification.
+        var entries = await ReadMissionEntriesAsync(missionId, cancellationToken);
+        var record = Assemble(missionId, entries);
+
+        return await _archiveExporter.ExportMissionRunRecordPackageAsync(record, entries, outputDirectory, cancellationToken);
+    }
+
+    private MissionRunRecord Assemble(Guid missionId, IReadOnlyList<AuditLogEntry> entries)
+    {
+        var factsEntry = entries
+            .Where(e => e.Action == MissionRunFacts.LedgerAction)
+            .OrderBy(e => e.Id)
+            .LastOrDefault()
+            ?? throw new InvalidOperationException(
+                $"Mission {missionId:D} has no {MissionRunFacts.LedgerAction} row. Either it is still running, it ran " +
+                "before the engine sealed its facts, or the ledger holds no mission by that id.");
+
+        MissionRunFacts facts;
+        try
+        {
+            facts = JsonSerializer.Deserialize<MissionRunFacts>(factsEntry.Details)
+                ?? throw new JsonException("The facts row is empty.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException(
+                $"The facts sealed for mission {missionId:D} cannot be read, which is what retention leaves once it " +
+                $"has redacted a row's details: {ex.Message}", ex);
+        }
+
+        if (facts.Schema != MissionRunFacts.CurrentSchema || facts.MissionId != missionId)
+        {
+            throw new InvalidOperationException(
+                $"The facts row for mission {missionId:D} is schema {facts.Schema} for mission {facts.MissionId:D}; " +
+                $"this build reads schema {MissionRunFacts.CurrentSchema}.");
+        }
+
         var (chainKind, hashVersion) = ChainOf(entries);
+        var tokenControls = facts.AppliedControls.Where(c => c.StartsWith("token:", StringComparison.Ordinal)).ToList();
 
         var requestIdentity = new RequestIdentityEvidence(
-            Principal: string.IsNullOrWhiteSpace(operatorIdentity) ? null : operatorIdentity,
-            // Nothing in the host records how a principal authenticated, an approval or an
-            // idempotency key; a mission id is not one, since nothing deduplicates on it.
-            AuthProvenance: null,
+            Principal: string.IsNullOrWhiteSpace(facts.Principal) ? null : facts.Principal,
+            AuthProvenance: ProvenanceOf(facts.Principal),
             MissionId: missionId,
-            IdempotencyToken: null,
-            ApprovalReference: null,
-            PolicyVersionOrHash: TemplateHash(template),
-            FirstRecordedAtUtc: entries.Count == 0 ? null : entries.Min(e => AsUtc(e.TimestampUtc)));
+            IdempotencyToken: "none: a mission id names one request, and nothing deduplicates requests",
+            ApprovalReference: "none: a mission runs on its caller's request, with no separate approval step",
+            PolicyVersionOrHash: facts.TemplateSha256,
+            RequestedAtUtc: facts.StartedAtUtc);
 
         var effectivePermission = new EffectivePermissionEvidence(
-            ExecutablePath: template.Tool.ExecutablePath,
-            // The template holds placeholders; the bound vector exists only where the mission ran.
-            ArgumentVector: null,
-            // The network rules and the workspace exist only in a lease, which only the WSL path has.
-            WorkspaceBoundary: leaseSpec?.WorkingDirectory,
-            AllowedEgressIps: leaseSpec?.AllowedEgressIps,
-            AllowedEgressPorts: leaseSpec?.AllowedEgressPorts,
-            AllowNetwork: leaseSpec?.AllowNetwork,
-            // Ceilings as requested, from the lease or else the template the job object is sized from.
-            MaxMemoryBytes: leaseSpec?.Limits.MaxMemoryBytes ?? (ulong)template.Tool.MaxMemoryBytes,
-            MaxCpuPercent: leaseSpec?.Limits.MaxCpuPercent ?? (uint)template.Tool.MaxCpuPercent,
-            LeaseDurationSeconds: leaseSpec?.LeaseDurationSeconds,
-            RuntimeCapabilities: null);
+            ExecutablePath: facts.ExecutablePath,
+            CommandLine: facts.CommandLine,
+            WorkspaceBoundary: facts.WorkspacePath,
+            DeclaredEgress: facts.DeclaredEgress,
+            EgressEnforcement: EgressEnforcementOf(facts),
+            MaxMemoryBytes: (ulong)Math.Max(0, facts.RequestedMemoryBytes),
+            MaxCpuPercent: (uint)Math.Max(0, facts.RequestedCpuPercent),
+            DurationCeilingSeconds: (uint)Math.Max(0, facts.TimeoutSeconds),
+            RuntimeIdentity: tokenControls.Count == 0 ? null : string.Join(", ", tokenControls));
 
         var enforcementState = new EnforcementStateEvidence(
-            SubstrateType: substrateType,
-            // What was attached, the kernel it ran under and the limits as read back are the
-            // substrate's to report, and neither substrate returns them with a result yet.
-            KernelOrOsRelease: null,
-            AttachedControls: null,
-            CgroupOrJobId: cgroupOrJobId,
-            EffectiveLimitsReadback: null,
-            AdmissionVerdict: executionState == "Refused" ? "Refused" : "Admitted");
+            SubstrateType: facts.Substrate,
+            KernelOrOsRelease: string.IsNullOrWhiteSpace(facts.OsDescription) ? null : facts.OsDescription,
+            AttachedControls: facts.AppliedControls.Count == 0 ? null : facts.AppliedControls,
+            CgroupOrJobId: facts.JobName,
+            EffectiveLimitsReadback: facts.LimitsReadBack,
+            AdmissionVerdict: facts.Admission);
 
         var outcome = new OutcomeEvidence(
-            ExecutionState: executionState,
-            ExitCode: exitCode,
-            RedactionCount: redactionCount,
-            RedactedCategories: redactedCategories ?? Array.Empty<string>(),
-            QualityAcceptance: qualityAcceptance,
-            TerminalReason: terminalReason);
+            ExecutionState: facts.ExecutionState,
+            ExitCode: facts.ExitCode,
+            AllowedExitCodes: facts.AllowedExitCodes,
+            ExitContractMet: facts.ExitContractMet,
+            TerminalReason: facts.TerminalReason,
+            RedactionCount: facts.RedactionCount,
+            RedactedCategories: facts.RedactedCategories,
+            Model: facts.Model,
+            QualityAcceptance: facts.QualityAccepted);
 
-        // Teardown happens in the substrate, which does not report it back yet.
         var cleanup = new CleanupEvidence(
-            ProcessesTerminated: null,
-            PolicyRemovalOrder: null,
-            WorkspaceDisposition: null,
-            ResidualResourcesCleaned: null);
+            ProcessesLeftAtTeardown: facts.ProcessesLeftAtTeardown,
+            TeardownOrder: facts.TeardownOrder.Count == 0 ? null : facts.TeardownOrder,
+            WorkspaceDisposition: facts.WorkspacePath is null
+                ? "none: nothing was provisioned"
+                : facts.JailRemoved switch { true => "removed", false => "remains on disk", null => null },
+            ResidualResourcesCleaned: CleanedUp(facts));
 
         var integrity = new IntegrityEvidence(
             ChainKind: chainKind,
             HashVersion: hashVersion,
             MerkleRootHash: entries.Count == 0 ? null : _merkleEngine.BuildTree(entries).RootHash,
             TotalAuditEntries: entries.Count,
-            // A digest anyone can recompute is not a signature, and nothing signs a record yet.
-            AttestationSignature: null,
-            SignatureAlgorithm: null,
+            FactsEntryHash: factsEntry.EntryHash,
             AssembledAtUtc: DateTimeOffset.UtcNow);
 
         return new MissionRunRecord(
@@ -145,37 +151,6 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
             Integrity: integrity);
     }
 
-    public async Task<string> AssembleAndExportBundleAsync(
-        Guid missionId,
-        SingleToolTemplate template,
-        LeaseSpec? leaseSpec,
-        string operatorIdentity,
-        string executionState,
-        int? exitCode,
-        int redactionCount,
-        IReadOnlyList<string> redactedCategories,
-        string substrateType,
-        string outputDirectory,
-        string? cgroupOrJobId = null,
-        bool? qualityAcceptance = null,
-        string? terminalReason = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(template);
-
-        // One read serves the record and the bundle. Two reads let an entry appended between them into
-        // the proofs but not under the record's root, and the bundle then failed its own verification.
-        var entries = await ReadMissionEntriesAsync(missionId, cancellationToken);
-        var record = Assemble(entries, missionId, template, leaseSpec, operatorIdentity, executionState, exitCode,
-            redactionCount, redactedCategories, substrateType, cgroupOrJobId, qualityAcceptance, terminalReason);
-
-        return await _archiveExporter.ExportMissionRunRecordPackageAsync(
-            record,
-            entries,
-            outputDirectory,
-            cancellationToken);
-    }
-
     private async Task<IReadOnlyList<AuditLogEntry>> ReadMissionEntriesAsync(Guid missionId, CancellationToken cancellationToken)
     {
         var entries = await _auditLedger.GetAuditLogsAsync(missionId, MaxMissionEntries + 1, cancellationToken);
@@ -186,6 +161,70 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
         }
 
         return entries;
+    }
+
+    // OperatorIdentity.ToLedgerIdentity writes "<method>:<name> [<id>] via <transport>", so the host's
+    // own account of how it authenticated the caller is the prefix. Anything else was not written by a
+    // host that says, and is not recorded as provenance.
+    private static string? ProvenanceOf(string principal)
+    {
+        int colon = principal.IndexOf(':');
+        if (colon <= 0)
+        {
+            return null;
+        }
+
+        string method = principal[..colon] switch
+        {
+            "windows" => "Windows logon: the operating system authenticated the caller",
+            "apikey" => "an API key the host validated",
+            "bearer" => "a bearer token the host validated",
+            "unauthenticated" => "none: the host could not authenticate the caller",
+            _ => string.Empty
+        };
+        if (method.Length == 0)
+        {
+            return null;
+        }
+
+        int via = principal.LastIndexOf(" via ", StringComparison.Ordinal);
+        return via < 0 ? method : $"{method}, over {principal[(via + 5)..]}";
+    }
+
+    // Read from the tool's token, not from the request: the AppContainer is what removes the network.
+    private static string EgressEnforcementOf(MissionRunFacts facts)
+    {
+        string? container = facts.AppliedControls.FirstOrDefault(c => c.StartsWith("token:appcontainer=", StringComparison.Ordinal));
+        return container switch
+        {
+            "token:appcontainer=0-capabilities" =>
+                "enforced: the tool had no network at all (an AppContainer with no capabilities, read back from its token)",
+            "token:appcontainer=none" when facts.NetworkDenialRequested =>
+                "NOT enforced: denial was requested but the tool's token shows no AppContainer",
+            "token:appcontainer=none" =>
+                "declared only: the tool kept a network stack, and Windows does not hold it to the declared destination",
+            null when facts.ExitCode is null =>
+                "not applicable: no tool ran",
+            null =>
+                "not recorded: the tool's token was not read back",
+            _ => $"partly: {container["token:appcontainer=".Length..]} granted to the tool's AppContainer"
+        };
+    }
+
+    private static bool? CleanedUp(MissionRunFacts facts)
+    {
+        if (facts.WorkspacePath is null && facts.JobName is null)
+        {
+            return true; // nothing was provisioned, so nothing can have been left
+        }
+
+        bool jobClosed = facts.JobName is null || facts.TeardownOrder.Any(s => s.StartsWith("job: closed", StringComparison.Ordinal));
+        return facts.JailRemoved switch
+        {
+            true => jobClosed,
+            false => false,
+            null => facts.WorkspacePath is null ? jobClosed : null
+        };
     }
 
     // The kind of chain the mission's own rows were written into, read from each row's hash version.
@@ -212,14 +251,4 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
         };
         return kind is null ? (null, null) : (kind, versions[0]);
     }
-
-    // The template as handed in, so two versions of one template id do not read as the same policy.
-    private static string TemplateHash(SingleToolTemplate template) =>
-        "sha256:" + Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(template))).ToLowerInvariant();
-
-    // TimestampUtc is UTC by contract, so an unspecified kind is read as UTC, not as this machine's local time.
-    private static DateTimeOffset AsUtc(DateTime timestamp) =>
-        new DateTimeOffset(timestamp.Kind == DateTimeKind.Unspecified
-            ? DateTime.SpecifyKind(timestamp, DateTimeKind.Utc)
-            : timestamp).ToUniversalTime();
 }

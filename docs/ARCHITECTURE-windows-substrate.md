@@ -113,6 +113,22 @@ A false positive costs one template its containment; a false negative would fail
 operator as an unexplained sensor error. The scan is biased toward the survivable mistake, and
 per-template verification is the durable fix.
 
+## The run record
+
+- When a mission ends, [`MissionExecutionEngine`](../src/MissionController.Core/MissionExecutionEngine.cs)
+  seals what it observed into one `MISSION_RUN_FACTS` ledger row: the template's hash, the bound
+  command line (scrubbed like the tool's output), the workspace, the job object's limits **as queried
+  back from the kernel**, the tool's token **as read from the process before it ran**, the exit code
+  against the template's contract, the redaction count, the model, the quality gate's verdict, and the
+  teardown order with what was still running at it.
+- [`MissionRunRecordAssembler`](../src/MissionController.Infrastructure.Data/Compliance/MissionRunRecordAssembler.cs)
+  builds the six-group record from that row and the mission's other rows, and from nothing else. A
+  mission with no facts row is refused rather than described from what is left.
+- [`ComplianceArchiveExporter`](../src/MissionController.Infrastructure.Data/Compliance/ComplianceArchiveExporter.cs)
+  writes the bundle: the record, the entries, a Merkle proof for each, the two verification scripts,
+  and `signature.json` when a signing key is configured. An unsigned bundle says so, and its scripts
+  exit 2 rather than 0.
+
 ## Remediation, secrets and identity
 
 - [`SandboxedRemediationEngine`](../src/MissionController.Infrastructure.Windows/Remediation/SandboxedRemediationEngine.cs)

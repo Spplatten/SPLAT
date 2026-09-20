@@ -23,6 +23,7 @@ public class McpServerHandler
     private readonly IAuditLedger _auditLedger;
     private readonly WslSubstrateHealthChecker _healthChecker;
     private readonly IMissionExecutionEngine? _missionEngine;
+    private readonly IMissionRunRecordAssembler? _runRecords;
     private readonly IGovernedInvestigationLoop? _investigationLoop;
     private readonly ITemplateRegistry? _templateRegistry;
     private readonly ISemanticMemoryIndex? _semanticMemory;
@@ -110,8 +111,10 @@ public class McpServerHandler
         IGovernedCrewRegistry? crewRegistry = null,
         IOperatorIdentityProvider? identityProvider = null,
         string? workspaceRoot = null,
-        McpEgressPolicy? egressPolicy = null)
+        McpEgressPolicy? egressPolicy = null,
+        IMissionRunRecordAssembler? runRecords = null)
     {
+        _runRecords = runRecords;
         _leasedExecutor = leasedExecutor ?? throw new ArgumentNullException(nameof(leasedExecutor));
         _policyCompiler = policyCompiler ?? throw new ArgumentNullException(nameof(policyCompiler));
         _auditLedger = auditLedger ?? throw new ArgumentNullException(nameof(auditLedger));
@@ -356,6 +359,20 @@ public class McpServerHandler
             },
             new()
             {
+                Name = "export_run_record",
+                Description = "Export one mission's run record: a bundle holding what the mission was permitted to do and what it did, the mission's audit ledger entries with a Merkle proof for each, and scripts that verify them. Signed when the host was started with a run record key. The mission must have ended.",
+                InputSchema = JsonSerializer.Deserialize<JsonElement>(@"
+                {
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""missionId"": { ""type"": ""string"", ""description"": ""The mission's id, as returned by the tool that ran it."" },
+                        ""outputDirectory"": { ""type"": ""string"", ""description"": ""Where to write the bundle. Defaults to %LOCALAPPDATA%\\MissionController\\MissionRunRecords."" }
+                    },
+                    ""required"": [""missionId""]
+                }")
+            },
+            new()
+            {
                 Name = "run_agent_brain",
                 Description = "Execute SPLAT's Layer 2 Cognitive Planning & Autonomous Reasoning Engine ('The Brain'): Decomposes high-level natural language goals, performs multi-hypothesis testing, verifies grounded telemetry, synthesizes cross-subsystem root cause, and formulates self-healing remediations with Merkle ledger commitment.",
                 InputSchema = JsonSerializer.Deserialize<JsonElement>(@"
@@ -480,6 +497,10 @@ public class McpServerHandler
 
             case "run_agent_brain":
                 toolResult = await ExecuteRunAgentBrainAsync(args, ct);
+                break;
+
+            case "export_run_record":
+                toolResult = await ExecuteExportRunRecordAsync(args, ct);
                 break;
 
             case "list_governed_crews":
@@ -1154,6 +1175,67 @@ public class McpServerHandler
             }
         };
     }
+
+    /// <summary>
+    /// Exports the bundle for a mission that has ended. Everything in it comes from the ledger: the
+    /// facts the engine sealed when the mission ended, and the mission's own rows. A mission with no
+    /// facts row is refused rather than described from its remaining rows.
+    /// </summary>
+    private async Task<McpToolCallResult> ExecuteExportRunRecordAsync(JsonElement args, CancellationToken ct)
+    {
+        if (_runRecords == null)
+        {
+            return Refusal("Run record export is not configured on this server.");
+        }
+
+        string missionText = args.TryGetProperty("missionId", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty;
+        if (!Guid.TryParse(missionText, out var missionId))
+        {
+            return Refusal($"'{missionText}' is not a mission id.");
+        }
+
+        string outputDirectory = args.TryGetProperty("outputDirectory", out var dirProp) ? dirProp.GetString() ?? string.Empty : string.Empty;
+
+        string bundlePath;
+        MissionRunRecord record;
+        try
+        {
+            bundlePath = await _runRecords.AssembleAndExportBundleAsync(missionId, outputDirectory, ct);
+            record = await _runRecords.AssembleRunRecordAsync(missionId, ct);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return Refusal(ex.Message);
+        }
+
+        var summary = new
+        {
+            bundle = bundlePath,
+            missionId = record.MissionId,
+            state = record.Outcome.ExecutionState,
+            admission = record.EnforcementState.AdmissionVerdict,
+            policy = record.RequestIdentity.PolicyVersionOrHash,
+            entries = record.Integrity.TotalAuditEntries,
+            chain = record.Integrity.ChainKind,
+            merkleRoot = record.Integrity.MerkleRootHash,
+            verifyWith = "python verify_proofs.py, or powershell -ExecutionPolicy Bypass -File .\\verify_proofs.ps1, from inside the bundle"
+        };
+
+        return new McpToolCallResult
+        {
+            IsError = false,
+            Content = new List<McpContentItem>
+            {
+                new() { Type = "text", Text = JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }) }
+            }
+        };
+    }
+
+    private static McpToolCallResult Refusal(string message) => new()
+    {
+        IsError = true,
+        Content = new List<McpContentItem> { new() { Type = "text", Text = message } }
+    };
 
     private async Task<McpToolCallResult> ExecuteSearchIncidentMemoryAsync(JsonElement args, CancellationToken ct)
     {

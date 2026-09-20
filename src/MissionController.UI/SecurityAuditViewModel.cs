@@ -18,6 +18,7 @@ public partial class SecurityAuditViewModel : ObservableObject
     private readonly IAuditLedger _auditLedger;
     private readonly IMerkleProofEngine _merkleEngine;
     private readonly IComplianceArchiveExporter _archiveExporter;
+    private readonly IMissionRunRecordAssembler _runRecords;
     private readonly ISiemForwarder _siemForwarder;
     private readonly IEdrIngestionBridge _edrBridge;
     private readonly IIncidentRevocationManager _revocationManager;
@@ -38,6 +39,12 @@ public partial class SecurityAuditViewModel : ObservableObject
 
     [ObservableProperty]
     private ObservableCollection<EdrSecurityAlert> _edrAlerts = new();
+
+    [ObservableProperty]
+    private string _runRecordMissionId = string.Empty;
+
+    [ObservableProperty]
+    private string _runRecordStatus = "Export one mission's run record: what it was permitted to do, what it did, and its ledger entries with proofs.";
 
     [ObservableProperty]
     private ObservableCollection<RevocationEntry> _activeRevocations = new();
@@ -97,6 +104,7 @@ public partial class SecurityAuditViewModel : ObservableObject
         IAuditLedger auditLedger,
         IMerkleProofEngine merkleEngine,
         IComplianceArchiveExporter archiveExporter,
+        IMissionRunRecordAssembler runRecords,
         ISiemForwarder siemForwarder,
         IEdrIngestionBridge edrBridge,
         IIncidentRevocationManager revocationManager,
@@ -107,6 +115,7 @@ public partial class SecurityAuditViewModel : ObservableObject
         _auditLedger = auditLedger;
         _merkleEngine = merkleEngine;
         _archiveExporter = archiveExporter;
+        _runRecords = runRecords;
         _siemForwarder = siemForwarder;
         _edrBridge = edrBridge;
         _revocationManager = revocationManager;
@@ -227,6 +236,43 @@ public partial class SecurityAuditViewModel : ObservableObject
     public async Task ExportCmmcCompliancePackageAsync()
     {
         await ExportPackageInternalAsync(ComplianceFramework.CmmcLevel2);
+    }
+
+    /// <summary>
+    /// Exports one mission's run record. Everything in the bundle comes from the ledger, so a mission
+    /// that never sealed its facts is refused here rather than described from its other rows.
+    /// </summary>
+    [RelayCommand]
+    public async Task ExportRunRecordAsync()
+    {
+        string wanted = RunRecordMissionId.Trim();
+        if (wanted.Length == 0)
+        {
+            wanted = AuditLogs.FirstOrDefault()?.MissionId.ToString("D") ?? string.Empty;
+        }
+
+        if (!Guid.TryParse(wanted, out var missionId))
+        {
+            RunRecordStatus = "Type the mission id of a finished mission, or load the ledger first.";
+            return;
+        }
+
+        IsProcessing = true;
+        RunRecordStatus = $"Assembling the run record for {missionId:D}...";
+        try
+        {
+            string zipPath = await _runRecords.AssembleAndExportBundleAsync(missionId, string.Empty);
+            LastExportedPackagePath = zipPath;
+            RunRecordStatus = $"Exported {System.IO.Path.GetFileName(zipPath)}. Run verify_proofs inside it to check the bundle.";
+        }
+        catch (Exception ex)
+        {
+            RunRecordStatus = $"Not exported: {ex.Message}";
+        }
+        finally
+        {
+            IsProcessing = false;
+        }
     }
 
     private async Task ExportPackageInternalAsync(ComplianceFramework framework)

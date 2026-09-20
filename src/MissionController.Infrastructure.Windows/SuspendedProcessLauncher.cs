@@ -232,6 +232,10 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
             // Assign process to Job Object BEFORE resuming thread
             jobSandbox.AssignProcess(safeProcess);
 
+            // Read back what confines the process before it runs a single instruction; the run record
+            // reports this, not the flags this method was called with.
+            var appliedControls = ProcessContainmentInspector.Describe(safeProcess, jobSandbox);
+
             // Close write ends in parent process so EOF can be detected on read
             Win32Interop.CloseHandle(hStdOutWrite);
             hStdOutWrite = IntPtr.Zero;
@@ -296,7 +300,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
             Win32Interop.GetExitCodeProcess(safeProcess, out uint exitCode);
             var metrics = jobSandbox.GetResourceMetrics();
 
-            return new ProcessExecutionResult((int)exitCode, stdout, stderr, timedOut, metrics);
+            return new ProcessExecutionResult((int)exitCode, stdout, stderr, timedOut, metrics, AppliedControls: appliedControls);
         }
         finally
         {

@@ -171,7 +171,15 @@ public partial class App : Application
         services.AddSingleton<IProjectTemplateRegistry, SqliteProjectTemplateRegistry>();
         services.AddSingleton<ISemanticMemoryIndex, SqliteSemanticMemoryIndex>();
         services.AddSingleton<IMerkleProofEngine, MerkleTreeEngine>();
-        services.AddSingleton<IComplianceArchiveExporter, ComplianceArchiveExporter>();
+
+        // The operator's run record signing key, named the same way as the ledger key. Without it the
+        // console still exports bundles; they say they are unsigned. A variable naming a file that
+        // will not do stops the start rather than exporting something that cannot be attributed.
+        services.AddSingleton<IComplianceArchiveExporter>(sp => new ComplianceArchiveExporter(
+            sp.GetRequiredService<IMerkleProofEngine>(),
+            Environment.GetEnvironmentVariable(RunRecordKeyFile.EnvironmentVariable) is { Length: > 0 } signingKeyPath
+                ? RunRecordKeyFile.Load(signingKeyPath)
+                : null));
         services.AddSingleton<IMissionRunRecordAssembler, MissionRunRecordAssembler>();
 
         // Infrastructure - Identity & Zero-Trust Auth

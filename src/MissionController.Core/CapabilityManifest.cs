@@ -111,6 +111,8 @@ public static class CapabilityManifest
         new("list_governed_crews", ToolEnforcement.ControlPlaneOnly, "read-only: it reports, and changes nothing"),
         new("search_incident_memory", ToolEnforcement.ControlPlaneOnly,
             "read-only over the local index; recalled text is labelled as context, never as instructions"),
+        new("export_run_record", ToolEnforcement.ControlPlaneOnly,
+            "read-only over the ledger: it writes a bundle out of rows already sealed, and changes nothing a mission did"),
     };
 
     /// <summary>

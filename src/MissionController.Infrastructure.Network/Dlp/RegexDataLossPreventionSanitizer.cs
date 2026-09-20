@@ -20,8 +20,12 @@ public sealed class RegexDataLossPreventionSanitizer : IDataLossPreventionSaniti
     /// unbounded classes (<c>[\s\S]*?</c>) that can backtrack catastrophically on a crafted input.
     /// Without this, the default is <see cref="Regex.InfiniteMatchTimeout"/> and a single crafted
     /// filename wedges the mission pipeline.
+    ///
+    /// It bounds backtracking, not the machine. At 750 ms the test suite's own parallel load was
+    /// enough to trip it, and a tripped rule withholds a real mission's output; three seconds still
+    /// bounds a hostile input, and no honest payload comes near it.
     /// </summary>
-    private static readonly TimeSpan PatternTimeout = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan PatternTimeout = TimeSpan.FromSeconds(3);
 
     /// <summary>Category suffix recorded when a rule could not finish scanning within the budget.</summary>
     private const string TimeoutCategorySuffix = ":ScanTimeout";
@@ -126,6 +130,17 @@ public sealed class RegexDataLossPreventionSanitizer : IDataLossPreventionSaniti
                 "[REDACTED_GOOGLE_API_KEY]"
             )
         };
+
+        // RegexOptions.Compiled emits each pattern's IL on its FIRST use, and that emit happens
+        // inside the timed call. On a loaded machine the first scan could therefore blow the budget
+        // and withhold a payload that held nothing - a real mission's output, discarded because the
+        // scanner was still warming up. Warming here moves the cost out of the timed window; a
+        // timeout on this one-character input is not a finding, so it is ignored.
+        foreach (var rule in _rules)
+        {
+            try { rule.Pattern.IsMatch("."); }
+            catch (RegexMatchTimeoutException) { }
+        }
     }
 
     public DlpSanitizationResult Sanitize(string input)

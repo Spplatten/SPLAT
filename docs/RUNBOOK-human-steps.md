@@ -131,7 +131,7 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 609`, on a line ending `(net10.0)`. The `dotnet` on this
+**Expect:** `Passed! - Failed: 0, Passed: 626`, on a line ending `(net10.0)`. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
 
@@ -244,7 +244,40 @@ keyed entry is a `LEDGER_KEYED` row that commits to everything before it.
 falls back to unkeyed. Lose the key and the only way on is to move the ledger aside and start a new
 one. Whoever can read the file can rewrite the ledger, so keep it where only you can.
 
-### 1.6 Keep leased commands out of your Windows files, until P2
+### 1.6 Make a run record signing key
+
+A run record bundle says what one mission was permitted to do and what it did. Unsigned, it shows only
+that its own files agree with each other: anyone who can edit the bundle can rebuild it to agree.
+Signed, it shows the files are the ones your key produced, unchanged. Make the key once, into the same
+folder you keep the ledger key in:
+
+```powershell
+splat-mcp new-run-record-key "C:\path\to\your\KEYS\splat-run-record.pem"
+[Environment]::SetEnvironmentVariable("SPLAT_RUN_RECORD_KEY_FILE", "C:\path\to\your\KEYS\splat-run-record.pem", "User")
+```
+
+It refuses to overwrite a file, writes the key readable only by your account, and prints the key's
+fingerprint. **Publish that fingerprint** wherever whoever reads your bundles will look: it is how they
+tell your bundles from a forgery, and a bundle cannot say whose key signed it.
+
+As with the ledger key, an MCP client may start `splat-mcp` without your environment, so add it to the
+stanza's `args` too: `"--run-record-key", "C:\\path\\to\\your\\KEYS\\splat-run-record.pem"`.
+
+**Expect:** `splat-mcp doctor --run-record-key <that path>` prints the run records line as
+`ok signed by sha256:...`. Without a key it prints `-- exported bundles are UNSIGNED`, and each bundle
+says the same in its own summary.
+
+**To check a bundle**, unzip it and run either script inside it:
+
+```powershell
+python verify_proofs.py
+powershell -ExecutionPolicy Bypass -File .\verify_proofs.ps1
+```
+
+They exit 0 when the bundle verifies and name the signing key, 2 when it is unsigned but internally
+consistent, and 1 when a check fails. Neither needs anything installed beyond Python or PowerShell.
+
+### 1.7 Keep leased commands out of your Windows files, until P2
 
 A lease runs its command as `nobody` inside WSL, and WSL mounts your Windows drives with every
 permission open. So that command can read your whole Windows profile, SSH keys included
@@ -261,7 +294,7 @@ wsl -u nobody --cd / -e ls /mnt/c
 **Expect:** the last line fails with `Permission denied`. Applied to this machine and the second one
 on 2026-09-18.
 
-### 1.7 The app runs
+### 1.8 The app runs
 
 ```powershell
 Start-Process C:\C_AGENT_BUILDER\dist\App\MissionController.UI.exe -WorkingDirectory C:\C_AGENT_BUILDER\dist\App

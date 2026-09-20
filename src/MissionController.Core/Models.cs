@@ -472,6 +472,22 @@ public record CefEvent(
 /// from a real one once it reaches the ledger, and this product's entire claim is that its telemetry
 /// is evidence. Render null as "unavailable", never as 0.
 /// </summary>
+/// <summary>
+/// The limits a job object holds, queried back from the kernel after they were set. A null field is
+/// one the query did not return or a limit that is not set; the requested value must never stand in
+/// for it, because the point of reading back is to catch a set call that silently did not take.
+/// </summary>
+public record JobLimitsReadback(
+    long? ProcessMemoryLimitBytes,
+    long? JobMemoryLimitBytes,
+    int? CpuRatePercent,
+    uint? ActiveProcessLimit,
+    bool? KillOnJobClose)
+{
+    /// <summary>Nothing was read back: the sandbox cannot query its limits.</summary>
+    public static JobLimitsReadback Unavailable { get; } = new(null, null, null, null, null);
+}
+
 public record JobResourceMetrics(
     long? PeakMemoryBytes,
     long? CurrentMemoryBytes,

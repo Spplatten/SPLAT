@@ -26,9 +26,15 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
 
     private const string NotRecorded = "not recorded";
 
-    public ComplianceArchiveExporter(IMerkleProofEngine merkleEngine)
+    /// <summary>The first line of every signed statement, so a signature over one can never pass as another kind.</summary>
+    public const string StatementHeader = "splat-run-record-v1";
+
+    private readonly IRunRecordSigner? _signer;
+
+    public ComplianceArchiveExporter(IMerkleProofEngine merkleEngine, IRunRecordSigner? signer = null)
     {
         _merkleEngine = merkleEngine;
+        _signer = signer;
     }
 
     public async Task<string> ExportCompliancePackageAsync(
@@ -128,49 +134,74 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
 
         Directory.CreateDirectory(outputDirectory);
 
-        string packageId = $"RUN-RECORD-{runRecord.MissionId:N}";
-        string timestampStr = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        string zipFileName = $"{packageId}_{timestampStr}.zip";
-        string zipFilePath = Path.Combine(outputDirectory, zipFileName);
+        string zipFilePath = Path.Combine(
+            outputDirectory,
+            $"RUN-RECORD-{runRecord.MissionId:N}_{DateTime.UtcNow.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture)}.zip");
 
-        // 1. Build Merkle Tree & Generate Proofs for entries
         var tree = _merkleEngine.BuildTree(entries);
-        var proofs = new List<MerkleProof>();
-        foreach (var entry in entries)
+        var proofs = entries.Select(entry => _merkleEngine.GenerateProof(tree, entry.Id)).ToList();
+
+        // Every file as the exact bytes that go into the archive, so the signed statement names the same
+        // bytes a verifier hashes. Sorted, so the statement lists them in one order on every host.
+        var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal)
         {
-            proofs.Add(_merkleEngine.GenerateProof(tree, entry.Id));
+            ["mission_run_record.json"] = TextBytes(JsonSerializer.Serialize(runRecord, JsonOpts)),
+            ["audit_chain.json"] = TextBytes(JsonSerializer.Serialize(entries, JsonOpts)),
+            ["merkle_proofs.json"] = TextBytes(JsonSerializer.Serialize(proofs, JsonOpts)),
+            ["run_record_summary.md"] = TextBytes(GenerateMissionRunRecordSummary(runRecord, _signer)),
+            ["verify_proofs.py"] = TextBytes(GeneratePythonVerificationScript()),
+            ["verify_proofs.ps1"] = TextBytes(GeneratePowerShellVerificationScript())
+        };
+
+        if (_signer is not null)
+        {
+            files["signature.json"] = TextBytes(JsonSerializer.Serialize(SignatureOver(runRecord.MissionId, files, _signer), JsonOpts));
         }
 
-        // 2. Create Zip Archive
         await using (var fileStream = new FileStream(zipFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
         using (var archive = new ZipArchive(fileStream, ZipArchiveMode.Create))
         {
-            // mission_run_record.json
-            await WriteTextToArchiveAsync(archive, "mission_run_record.json", JsonSerializer.Serialize(runRecord, JsonOpts));
-
-            // audit_chain.json
-            await WriteTextToArchiveAsync(archive, "audit_chain.json", JsonSerializer.Serialize(entries, JsonOpts));
-
-            // merkle_proofs.json
-            await WriteTextToArchiveAsync(archive, "merkle_proofs.json", JsonSerializer.Serialize(proofs, JsonOpts));
-
-            // run_record_summary.md
-            string summaryMd = GenerateMissionRunRecordSummary(runRecord);
-            await WriteTextToArchiveAsync(archive, "run_record_summary.md", summaryMd);
-
-            // verify_proofs.py
-            string pythonScript = GeneratePythonVerificationScript();
-            await WriteTextToArchiveAsync(archive, "verify_proofs.py", pythonScript);
-
-            // verify_proofs.ps1
-            string psScript = GeneratePowerShellVerificationScript();
-            await WriteTextToArchiveAsync(archive, "verify_proofs.ps1", psScript);
+            foreach (var (name, bytes) in files)
+            {
+                var entry = archive.CreateEntry(name, CompressionLevel.Optimal);
+                await using var entryStream = entry.Open();
+                await entryStream.WriteAsync(bytes, cancellationToken);
+            }
         }
 
         return zipFilePath;
     }
 
-    private static string GenerateMissionRunRecordSummary(MissionRunRecord record)
+    /// <summary>
+    /// What a signed bundle carries beside its files: the public key, and a signature over a statement
+    /// that names the mission and every other file in the bundle by its SHA-256.
+    /// </summary>
+    public sealed record RunRecordSignature(string Algorithm, string KeyId, string PublicKey, string Statement, string Signature);
+
+    private static RunRecordSignature SignatureOver(Guid missionId, IReadOnlyDictionary<string, byte[]> files, IRunRecordSigner signer)
+    {
+        var statement = new StringBuilder();
+        statement.Append(StatementHeader).Append('\n');
+        statement.Append("mission ").Append(missionId.ToString("D")).Append('\n');
+        foreach (var (name, bytes) in files)
+        {
+            statement.Append("file ").Append(name).Append(" sha256 ")
+                .Append(Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant()).Append('\n');
+        }
+
+        string text = statement.ToString();
+        return new RunRecordSignature(
+            signer.Algorithm,
+            signer.KeyId,
+            Convert.ToBase64String(signer.PublicKeyDer),
+            text,
+            Convert.ToBase64String(signer.Sign(Encoding.UTF8.GetBytes(text))));
+    }
+
+    // With the byte-order mark every text file here has always been written with.
+    private static byte[] TextBytes(string content) => [.. Encoding.UTF8.GetPreamble(), .. Encoding.UTF8.GetBytes(content)];
+
+    private static string GenerateMissionRunRecordSummary(MissionRunRecord record, IRunRecordSigner? signer)
     {
         var identity = record.RequestIdentity;
         var permission = record.EffectivePermission;
@@ -178,64 +209,75 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
         var outcome = record.Outcome;
         var cleanup = record.Cleanup;
         var integrity = record.Integrity;
+        var limits = enforcement.EffectiveLimitsReadback;
 
         var sb = new StringBuilder();
         sb.AppendLine($"# Mission run record: `{record.MissionId:D}`");
         sb.AppendLine();
-        sb.AppendLine($"A field that reads \"{NotRecorded}\" is one nothing observed when this record was assembled. It is not a default and it is not a claim.");
+        sb.AppendLine("Everything below comes from the facts the mission engine sealed into its audit ledger when the mission ended, the `MISSION_RUN_FACTS` entry among the entries in `audit_chain.json`. " +
+                      $"A field that reads \"{NotRecorded}\" is one the engine did not observe. It is not a default and it is not a claim.");
         sb.AppendLine();
         sb.AppendLine("## 1. Request identity");
         sb.AppendLine($"- **Principal:** `{Shown(identity.Principal)}`");
-        sb.AppendLine($"- **Auth provenance:** `{Shown(identity.AuthProvenance)}`");
+        sb.AppendLine($"- **Authenticated by:** `{Shown(identity.AuthProvenance)}`");
         sb.AppendLine($"- **Mission ID:** `{identity.MissionId:D}`");
         sb.AppendLine($"- **Idempotency token:** `{Shown(identity.IdempotencyToken)}`");
         sb.AppendLine($"- **Approval reference:** `{Shown(identity.ApprovalReference)}`");
-        sb.AppendLine($"- **Policy hash:** `{identity.PolicyVersionOrHash}` (the template as it was handed to the assembler)");
-        sb.AppendLine($"- **First recorded:** `{Shown(identity.FirstRecordedAtUtc?.ToString("O", CultureInfo.InvariantCulture))}`");
+        sb.AppendLine($"- **Policy hash:** `{identity.PolicyVersionOrHash}` (the template, as the engine ran it)");
+        sb.AppendLine($"- **Requested at:** `{Shown(identity.RequestedAtUtc?.ToString("O", CultureInfo.InvariantCulture))}`");
         sb.AppendLine();
-        sb.AppendLine("## 2. Effective permission, as requested");
+        sb.AppendLine("## 2. Effective permission");
         sb.AppendLine($"- **Executable:** `{permission.ExecutablePath}`");
-        sb.AppendLine($"- **Arguments:** `{Shown(permission.ArgumentVector, "none")}`");
-        sb.AppendLine($"- **Workspace boundary:** `{Shown(permission.WorkspaceBoundary)}`");
-        sb.AppendLine($"- **Network allowed:** `{Shown(permission.AllowNetwork)}`");
-        sb.AppendLine($"- **Allowed egress IPs:** `{Shown(permission.AllowedEgressIps, "none")}`");
-        sb.AppendLine($"- **Allowed egress ports:** `{Shown(permission.AllowedEgressPorts, "none")}`");
-        sb.AppendLine($"- **Ceilings:** `{permission.MaxMemoryBytes / (1024 * 1024)} MB memory, {permission.MaxCpuPercent}% CPU`");
-        sb.AppendLine($"- **Lease duration (s):** `{Shown(permission.LeaseDurationSeconds)}`");
-        sb.AppendLine($"- **Runtime UID and capabilities:** `{Shown(permission.RuntimeCapabilities)}`");
+        sb.AppendLine($"- **Command line:** `{Shown(permission.CommandLine)}`");
+        sb.AppendLine($"- **Workspace:** `{Shown(permission.WorkspaceBoundary)}`");
+        sb.AppendLine($"- **Declared destination:** `{Shown(permission.DeclaredEgress)}`");
+        sb.AppendLine($"- **Network, as enforced:** `{permission.EgressEnforcement}`");
+        sb.AppendLine($"- **Requested ceilings:** `{permission.MaxMemoryBytes / (1024 * 1024)} MB memory, {permission.MaxCpuPercent}% CPU, {Shown(permission.DurationCeilingSeconds)} s`");
+        sb.AppendLine($"- **Token the tool ran with:** `{Shown(permission.RuntimeIdentity)}`");
         sb.AppendLine();
-        sb.AppendLine("## 3. Enforcement state");
-        sb.AppendLine($"- **Substrate:** `{enforcement.SubstrateType}`");
-        sb.AppendLine($"- **Kernel / OS:** `{Shown(enforcement.KernelOrOsRelease)}`");
-        sb.AppendLine($"- **Attached controls:** `{Shown(enforcement.AttachedControls, "none")}`");
-        sb.AppendLine($"- **Cgroup / job ID:** `{Shown(enforcement.CgroupOrJobId)}`");
-        sb.AppendLine($"- **Limits as read back:** `{Shown(enforcement.EffectiveLimitsReadback)}`");
-        sb.AppendLine($"- **Admission verdict:** `{enforcement.AdmissionVerdict}`");
+        sb.AppendLine("## 3. Enforcement state, read back from the kernel objects");
+        sb.AppendLine($"- **Substrate:** `{enforcement.SubstrateType}` on `{Shown(enforcement.KernelOrOsRelease)}`");
+        sb.AppendLine($"- **Job object:** `{Shown(enforcement.CgroupOrJobId)}`");
+        sb.AppendLine($"- **Limits the kernel held:** `{(limits is null ? NotRecorded : LimitsText(limits))}`");
+        sb.AppendLine($"- **Controls read back:** `{Shown(enforcement.AttachedControls, "none")}`");
+        sb.AppendLine($"- **Admission:** `{enforcement.AdmissionVerdict}`");
         sb.AppendLine();
         sb.AppendLine("## 4. Outcome");
         sb.AppendLine($"- **Execution state:** `{outcome.ExecutionState}`");
-        sb.AppendLine($"- **Exit code:** `{Shown(outcome.ExitCode)}`");
+        sb.AppendLine($"- **Exit code:** `{Shown(outcome.ExitCode)}` (accepted: `{Shown(outcome.AllowedExitCodes, "none")}`; contract met: `{Shown(outcome.ExitContractMet)}`)");
         sb.AppendLine($"- **Terminal reason:** `{Shown(outcome.TerminalReason)}`");
-        sb.AppendLine($"- **DLP redactions:** `{outcome.RedactionCount}` (categories: `{Shown(outcome.RedactedCategories, "none")}`)");
-        sb.AppendLine($"- **Quality acceptance:** `{Shown(outcome.QualityAcceptance)}`");
+        sb.AppendLine($"- **Redactions before the output left the sandbox:** `{outcome.RedactionCount}` (categories: `{Shown(outcome.RedactedCategories, "none")}`)");
+        sb.AppendLine($"- **Model:** `{Shown(outcome.Model)}`");
+        sb.AppendLine($"- **Quality gate accepted the analysis:** `{Shown(outcome.QualityAcceptance)}`");
         sb.AppendLine();
-        sb.AppendLine("## 5. Cleanup");
-        sb.AppendLine($"- **Processes terminated:** `{Shown(cleanup.ProcessesTerminated)}`");
-        sb.AppendLine($"- **Policy removal order:** `{Shown(cleanup.PolicyRemovalOrder, "none")}`");
-        sb.AppendLine($"- **Workspace disposition:** `{Shown(cleanup.WorkspaceDisposition)}`");
-        sb.AppendLine($"- **Residual resources cleaned:** `{Shown(cleanup.ResidualResourcesCleaned)}`");
+        sb.AppendLine("## 5. Cleanup, as observed at teardown");
+        sb.AppendLine($"- **Processes still running at teardown:** `{Shown(cleanup.ProcessesLeftAtTeardown)}`");
+        sb.AppendLine($"- **Teardown order:** `{Shown(cleanup.TeardownOrder, "none")}`");
+        sb.AppendLine($"- **Workspace:** `{Shown(cleanup.WorkspaceDisposition)}`");
+        sb.AppendLine($"- **Nothing left behind:** `{Shown(cleanup.ResidualResourcesCleaned)}`");
         sb.AppendLine();
         sb.AppendLine("## 6. Integrity");
         sb.AppendLine($"- **Ledger chain kind:** `{Shown(integrity.ChainKind)}` (hash version `{Shown(integrity.HashVersion)}`)");
         sb.AppendLine($"- **Merkle root:** `{Shown(integrity.MerkleRootHash)}`");
-        sb.AppendLine($"- **Audit entries:** `{integrity.TotalAuditEntries}`");
-        sb.AppendLine($"- **Signature:** `{Shown(integrity.AttestationSignature)}`");
+        sb.AppendLine($"- **Audit entries:** `{integrity.TotalAuditEntries}`, the facts among them as entry hash `{Shown(integrity.FactsEntryHash)}`");
+        sb.AppendLine($"- **Signed by:** `{(signer is null ? "nobody: this bundle is unsigned" : $"{signer.KeyId} ({signer.Algorithm})")}`");
         sb.AppendLine($"- **Assembled at:** `{integrity.AssembledAtUtc.ToString("O", CultureInfo.InvariantCulture)}`");
         sb.AppendLine();
         sb.AppendLine("## What this bundle proves");
-        sb.AppendLine("The scripts in this folder check that every entry in `audit_chain.json` is a leaf under the Merkle root in `mission_run_record.json`, through a proof in `merkle_proofs.json`. That shows the three files agree with each other.");
+        sb.AppendLine("The scripts in this folder check that every entry in `audit_chain.json` is a leaf under the Merkle root in `mission_run_record.json`, through a proof in `merkle_proofs.json`.");
         sb.AppendLine();
-        sb.AppendLine("It does not show where they came from. Nothing in the bundle is signed, so whoever can edit it can rebuild all three files to agree. A leaf covers an entry's id, entry hash, time, action and operator, but not its details: the entry hash commits to those, and only the host's ledger holds what it takes to recompute one. Tying the bundle to a host means checking that the host's ledger verifies, under its key when it has one, and holds these entry hashes. No command makes that comparison yet.");
+        if (signer is null)
+        {
+            sb.AppendLine("This bundle is unsigned. The check shows the files agree with each other; it does not show who produced them, because whoever can edit the bundle can rebuild all three to agree. Configure a run record key to sign bundles.");
+        }
+        else
+        {
+            sb.AppendLine("`signature.json` names every other file here by its SHA-256, and carries a signature over that list and the mission id. The scripts check each file still has its listed hash and that the signature verifies under the public key `signature.json` carries. " +
+                          $"Together that shows these are the files the holder of key `{signer.KeyId}` produced, unchanged. The bundle alone cannot say whose key that is: compare the fingerprint with the one the operator published.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("Tying the entries to the host's own ledger means checking that its ledger verifies, under its key when it has one, and holds these entry hashes. No command makes that comparison yet.");
         sb.AppendLine();
         sb.AppendLine("Run either script from this folder:");
         sb.AppendLine("```");
@@ -244,6 +286,13 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
         sb.AppendLine("```");
         return sb.ToString();
     }
+
+    private static string LimitsText(JobLimitsReadback limits) =>
+        $"memory {Megabytes(limits.JobMemoryLimitBytes)} per job and {Megabytes(limits.ProcessMemoryLimitBytes)} per process, " +
+        $"CPU {(limits.CpuRatePercent is { } cpu ? $"{cpu}%" : "uncapped")}, " +
+        $"{Shown(limits.ActiveProcessLimit)} processes at most, kill on close {Shown(limits.KillOnJobClose)}";
+
+    private static string Megabytes(long? bytes) => bytes is { } b ? $"{b / (1024 * 1024)} MB" : "uncapped";
 
     private static string Shown(string? value) => string.IsNullOrEmpty(value) ? NotRecorded : value;
 
@@ -316,15 +365,17 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
         return sb.ToString();
     }
 
+    // Both scripts once read only manifest.json, which a run record bundle does not have; json.load
+    // refused the byte-order mark every file here is written with; and neither rebuilt a leaf from
+    // audit_chain.json, so an edited entry still passed. A script shipped as a verifier has to run.
     private static string GeneratePythonVerificationScript()
     {
-        // Both scripts once read only manifest.json, which a run record bundle does not have; json.load
-        // refused the byte-order mark every file here is written with; and neither rebuilt a leaf from
-        // audit_chain.json, so an edited entry still passed. A script shipped as a verifier has to run.
-        return @"# Checks that the evidence files beside this script agree with each other: every entry in
-# audit_chain.json is a leaf under the Merkle root, through its proof in merkle_proofs.json.
-# That is all it checks. It does not show where the files came from; the summary beside it
-# says what would.
+        return @"# Checks the evidence files beside this script:
+#   1. every entry in audit_chain.json is a leaf under the Merkle root, through its proof;
+#   2. if the bundle is signed, every file still has the hash the signed statement gives it,
+#      and that statement's signature verifies under the public key the bundle carries.
+# Exit codes: 0 verified and signed, 2 the files agree but nothing signed them, 1 a check failed.
+import base64
 import hashlib
 import json
 import os
@@ -340,6 +391,10 @@ def load(name):
 def sha256_hex(text):
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
+def file_sha256(name):
+    with open(os.path.join(HERE, name), 'rb') as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
 def leaf_hash(entry):
     # The fields and order of MerkleTreeEngine.ComputeLeafHash; the time is its round-trip text.
     return sha256_hex(f""{entry['Id']}:{entry['EntryHash']}:{entry['TimestampUtc']}:{entry['Action']}:{entry['OperatorIdentity']}"")
@@ -351,13 +406,85 @@ def fail(message):
     print(f'[-] {message}')
     sys.exit(1)
 
+def der_rsa_public_key(der):
+    # SEQUENCE { INTEGER modulus, INTEGER exponent }, which is all a PKCS#1 RSAPublicKey holds.
+    def length(at):
+        size = der[at]
+        at += 1
+        if size & 0x80:
+            count = size & 0x7F
+            size = int.from_bytes(der[at:at + count], 'big')
+            at += count
+        return size, at
+
+    if der[0] != 0x30:
+        fail('the public key in signature.json is not a DER SEQUENCE.')
+    _, at = length(1)
+    numbers = []
+    for _ in range(2):
+        if der[at] != 0x02:
+            fail('the public key in signature.json is not two DER INTEGERs.')
+        size, at = length(at + 1)
+        numbers.append(int.from_bytes(der[at:at + size], 'big'))
+        at += size
+    return numbers[0], numbers[1]
+
+def pkcs1_sha256_verify(modulus, exponent, message, signature):
+    # RSASSA-PKCS1-v1_5 verification is one modular exponentiation and a comparison, so it needs
+    # nothing but the standard library.
+    size = (modulus.bit_length() + 7) // 8
+    if len(signature) != size:
+        return False
+    decrypted = pow(int.from_bytes(signature, 'big'), exponent, modulus).to_bytes(size, 'big')
+    digest_info = bytes.fromhex('3031300d060960864801650304020105000420') + hashlib.sha256(message).digest()
+    expected = b'\x00\x01' + b'\xff' * (size - len(digest_info) - 3) + b'\x00' + digest_info
+    return decrypted == expected
+
+def check_signature(mission_id):
+    if not os.path.exists(os.path.join(HERE, 'signature.json')):
+        print('[!] Unsigned: the files agree with each other, and nothing here says who produced them.')
+        return 2
+
+    signature = load('signature.json')
+    statement = signature['Statement']
+    listed = {}
+    for line in statement.split('\n'):
+        parts = line.split(' ')
+        if len(parts) == 4 and parts[0] == 'file' and parts[2] == 'sha256':
+            listed[parts[1]] = parts[3]
+
+    for name, expected in sorted(listed.items()):
+        if file_sha256(name) != expected:
+            fail(f'{name} is not the file that was signed.')
+    for required in ('mission_run_record.json', 'audit_chain.json', 'merkle_proofs.json'):
+        if required not in listed:
+            fail(f'the signed statement does not cover {required}.')
+    if mission_id and f'mission {mission_id}' not in statement.split('\n'):
+        fail('the signed statement is for a different mission.')
+
+    der = base64.b64decode(signature['PublicKey'])
+    key_id = 'sha256:' + hashlib.sha256(der).hexdigest()
+    if key_id != signature['KeyId']:
+        fail('the key id does not match the key the bundle carries.')
+
+    modulus, exponent = der_rsa_public_key(der)
+    if not pkcs1_sha256_verify(modulus, exponent, statement.encode('utf-8'), base64.b64decode(signature['Signature'])):
+        fail('the signature does not verify under the key the bundle carries.')
+
+    print(f'[+] Signed by {key_id}.')
+    print('[+] Compare that fingerprint with the one the operator published: the bundle cannot tell you whose key it is.')
+    return 0
+
 def main():
+    mission_id = None
     if os.path.exists(os.path.join(HERE, 'manifest.json')):
         root_file = 'manifest.json'
         root = load(root_file).get('MerkleRootHash')
     else:
         root_file = 'mission_run_record.json'
-        root = (load(root_file).get('Integrity') or {}).get('MerkleRootHash')
+        record = load(root_file)
+        root = (record.get('Integrity') or {}).get('MerkleRootHash')
+        mission_id = record.get('MissionId')
     entries = load('audit_chain.json')
     proofs = load('merkle_proofs.json')
 
@@ -386,7 +513,7 @@ def main():
     if unproven:
         fail(f'No proof for entries {unproven}.')
     print(f'[+] All {len(leaves)} entries in audit_chain.json are leaves under the root in {root_file}.')
-    print('[+] The files agree with each other. That does not show where they came from.')
+    sys.exit(check_signature(mission_id))
 
 if __name__ == '__main__':
     main()
@@ -395,10 +522,11 @@ if __name__ == '__main__':
 
     private static string GeneratePowerShellVerificationScript()
     {
-        return @"# Checks that the evidence files beside this script agree with each other: every entry in
-# audit_chain.json is a leaf under the Merkle root, through its proof in merkle_proofs.json.
-# That is all it checks. It does not show where the files came from; the summary beside it
-# says what would.
+        return @"# Checks the evidence files beside this script:
+#   1. every entry in audit_chain.json is a leaf under the Merkle root, through its proof;
+#   2. if the bundle is signed, every file still has the hash the signed statement gives it,
+#      and that statement's signature verifies under the public key the bundle carries.
+# Exit codes: 0 verified and signed, 2 the files agree but nothing signed them, 1 a check failed.
 $ErrorActionPreference = 'Stop'
 
 function Read-Evidence([string]$name) {
@@ -407,11 +535,14 @@ function Read-Evidence([string]$name) {
     return ($text | ConvertFrom-Json)
 }
 
-function Get-Sha256Hex([string]$text) {
+function Get-Sha256HexOfBytes([byte[]]$bytes) {
     $hasher = [System.Security.Cryptography.SHA256]::Create()
-    try { $hash = $hasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($text)) }
-    finally { $hasher.Dispose() }
+    try { $hash = $hasher.ComputeHash($bytes) } finally { $hasher.Dispose() }
     return [System.BitConverter]::ToString($hash).Replace('-', '').ToLowerInvariant()
+}
+
+function Get-Sha256Hex([string]$text) {
+    return Get-Sha256HexOfBytes ([System.Text.Encoding]::UTF8.GetBytes($text))
 }
 
 # Windows PowerShell 5.1 keeps a timestamp as the text it was written as. PowerShell 7 turns it
@@ -429,12 +560,96 @@ function Stop-Verification([string]$message) {
     exit 1
 }
 
+# SEQUENCE { INTEGER modulus, INTEGER exponent }, which is all a PKCS#1 RSAPublicKey holds.
+function Read-RsaPublicKey([byte[]]$der) {
+    $script:at = 0
+    function Read-DerLength {
+        $size = [int]$der[$script:at]; $script:at++
+        if ($size -band 0x80) {
+            $count = $size -band 0x7F
+            $size = 0
+            for ($k = 0; $k -lt $count; $k++) { $size = ($size -shl 8) -bor $der[$script:at]; $script:at++ }
+        }
+        return $size
+    }
+    function Read-DerInteger {
+        if ($der[$script:at] -ne 0x02) { Stop-Verification 'the public key in signature.json is not two DER INTEGERs.' }
+        $script:at++
+        $size = Read-DerLength
+        $bytes = New-Object byte[] $size
+        [Array]::Copy($der, $script:at, $bytes, 0, $size)
+        $script:at += $size
+        # A positive INTEGER carries a leading zero when its top bit is set; RSAParameters wants it gone.
+        while ($bytes.Length -gt 1 -and $bytes[0] -eq 0) { $bytes = $bytes[1..($bytes.Length - 1)] }
+        return ,([byte[]]$bytes)
+    }
+
+    if ($der[0] -ne 0x30) { Stop-Verification 'the public key in signature.json is not a DER SEQUENCE.' }
+    $script:at = 1
+    [void](Read-DerLength)
+    $modulus = Read-DerInteger
+    $exponent = Read-DerInteger
+    return [PSCustomObject]@{ Modulus = $modulus; Exponent = $exponent }
+}
+
+function Test-Signature($missionId) {
+    if (-not (Test-Path (Join-Path $PSScriptRoot 'signature.json'))) {
+        Write-Host '[!] Unsigned: the files agree with each other, and nothing here says who produced them.' -ForegroundColor Yellow
+        exit 2
+    }
+
+    $signature = Read-Evidence 'signature.json'
+    $statement = [string]$signature.Statement
+    $listed = @{}
+    foreach ($line in ($statement -split ""`n"")) {
+        $parts = $line -split ' '
+        if ($parts.Count -eq 4 -and $parts[0] -eq 'file' -and $parts[2] -eq 'sha256') { $listed[$parts[1]] = $parts[3] }
+    }
+
+    foreach ($name in $listed.Keys) {
+        $actual = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $listed[$name]) { Stop-Verification ""$name is not the file that was signed."" }
+    }
+    foreach ($required in @('mission_run_record.json', 'audit_chain.json', 'merkle_proofs.json')) {
+        if (-not $listed.ContainsKey($required)) { Stop-Verification ""the signed statement does not cover $required."" }
+    }
+    if ($missionId -and (($statement -split ""`n"") -notcontains ""mission $missionId"")) {
+        Stop-Verification 'the signed statement is for a different mission.'
+    }
+
+    $der = [Convert]::FromBase64String([string]$signature.PublicKey)
+    $keyId = 'sha256:' + (Get-Sha256HexOfBytes $der)
+    if ($keyId -ne [string]$signature.KeyId) { Stop-Verification 'the key id does not match the key the bundle carries.' }
+
+    $key = Read-RsaPublicKey $der
+    $parameters = New-Object System.Security.Cryptography.RSAParameters
+    $parameters.Modulus = $key.Modulus
+    $parameters.Exponent = $key.Exponent
+    $rsa = [System.Security.Cryptography.RSA]::Create()
+    try {
+        $rsa.ImportParameters($parameters)
+        $verified = $rsa.VerifyData(
+            [System.Text.Encoding]::UTF8.GetBytes($statement),
+            [Convert]::FromBase64String([string]$signature.Signature),
+            [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+            [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    } finally { $rsa.Dispose() }
+    if (-not $verified) { Stop-Verification 'the signature does not verify under the key the bundle carries.' }
+
+    Write-Host ""[+] Signed by $keyId."" -ForegroundColor Green
+    Write-Host '[+] Compare that fingerprint with the one the operator published: the bundle cannot tell you whose key it is.' -ForegroundColor Green
+    exit 0
+}
+
+$missionId = $null
 if (Test-Path (Join-Path $PSScriptRoot 'manifest.json')) {
     $rootFile = 'manifest.json'
     $root = (Read-Evidence $rootFile).MerkleRootHash
 } else {
     $rootFile = 'mission_run_record.json'
-    $root = (Read-Evidence $rootFile).Integrity.MerkleRootHash
+    $record = Read-Evidence $rootFile
+    $root = $record.Integrity.MerkleRootHash
+    $missionId = [string]$record.MissionId
 }
 $entries = @((Read-Evidence 'audit_chain.json') | Where-Object { $null -ne $_ })
 $proofs = @((Read-Evidence 'merkle_proofs.json') | Where-Object { $null -ne $_ })
@@ -467,7 +682,7 @@ foreach ($id in $leaves.Keys) {
 }
 
 Write-Host ""[+] All $($leaves.Count) entries in audit_chain.json are leaves under the root in $rootFile."" -ForegroundColor Green
-Write-Host '[+] The files agree with each other. That does not show where they came from.' -ForegroundColor Green
+Test-Signature $missionId
 ";
     }
 }

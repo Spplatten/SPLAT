@@ -5,7 +5,7 @@
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](src/)
 [![Rust](https://img.shields.io/badge/Rust-libbpf--rs%20%2B%20eBPF-CE412B?logo=rust&logoColor=white)](native/splat-agent/)
 [![WinUI 3](https://img.shields.io/badge/UI-WinUI%203%20%2F%20Windows%20App%20SDK-0078D6?logo=windows&logoColor=white)](src/MissionController.UI/)
-[![Tests](https://img.shields.io/badge/Tests-609%2F609%20passing-success)](tests/MissionController.Tests/)
+[![Tests](https://img.shields.io/badge/Tests-626%2F626%20passing-success)](tests/MissionController.Tests/)
 [![Build](https://img.shields.io/badge/Build-0%20errors-success)](src/)
 
 **New here, or allergic to jargon?** Start with **[The SPLAT Field Guide](docs/TUTORIAL.md)** — the whole system explained in plain English.
@@ -39,7 +39,7 @@ Technical evaluations of agent sandboxes tend to blur together into generic "iso
 | Component | State |
 | :--- | :--- |
 | Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
-| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 609/609 automated tests passing |
+| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 626/626 automated tests passing |
 | Zero-warning build gate | **Enforced** — [`src`](src/Directory.Build.props) and [`tests`](tests/Directory.Build.props) compile with `TreatWarningsAsErrors`, so a cold solution build reports 0 warnings and 0 errors. No project is exempt: the console joined on 2026-09-18, when it moved to Windows App SDK 2.5.1 on .NET 10 and built without a warning, and `WarningGateTests` fails if an exemption appears |
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 12 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining ten run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
@@ -121,8 +121,9 @@ Policy matches on inode identity, not path strings — full-path resolution in B
 | `fs_read`, `fs_write` | Windows control plane. Confined by canonical-path containment to a governed workspace root — a user-space boundary, not a kernel one |
 | `diagnose_system`, `investigate_system`, `run_agent_brain`, `run_governed_crew` | The full 1:1:1 mission pipeline: validated argument binding, Job Object clamps, restricted token, ACL jail, DLP, audit ledger, Layer-2 cognitive planning, and multi-agent crew execution |
 | `get_substrate_health`, `list_diagnostic_templates`, `search_incident_memory`, `list_governed_crews` | Read-only queries against the local host, catalog, memory, and crew registry |
+| `export_run_record` | Reads one finished mission out of the ledger: the facts the engine sealed when it ended, the mission's entries with a Merkle proof for each, and scripts that check them. Signed when the host was given a run record key, and the bundle says so either way |
 
-Run it as `splat-mcp --workspace <dir>`. `fs_read` and `fs_write` are confined to that directory, which must already exist — it is never created for you. Without the flag they fall back to a private folder under `%LOCALAPPDATA%\SPLAT\mcp-workspace`, and the server names it on stderr at startup; stdout carries nothing but JSON-RPC. A bad option exits with status 2 before anything is built. `--ledger-key <file>` keys the audit ledger with a file you keep; an MCP client may start the server without your environment variables, so give it in the stanza's `args`. `splat-mcp --help` prints the rest. On a fresh host, `splat-mcp provision --apply` does the Linux setup that `splat-mcp doctor` reports missing: it installs the lease daemon it carries at `/opt/splat/splat-agent`, starts it under systemd so it survives a restart, and succeeds only when the daemon is enforcing. Without `--apply` it changes nothing and lists what it would do.
+Run it as `splat-mcp --workspace <dir>`. `fs_read` and `fs_write` are confined to that directory, which must already exist — it is never created for you. Without the flag they fall back to a private folder under `%LOCALAPPDATA%\SPLAT\mcp-workspace`, and the server names it on stderr at startup; stdout carries nothing but JSON-RPC. A bad option exits with status 2 before anything is built. `--ledger-key <file>` keys the audit ledger with a file you keep; an MCP client may start the server without your environment variables, so give it in the stanza's `args`. `--run-record-key <file>` signs exported run records with a key you keep, which `splat-mcp new-run-record-key <file>` will make for you, printing the fingerprint to publish; without it bundles export unsigned and say so. `splat-mcp --help` prints the rest. On a fresh host, `splat-mcp provision --apply` does the Linux setup that `splat-mcp doctor` reports missing: it installs the lease daemon it carries at `/opt/splat/splat-agent`, starts it under systemd so it survives a restart, and succeeds only when the daemon is enforcing. Without `--apply` it changes nothing and lists what it would do.
 
 **Installing it.** One self-contained file; the target machine needs no .NET, and its WSL guest needs no Rust toolchain, because the Linux daemon travels inside it:
 
@@ -178,10 +179,10 @@ Every call lands in the audit ledger attributed to a resolved principal — the 
 
 ```text
 $ dotnet test tests/MissionController.Tests/MissionController.Tests.csproj
-Passed!  - Failed: 0, Passed: 609, Skipped: 0, Total: 609, Duration: 25 s - MissionController.Tests.dll (net10.0)
+Passed!  - Failed: 0, Passed: 626, Skipped: 0, Total: 626, Duration: 25 s - MissionController.Tests.dll (net10.0)
 ```
 
-609 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
+626 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
 
 **On the warning count.** An incremental `dotnet build` reports zero warnings, but that is an artifact of caching rather than a property of the source: a cold `--no-incremental` build re-runs the CommunityToolkit source generators and emits **186 `MVVMTK0045` warnings**, one per `[ObservableProperty]` field that should be declared as a partial property for WinRT marshalling. They are cosmetic and confined to the view models, but a "zero warnings" claim would only have been true on the build nobody runs from clean. Converting the fields is tracked work; the badge above claims zero *errors*, which holds either way.
 
@@ -200,7 +201,7 @@ SPLAT/
 ├── native/
 │   ├── splat-agent/                             # Rust eBPF daemon: lease_lsm.bpf.c + libbpf-rs loader
 │   └── splat-canary/                            # Minimal -EPERM proof harness (preflight → canary)
-├── tests/MissionController.Tests/               # 609 xUnit unit / integration / security tests
+├── tests/MissionController.Tests/               # 626 xUnit unit / integration / security tests
 ├── packaging/                                   # Signed MSIX build + Intune/SCCM silent install scripts
 └── docs/                                        # Architecture, context and module maps; briefs, plans, audits - index in docs/README.md
 ```

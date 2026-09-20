@@ -84,6 +84,27 @@ public sealed class NtAclJailManager : IJailManager
         return jailPath;
     }
 
+    public string? DescribeJail(string jailPath)
+    {
+        try
+        {
+            // Read from the directory as it stands, not from the rules written above.
+            var security = new DirectoryInfo(jailPath).GetAccessControl(AccessControlSections.Access);
+            int allow = 0, deny = 0;
+            foreach (FileSystemAccessRule rule in security.GetAccessRules(true, true, typeof(SecurityIdentifier)))
+            {
+                if (rule.AccessControlType == AccessControlType.Allow) allow++; else deny++;
+            }
+
+            return $"acl-jail:{(security.AreAccessRulesProtected ? "inheritance-stripped" : "inherits-from-parent")}" +
+                   $",allow-rules={allow},deny-rules={deny}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return $"acl-jail:unreadable ({ex.GetType().Name})";
+        }
+    }
+
     public async Task DrainAndCleanupJailAsync(string jailPath, int maxRetries = 5, int retryDelayMs = 200)
     {
         if (!Directory.Exists(jailPath))

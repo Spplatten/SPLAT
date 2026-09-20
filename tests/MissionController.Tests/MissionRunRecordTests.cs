@@ -10,7 +10,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
-using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 using MissionController.Infrastructure.Data;
@@ -22,127 +21,173 @@ namespace MissionController.Tests;
 
 public class MissionRunRecordTests
 {
-    private static SingleToolTemplate CreateSampleTemplate(string toolName = "curl.exe")
+    private static MissionRunFacts SampleFacts(Guid missionId) => new()
     {
-        var toolDef = new SingleToolDefinition(
-            ToolId: "curl-sensor-1",
-            Name: "Curl Network Sensor",
-            ExecutablePath: toolName,
-            ArgumentsTemplate: "-s https://api.grants.gov/v1/health",
-            AllowedExitCodes: new[] { 0 },
-            TimeoutSeconds: 30,
-            MaxMemoryBytes: 256 * 1024 * 1024,
-            MaxCpuPercent: 50);
+        MissionId = missionId,
+        TemplateId = "net-dns-audit",
+        TemplateSha256 = "sha256:" + new string('a', 64),
+        Principal = "windows:Operator Atlas [S-1-5-21-7] via console",
+        StartedAtUtc = new DateTimeOffset(2026, 9, 19, 5, 39, 28, TimeSpan.Zero),
+        EndedAtUtc = new DateTimeOffset(2026, 9, 19, 5, 39, 31, TimeSpan.Zero),
+        ExecutablePath = "cmd.exe",
+        CommandLine = "/c ipconfig /all",
+        WorkspacePath = @"C:\jails\mission",
+        DeclaredEgress = "api.anthropic.com:443 (ModelGateway)",
+        NetworkDenialRequested = true,
+        PrivilegeDropRequested = true,
+        RequestedMemoryBytes = 256 * 1024 * 1024,
+        RequestedCpuPercent = 50,
+        TimeoutSeconds = 60,
+        OsDescription = "Microsoft Windows 10.0.26200",
+        JobName = "MissionJob_test",
+        LimitsReadBack = new JobLimitsReadback(256 * 1024 * 1024, 256 * 1024 * 1024, 50, 32, true),
+        AppliedControls =
+        {
+            "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+            "job:MissionJob_test",
+            "token:integrity=Low",
+            "token:administrators=deny-only",
+            "token:privileges=1",
+            "token:appcontainer=0-capabilities"
+        },
+        ExecutionState = "Completed",
+        ExitCode = 0,
+        TimedOut = false,
+        AllowedExitCodes = { 0 },
+        ExitContractMet = true,
+        TerminalReason = "the tool exited",
+        RedactionCount = 2,
+        RedactedCategories = { "AwsKey", "Credential" },
+        Model = "Anthropic/claude-sonnet-5",
+        QualityAccepted = true,
+        ProcessesLeftAtTeardown = 0,
+        JailRemoved = true,
+        TeardownOrder = { "job: no process left running", "job: closed, which kills anything left in it", "jail: drained and removed" }
+    };
 
-        var egress = new EgressRule(
-            AllowedFqdn: "api.grants.gov",
-            AllowedPort: 443,
-            Scope: EgressScope.ToolProcess);
-
-        return new SingleToolTemplate(
-            TemplateId: "sample-network-mission",
-            Name: "Sample Network Mission",
-            Description: "Sensor network audit",
-            Category: "Network",
-            TargetModel: "claude-3-opus",
-            Tool: toolDef,
-            EgressRule: egress,
-            SystemPrompt: "Execute network diagnostic",
-            ParameterFields: Array.Empty<TemplateParameterField>());
+    private static async Task<SqliteChainedAuditLedger> LedgerWithMissionAsync(string dbPath, MissionRunFacts facts, byte[]? key = null)
+    {
+        var ledger = new SqliteChainedAuditLedger(new SqliteStorageContext(dbPath), key);
+        await ledger.AppendLogAsync(facts.MissionId, facts.TemplateId, "MISSION_INITIATED", "Template: DNS audit", facts.Principal);
+        await ledger.AppendLogAsync(facts.MissionId, facts.TemplateId, "TOOL_EXECUTION_COMPLETED", "ExitCode: 0", facts.Principal);
+        await ledger.AppendLogAsync(facts.MissionId, facts.TemplateId, MissionRunFacts.LedgerAction, JsonSerializer.Serialize(facts), facts.Principal);
+        return ledger;
     }
 
-    private static LeaseSpec CreateSampleLease(Guid missionId)
+    private static MissionRunRecordAssembler AssemblerFor(IAuditLedger ledger, IRunRecordSigner? signer = null)
     {
-        return new LeaseSpec(
-            MissionId: missionId,
-            WorkingDirectory: $"/tmp/splat_sandboxes/{missionId:D}",
-            AllowNetwork: true,
-            AllowedEgressIps: new[] { "93.184.216.34" },
-            AllowedEgressPorts: new uint[] { 443 },
-            ReadOnlyFs: false,
-            ProtectedInodes: new[] { new InodeIdentifierModel(0, 0, "/etc/shadow") },
-            AllowedExecInodes: new[] { new InodeIdentifierModel(0, 0, "/bin/curl") },
-            LeaseDurationSeconds: 30,
-            Limits: new LeaseResourceLimits(256UL * 1024 * 1024, 50u, 50),
-            OverlayFs: new OverlayFsSpec(false, "/var/splat/baseline", $"/tmp/splat_scratch/{missionId:D}"));
+        var merkle = new MerkleTreeEngine();
+        return new MissionRunRecordAssembler(ledger, merkle, new ComplianceArchiveExporter(merkle, signer));
+    }
+
+    private static void DeleteDatabase(string dbPath)
+    {
+        SqliteConnection.ClearAllPools();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        try { File.Delete(dbPath); } catch (IOException) { }
     }
 
     [Fact]
-    public async Task TheRecord_HoldsWhatItWasHanded_AndLeavesTheRestUnrecorded()
+    public async Task TheRecord_IsTheFactsTheEngineSealed_AndNothingElse()
     {
-        var missionId = Guid.NewGuid();
-        var template = CreateSampleTemplate();
-        var lease = CreateSampleLease(missionId);
-        var start = DateTime.UtcNow;
-
-        var mockLedger = new StubAuditLedger(new List<AuditLogEntry>
+        string dbPath = Path.Combine(Path.GetTempPath(), $"RunRecord_{Guid.NewGuid():N}.db");
+        try
         {
-            new(3, start, missionId, template.TemplateId, "MISSION_COMPLETE", "Completed successfully", "Operator-Atlas", "hash2", "hash3"),
-            new(2, start.AddSeconds(-1), missionId, template.TemplateId, "TOOL_EXEC", "Executed curl sensor", "Operator-Atlas", "hash1", "hash2"),
-            new(1, start.AddSeconds(-2), missionId, template.TemplateId, "MISSION_INIT", "Mission initialized", "Operator-Atlas", "0000000000000000000000000000000000000000000000000000000000000000", "hash1")
-        });
+            var missionId = Guid.NewGuid();
+            var facts = SampleFacts(missionId);
+            var ledger = await LedgerWithMissionAsync(dbPath, facts);
 
-        var merkleEngine = new MerkleTreeEngine();
-        var archiveExporter = new ComplianceArchiveExporter(merkleEngine);
-        var assembler = new MissionRunRecordAssembler(mockLedger, merkleEngine, archiveExporter);
+            var record = await AssemblerFor(ledger).AssembleRunRecordAsync(missionId);
 
-        var record = await assembler.AssembleRunRecordAsync(
-            missionId: missionId,
-            template: template,
-            leaseSpec: lease,
-            operatorIdentity: "Operator-Atlas",
-            executionState: "Completed",
-            exitCode: 0,
-            redactionCount: 2,
-            redactedCategories: new[] { "AwsKey", "EmailAddress" },
-            substrateType: "WSL2-BPF-LSM",
-            cgroupOrJobId: "splat-cg-445");
+            // 1. Request identity: the principal as the host wrote it, and how it authenticated them.
+            Assert.Equal(facts.Principal, record.RequestIdentity.Principal);
+            Assert.Equal("Windows logon: the operating system authenticated the caller, over console", record.RequestIdentity.AuthProvenance);
+            Assert.Equal(facts.TemplateSha256, record.RequestIdentity.PolicyVersionOrHash);
+            Assert.Equal(facts.StartedAtUtc, record.RequestIdentity.RequestedAtUtc);
 
-        // 1. Request identity: the principal it was handed, the template's hash, and the ledger's first time.
-        Assert.Equal("Operator-Atlas", record.RequestIdentity.Principal);
-        Assert.Equal(missionId, record.RequestIdentity.MissionId);
-        Assert.Matches("^sha256:[0-9a-f]{64}$", record.RequestIdentity.PolicyVersionOrHash);
-        Assert.Equal(new DateTimeOffset(start.AddSeconds(-2)), record.RequestIdentity.FirstRecordedAtUtc);
-        Assert.Null(record.RequestIdentity.AuthProvenance);
-        Assert.Null(record.RequestIdentity.IdempotencyToken);
-        Assert.Null(record.RequestIdentity.ApprovalReference);
+            // 2. Effective permission: the bound command line, and the network as the token showed it.
+            Assert.Equal("cmd.exe", record.EffectivePermission.ExecutablePath);
+            Assert.Equal("/c ipconfig /all", record.EffectivePermission.CommandLine);
+            Assert.Equal(@"C:\jails\mission", record.EffectivePermission.WorkspaceBoundary);
+            Assert.StartsWith("enforced: the tool had no network at all", record.EffectivePermission.EgressEnforcement);
+            Assert.Equal(60u, record.EffectivePermission.DurationCeilingSeconds);
+            Assert.Contains("token:integrity=Low", record.EffectivePermission.RuntimeIdentity);
+            Assert.DoesNotContain("job:", record.EffectivePermission.RuntimeIdentity);
 
-        // 2. Effective permission: the lease's rules; the argument vector is not in the template.
-        Assert.Equal("curl.exe", record.EffectivePermission.ExecutablePath);
-        Assert.True(record.EffectivePermission.AllowNetwork);
-        Assert.Contains("93.184.216.34", record.EffectivePermission.AllowedEgressIps!);
-        Assert.Contains(443u, record.EffectivePermission.AllowedEgressPorts!);
-        Assert.Equal(256UL * 1024 * 1024, record.EffectivePermission.MaxMemoryBytes);
-        Assert.Equal(30u, record.EffectivePermission.LeaseDurationSeconds);
-        Assert.Null(record.EffectivePermission.ArgumentVector);
-        Assert.Null(record.EffectivePermission.RuntimeCapabilities);
+            // 3. Enforcement: read back from the job object, not repeated from the request.
+            Assert.Equal("MissionJob_test", record.EnforcementState.CgroupOrJobId);
+            Assert.Equal(50, record.EnforcementState.EffectiveLimitsReadback!.CpuRatePercent);
+            Assert.True(record.EnforcementState.EffectiveLimitsReadback!.KillOnJobClose);
+            Assert.Contains("token:appcontainer=0-capabilities", record.EnforcementState.AttachedControls!);
+            Assert.Equal("Admitted", record.EnforcementState.AdmissionVerdict);
 
-        // 3. Enforcement state: nothing reports what was attached or read back, so nothing claims it.
-        Assert.Equal("WSL2-BPF-LSM", record.EnforcementState.SubstrateType);
-        Assert.Equal("splat-cg-445", record.EnforcementState.CgroupOrJobId);
-        Assert.Equal("Admitted", record.EnforcementState.AdmissionVerdict);
-        Assert.Null(record.EnforcementState.AttachedControls);
-        Assert.Null(record.EnforcementState.KernelOrOsRelease);
-        Assert.Null(record.EnforcementState.EffectiveLimitsReadback);
+            // 4. Outcome, with the exit contract the template declared.
+            Assert.Equal("Completed", record.Outcome.ExecutionState);
+            Assert.Equal(0, record.Outcome.ExitCode);
+            Assert.Equal(new[] { 0 }, record.Outcome.AllowedExitCodes);
+            Assert.True(record.Outcome.ExitContractMet);
+            Assert.Equal(2, record.Outcome.RedactionCount);
+            Assert.True(record.Outcome.QualityAcceptance);
 
-        // 4. Outcome, with no quality verdict because none was given.
-        Assert.Equal("Completed", record.Outcome.ExecutionState);
-        Assert.Equal(0, record.Outcome.ExitCode);
-        Assert.Equal(2, record.Outcome.RedactionCount);
-        Assert.Contains("AwsKey", record.Outcome.RedactedCategories);
-        Assert.Null(record.Outcome.QualityAcceptance);
-        Assert.Null(record.Outcome.TerminalReason);
+            // 5. Cleanup as teardown observed it.
+            Assert.Equal(0u, record.Cleanup.ProcessesLeftAtTeardown);
+            Assert.Equal("removed", record.Cleanup.WorkspaceDisposition);
+            Assert.True(record.Cleanup.ResidualResourcesCleaned);
 
-        // 5. Cleanup is not reported back by either substrate.
-        Assert.Equal(new CleanupEvidence(null, null, null, null), record.Cleanup);
+            // 6. Integrity: this ledger is unkeyed, and the record names the row its facts came from.
+            Assert.Equal("Unkeyed", record.Integrity.ChainKind);
+            Assert.Equal(SqliteChainedAuditLedger.UnkeyedVersion, record.Integrity.HashVersion);
+            Assert.Equal(3, record.Integrity.TotalAuditEntries);
+            var entries = await ledger.GetAuditLogsAsync(missionId);
+            Assert.Equal(entries.Single(e => e.Action == MissionRunFacts.LedgerAction).EntryHash, record.Integrity.FactsEntryHash);
+        }
+        finally
+        {
+            DeleteDatabase(dbPath);
+        }
+    }
 
-        // 6. Integrity: a root over the entries, no chain kind (these entries do not say theirs), no signature.
-        Assert.Null(record.Integrity.ChainKind);
-        Assert.Null(record.Integrity.HashVersion);
-        Assert.Equal(3, record.Integrity.TotalAuditEntries);
-        Assert.Equal(merkleEngine.BuildTree(await mockLedger.GetAuditLogsAsync(missionId)).RootHash, record.Integrity.MerkleRootHash);
-        Assert.Null(record.Integrity.AttestationSignature);
-        Assert.Null(record.Integrity.SignatureAlgorithm);
+    [Fact]
+    public async Task AMissionWhoseFactsWereNeverSealed_IsRefused()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), $"NoFacts_{Guid.NewGuid():N}.db");
+        try
+        {
+            var missionId = Guid.NewGuid();
+            var ledger = new SqliteChainedAuditLedger(new SqliteStorageContext(dbPath));
+            await ledger.AppendLogAsync(missionId, "net-dns-audit", "MISSION_INITIATED", "started", "operator");
+
+            var refusal = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => AssemblerFor(ledger).AssembleRunRecordAsync(missionId));
+
+            Assert.Contains(MissionRunFacts.LedgerAction, refusal.Message);
+        }
+        finally
+        {
+            DeleteDatabase(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task FactsRetentionHasRedacted_AreRefused_NotGuessedAround()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), $"RedactedFacts_{Guid.NewGuid():N}.db");
+        try
+        {
+            var missionId = Guid.NewGuid();
+            var ledger = new SqliteChainedAuditLedger(new SqliteStorageContext(dbPath));
+            await ledger.AppendLogAsync(missionId, "net-dns-audit", MissionRunFacts.LedgerAction, "[REDACTED BY RETENTION]", "operator");
+
+            var refusal = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => AssemblerFor(ledger).AssembleRunRecordAsync(missionId));
+
+            Assert.Contains("retention", refusal.Message);
+        }
+        finally
+        {
+            DeleteDatabase(dbPath);
+        }
     }
 
     [Theory]
@@ -150,66 +195,24 @@ public class MissionRunRecordTests
     [InlineData(true, "HmacSha256", SqliteChainedAuditLedger.KeyedVersion)]
     public async Task TheChainKind_IsReadFromTheLedgersOwnRows(bool keyed, string kind, int version)
     {
-        // The real ledger, not a stub: the LEDGER_KEYED row the first version looked for among a
+        // The real ledger, not a stub: the LEDGER_KEYED row an earlier version looked for among a
         // mission's entries belongs to no mission, so against this ledger it never found it.
         string dbPath = Path.Combine(Path.GetTempPath(), $"RunRecordChain_{Guid.NewGuid():N}.db");
         try
         {
-            var ledger = new SqliteChainedAuditLedger(
-                new SqliteStorageContext(dbPath), keyed ? RandomNumberGenerator.GetBytes(32) : null);
             var missionId = Guid.NewGuid();
-            await ledger.AppendLogAsync(missionId, "sample-network-mission", "MISSION_INIT", "Init", "Operator-Atlas");
-            await ledger.AppendLogAsync(missionId, "sample-network-mission", "MISSION_EXIT", "Exit 0", "Operator-Atlas");
+            var ledger = await LedgerWithMissionAsync(dbPath, SampleFacts(missionId), keyed ? RandomNumberGenerator.GetBytes(32) : null);
 
-            var merkleEngine = new MerkleTreeEngine();
-            var record = await new MissionRunRecordAssembler(ledger, merkleEngine, new ComplianceArchiveExporter(merkleEngine))
-                .AssembleRunRecordAsync(missionId, CreateSampleTemplate(), null, "Operator-Atlas", "Completed", 0, 0,
-                    Array.Empty<string>(), "Windows");
+            var record = await AssemblerFor(ledger).AssembleRunRecordAsync(missionId);
 
             Assert.Equal(kind, record.Integrity.ChainKind);
             Assert.Equal(version, record.Integrity.HashVersion);
-            Assert.Equal(2, record.Integrity.TotalAuditEntries);
+            Assert.Equal(3, record.Integrity.TotalAuditEntries);
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
-            try { File.Delete(dbPath); } catch (IOException) { }
+            DeleteDatabase(dbPath);
         }
-    }
-
-    [Fact]
-    public async Task EntriesFromTwoKindsOfChain_AreRecordedAsMixed()
-    {
-        var missionId = Guid.NewGuid();
-        var template = CreateSampleTemplate();
-        var ledger = new StubAuditLedger(new List<AuditLogEntry>
-        {
-            new(2, DateTime.UtcNow, missionId, template.TemplateId, "MISSION_EXIT", "Exit 0", "Operator-Atlas", "hash1", "hash2", SqliteChainedAuditLedger.KeyedVersion),
-            new(1, DateTime.UtcNow.AddSeconds(-1), missionId, template.TemplateId, "MISSION_INIT", "Init", "Operator-Atlas", "hash0", "hash1", SqliteChainedAuditLedger.UnkeyedVersion)
-        });
-        var merkleEngine = new MerkleTreeEngine();
-
-        var record = await new MissionRunRecordAssembler(ledger, merkleEngine, new ComplianceArchiveExporter(merkleEngine))
-            .AssembleRunRecordAsync(missionId, template, null, "Operator-Atlas", "Completed", 0, 0, Array.Empty<string>(), "Windows");
-
-        Assert.Equal("Mixed", record.Integrity.ChainKind);
-        Assert.Null(record.Integrity.HashVersion);
-    }
-
-    [Fact]
-    public async Task AMissionTheLedgerHoldsNothingFor_HasNoRootAndNoFirstTime()
-    {
-        var merkleEngine = new MerkleTreeEngine();
-        var record = await new MissionRunRecordAssembler(new StubAuditLedger(Array.Empty<AuditLogEntry>()), merkleEngine,
-                new ComplianceArchiveExporter(merkleEngine))
-            .AssembleRunRecordAsync(Guid.NewGuid(), CreateSampleTemplate(), null, " ", "Refused", null, 0, Array.Empty<string>(), "Windows");
-
-        // The all-zero root the tree builder returns for no entries would read as a real commitment.
-        Assert.Null(record.Integrity.MerkleRootHash);
-        Assert.Null(record.RequestIdentity.FirstRecordedAtUtc);
-        Assert.Null(record.RequestIdentity.Principal);
-        Assert.Equal(0, record.Integrity.TotalAuditEntries);
-        Assert.Equal("Refused", record.EnforcementState.AdmissionVerdict);
     }
 
     [Fact]
@@ -217,128 +220,28 @@ public class MissionRunRecordTests
     {
         var missionId = Guid.NewGuid();
         var entries = Enumerable.Range(1, 100_001)
-            .Select(i => new AuditLogEntry(i, DateTime.UtcNow, missionId, "t", "TOOL_EXEC", "d", "Operator-Atlas", "p", $"e{i}"))
+            .Select(i => new AuditLogEntry(i, DateTime.UtcNow, missionId, "t", "TOOL_EXEC", "d", "operator", "p", $"e{i}", 2))
             .ToList();
-        var merkleEngine = new MerkleTreeEngine();
-        var assembler = new MissionRunRecordAssembler(new StubAuditLedger(entries), merkleEngine, new ComplianceArchiveExporter(merkleEngine));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => assembler.AssembleRunRecordAsync(
-            missionId, CreateSampleTemplate(), null, "Operator-Atlas", "Completed", 0, 0, Array.Empty<string>(), "Windows"));
-    }
-
-    [Fact]
-    public async Task ThePolicyHash_ChangesWithTheTemplate_AndOnlyWithIt()
-    {
-        var missionId = Guid.NewGuid();
-        var template = CreateSampleTemplate();
-        var edited = template with { Tool = template.Tool with { ArgumentsTemplate = "-s https://example.invalid/" } };
-        var merkleEngine = new MerkleTreeEngine();
-        var assembler = new MissionRunRecordAssembler(new StubAuditLedger(Array.Empty<AuditLogEntry>()), merkleEngine,
-            new ComplianceArchiveExporter(merkleEngine));
-
-        async Task<string> HashOf(SingleToolTemplate t) => (await assembler.AssembleRunRecordAsync(
-            missionId, t, null, "Operator-Atlas", "Completed", 0, 0, Array.Empty<string>(), "Windows")).RequestIdentity.PolicyVersionOrHash;
-
-        Assert.Equal(await HashOf(template), await HashOf(CreateSampleTemplate()));
-        Assert.NotEqual(await HashOf(template), await HashOf(edited));
-    }
-
-    [Fact]
-    public async Task AssembleAndExportBundleAsync_CreatesValidVerifiableArchive()
-    {
-        var missionId = Guid.NewGuid();
-        var template = CreateSampleTemplate();
-        var lease = CreateSampleLease(missionId);
-
-        var entries = new List<AuditLogEntry>
-        {
-            new(1, DateTime.UtcNow.AddSeconds(-3), missionId, template.TemplateId, "MISSION_INIT", "Init", "Operator-Atlas", "prev0", "hash1"),
-            new(2, DateTime.UtcNow.AddSeconds(-2), missionId, template.TemplateId, "POLICY_APPLIED", "Applied BPF lease", "Operator-Atlas", "hash1", "hash2"),
-            new(3, DateTime.UtcNow.AddSeconds(-1), missionId, template.TemplateId, "TOOL_EXEC", "Ran curl", "Operator-Atlas", "hash2", "hash3"),
-            new(4, DateTime.UtcNow, missionId, template.TemplateId, "MISSION_EXIT", "Exit 0", "Operator-Atlas", "hash3", "hash4")
-        };
-
-        var mockLedger = new StubAuditLedger(entries);
-        var merkleEngine = new MerkleTreeEngine();
-        var archiveExporter = new ComplianceArchiveExporter(merkleEngine);
-        var assembler = new MissionRunRecordAssembler(mockLedger, merkleEngine, archiveExporter);
-
-        string tempDir = Path.Combine(Path.GetTempPath(), "splat_test_export_" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            string zipPath = await assembler.AssembleAndExportBundleAsync(
-                missionId: missionId,
-                template: template,
-                leaseSpec: lease,
-                operatorIdentity: "Operator-Atlas",
-                executionState: "Completed",
-                exitCode: 0,
-                redactionCount: 1,
-                redactedCategories: new[] { "AwsKey" },
-                substrateType: "WSL2-BPF-LSM",
-                outputDirectory: tempDir);
-
-            Assert.True(File.Exists(zipPath));
-
-            using var zip = ZipFile.OpenRead(zipPath);
-            var entryNames = zip.Entries.Select(e => e.FullName).ToList();
-
-            Assert.Contains("mission_run_record.json", entryNames);
-            Assert.Contains("audit_chain.json", entryNames);
-            Assert.Contains("merkle_proofs.json", entryNames);
-            Assert.Contains("run_record_summary.md", entryNames);
-            Assert.Contains("verify_proofs.py", entryNames);
-            Assert.Contains("verify_proofs.ps1", entryNames);
-
-            // Read mission_run_record.json
-            var recordEntry = zip.GetEntry("mission_run_record.json")!;
-            using var recordStream = recordEntry.Open();
-            var record = await JsonSerializer.DeserializeAsync<MissionRunRecord>(recordStream);
-            Assert.NotNull(record);
-            Assert.Equal(missionId, record.MissionId);
-            Assert.Equal("Completed", record.Outcome.ExecutionState);
-            Assert.Equal(4, record.Integrity.TotalAuditEntries);
-
-            // Read merkle_proofs.json and verify each proof against MerkleTreeEngine
-            var proofsEntry = zip.GetEntry("merkle_proofs.json")!;
-            using var proofsStream = proofsEntry.Open();
-            var proofs = await JsonSerializer.DeserializeAsync<List<MerkleProof>>(proofsStream);
-            Assert.NotNull(proofs);
-            Assert.Equal(4, proofs.Count);
-
-            foreach (var proof in proofs)
-            {
-                bool isValid = merkleEngine.VerifyProof(proof);
-                Assert.True(isValid, $"Merkle proof for EntryId {proof.EntryId} failed verification!");
-            }
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
-        }
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => AssemblerFor(new StubAuditLedger(entries)).AssembleRunRecordAsync(missionId));
     }
 
     [Fact]
     public async Task TheBundle_ReadsTheLedgerOnce_SoItsRootCoversItsProofs()
     {
         var missionId = Guid.NewGuid();
-        var template = CreateSampleTemplate();
+        var facts = SampleFacts(missionId);
         // Every read finds one more entry, as it does while a mission is still writing to the ledger.
         var ledger = new StubAuditLedger(new List<AuditLogEntry>
         {
-            new(1, DateTime.UtcNow, missionId, template.TemplateId, "MISSION_INIT", "Init", "Operator-Atlas", "prev0", "hash1")
+            new(1, DateTime.UtcNow, missionId, facts.TemplateId, MissionRunFacts.LedgerAction, JsonSerializer.Serialize(facts), facts.Principal, "prev0", "hash1", 2)
         }, growsOnEachRead: true);
-        var merkleEngine = new MerkleTreeEngine();
-        var assembler = new MissionRunRecordAssembler(ledger, merkleEngine, new ComplianceArchiveExporter(merkleEngine));
 
         string tempDir = Path.Combine(Path.GetTempPath(), "splat_test_once_" + Guid.NewGuid().ToString("N"));
         try
         {
-            string zipPath = await assembler.AssembleAndExportBundleAsync(
-                missionId, template, null, "Operator-Atlas", "Completed", 0, 0, Array.Empty<string>(), "Windows", tempDir);
+            string zipPath = await AssemblerFor(ledger).AssembleAndExportBundleAsync(missionId, tempDir);
 
             using var zip = ZipFile.OpenRead(zipPath);
             var record = JsonSerializer.Deserialize<MissionRunRecord>(ReadEntry(zip, "mission_run_record.json"))!;
@@ -349,57 +252,128 @@ public class MissionRunRecordTests
         }
         finally
         {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
         }
     }
 
     [Fact]
-    public async Task TheBundlesOwnVerifier_Passes_AndFailsOnceAnEntryIsEdited()
+    public async Task AnUnsignedBundle_VerifiesAsConsistentButSaysSoLoudly()
     {
-        var missionId = Guid.NewGuid();
-        var template = CreateSampleTemplate();
-        var ledger = new StubAuditLedger(new List<AuditLogEntry>
-        {
-            // A whole second, whose trailing zeros the serializer's own form drops, and an operator name
-            // that is not ASCII: both have to survive the file's text for a leaf to be rebuilt from it.
-            new(1, new DateTime(2026, 9, 19, 5, 39, 28, DateTimeKind.Utc), missionId, template.TemplateId, "MISSION_INIT", "Init", "Opérateur-Atlas", "prev0", "hash1"),
-            new(2, DateTime.UtcNow.AddSeconds(-2), missionId, template.TemplateId, "POLICY_APPLIED", "Applied", "Opérateur-Atlas", "hash1", "hash2"),
-            new(3, DateTime.UtcNow.AddSeconds(-1), missionId, template.TemplateId, "TOOL_EXEC", "Ran curl", "Opérateur-Atlas", "hash2", "hash3")
-        });
-        var merkleEngine = new MerkleTreeEngine();
-        var assembler = new MissionRunRecordAssembler(ledger, merkleEngine, new ComplianceArchiveExporter(merkleEngine));
-
-        string tempDir = Path.Combine(Path.GetTempPath(), "splat_test_verifier_" + Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(Path.GetTempPath(), $"Unsigned_{Guid.NewGuid():N}.db");
+        string tempDir = Path.Combine(Path.GetTempPath(), "splat_test_unsigned_" + Guid.NewGuid().ToString("N"));
         try
         {
-            string zipPath = await assembler.AssembleAndExportBundleAsync(
-                missionId, template, null, "Opérateur-Atlas", "Completed", 0, 0, Array.Empty<string>(), "Windows", tempDir);
-            string bundle = Path.Combine(tempDir, "bundle");
-            ZipFile.ExtractToDirectory(zipPath, bundle);
+            var missionId = Guid.NewGuid();
+            var ledger = await LedgerWithMissionAsync(dbPath, SampleFacts(missionId));
+            string bundle = await ExtractBundleAsync(AssemblerFor(ledger), missionId, tempDir);
 
-            var (passCode, passOutput) = await RunPowerShellVerifierAsync(bundle);
-            Assert.True(passCode == 0, passOutput);
-            Assert.Contains("All 3 entries", passOutput);
+            var (code, output) = await RunPowerShellVerifierAsync(bundle);
 
-            // One edited action, and that entry is no longer a leaf under the root.
-            string chainPath = Path.Combine(bundle, "audit_chain.json");
-            string chain = File.ReadAllText(chainPath);
-            Assert.Contains("\"TOOL_EXEC\"", chain);
-            File.WriteAllText(chainPath, chain.Replace("\"TOOL_EXEC\"", "\"TOOL_SKIPPED\""), new UTF8Encoding(true));
-
-            var (failCode, failOutput) = await RunPowerShellVerifierAsync(bundle);
-            Assert.True(failCode == 1, failOutput);
-            Assert.Contains("is not for the entry", failOutput);
+            Assert.True(code == 2, output);
+            Assert.Contains("Unsigned", output);
+            Assert.Contains("All 3 entries", output);
         }
         finally
         {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, recursive: true);
-            }
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
+            DeleteDatabase(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task ASignedBundle_Verifies_AndFailsOnceAnyOfItIsEdited()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), $"Signed_{Guid.NewGuid():N}.db");
+        string tempDir = Path.Combine(Path.GetTempPath(), "splat_test_signed_" + Guid.NewGuid().ToString("N"));
+        string keyPath = Path.Combine(Path.GetTempPath(), $"splat_test_key_{Guid.NewGuid():N}.pem");
+        try
+        {
+            File.WriteAllText(keyPath, RunRecordKeyFile.NewKeyPem(out string keyId));
+            using var signer = RunRecordKeyFile.Load(keyPath);
+            Assert.Equal(keyId, signer.KeyId);
+
+            var missionId = Guid.NewGuid();
+            var ledger = await LedgerWithMissionAsync(dbPath, SampleFacts(missionId));
+            string bundle = await ExtractBundleAsync(AssemblerFor(ledger, signer), missionId, tempDir);
+
+            var (passCode, passOutput) = await RunPowerShellVerifierAsync(bundle);
+            Assert.True(passCode == 0, passOutput);
+            Assert.Contains(signer.KeyId, passOutput);
+
+            // One edited entry: the Merkle leaf no longer matches, and so does the signed hash of the file.
+            string chainPath = Path.Combine(bundle, "audit_chain.json");
+            File.WriteAllText(
+                chainPath,
+                File.ReadAllText(chainPath).Replace("TOOL_EXECUTION_COMPLETED", "TOOL_EXECUTION_SKIPPED"),
+                new UTF8Encoding(true));
+
+            var (failCode, failOutput) = await RunPowerShellVerifierAsync(bundle);
+            Assert.True(failCode == 1, failOutput);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
+            try { File.Delete(keyPath); } catch (IOException) { }
+            DeleteDatabase(dbPath);
+        }
+    }
+
+    [Fact]
+    public async Task ASignatureFromAnotherKey_DoesNotPassAsThisOne()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), $"SwappedKey_{Guid.NewGuid():N}.db");
+        string tempDir = Path.Combine(Path.GetTempPath(), "splat_test_swapped_" + Guid.NewGuid().ToString("N"));
+        string keyPath = Path.Combine(Path.GetTempPath(), $"splat_test_key_{Guid.NewGuid():N}.pem");
+        try
+        {
+            File.WriteAllText(keyPath, RunRecordKeyFile.NewKeyPem(out _));
+            using var signer = RunRecordKeyFile.Load(keyPath);
+            var missionId = Guid.NewGuid();
+            var ledger = await LedgerWithMissionAsync(dbPath, SampleFacts(missionId));
+            string bundle = await ExtractBundleAsync(AssemblerFor(ledger, signer), missionId, tempDir);
+
+            // Another key's public half, put forward under the same key id: the fingerprint no longer
+            // matches the key, which is what stops a signature being re-labelled as someone else's.
+            string signaturePath = Path.Combine(bundle, "signature.json");
+            using var stranger = RSA.Create(RunRecordKeyFile.CreatedKeyBits);
+            // Through the parser, not by text: the serializer escapes base64's "+" as +, so a
+            // search for the key's own characters finds nothing in the file.
+            var signature = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(signaturePath))!;
+            signature["PublicKey"] = Convert.ToBase64String(stranger.ExportRSAPublicKey());
+            File.WriteAllText(signaturePath, JsonSerializer.Serialize(signature), new UTF8Encoding(true));
+
+            var (code, output) = await RunPowerShellVerifierAsync(bundle);
+
+            Assert.True(code == 1, output);
+            Assert.Contains("key id does not match", output);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
+            try { File.Delete(keyPath); } catch (IOException) { }
+            DeleteDatabase(dbPath);
+        }
+    }
+
+    [Fact]
+    public void AKeyFileThatIsNotAPrivateKey_IsRefusedByPath_NotByGuess()
+    {
+        string publicOnly = Path.Combine(Path.GetTempPath(), $"splat_pub_{Guid.NewGuid():N}.pem");
+        string missing = Path.Combine(Path.GetTempPath(), $"splat_missing_{Guid.NewGuid():N}.pem");
+        try
+        {
+            using var rsa = RSA.Create(RunRecordKeyFile.CreatedKeyBits);
+            File.WriteAllText(publicOnly, rsa.ExportSubjectPublicKeyInfoPem());
+
+            var refusal = Assert.Throws<InvalidOperationException>(() => RunRecordKeyFile.Load(publicOnly));
+            Assert.Contains(publicOnly, refusal.Message);
+            Assert.Contains("no RSA private key", refusal.Message);
+
+            Assert.Contains("does not exist", RunRecordKeyFile.Problem(missing));
+        }
+        finally
+        {
+            try { File.Delete(publicOnly); } catch (IOException) { }
         }
     }
 
@@ -419,9 +393,16 @@ public class MissionRunRecordTests
 
         Assert.True(engine.VerifyProof(proof));
 
-        // Tamper with the leaf hash
         var tamperedProof = proof with { LeafHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" };
         Assert.False(engine.VerifyProof(tamperedProof));
+    }
+
+    private static async Task<string> ExtractBundleAsync(MissionRunRecordAssembler assembler, Guid missionId, string tempDir)
+    {
+        string zipPath = await assembler.AssembleAndExportBundleAsync(missionId, tempDir);
+        string bundle = Path.Combine(tempDir, "bundle");
+        ZipFile.ExtractToDirectory(zipPath, bundle);
+        return bundle;
     }
 
     private static string ReadEntry(ZipArchive zip, string name)
@@ -485,7 +466,7 @@ public class MissionRunRecordTests
             {
                 var last = _entries[^1];
                 long id = _entries.Max(e => e.Id) + 1;
-                _entries.Add(last with { Id = id, TimestampUtc = DateTime.UtcNow, Action = "TOOL_OUTPUT", PreviousHash = last.EntryHash, EntryHash = $"hash{id}" });
+                _entries.Add(last with { Id = id, TimestampUtc = DateTime.UtcNow, Action = "TOOL_OUTPUT", Details = "more", PreviousHash = last.EntryHash, EntryHash = $"hash{id}" });
             }
 
             if (missionId.HasValue)
@@ -493,6 +474,7 @@ public class MissionRunRecordTests
                 var filtered = _entries.Where(e => e.MissionId == missionId.Value).Take(limit).ToList();
                 return Task.FromResult<IReadOnlyList<AuditLogEntry>>(filtered);
             }
+
             return Task.FromResult<IReadOnlyList<AuditLogEntry>>(_entries.Take(limit).ToList());
         }
 

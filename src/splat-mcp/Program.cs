@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -11,6 +13,7 @@ using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Catalog;
+using MissionController.Infrastructure.Data.Compliance;
 using MissionController.Infrastructure.Data.Templates;
 using MissionController.Infrastructure.Data.Vector;
 using MissionController.Infrastructure.Linux;
@@ -33,7 +36,9 @@ public static class Program
         // Decided before anything is built: a bad invocation must not create the ledger database,
         // seed the catalog or reach for the daemon. stdout is the JSON-RPC channel, so everything that
         // is not a protocol message - errors, and the startup note - goes to stderr.
-        var command = McpServerCommand.WithLedgerKeyFromEnvironment(McpServerCommand.Parse(args), Environment.GetEnvironmentVariable);
+        var command = McpServerCommand.WithRunRecordKeyFromEnvironment(
+            McpServerCommand.WithLedgerKeyFromEnvironment(McpServerCommand.Parse(args), Environment.GetEnvironmentVariable),
+            Environment.GetEnvironmentVariable);
         if (command is McpServerCommand.ShowHelp)
         {
             Console.Out.Write(McpServerCommand.Usage);
@@ -56,6 +61,11 @@ public static class Program
         if (command is McpServerCommand.Provision provision)
         {
             return await SubstrateProvisioner.RunAsync(provision, Console.Out);
+        }
+
+        if (command is McpServerCommand.NewRunRecordKey newKey)
+        {
+            return MakeRunRecordKey(newKey.Path, Console.Out, Console.Error);
         }
 
         if (command is McpServerCommand.Doctor doctor)
@@ -100,8 +110,28 @@ public static class Program
         Console.Error.WriteLine(ledgerKey is null
             ? "splat-mcp: no --ledger-key given; the audit ledger chains unkeyed"
             : $"splat-mcp: the audit ledger is keyed by {serve.LedgerKeyPath}");
+        // The signing key for run record bundles, if the operator configured one. A bundle exported
+        // without it says it is unsigned rather than implying otherwise.
+        RsaRunRecordSigner? runRecordSigner = null;
+        try
+        {
+            runRecordSigner = serve.RunRecordKeyPath is null ? null : RunRecordKeyFile.Load(serve.RunRecordKeyPath);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine($"splat-mcp: {ex.Message}");
+            return McpServerCommand.UsageExitCode;
+        }
+
+        Console.Error.WriteLine(runRecordSigner is null
+            ? "splat-mcp: no --run-record-key given; exported run records are unsigned"
+            : $"splat-mcp: run records are signed by {runRecordSigner.KeyId}");
+
         var storageContext = new SqliteStorageContext(dbPath);
         var auditLedger = new SqliteChainedAuditLedger(storageContext, ledgerKey);
+        var merkleEngine = new MerkleTreeEngine();
+        var runRecords = new MissionRunRecordAssembler(
+            auditLedger, merkleEngine, new ComplianceArchiveExporter(merkleEngine, runRecordSigner));
         var templateRegistry = new SqliteTemplateRegistry(storageContext);
         var semanticMemory = new SqliteSemanticMemoryIndex(storageContext);
 
@@ -190,8 +220,61 @@ public static class Program
                 new JwtTokenValidator(),
                 new ApiKeyValidator()),
             workspaceRoot: workspaceRoot,
-            egressPolicy: serve.Egress);
+            egressPolicy: serve.Egress,
+            runRecords: runRecords);
 
+        using (runRecordSigner)
+        {
+            return await ServeAsync(handler);
+        }
+    }
+
+    /// <summary>
+    /// Writes a new signing key where only this account can read it, and prints its fingerprint. The
+    /// key itself is never printed, and an existing file is never overwritten: a key nobody meant to
+    /// replace would silently orphan every bundle already signed with it.
+    /// </summary>
+    private static int MakeRunRecordKey(string path, TextWriter output, TextWriter error)
+    {
+        if (File.Exists(path) || Directory.Exists(path))
+        {
+            error.WriteLine($"splat-mcp: '{path}' already exists; it will not be overwritten.");
+            return McpServerCommand.UsageExitCode;
+        }
+
+        string pem = RunRecordKeyFile.NewKeyPem(out string keyId);
+        try
+        {
+            var onlyThisAccount = new FileSecurity();
+            var self = WindowsIdentity.GetCurrent().User
+                ?? throw new InvalidOperationException("this process's token names no user to grant the key to.");
+            onlyThisAccount.SetOwner(self);
+            onlyThisAccount.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            onlyThisAccount.AddAccessRule(new FileSystemAccessRule(self, FileSystemRights.FullControl, AccessControlType.Allow));
+
+            // Created WITH that security descriptor: a file made first and secured after is readable
+            // for as long as the two calls are apart.
+            using var stream = new FileInfo(path).Create(
+                FileMode.CreateNew, FileSystemRights.WriteData, FileShare.None, 4096, FileOptions.None, onlyThisAccount);
+            using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+            writer.Write(pem);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            error.WriteLine($"splat-mcp: could not write the key file '{path}': {ex.Message}");
+            return McpServerCommand.UsageExitCode;
+        }
+
+        output.WriteLine($"Wrote a {RunRecordKeyFile.CreatedKeyBits}-bit run record signing key to {path}");
+        output.WriteLine($"Its fingerprint is {keyId}");
+        output.WriteLine("Publish that fingerprint. Anyone you hand a bundle to compares it with the one in the bundle,");
+        output.WriteLine("which is how they tell your bundles from a forgery. Keep the file where only you can read it,");
+        output.WriteLine($"and point the host at it with --run-record-key or {RunRecordKeyFile.EnvironmentVariable}.");
+        return 0;
+    }
+
+    private static async Task<int> ServeAsync(McpServerHandler handler)
+    {
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (s, e) =>
         {

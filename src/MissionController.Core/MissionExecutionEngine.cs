@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MissionController.Core.Enums;
@@ -82,12 +84,37 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         var fullOutput = new StringBuilder();
         var fullAiAnalysis = new StringBuilder();
 
+        // What this mission is observed to do, filled in as it happens and sealed into the ledger when
+        // it ends (SealRunFactsAsync). The run record is built from this, so every field is set at the
+        // point the engine sees it, never reconstructed later.
+        var facts = new MissionRunFacts
+        {
+            MissionId = missionId,
+            TemplateId = template.TemplateId,
+            TemplateSha256 = MissionRunFacts.HashTemplate(template),
+            Principal = operatorIdentity,
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            ExecutablePath = template.Tool.ExecutablePath,
+            DeclaredEgress = $"{template.EgressRule.AllowedFqdn}:{template.EgressRule.AllowedPort} ({template.EgressRule.Scope})",
+            NetworkDenialRequested = !template.EgressRule.ToolProcessNeedsNetwork && !template.ToolNeedsLocalSubsystems,
+            PrivilegeDropRequested = template.Tool.RequiresRestrictedToken,
+            RequestedMemoryBytes = template.Tool.MaxMemoryBytes,
+            RequestedCpuPercent = template.Tool.MaxCpuPercent,
+            TimeoutSeconds = template.Tool.TimeoutSeconds,
+            OsDescription = RuntimeInformation.OSDescription,
+            AllowedExitCodes = template.Tool.AllowedExitCodes.ToList()
+        };
+
         // 1.1 Revocation Circuit Breaker Check
         if (_revocationManager != null)
         {
             var revStatus = await _revocationManager.CheckRevocationAsync(operatorIdentity, cancellationToken);
             if (revStatus.IsRevoked)
             {
+                facts.Admission = "Refused: the principal is revoked";
+                facts.ExecutionState = "Refused";
+                await SealRunFactsAsync(facts);
+
                 yield return new MissionChunk(
                     missionId,
                     MissionChunkType.Stderr,
@@ -148,6 +175,10 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
                 operatorIdentity,
                 cancellationToken);
 
+            facts.Admission = $"Refused: {rejection.Message}";
+            facts.ExecutionState = "Refused";
+            await SealRunFactsAsync(facts);
+
             yield return new MissionChunk(
                 missionId,
                 MissionChunkType.StatusChange,
@@ -165,6 +196,10 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             operatorIdentity,
             cancellationToken);
 
+        // Scrubbed like the tool's output: a bound value is operator or agent text, and the facts
+        // outlive the mission in the ledger.
+        facts.CommandLine = Scrub(resolvedArguments);
+
         // 3. Provision Isolated NT ACL Jail
         yield return new MissionChunk(
             missionId,
@@ -173,6 +208,11 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             DateTime.UtcNow);
 
         jailPath = await _jailManager.ProvisionJailAsync(missionId, cancellationToken);
+        facts.WorkspacePath = jailPath;
+        if (_jailManager.DescribeJail(jailPath) is { } jailReadback)
+        {
+            facts.AppliedControls.Add(jailReadback);
+        }
 
         // A jail directory now exists on disk, so the guard must open BEFORE the next yield:
         // an async iterator abandoned at a yield outside the try would skip the finally and leak
@@ -180,6 +220,45 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         // indentation to keep the guarded region reviewable as one diff) so the jail is drained
         // on EVERY exit path - success, tool failure, AI fault, cancellation, abandonment.
         bool jailDrained = false;
+        IJobSandbox? jobSandbox = null;
+        bool tornDown = false;
+
+        // One teardown for every exit path, in one order: whatever the tool left running is killed
+        // and the job closed BEFORE the jail is drained, so nothing it spawned can still be writing
+        // into the workspace being removed. The step-10 drain used to run with the job still open,
+        // and the failure paths closed the job first; the record could not have named one order.
+        async Task TeardownAsync()
+        {
+            if (tornDown) return;
+            tornDown = true;
+
+            if (jobSandbox is not null)
+            {
+                uint? left = jobSandbox.GetResourceMetrics().ActiveProcessCount;
+                facts.ProcessesLeftAtTeardown = left;
+                if (left is > 0)
+                {
+                    jobSandbox.TerminateAllProcesses();
+                    facts.TeardownOrder.Add($"job: terminated {left} process(es) still running");
+                }
+                else
+                {
+                    facts.TeardownOrder.Add(left is null ? "job: running-process count unreadable" : "job: no process left running");
+                }
+
+                jobSandbox.Dispose();
+                facts.TeardownOrder.Add("job: closed, which kills anything left in it");
+            }
+
+            if (!jailDrained && !string.IsNullOrEmpty(jailPath))
+            {
+                await _jailManager.DrainAndCleanupJailAsync(jailPath);
+                jailDrained = true;
+                facts.JailRemoved = !Directory.Exists(jailPath);
+                facts.TeardownOrder.Add(facts.JailRemoved == true ? "jail: drained and removed" : "jail: drained, but the directory remains");
+            }
+        }
+
         try
         {
 
@@ -189,9 +268,12 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             $"Jail established at '{jailPath}' (Parent inheritance stripped).",
             DateTime.UtcNow);
 
-        // 4. Create Win32 Job Object & Launch Process Suspended
-        using var jobSandbox = _jobSandboxFactory($"MissionJob_{missionId:N}");
-        jobSandbox.ConfigureExtendedLimits(template.Tool.MaxMemoryBytes, template.Tool.MaxCpuPercent);
+        // 4. Create Win32 Job Object & Launch Process Suspended. Teardown closes it, on every path.
+        var job = _jobSandboxFactory($"MissionJob_{missionId:N}");
+        jobSandbox = job;
+        job.ConfigureExtendedLimits(template.Tool.MaxMemoryBytes, template.Tool.MaxCpuPercent);
+        facts.JobName = job.JobName;
+        facts.LimitsReadBack = job.ReadBackLimits();
 
         yield return new MissionChunk(
             missionId,
@@ -222,7 +304,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
                 template.Tool.ExecutablePath,
                 resolvedArguments,
                 jailPath,
-                jobSandbox,
+                job,
                 template.Tool.RequiresRestrictedToken,
                 template.Tool.TimeoutSeconds,
                 stdoutProgress,
@@ -234,12 +316,12 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
                 // would cost more than it buys: the AppContainer that removes the network also walls
                 // the tool off from WMI, the Event Log service and Defender, so a template built on
                 // those is left uncontained rather than silently broken in front of an operator.
-                denyNetworkAccess:
-                    !template.EgressRule.ToolProcessNeedsNetwork &&
-                    !template.ToolNeedsLocalSubsystems);
+                denyNetworkAccess: facts.NetworkDenialRequested);
         }
         catch (OperationCanceledException)
         {
+            facts.ExecutionState = "Cancelled";
+            facts.TerminalReason = "cancelled by the caller while the tool ran";
             throw;
         }
         catch (Exception ex)
@@ -249,6 +331,9 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
 
         if (launchFailure is not null)
         {
+            facts.ExecutionState = "LaunchFailed";
+            facts.TerminalReason = $"the tool could not be launched ({launchFailure.GetType().Name})";
+
             yield return new MissionChunk(
                 missionId,
                 MissionChunkType.Stderr,
@@ -272,6 +357,14 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         }
 
         var execResult = launchResult!;
+        facts.ExitCode = execResult.ExitCode;
+        facts.TimedOut = execResult.TimedOut;
+        facts.TerminalReason = execResult.TerminalReason
+            ?? (execResult.TimedOut ? $"killed at the tool's {template.Tool.TimeoutSeconds}s budget" : "the tool exited");
+        if (execResult.AppliedControls is { } applied)
+        {
+            facts.AppliedControls.AddRange(applied);
+        }
 
         // 5. Layer 4: credential and DLP sanitization, BEFORE a single byte of tool output is
         // yielded.
@@ -309,6 +402,10 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
                 if (!dlpCategories.Contains(category)) dlpCategories.Add(category);
             }
         }
+
+        facts.RedactionCount = credentialsRedacted + dlpRedacted;
+        facts.RedactedCategories.AddRange(dlpCategories);
+        if (credentialsRedacted > 0) facts.RedactedCategories.Add("Credential");
 
         // Everything downstream - the chunk stream, the model prompt, the semantic index - reads
         // from the sanitized text. There is no raw copy left to leak by accident.
@@ -375,6 +472,11 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         // process that fell outside them - or was killed at its ceiling - produced telemetry that
         // must not be analysed, indexed, or reported as a completed mission.
         bool toolSucceeded = !execResult.TimedOut && template.Tool.AllowedExitCodes.Contains(execResult.ExitCode);
+        facts.ExitContractMet = toolSucceeded;
+        if (!toolSucceeded)
+        {
+            facts.ExecutionState = "ToolFailed";
+        }
 
         await _auditLedger.AppendLogAsync(
             missionId,
@@ -529,6 +631,9 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         // Probe for a live model FIRST. If none is connected, emit a loud SimulatedNotice so the
         // analysis that follows can never be mistaken for genuine model output.
         var availability = await _modelClient.CheckAvailabilityAsync(template.TargetModel, cancellationToken);
+        facts.Model = availability.IsLive
+            ? $"{availability.ProviderName}/{availability.ModelId}"
+            : $"none: a local simulation ({availability.UnavailableReason ?? "no live model connected"})";
         if (availability.IsLive)
         {
             yield return new MissionChunk(
@@ -573,6 +678,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         var islandResult = await _qualityIsland.ExecuteIslandAsync(
             islandRequest,
             cancellationToken: cancellationToken);
+        facts.QualityAccepted = islandResult.IsSuccess;
 
         fullAiAnalysis.Append(islandResult.OutputContent);
         yield return new MissionChunk(
@@ -612,11 +718,11 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             "Draining and releasing filesystem jail...",
             DateTime.UtcNow);
 
-        await _jailManager.DrainAndCleanupJailAsync(jailPath);
-        jailDrained = true;
+        await TeardownAsync();
 
         if (!islandResult.IsSuccess)
         {
+            facts.ExecutionState = "AnalysisRejected";
             yield return new MissionChunk(
                 missionId,
                 MissionChunkType.Stderr,
@@ -637,6 +743,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             yield break;
         }
 
+        facts.ExecutionState = "Completed";
         yield return new MissionChunk(
             missionId,
             MissionChunkType.Completed,
@@ -646,14 +753,51 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         }
         finally
         {
-            if (!jailDrained && !string.IsNullOrEmpty(jailPath))
+            // Backstop for every abnormal exit (launch failure, AI fault, cancellation, abandoned
+            // enumerator). Best-effort: a cleanup exception must never mask the original fault or
+            // throw from a finally during unwind.
+            try { await TeardownAsync(); } catch { }
+
+            if (facts.ExecutionState == "Faulted" && cancellationToken.IsCancellationRequested)
             {
-                // Backstop for every abnormal exit (launch failure, AI fault, cancellation,
-                // abandoned enumerator). Best-effort: a cleanup exception must never mask the
-                // original fault or throw from a finally during unwind.
-                try { await _jailManager.DrainAndCleanupJailAsync(jailPath); } catch { }
+                facts.ExecutionState = "Cancelled";
             }
+
+            await SealRunFactsAsync(facts);
         }
+    }
+
+    /// <summary>
+    /// Seals the mission's facts as its last ledger row. The caller's token is not used: a cancelled
+    /// mission is exactly one whose record matters, so its facts are written after the cancellation.
+    /// </summary>
+    private async Task SealRunFactsAsync(MissionRunFacts facts)
+    {
+        facts.EndedAtUtc ??= DateTimeOffset.UtcNow;
+        try
+        {
+            await _auditLedger.AppendLogAsync(
+                facts.MissionId,
+                facts.TemplateId,
+                MissionRunFacts.LedgerAction,
+                JsonSerializer.Serialize(facts),
+                facts.Principal,
+                CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Called from a finally: throwing here would replace the mission's own fault. A ledger
+            // that refuses this row has refused the mission's other rows too, so there is no record
+            // this could still complete.
+        }
+    }
+
+    /// <summary>What reaches the ledger from operator or agent text passes the same scrub as tool output.</summary>
+    private string Scrub(string text)
+    {
+        if (_credentialSanitizer != null) text = _credentialSanitizer.Sanitize(text).SanitizedText;
+        if (_dlpSanitizer != null) text = _dlpSanitizer.Sanitize(text).SanitizedContent;
+        return text;
     }
 
     /// <summary>

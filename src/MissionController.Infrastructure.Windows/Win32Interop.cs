@@ -63,6 +63,15 @@ internal static partial class Win32Interop
     public const int TokenOwner = 4;                   // TOKEN_INFORMATION_CLASS.TokenOwner
     public const int TokenDefaultDacl = 6;             // TOKEN_INFORMATION_CLASS.TokenDefaultDacl
 
+    // Read back from a launched process's token, to record what confined it rather than what was
+    // asked for.
+    public const int TokenGroups = 2;                  // TOKEN_INFORMATION_CLASS.TokenGroups
+    public const int TokenPrivileges = 3;              // TOKEN_INFORMATION_CLASS.TokenPrivileges
+    public const int TokenIsAppContainer = 29;         // TOKEN_INFORMATION_CLASS.TokenIsAppContainer
+    public const int TokenCapabilities = 30;           // TOKEN_INFORMATION_CLASS.TokenCapabilities
+    public const uint SE_GROUP_ENABLED = 0x00000004;
+    public const uint SE_GROUP_USE_FOR_DENY_ONLY = 0x00000010;
+
     // Job Object Info Classes
     public enum JobObjectInfoClass
     {
@@ -321,6 +330,22 @@ internal static partial class Win32Interop
         int TokenInformationClass,
         IntPtr TokenInformation,
         uint TokenInformationLength);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetTokenInformation(
+        SafeAccessTokenHandle TokenHandle,
+        int TokenInformationClass,
+        IntPtr TokenInformation,
+        uint TokenInformationLength,
+        out uint ReturnLength);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool IsProcessInJob(
+        SafeProcessHandle ProcessHandle,
+        SafeJobObjectHandle JobHandle,
+        [MarshalAs(UnmanagedType.Bool)] out bool Result);
 
     // --- AppContainer network isolation -------------------------------------------------------
     // A job object clamps CPU, memory and PIDs but has no concept of a socket. An AppContainer does:

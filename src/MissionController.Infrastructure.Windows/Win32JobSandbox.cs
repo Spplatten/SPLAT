@@ -194,6 +194,64 @@ public sealed class Win32JobSandbox : IJobSandbox
         return JobResourceMetrics.Unavailable;
     }
 
+    public JobLimitsReadback ReadBackLimits()
+    {
+        ThrowIfDisposed();
+
+        // Queried, not remembered. ConfigureExtendedLimits ignores the result of its CPU-rate call, so
+        // a cap the kernel refused would otherwise be reported as applied.
+        long? processMemory = null, jobMemory = null;
+        uint? activeProcessLimit = null;
+        bool? killOnJobClose = null;
+        int? cpuRatePercent = null;
+
+        int length = Marshal.SizeOf<Win32Interop.JOBOBJECT_EXTENDED_LIMIT_INFORMATION>();
+        IntPtr pLimits = Marshal.AllocHGlobal(length);
+        try
+        {
+            if (Win32Interop.QueryInformationJobObject(
+                _jobHandle, Win32Interop.JobObjectInfoClass.JobObjectExtendedLimitInformation, pLimits, (uint)length, out _))
+            {
+                var limits = Marshal.PtrToStructure<Win32Interop.JOBOBJECT_EXTENDED_LIMIT_INFORMATION>(pLimits);
+                uint flags = limits.BasicLimitInformation.LimitFlags;
+                killOnJobClose = (flags & Win32Interop.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE) != 0;
+                if ((flags & Win32Interop.JOB_OBJECT_LIMIT_PROCESS_MEMORY) != 0) processMemory = (long)limits.ProcessMemoryLimit.ToUInt64();
+                if ((flags & Win32Interop.JOB_OBJECT_LIMIT_JOB_MEMORY) != 0) jobMemory = (long)limits.JobMemoryLimit.ToUInt64();
+                if ((flags & Win32Interop.JOB_OBJECT_LIMIT_ACTIVE_PROCESS) != 0) activeProcessLimit = limits.BasicLimitInformation.ActiveProcessLimit;
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(pLimits);
+        }
+
+        int cpuLength = Marshal.SizeOf<Win32Interop.JOBOBJECT_CPU_RATE_CONTROL_INFORMATION>();
+        IntPtr pCpu = Marshal.AllocHGlobal(cpuLength);
+        try
+        {
+            const uint hardCap = Win32Interop.JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | Win32Interop.JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP;
+            if (Win32Interop.QueryInformationJobObject(
+                    _jobHandle, Win32Interop.JobObjectInfoClass.JobObjectCpuRateControlInformation, pCpu, (uint)cpuLength, out _)
+                && Marshal.PtrToStructure<Win32Interop.JOBOBJECT_CPU_RATE_CONTROL_INFORMATION>(pCpu) is var cpu
+                && (cpu.ControlFlags & hardCap) == hardCap)
+            {
+                cpuRatePercent = (int)(cpu.CpuRate / 100); // the kernel counts in hundredths of a percent
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(pCpu);
+        }
+
+        return new JobLimitsReadback(processMemory, jobMemory, cpuRatePercent, activeProcessLimit, killOnJobClose);
+    }
+
+    public bool? ContainsProcess(SafeProcessHandle process)
+    {
+        ThrowIfDisposed();
+        return Win32Interop.IsProcessInJob(process, _jobHandle, out bool inJob) ? inJob : null;
+    }
+
     public void TerminateAllProcesses(uint exitCode = 1)
     {
         if (!_jobHandle.IsInvalid && !_jobHandle.IsClosed)

@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using MissionController.Core;
 using MissionController.Infrastructure.Data.Audit;
+using MissionController.Infrastructure.Data.Compliance;
 using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Linux;
 
@@ -64,6 +65,8 @@ public static class SubstrateDoctor
             + $"{census.LocalSubsystems} would lose WMI, the Event Log, Defender or the SCM inside the container)");
         var (ledgerMark, ledgerDetail) = await LedgerLineAsync(ledgerPath ?? LedgerPath(), doctor.LedgerKeyPath, ct);
         Line(output, ledgerMark, "audit ledger", ledgerDetail);
+        var (signingMark, signingDetail) = RunRecordKeyLine(doctor.RunRecordKeyPath);
+        Line(output, signingMark, "run records", signingDetail);
         output.WriteLine();
 
         // The kernel and its boot line are readable whether or not the daemon is up, and they are what
@@ -177,6 +180,30 @@ public static class SubstrateDoctor
         return key is null
             ? ("--", $"{path} - hash-chained and UNKEYED, so a rewrite by this user is undetectable; --ledger-key keys it")
             : ("ok", $"{path} - {(chain.Exists ? "unkeyed so far; its next entry keys it" : "not created yet; its first entry will be keyed")}, by {keyPath}");
+    }
+
+    /// <summary>
+    /// Whether exported run record bundles would be signed, read from the key file itself: a bundle
+    /// nobody can attribute is the one thing an auditor cannot check, so an unsigned host says so here
+    /// rather than at export time.
+    /// </summary>
+    private static (string Mark, string Detail) RunRecordKeyLine(string? keyPath)
+    {
+        if (keyPath is null)
+        {
+            return ("--", "exported bundles are UNSIGNED, so they show only that their own files agree; "
+                + $"--run-record-key <file> or {RunRecordKeyFile.EnvironmentVariable} signs them");
+        }
+
+        try
+        {
+            using var signer = RunRecordKeyFile.Load(keyPath);
+            return ("ok", $"signed by {signer.KeyId} ({signer.Algorithm}), from {keyPath}; publish that fingerprint to whoever checks a bundle");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException)
+        {
+            return ("FAIL", $"{keyPath} - {ex.Message}");
+        }
     }
 
     private static string LedgerPath() => Path.Combine(

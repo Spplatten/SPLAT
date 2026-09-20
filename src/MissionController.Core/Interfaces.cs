@@ -16,6 +16,15 @@ public interface IJobSandbox : IDisposable
     void AssignProcess(SafeProcessHandle processHandle);
     JobResourceMetrics GetResourceMetrics();
     void TerminateAllProcesses(uint exitCode = 1);
+
+    /// <summary>
+    /// The limits the kernel holds for this job, queried rather than remembered from the request. The
+    /// default reads nothing back, which is the truth for a sandbox that cannot query its object.
+    /// </summary>
+    JobLimitsReadback ReadBackLimits() => JobLimitsReadback.Unavailable;
+
+    /// <summary>Whether the kernel has this process in this job; null when the sandbox cannot ask.</summary>
+    bool? ContainsProcess(SafeProcessHandle process) => null;
 }
 
 public interface IProcessLauncher
@@ -47,13 +56,22 @@ public record ProcessExecutionResult(
     string StandardError,
     bool TimedOut,
     JobResourceMetrics FinalMetrics,
-    string? TerminalReason = null);
+    string? TerminalReason = null,
+    // What confined the process, read back from the suspended process itself before it ran: its job
+    // membership and its token. Null when the launcher reads nothing back.
+    IReadOnlyList<string>? AppliedControls = null);
 
 public interface IJailManager
 {
     Task<string> ProvisionJailAsync(Guid missionId, CancellationToken cancellationToken = default);
     Task DrainAndCleanupJailAsync(string jailPath, int maxRetries = 5, int retryDelayMs = 200);
     Task<int> SweepOrphanJailsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The jail's access control as it stands on disk, read back rather than assumed from provisioning;
+    /// null when the manager cannot read it.
+    /// </summary>
+    string? DescribeJail(string jailPath) => null;
 }
 
 public interface IRestrictedTokenProvider
@@ -142,41 +160,34 @@ public interface IComplianceArchiveExporter
 }
 
 /// <summary>
-/// Assembles a per-mission run record in the six-group evidence schema from what it is handed and
-/// what the audit ledger holds for the mission. A field nothing observed is null, not a default.
+/// Assembles a mission's run record in the six-group evidence schema from the ledger alone: the
+/// MISSION_RUN_FACTS row the engine sealed when the mission ended, and the mission's other rows. It
+/// takes nothing from its caller, so a record cannot say more than the mission recorded.
 /// </summary>
 public interface IMissionRunRecordAssembler
 {
-    Task<MissionRunRecord> AssembleRunRecordAsync(
-        Guid missionId,
-        SingleToolTemplate template,
-        LeaseSpec? leaseSpec,
-        string operatorIdentity,
-        string executionState,
-        int? exitCode,
-        int redactionCount,
-        IReadOnlyList<string> redactedCategories,
-        string substrateType,
-        string? cgroupOrJobId = null,
-        bool? qualityAcceptance = null,
-        string? terminalReason = null,
-        CancellationToken cancellationToken = default);
+    Task<MissionRunRecord> AssembleRunRecordAsync(Guid missionId, CancellationToken cancellationToken = default);
 
-    Task<string> AssembleAndExportBundleAsync(
-        Guid missionId,
-        SingleToolTemplate template,
-        LeaseSpec? leaseSpec,
-        string operatorIdentity,
-        string executionState,
-        int? exitCode,
-        int redactionCount,
-        IReadOnlyList<string> redactedCategories,
-        string substrateType,
-        string outputDirectory,
-        string? cgroupOrJobId = null,
-        bool? qualityAcceptance = null,
-        string? terminalReason = null,
-        CancellationToken cancellationToken = default);
+    /// <summary>Writes the record's bundle, signed when a signing key is configured, and returns its path.</summary>
+    Task<string> AssembleAndExportBundleAsync(Guid missionId, string outputDirectory, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Signs a run record bundle. The key is the operator's, like the ledger key: the bundle carries the
+/// public half and its fingerprint, and a verifier compares that fingerprint with the one the operator
+/// published, because nothing inside a bundle can say whose key signed it.
+/// </summary>
+public interface IRunRecordSigner
+{
+    /// <summary>"sha256:" and the hex SHA-256 of <see cref="PublicKeyDer"/>.</summary>
+    string KeyId { get; }
+
+    string Algorithm { get; }
+
+    /// <summary>The public key as a PKCS#1 RSAPublicKey, DER-encoded.</summary>
+    byte[] PublicKeyDer { get; }
+
+    byte[] Sign(byte[] data);
 }
 
 public interface ISiemForwarder
