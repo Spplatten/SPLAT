@@ -314,6 +314,14 @@ impl LeaseManager {
         expired
     }
 
+    /// Puts an expired lease whose workload would not die back into the table, policy still
+    /// installed, so the next reaper tick tries again. Dropping it instead left the survivor policed
+    /// but forgotten: its map entries never withdrawn, its cgroup never retried.
+    pub fn hold_expired(&self, lease: ActiveLease) {
+        let mut lock = self.leases.lock().unwrap();
+        lock.insert(lease.cgroup_id, lease);
+    }
+
     /// Withdraws an already-removed lease's kernel state. Call after the workload is dead.
     pub fn release_expired(&self, lease: &ActiveLease) {
         if let Some(ref sync) = self.bpf_sync {
@@ -456,6 +464,33 @@ mod tests {
         );
 
         mgr.release_expired(&expired[0]);
+        assert_eq!(sync.removed.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_lease_the_reaper_could_not_drain_is_held_for_the_next_tick() {
+        let sync = RecordingSync::new(false);
+        let mgr = LeaseManager::new(Some(sync.clone()));
+
+        mgr.register_lease(47, PathBuf::from("/tmp/splat-nonexistent-cg"), &config(vec!["/etc/hostname"], 5))
+            .unwrap();
+        {
+            let mut lock = mgr.leases.lock().unwrap();
+            lock.get_mut(&47).unwrap().expires_at = Instant::now() - Duration::from_secs(1);
+        }
+
+        let expired = mgr.take_expired();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(mgr.get_active_count(), 0);
+
+        // The kill failed: the lease goes back, still expired, and its policy is still installed.
+        mgr.hold_expired(expired.into_iter().next().unwrap());
+        assert_eq!(mgr.get_active_count(), 1, "a held lease is still a live lease");
+        assert_eq!(sync.removed.load(Ordering::SeqCst), 0, "holding must not withdraw the policy");
+
+        let again = mgr.take_expired();
+        assert_eq!(again.len(), 1, "the next tick sees it again");
+        mgr.release_expired(&again[0]);
         assert_eq!(sync.removed.load(Ordering::SeqCst), 1);
     }
 

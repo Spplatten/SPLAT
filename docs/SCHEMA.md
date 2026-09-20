@@ -189,8 +189,8 @@ A refused request (policy the daemon cannot enforce, an undeclared dimension, a 
 own lease, a cgroup or map that could not be provisioned) is answered with a `STDERR` frame whose
 `data` begins `SPLAT refused` and an `EXIT` of `-1`; the connection stays open. An authentication
 failure or an oversized frame is answered with a `STDERR` frame and the connection is **closed**. A
-request of an unknown `type` is logged and **not answered**; the bridge's deadline is what ends
-that wait.
+request of an unknown `type` is answered with a `STDERR` refusal naming the type, and the
+connection stays open.
 
 ### What the daemon's own frames carry
 

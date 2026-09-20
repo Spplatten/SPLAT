@@ -429,18 +429,23 @@ async fn main() -> Result<()> {
                         "Expired lease for mission {} (cg {}): killed {n} process(es) that outlived it",
                         l.mission_id, l.cgroup_id
                     ),
-                    Err(e) => error!(
-                        "Expired lease for mission {} (cg {}) could NOT be drained: {e:#}. Holding its policy installed rather than unpolicing a live workload.",
-                        l.mission_id, l.cgroup_id
-                    ),
+                    Err(e) => {
+                        // A surviving process keeps its lease so that it stays contained, and the
+                        // lease goes back into the table so the next tick tries again. It used to
+                        // be dropped from the table here with its policy still installed, which
+                        // left the map entries to leak for the daemon's lifetime and the survivor
+                        // to nobody's attention but this log line.
+                        error!(
+                            "Expired lease for mission {} (cg {}) could NOT be drained: {e:#}. Holding its policy installed and retrying next tick.",
+                            l.mission_id, l.cgroup_id
+                        );
+                        reaper_mgr.hold_expired(l);
+                        continue;
+                    }
                 }
 
-                // Only withdraw the policy once the cgroup is empty. A surviving process keeps its
-                // lease so that it stays contained, and the failure above is what an operator acts
-                // on - an unpoliced survivor is not an acceptable resting state.
-                if EphemeralCgroup::kill_tree(&l.cgroup_path).is_ok() {
-                    reaper_mgr.release_expired(&l);
-                }
+                // Only withdraw the policy once the cgroup is empty.
+                reaper_mgr.release_expired(&l);
             }
         }
     });
@@ -1282,7 +1287,14 @@ async fn handle_client(
             }
 
             _ => {
+                // Answered, not just logged: a caller that sent something this daemon does not
+                // know used to hear nothing at all, and waited out its own deadline to learn so.
                 warn!("Unknown request type: {req_type}");
+                let err_resp = serde_json::json!({
+                    "type": "STDERR",
+                    "data": format!("SPLAT refused the request: '{req_type}' is not a request this daemon knows.\n")
+                });
+                writer.write_all(format!("{err_resp}\n").as_bytes()).await?;
             }
         }
 

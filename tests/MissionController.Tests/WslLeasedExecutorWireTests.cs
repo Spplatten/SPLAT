@@ -606,6 +606,53 @@ public class WslLeasedExecutorWireTests
     }
 
     /// <summary>
+    /// The daemon frames a tool's output in 64 KiB pieces so the guest never holds it whole. This host
+    /// held it whole, in a StringBuilder with no ceiling. The result is now capped per stream and says
+    /// so; a streaming consumer still receives every byte.
+    /// </summary>
+    [Fact]
+    public async Task OutputPastTheCap_IsDroppedFromTheResult_AndSaidSo_WhileStreamingSeesItAll()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        const int frameChars = 64 * 1024;
+        int frameCount = WslLeasedExecutor.MaxCapturedCharsPerStream / frameChars + 4;
+        string data = new string('x', frameChars);
+        var frames = new List<string>();
+        for (int i = 0; i < frameCount; i++)
+        {
+            frames.Add("{\"type\":\"STDOUT\",\"data\":\"" + data + "\"}");
+        }
+        frames.Add("{\"type\":\"EXIT\",\"exitCode\":0}");
+        var daemon = RunStandInDaemonAsync(listener, frames.ToArray());
+
+        var streamed = new CountingProgress();
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
+        var result = await executor.ExecuteLeasedAsync(SampleLease(), "/usr/bin/yes", Array.Empty<string>(), stdout: streamed);
+
+        await daemon;
+        listener.Stop();
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal((long)frameCount * frameChars, streamed.Chars);
+        Assert.Contains("[OUTPUT_TRUNCATED]", result.StandardOutput, StringComparison.Ordinal);
+        Assert.True(
+            result.StandardOutput.Length < WslLeasedExecutor.MaxCapturedCharsPerStream + 256,
+            $"the result kept {result.StandardOutput.Length} characters");
+        Assert.DoesNotContain("[OUTPUT_TRUNCATED]", result.StandardError, StringComparison.Ordinal);
+    }
+
+    /// <summary>Counts what a streaming consumer received, on whatever thread it arrived.</summary>
+    private sealed class CountingProgress : IProgress<string>
+    {
+        public long Chars;
+
+        public void Report(string value) => System.Threading.Interlocked.Add(ref Chars, value.Length);
+    }
+
+    /// <summary>
     /// The daemon's EXIT frame carries no cgroup accounting, so the bridge must report absence
     /// rather than deriving numbers. It previously returned MaxMemoryBytes/4 as "peak memory" -
     /// arithmetic on a constant, sealed into the ledger as an observation.

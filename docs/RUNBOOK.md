@@ -230,8 +230,9 @@ production host would need instead, and **none of it is built** unless the row s
 | A map write fails partway through a lease | The partial write is rolled back and the request refused | `lease.rs` |
 | A protected path does not resolve | The request is refused — a missing deny entry fails open | `lease.rs` |
 | The client disconnects mid-run | The cgroup is killed, then the lease withdrawn | `main.rs` |
-| The lease expires with the workload running | Killed inside the policy, then withdrawn; a tree that will not drain keeps its policy | `main.rs`, reaper |
+| The lease expires with the workload running | Killed inside the policy, then withdrawn; a tree that will not drain keeps its policy and is retried every second | `main.rs`, reaper |
 | The ring buffer poll returns an error | Logged; polling continues. It used to end the drain thread silently | `main.rs` |
 | A tool prints a line longer than 64 KiB | Forwarded in 64 KiB frames, never buffered whole | `main.rs`, `pump_output` |
 | A request frame over 1 MiB | Refused; connection closed | `main.rs`, `read_frame` |
-| A request of unknown `type` | Logged; **no reply** — the bridge's deadline ends the wait | `main.rs` |
+| A request of unknown `type` | Refused with a `STDERR` frame naming the type; the connection stays open | `main.rs` |
+| A tool's output exceeds 4 MiB per stream | The bridge keeps the first 4 MiB and marks the result `[OUTPUT_TRUNCATED]`; streaming consumers still receive everything | `WslLeasedExecutor.cs` |

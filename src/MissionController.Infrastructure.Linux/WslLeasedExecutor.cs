@@ -112,8 +112,8 @@ public class WslLeasedExecutor : ILeasedExecutor
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
 
         var stopwatch = Stopwatch.StartNew();
-        var stdoutBuilder = new StringBuilder();
-        var stderrBuilder = new StringBuilder();
+        var stdoutBuilder = new CappedCapture();
+        var stderrBuilder = new CappedCapture();
         int exitCode = -1;
         bool timedOut = false;
         string? terminalReason = null;
@@ -280,7 +280,7 @@ public class WslLeasedExecutor : ILeasedExecutor
                 catch (JsonException)
                 {
                     // Plaintext fallback chunk
-                    stdoutBuilder.AppendLine(line);
+                    stdoutBuilder.Append(line + "\n");
                     stdout?.Report(line + "\n");
                 }
             }
@@ -289,7 +289,7 @@ public class WslLeasedExecutor : ILeasedExecutor
             // an expiry, not a dropped connection, so it goes through the same classification below.
             cts.Token.ThrowIfCancellationRequested();
             terminalReason = "AbruptDisconnect";
-            stderrBuilder.AppendLine("[DAEMON_DISCONNECTED] Connection closed unexpectedly before receiving an EXIT frame.");
+            stderrBuilder.Note("[DAEMON_DISCONNECTED] Connection closed unexpectedly before receiving an EXIT frame.");
         }
         catch (OperationCanceledException)
         {
@@ -297,19 +297,19 @@ public class WslLeasedExecutor : ILeasedExecutor
             {
                 timedOut = false;
                 terminalReason = "CallerCancelled";
-                stderrBuilder.AppendLine("[EXECUTION_CANCELLED] Execution was cancelled by the caller.");
+                stderrBuilder.Note("[EXECUTION_CANCELLED] Execution was cancelled by the caller.");
             }
             else
             {
                 timedOut = true;
                 terminalReason = "LocalDeadlineExpired";
-                stderrBuilder.AppendLine("[EXECUTION_TIMEOUT] Local lease duration expired before daemon completion.");
+                stderrBuilder.Note("[EXECUTION_TIMEOUT] Local lease duration expired before daemon completion.");
             }
         }
         catch (Exception ex)
         {
             terminalReason = "TransportError";
-            stderrBuilder.AppendLine($"[DAEMON_COMMUNICATION_ERROR] {ex.Message}");
+            stderrBuilder.Note($"[DAEMON_COMMUNICATION_ERROR] {ex.Message}");
         }
 
         stopwatch.Stop();
@@ -323,6 +323,48 @@ public class WslLeasedExecutor : ILeasedExecutor
             // report than on the EXIT path. Nothing measured, nothing claimed.
             FinalMetrics: JobResourceMetrics.Unavailable,
             TerminalReason: terminalReason);
+    }
+
+    /// <summary>
+    /// The most of each stream a result carries. The daemon frames a tool's output in 64 KiB pieces so
+    /// the guest never holds it whole; this host did, in a StringBuilder with no ceiling, so a tool that
+    /// printed without end grew the MCP server by the size of its output. Streaming consumers still
+    /// receive every byte through their <see cref="IProgress{T}"/>.
+    /// </summary>
+    public const int MaxCapturedCharsPerStream = 4 * 1024 * 1024;
+
+    /// <summary>
+    /// A bounded transcript of one stream. Past the cap the text is dropped and the drop is recorded
+    /// once, in the stream it happened to, so a partial result reads as partial rather than complete.
+    /// </summary>
+    private sealed class CappedCapture
+    {
+        private readonly StringBuilder _text = new();
+        private bool _truncated;
+
+        public void Append(string text)
+        {
+            if (_truncated)
+            {
+                return;
+            }
+
+            int room = MaxCapturedCharsPerStream - _text.Length;
+            if (text.Length <= room)
+            {
+                _text.Append(text);
+                return;
+            }
+
+            _text.Append(text, 0, room);
+            _text.Append($"\n[OUTPUT_TRUNCATED] More than {MaxCapturedCharsPerStream} characters were produced; the rest was not kept.\n");
+            _truncated = true;
+        }
+
+        /// <summary>A diagnostic line from this bridge, kept whatever the cap: it says how the run ended.</summary>
+        public void Note(string line) => _text.AppendLine(line);
+
+        public override string ToString() => _text.ToString();
     }
 
     /// <summary>
