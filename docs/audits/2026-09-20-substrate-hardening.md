@@ -129,6 +129,12 @@ daemon behind it. Then confirm the restarted daemon reports the inherited lease 
 
 ## 4. The shared secret
 
+> **Done 2026-09-21.** [`ceiling.rs`](../../native/splat-agent/src/ceiling.rs) loads a root-owned
+> `/etc/splat/policy.json` at startup, refuses to start under one that others could write, and
+> intersects every request with it; `HEALTH_RESPONSE` and `doctor` say whether a host has one;
+> `provision --apply [--egress ...]` writes it and restarts the daemon when it changed. Ten tests on
+> the intersection, needing no root. What follows is the reasoning as it stood.
+
 **What is true today.** The daemon trusts anyone who proves possession of `/etc/splat/agent.token`.
 An unprivileged guest process cannot read it, and a squatter on the port learns nothing. Any
 Windows process running as you can read it exactly as the bridge does, through `wsl -u root`,

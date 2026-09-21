@@ -137,7 +137,9 @@ including a protocol 2 request carrying the token itself — is refused, and the
    means nothing is permitted. Protected paths are the daemon's own defaults **unioned** with the
    request's — a caller can add protection, never remove it. Exec paths come from the request. An
    absent `allowedExecPaths`, or an absent egress list with the network on, is **refused**, never
-   defaulted: an empty list is a decision, a missing key is the absence of one.
+   defaulted: an empty list is a decision, a missing key is the absence of one. Then the
+   ceiling, when the guest has one: every executable under its directories, every endpoint in
+   its set, the duration shortened and the clamps lowered to it, its always-protected paths added.
 6. Refuse a lease that does not permit its own command.
 7. Register the lease: resolve each path to an inode, write every map entry, and roll back the
    partial writes on failure.
@@ -223,6 +225,7 @@ The handler builds the `LeaseSpec` inline, in `McpServerHandler.ExecuteRunComman
 | Ports | **The operator** — only the ports the policy approves for every granted address, because the kernel installs addresses × ports |
 | Duration | The caller's `timeoutSeconds`, clamped to 5–300 |
 | Clamps | Fixed in the handler; the daemon can only lower them |
+| The ceiling on all of the above | **The operator, in the guest** — `/etc/splat/policy.json`, written by `splat-mcp provision --apply [--egress ...]` and read by the daemon at startup. Whatever the request and the MCP host agreed, the daemon refuses anything outside it, so a token that leaked buys at most what the file allows |
 
 The network half used to be written by the agent that asked for it: its addresses as sent, loopback
 when it named none, 80 and 443 for all of them. [`McpEgressPolicy`](../src/splat-mcp/McpEgressPolicy.cs)
@@ -242,9 +245,11 @@ An unprivileged process **inside the guest** cannot read the token, and taking t
 daemon is down no longer yields it: on 2026-09-13 a listener run as `nobody` received what Windows
 sent, which under protocol 2 was the token itself, and such a listener is now sent one nonce and
 cannot produce the proof the caller checks before sending anything more. That does not stop another
-**Windows** process running as the same user, which can read the token exactly as the bridge does. A
-transport that carries peer identity — AF_VSOCK with a guest-side allow-list, or `SO_PEERCRED` over
-AF_UNIX — would close that. It is not built; the live plan pencils it into P2.
+**Windows** process running as the same user, which can read the token exactly as the bridge does. No
+transport tells the daemon which Windows process is asking, and a process running as you can already
+do everything you can; so since 2026-09-21 the answer is to bound what the token buys: a root-owned
+ceiling in the guest ([`ceiling.rs`](../native/splat-agent/src/ceiling.rs)) that every request is
+intersected with, written by `provision` where nothing on the Windows side can reach around it.
 
 ## Evidence, and how it is re-run
 

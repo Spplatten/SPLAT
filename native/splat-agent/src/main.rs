@@ -18,6 +18,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
 mod auth;
+mod ceiling;
 mod cgroup;
 mod cow;
 mod jail;
@@ -49,6 +50,7 @@ mod lease_lsm {
 use lease_lsm::*;
 
 use auth::PeerAuth;
+use ceiling::Ceiling;
 use cgroup::EphemeralCgroup;
 use lease::{bytes_of, lease_map_keys, BpfMapSync, LeaseConfig, LeaseManager};
 use violation::{RawViolationEvent, ViolationEvent};
@@ -154,6 +156,12 @@ struct Args {
     /// The gid a leased tool runs as. Defaults to nogroup.
     #[arg(long, default_value_t = 65534)]
     workload_gid: u32,
+
+    /// The operator's ceiling on every lease: a root-owned policy that bounds what any request may
+    /// name, whoever holds the token. Absent, the daemon runs without one and says so; present but
+    /// untrustworthy, the daemon refuses to start.
+    #[arg(long, default_value = ceiling::DEFAULT_PATH)]
+    policy_file: String,
 }
 
 /// What the daemon can actually observe about its own substrate.
@@ -384,6 +392,31 @@ async fn main() -> Result<()> {
         }
     };
 
+    // The ceiling, before anything is served. Its absence is loud because it is the one thing
+    // that makes a stolen token worth less than the daemon's whole authority.
+    let lease_ceiling: Option<Arc<Ceiling>> = match Ceiling::load(Path::new(&args.policy_file)) {
+        Ok(Some(c)) => {
+            info!(
+                "Lease ceiling loaded from {}{}",
+                args.policy_file,
+                if c.bounds_egress() { "" } else { " (egress not bounded by it)" }
+            );
+            Some(Arc::new(c))
+        }
+        Ok(None) => {
+            warn!(
+                "No lease ceiling at {}: the token alone authorizes what a lease may name. \
+                 `splat-mcp provision --apply` writes one.",
+                args.policy_file
+            );
+            None
+        }
+        Err(e) => {
+            error!("Refusing to start: the lease ceiling at {} cannot be trusted: {e:#}", args.policy_file);
+            std::process::exit(1);
+        }
+    };
+
     if args.workload_uid == 0 || args.workload_gid == 0 {
         error!(
             "Refusing to start: --workload-uid/--workload-gid resolve to root ({}/{}). A leased \
@@ -488,8 +521,9 @@ async fn main() -> Result<()> {
                 let mgr = lease_manager.clone();
                 let viol_tx_clone = viol_tx.clone();
                 let auth = peer_auth.clone();
+                let ceiling_for_client = lease_ceiling.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids).await {
+                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids, ceiling_for_client).await {
                         error!("Client session error: {e:#}");
                     }
                 });
@@ -698,6 +732,7 @@ async fn handle_client(
     viol_tx: broadcast::Sender<ViolationEvent>,
     peer_auth: Arc<PeerAuth>,
     workload: WorkloadIdentity,
+    lease_ceiling: Option<Arc<Ceiling>>,
 ) -> Result<()> {
     let (reader, mut writer) = socket.into_split();
     let mut buf_reader = BufReader::new(reader);
@@ -769,7 +804,10 @@ async fn handle_client(
                     // Named separately from the three booleans because it is the one a caller must
                     // gate on: false means this daemon will run work it cannot contain.
                     "enforcing": lease_mgr.is_enforcing(),
-                    "activeLeaseCount": lease_mgr.get_active_count()
+                    "activeLeaseCount": lease_mgr.get_active_count(),
+                    // Whether a ceiling bounds every lease here; without one the token alone
+                    // authorizes whatever a request names.
+                    "ceiling": lease_ceiling.is_some()
                 });
                 writer.write_all(format!("{resp}\n").as_bytes()).await?;
             }
@@ -923,6 +961,41 @@ async fn handle_client(
                     continue;
                 }
 
+                // 0.45 The ceiling. Everything the request names has now been declared; whether the
+                // operator allows it on this host is a separate question, answered in the guest
+                // where a stolen token cannot reach around it.
+                let exec_list = string_list(&parsed, "allowedExecPaths").unwrap_or_default();
+                let egress_ip_list = string_list(&parsed, "allowedEgressIps").unwrap_or_default();
+                let egress_port_list: Vec<u32> = parsed
+                    .get("allowedEgressPorts")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|p| p.as_u64().map(|n| n as u32)).collect())
+                    .unwrap_or_default();
+                if let Some(c) = &lease_ceiling {
+                    let ask = ceiling::Ask {
+                        exec_paths: &exec_list,
+                        allow_network: allow_network,
+                        egress_ips: &egress_ip_list,
+                        egress_ports: &egress_port_list,
+                    };
+                    if let Err(reason) = c.check(&ask) {
+                        error!("Refusing to execute for mission {mission_id}: outside the lease ceiling: {reason}");
+                        let err_chunk = serde_json::json!({
+                            "type": "STDERR",
+                            "data": format!(
+                                "SPLAT refused the request: outside this host's lease ceiling: {reason}. The ceiling \
+                                 is the operator's, in the guest, and the token does not raise it.\n"
+                            )
+                        });
+                        writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                        let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                        writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                        line.clear();
+                        continue;
+                    }
+                }
+                let duration_sec = lease_ceiling.as_ref().map_or(duration_sec, |c| c.clamp_duration(duration_sec));
+
                 // 0.5 Resolve the clamps.
                 //
                 // The cgroup used to be provisioned from three constants here while the request's
@@ -939,10 +1012,19 @@ async fn handle_client(
                             .map(|n| n.min(ceiling))
                             .unwrap_or(ceiling)
                     };
+                    // The daemon's constants, lowered further by the ceiling where it sets a limit.
+                    let (memory_cap, cpu_cap, pids_cap) = match &lease_ceiling {
+                        Some(c) => (
+                            c.memory_ceiling(MAX_MEMORY_BYTES_CEILING),
+                            c.cpu_ceiling(MAX_CPU_PERCENT_CEILING),
+                            c.pids_ceiling(MAX_PIDS_CEILING),
+                        ),
+                        None => (MAX_MEMORY_BYTES_CEILING, MAX_CPU_PERCENT_CEILING, MAX_PIDS_CEILING),
+                    };
                     cgroup::CgroupLimits {
-                        max_memory_bytes: get_u64("maxMemoryBytes", MAX_MEMORY_BYTES_CEILING),
-                        max_cpu_percent: get_u64("maxCpuPercent", MAX_CPU_PERCENT_CEILING as u64) as u32,
-                        max_pids: get_u64("maxPids", MAX_PIDS_CEILING as u64) as u32,
+                        max_memory_bytes: get_u64("maxMemoryBytes", memory_cap),
+                        max_cpu_percent: get_u64("maxCpuPercent", cpu_cap as u64) as u32,
+                        max_pids: get_u64("maxPids", pids_cap as u64) as u32,
                     }
                 };
 
@@ -1004,6 +1086,12 @@ async fn handle_client(
                     // able to unprotect the ones this daemon always guards.
                     protected_paths: {
                         let mut paths = vec!["/etc/shadow".to_string(), "/etc/sudoers".to_string()];
+                        // The ceiling's always-protected paths, before the caller's.
+                        for always in lease_ceiling.iter().flat_map(|c| c.protected_paths()) {
+                            if !paths.contains(always) {
+                                paths.push(always.clone());
+                            }
+                        }
                         for extra in string_list(&parsed, "protectedPaths").unwrap_or_default() {
                             if !paths.contains(&extra) {
                                 paths.push(extra);

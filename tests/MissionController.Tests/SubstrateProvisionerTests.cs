@@ -44,6 +44,9 @@ public sealed class SubstrateProvisionerTests
 
         public string WslConf { get; init; } = string.Empty;
 
+        /// <summary>What /etc/splat/policy.json holds; null when the guest has none.</summary>
+        public string? CeilingFile { get; init; }
+
         public Task<(int ExitCode, string Output)> RunAsync(IReadOnlyList<string> args, CancellationToken ct)
         {
             string line = string.Join(' ', args);
@@ -54,6 +57,7 @@ public sealed class SubstrateProvisionerTests
                 _ when line.EndsWith("echo ok", StringComparison.Ordinal) => (0, "ok"),
                 _ when line.Contains("stat -c %a /mnt/c", StringComparison.Ordinal) => (0, WindowsDriveMode),
                 _ when line.Contains("cat /etc/wsl.conf", StringComparison.Ordinal) => (0, WslConf),
+                _ when line.Contains("cat /etc/splat/policy.json", StringComparison.Ordinal) => CeilingFile is null ? (1, string.Empty) : (0, CeilingFile),
                 _ when line.Contains("os-release", StringComparison.Ordinal) => (0, "Ubuntu 26.04 LTS"),
                 _ when line.Contains("ps -p 1", StringComparison.Ordinal) => (0, HasSystemd ? "systemd" : "init"),
                 _ when line.Contains("/proc/cmdline", StringComparison.Ordinal) => (0, BpfOnBootLine ? "initrd=\\initrd.img lsm=landlock,yama,bpf" : "initrd=\\initrd.img lsm=landlock,yama"),
@@ -77,6 +81,7 @@ public sealed class SubstrateProvisionerTests
         || command.Contains("systemctl enable", StringComparison.Ordinal)
         || command.Contains("daemon-reload", StringComparison.Ordinal)
         || command.Contains(">> /etc/wsl.conf", StringComparison.Ordinal)
+        || command.Contains("> /etc/splat/policy.json", StringComparison.Ordinal)
         || command.Contains("systemctl restart", StringComparison.Ordinal)
         || command.Contains("cargo", StringComparison.Ordinal);
 
@@ -95,7 +100,7 @@ public sealed class SubstrateProvisionerTests
     [InlineData(new[] { "doctor", "--apply" }, "only for `splat-mcp provision`")]
     [InlineData(new[] { "provision", "--apply=yes" }, "takes no value")]
     [InlineData(new[] { "provision", "--apply", "--apply" }, "more than once")]
-    [InlineData(new[] { "provision", "--egress", "127.0.0.1:80" }, "takes only --apply")]
+    [InlineData(new[] { "provision", "--workspace", "C:\\" }, "takes only --apply and --egress")]
     public void AnOptionThatWouldDoNothing_IsRefused(string[] args, string reason)
     {
         var error = Assert.IsType<McpServerCommand.UsageError>(McpServerCommand.Parse(args));
@@ -169,6 +174,39 @@ public sealed class SubstrateProvisionerTests
         Assert.Contains(guest.Commands, command => command.Contains("umask=077", StringComparison.Ordinal) && command.Contains(">> /etc/wsl.conf", StringComparison.Ordinal));
         Assert.Contains("Windows drives", report.ToString());
         Assert.Contains("`wsl --shutdown` is yours", report.ToString());
+    }
+
+    /// <summary>
+    /// The ceiling is the one place a stolen token cannot reach around, so provision writes it into the
+    /// guest from the operator's --egress, and restarts the daemon that reads it at startup. A guest that
+    /// already holds the same document is left alone, and not restarted.
+    /// </summary>
+    [Fact]
+    public async Task TheLeaseCeiling_IsWrittenFromTheOperatorsEgress_AndTheDaemonRestartedForIt()
+    {
+        using var daemon = new SubstrateDoctorTests.StandInDaemon(EnforcingAnswer);
+        var egress = McpEgressPolicy.Parse("203.0.113.7:443,127.0.0.1:80");
+        var guest = new ScriptedGuest();
+        var report = new StringWriter();
+
+        await SubstrateProvisioner.RunAsync(
+            new McpServerCommand.Provision(Apply: true, egress), report, guest.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
+
+        string write = Assert.Single(guest.Commands, command => command.Contains("> /etc/splat/policy.json", StringComparison.Ordinal));
+        Assert.Contains("\"allowedEgress\"", write);
+        Assert.Contains("203.0.113.7:443", write);
+        Assert.Contains("\"allowedExecPrefixes\"", write);
+        Assert.Contains(guest.Commands, command => command.Contains("systemctl restart splat-agent", StringComparison.Ordinal));
+        Assert.Contains("egress bounded to 127.0.0.1:80, 203.0.113.7:443", report.ToString());
+
+        // The same document already in place: nothing written, nothing restarted.
+        var settled = new ScriptedGuest { CeilingFile = SubstrateProvisioner.CeilingDocument(egress) };
+        await SubstrateProvisioner.RunAsync(
+            new McpServerCommand.Provision(Apply: true, egress), new StringWriter(), settled.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
+        Assert.DoesNotContain(settled.Commands, command => command.Contains("> /etc/splat/policy.json", StringComparison.Ordinal));
+        Assert.DoesNotContain(settled.Commands, command => command.Contains("systemctl restart", StringComparison.Ordinal));
     }
 
     /// <summary>An [automount] section the operator wrote is theirs; the tool names the edit rather than making it.</summary>
@@ -347,7 +385,12 @@ public sealed class SubstrateProvisionerTests
     public async Task AnInstalledDaemonThatIsTheShippedOne_IsLeftAlone()
     {
         using var shipped = new ShippedAgent();
-        var guest = new ScriptedGuest { InstalledAgentSha256 = shipped.Sha256 };
+        // The daemon and the ceiling both already as this command would leave them.
+        var guest = new ScriptedGuest
+        {
+            InstalledAgentSha256 = shipped.Sha256,
+            CeilingFile = SubstrateProvisioner.CeilingDocument(McpEgressPolicy.None),
+        };
         var report = new StringWriter();
 
         await SubstrateProvisioner.RunAsync(

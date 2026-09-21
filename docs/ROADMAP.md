@@ -76,6 +76,7 @@ agent just wrote — are one missing capability. The plan's §3 has the argument
 
 | # | Item | Owner | State | Done when |
 | --- | --- | --- | --- | --- |
+| 2.0 | A guest-side ceiling on every lease, so a leaked token buys less | agent | Built 2026-09-21 in `ceiling.rs`: `/etc/splat/policy.json`, root-owned, intersected with every request; `provision --apply [--egress ...]` writes it. No root needed to prove; ten tests | `doctor` reports `lease ceiling` and `HEALTH_RESPONSE` carries `ceiling` |
 | 2.1 | `unshare(CLONE_NEWNS)` and `pivot_root` inside the spawn's `pre_exec` closure | agent | Built 2026-09-20 in `jail.rs`: the root is prepared in the parent, entered in the child between the cgroup join and the privilege drop, and holds the system read-only, the working directory, a fresh `/tmp`, `/proc` and six device nodes. `readOnlyFs` left the **Refused** table; `overlayFs.enableCow` stays until `cow.rs` mounts inside the namespace. Unproven until the root probe, which now carries five checks for it | `readOnlyFs` and `overlayFs.enableCow` move out of `SUPPORTED_POLICY.md`'s **Refused** table |
 | 2.2 | Leased scratch execution for code an agent just wrote | agent | Blocked on 2.1 | A file created in scratch executes, the same file outside scratch does not, and the scratch layer is gone after teardown |
 | 2.3 | The proof, under root | you — `sudo` for the daemon and its token | Blocked on 2.1 | `daemon-probe.json` gains those checks and is re-recorded; the runbook gets a section for it |

@@ -211,7 +211,7 @@ public sealed class SubstrateDoctorTests
     {
         using var daemon = new StandInDaemon(
             "{\"type\":\"HEALTH_RESPONSE\",\"bpfLsmActive\":true,\"cgroupV2Active\":true," +
-            "\"overlayFsSupported\":false,\"kernelVersion\":\"6.18.33.2\",\"enforcing\":true,\"activeLeaseCount\":1}");
+            "\"overlayFsSupported\":false,\"kernelVersion\":\"6.18.33.2\",\"enforcing\":true,\"activeLeaseCount\":1,\"ceiling\":true}");
         var report = new StringWriter();
 
         int exit = await SubstrateDoctor.RunAsync(
@@ -224,6 +224,29 @@ public sealed class SubstrateDoctorTests
         Assert.Equal(0, exit);
         Assert.Contains("accepted: a request from this host authenticated", text);
         Assert.Contains("live: a lease reaches the kernel (1 active)", text);
+        Assert.Contains("bounds every lease from /etc/splat/policy.json", text);
+    }
+
+    /// <summary>
+    /// A daemon with no ceiling - or one too old to report the field - is not a failure, but the
+    /// report has to say what that means: the token alone authorizes what a lease may name.
+    /// </summary>
+    [Fact]
+    public async Task ADaemonWithoutACeiling_IsSaidToBeBoundByTheTokenAlone()
+    {
+        using var daemon = new StandInDaemon(
+            "{\"type\":\"HEALTH_RESPONSE\",\"bpfLsmActive\":true,\"cgroupV2Active\":true," +
+            "\"overlayFsSupported\":false,\"kernelVersion\":\"6.18.33.2\",\"enforcing\":true,\"activeLeaseCount\":0}");
+        var report = new StringWriter();
+
+        int exit = await SubstrateDoctor.RunAsync(
+            new McpServerCommand.Doctor(null, McpEgressPolicy.None),
+            report,
+            wsl: (_, _) => Task.FromResult((0, "6.18.33.2\n---\nlsm=bpf\n")),
+            health: new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
+
+        Assert.True(exit == 0, "a missing ceiling does not change whether a lease reaches the kernel");
+        Assert.Contains("none in the guest, so the token alone authorizes", report.ToString());
     }
 
     [Fact]

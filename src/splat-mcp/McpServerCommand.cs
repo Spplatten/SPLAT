@@ -24,7 +24,7 @@ public abstract record McpServerCommand
     public static string Usage => $"""
         Usage: splat-mcp [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>] [--run-record-key <file>]
                splat-mcp doctor [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>] [--run-record-key <file>]
-               splat-mcp provision [--apply]
+               splat-mcp provision [--apply] [--egress <a.b.c.d:port,...>]
                splat-mcp new-run-record-key <file>
 
         Serves SPLAT's governed tools to an MCP client: JSON-RPC, one message per line, on stdin
@@ -46,7 +46,9 @@ public abstract record McpServerCommand
           --egress <list>     The only endpoints run_command and run_code leases may connect
                               to, as IPv4 a.b.c.d:port separated by commas. A caller may ask
                               for some of them and never for others. Without it, neither tool
-                              gets any network.
+                              gets any network. With provision, the same list is written into
+                              the guest's lease ceiling (/etc/splat/policy.json), which bounds
+                              every lease from inside the guest, whoever holds the token.
           --ledger-key <file> The operator's key for the audit ledger: a file of 32 to 4096
                               bytes, read and never written or printed. With it every new
                               entry is HMAC-SHA256 under the key, and a keyed ledger is never
@@ -186,11 +188,12 @@ public abstract record McpServerCommand
 
         if (provision)
         {
-            // Neither option changes what provisioning does, and accepting one would say otherwise.
-            string? irrelevant = given.Keys.FirstOrDefault(key => key is "--workspace" or "--egress" or "--ledger-key" or "--run-record-key");
+            // --egress is provision's too: it is written into the guest's lease ceiling. The other
+            // options change nothing about provisioning, and accepting one would say otherwise.
+            string? irrelevant = given.Keys.FirstOrDefault(key => key is "--workspace" or "--ledger-key" or "--run-record-key");
             return irrelevant is null
-                ? new Provision(given.ContainsKey("--apply"))
-                : new UsageError($"`provision` takes only --apply; {irrelevant} belongs to the server or to `doctor`.");
+                ? new Provision(given.ContainsKey("--apply"), egress)
+                : new UsageError($"`provision` takes only --apply and --egress; {irrelevant} belongs to the server or to `doctor`.");
         }
 
         string? ledgerKey = null;
@@ -335,7 +338,15 @@ public abstract record McpServerCommand
     /// /etc inside the guest and to the user's .wslconfig, so a dry run is what an unqualified
     /// invocation gets.
     /// </summary>
-    public sealed record Provision(bool Apply) : McpServerCommand;
+    /// <summary>
+    /// Provision the guest. <see cref="Egress"/> is what the lease ceiling written into the guest
+    /// allows a lease to reach; <see cref="McpEgressPolicy.None"/> leaves the ceiling's egress
+    /// unbounded, since the server's own --egress is then the only network policy.
+    /// </summary>
+    public sealed record Provision(bool Apply, McpEgressPolicy? Egress = null) : McpServerCommand
+    {
+        public McpEgressPolicy CeilingEgress => Egress ?? McpEgressPolicy.None;
+    }
 
     public sealed record ShowHelp : McpServerCommand;
 

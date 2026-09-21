@@ -164,6 +164,7 @@ Every request after the handshake is wrapped:
 | `overlayFsSupported` | bool | `overlay` is in `/proc/filesystems` — informational; the daemon refuses overlay leases regardless |
 | `kernelVersion` | string | `/proc/sys/kernel/osrelease` |
 | `activeLeaseCount` | int | Leases in the daemon's table |
+| `ceiling` | bool | A lease ceiling bounds every request on this host (section D). Absent from daemons before 2026-09-21 |
 
 **`EXECUTE_TOOL`** — one lease and one command. The daemon refuses, rather than defaults, any
 dimension the caller did not declare.
@@ -172,6 +173,7 @@ dimension the caller did not declare.
 | --- | --- | --- | --- |
 | `type` | `"EXECUTE_TOOL"` | yes | |
 | `protocolVersion` | `3` | yes | Anything else refused |
+| *(the whole request)* | | | Intersected with the lease ceiling (section D) when the guest has one; outside it, refused |
 | `missionId` | string | no (`"default"`) | Names the cgroup `splat_leases/mission_<id>` |
 | `command` | string | yes | Absolute path. Must appear in `allowedExecPaths` |
 | `argv` | string[] | yes | Verbatim arguments; an empty array is "no arguments". Anything but an array is refused |
@@ -260,6 +262,36 @@ accounting, and the bridge reports the absence rather than a number nobody measu
 | `VIOLATION.timestampMs` | daemon, `SystemTime::now()` | When the event was drained — the ring buffer is polled every ~100 ms, so up to that much after the denial |
 | `LeaseViolationEvent.TimestampUtc` | `timestampMs`, else host | |
 | Ledger row | host, at append | Written by the MCP handler after the lease ends |
+
+---
+
+## D. The lease ceiling: `/etc/splat/policy.json`
+
+Root-owned, mode 0644 or tighter, read by the daemon at startup and written by
+`splat-mcp provision --apply`. Every `EXECUTE_TOOL` is intersected with it after the declared
+checks and before a cgroup exists; a request outside it is refused naming the first offender.
+Parsed by [`ceiling.rs`](../native/splat-agent/src/ceiling.rs), which rejects a field it does not
+know, a schema it does not speak, a file that is not root's, and one that group or world can write.
+
+```json
+{
+  "schema": 1,
+  "allowedExecPrefixes": ["/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/", "/usr/local/bin/", "/usr/local/sbin/"],
+  "allowedEgress": ["127.0.0.1:80", "203.0.113.7:443"],
+  "alwaysProtectedPaths": ["/etc/shadow", "/etc/gshadow"],
+  "maxLeaseDurationSeconds": 300,
+  "limits": { "maxMemoryBytes": 268435456, "maxCpuPercent": 50, "maxPids": 100 }
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `schema` | `1` |
+| `allowedExecPrefixes` | Absolute directories; a trailing `/` is added, so `/usr/bin` admits `/usr/bin/x` and not `/usr/binx`. Every entry of a request's `allowedExecPaths` must start with one. Required, and not empty |
+| `allowedEgress` | `a.b.c.d:port` entries. **Absent**: egress is not bounded by the ceiling. **Empty**: no lease may reach the network. Present: every `(address, port)` of the request's cross product must be in it, when `allowNetwork` is true |
+| `alwaysProtectedPaths` | Unioned into every lease's protected paths before the caller's; each must resolve on the guest or every lease is refused |
+| `maxLeaseDurationSeconds` | The request's duration is shortened to this |
+| `limits` | Each present value lowers the daemon's own ceiling for that clamp; the request can lower it further |
 
 ---
 

@@ -93,6 +93,7 @@ Two things the picture says on purpose.
 | Linux workload identity | `pre_exec`: `setgroups`, `setresgid`, `setresuid` to `nobody` | Kernel (credentials) | The workload keeping or regaining root |
 | Linux lease lifetime | Daemon reaper — kill inside the policy, then withdraw it | Daemon | An overrunning workload |
 | Who may request a lease | Root-owned 0600 shared secret, loopback TCP | Daemon check | Unprivileged guest processes — **not** another Windows process running as the same user |
+| The most any lease may name | [`ceiling.rs`](../native/splat-agent/src/ceiling.rs) — root-owned `/etc/splat/policy.json` in the guest, written by `provision`, intersected with every request | Daemon check | A token holder asking for more than the operator allowed: executables outside the listed directories, endpoints outside the list, longer or larger than the file says |
 | Which endpoints a `run_command` / `run_code` lease names | [`McpEgressPolicy`](../src/splat-mcp/McpEgressPolicy.cs) — the operator's `--egress` list; a caller may request part of it, never more | Check in `splat-mcp` | An agent writing its own destinations into the lease the kernel then enforces |
 | MCP `fs_read` / `fs_write` | [`WorkspaceGuard`](../src/splat-mcp/WorkspaceGuard.cs) — the final path of the opened handle | Check in `splat-mcp` | `..`, string-prefix tricks, junctions, symlinks |
 | Who acted | Windows logon session; in `splat-mcp`, optionally a validated credential | Check in SPLAT's process | Caller-supplied names |

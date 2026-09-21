@@ -109,6 +109,15 @@ public static class SubstrateDoctor
                     : status.Enforcing
                         ? $"live: a lease reaches the kernel ({status.ActiveLeaseCount} active)"
                         : "the daemon answers but holds no BPF maps: treat anything it runs as UNCONTAINED");
+
+            // Not a failure: a host without one is as it was before ceilings existed. It is the line
+            // that says what a stolen token would buy.
+            Line(output, status.CeilingPolicy ? "ok" : "--", "lease ceiling",
+                !status.Authenticated
+                    ? "unknown: the daemon would not answer this host"
+                    : status.CeilingPolicy
+                        ? "the guest bounds every lease from /etc/splat/policy.json, whoever holds the token"
+                        : "none in the guest, so the token alone authorizes what a lease may name. `splat-mcp provision --apply` writes one; add --egress <list> to bound the network from there too");
         }
 
         output.WriteLine();

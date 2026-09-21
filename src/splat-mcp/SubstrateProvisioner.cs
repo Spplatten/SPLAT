@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MissionController.Infrastructure.Linux;
@@ -154,6 +155,10 @@ public static class SubstrateProvisioner
 
         bool reinstalled = agent == AgentStep.Installed;
 
+        // 4b. The lease ceiling: what any lease may name on this host, written where a stolen token
+        //     cannot reach around it. The daemon reads it at startup, so a change restarts the unit.
+        bool ceilingChanged = await CeilingStepAsync(output, wsl, apply, provision.CeilingEgress, ct);
+
         // 5. The unit, rewritten on every --apply: a stale ExecStart pointing at a path that no longer
         //    exists fails at boot, quietly, and nobody reads a unit they did not write today.
         var (unitExit, _) = await wsl(Root($"test -f {UnitPath}"), ct);
@@ -167,7 +172,7 @@ public static class SubstrateProvisioner
         {
             var (writeExit, writeOut) = await wsl(Root(
                 $"install -d /opt/splat && printf '%s' \"$SPLAT_UNIT\" > {UnitPath} && "
-                + "systemctl daemon-reload && " + StartCommand(reinstalled), ("SPLAT_UNIT", UnitFile)), ct);
+                + "systemctl daemon-reload && " + StartCommand(reinstalled || ceilingChanged), ("SPLAT_UNIT", UnitFile)), ct);
             if (writeExit != 0)
             {
                 Line(output, "FAIL", "service", $"could not install the unit: {Short(writeOut)}");
@@ -415,6 +420,74 @@ public static class SubstrateProvisioner
         }
 
         Line(output, "ok", "daemon binary", $"built and installed to {AgentPath}");
+        return true;
+    }
+
+    private const string CeilingPath = "/etc/splat/policy.json";
+
+    /// <summary>
+    /// The ceiling this host writes: the standard binary directories, the shadow files always
+    /// protected, five minutes at most, and the operator's --egress list when one was given. With no
+    /// list the key is left out, which the daemon reads as "not bounded by the ceiling"; the server's
+    /// own --egress then remains the only network policy, and doctor says so.
+    /// </summary>
+    public static string CeilingDocument(McpEgressPolicy egress)
+    {
+        var document = new Dictionary<string, object>
+        {
+            ["schema"] = 1,
+            ["allowedExecPrefixes"] = new[] { "/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/", "/usr/local/bin/", "/usr/local/sbin/" },
+            ["alwaysProtectedPaths"] = new[] { "/etc/shadow", "/etc/gshadow" },
+            ["maxLeaseDurationSeconds"] = 300,
+        };
+        if (!egress.IsEmpty)
+        {
+            document["allowedEgress"] = egress.ToString().Split(", ");
+        }
+
+        return JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    /// <summary>Writes the ceiling when it differs from what the guest holds. Returns whether it was written.</summary>
+    private static async Task<bool> CeilingStepAsync(
+        TextWriter output, SubstrateDoctor.WslRunner wsl, bool apply, McpEgressPolicy egress, CancellationToken ct)
+    {
+        string wanted = CeilingDocument(egress);
+        string egressNote = egress.IsEmpty
+            ? "egress not bounded by it - pass --egress to provision to bound the network from inside the guest too"
+            : $"egress bounded to {egress}";
+
+        var (readExit, current) = await wsl(new[] { "-e", "sh", "-c", $"cat {CeilingPath} 2>/dev/null" }, ct);
+        if (readExit == 0 && current.ReplaceLineEndings("\n").Trim() == wanted.ReplaceLineEndings("\n").Trim())
+        {
+            Line(output, "ok", "lease ceiling", $"{CeilingPath} bounds every lease; {egressNote}");
+            return false;
+        }
+
+        if (!apply)
+        {
+            Line(output, "todo", "lease ceiling",
+                readExit == 0
+                    ? $"{CeilingPath} differs from what this command would write. --apply rewrites it and restarts the daemon; {egressNote}"
+                    : $"{CeilingPath} is not there, so the token alone authorizes what a lease may name. --apply writes it; {egressNote}");
+            return false;
+        }
+
+        // Staged and renamed, so the daemon never reads a half-written file; 0644 root, which is what
+        // the daemon accepts - anything group- or world-writable it refuses to start under.
+        var (writeExit, writeOut) = await wsl(Root(
+            "install -d -m 0755 /etc/splat"
+            + " && printf '%s\\n' \"$SPLAT_CEILING\" > " + CeilingPath + ".new"
+            + " && chmod 0644 " + CeilingPath + ".new"
+            + " && mv -f " + CeilingPath + ".new " + CeilingPath,
+            ("SPLAT_CEILING", wanted)), ct);
+        if (writeExit != 0)
+        {
+            Line(output, "FAIL", "lease ceiling", $"could not write {CeilingPath}: {Short(writeOut)}");
+            return false;
+        }
+
+        Line(output, "ok", "lease ceiling", $"wrote {CeilingPath}; {egressNote}");
         return true;
     }
 

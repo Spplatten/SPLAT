@@ -52,6 +52,7 @@ mattered:
 | Documents disagreed with the code in five places | A reader would act on the wrong fact | Fixed; see the list below |
 | The lease was a deny-list on files, not a jail: everything not named was reachable, your Windows drives included | The one boundary that mattered most was a list of exceptions | Built: every leased command now runs in its own root with the system read-only, its working directory, a fresh `/tmp`, and no `/home` or `/mnt` at all. Unproven until step 1 |
 | Closing the Windows drives was a runbook line to remember | A host whose operator forgot it stayed open | `provision --apply` writes it and measures whether it took |
+| Anyone holding the guard's secret could ask it for any lease at all | A leaked secret bought the guard's whole authority | The guest now holds a ceiling of its own that every request is cut down to, written by `provision`; a leaked secret buys at most what the file allows |
 
 Then, on your say-so, the kernel program itself changed: each refusal record now carries the
 kernel's own clock and a sequence number, the program counts the refusals it had no room to
@@ -186,13 +187,19 @@ static libraries the packaging script asks for, so run the script and follow wha
 C:\C_AGENT_BUILDER\packaging\publish-splat-mcp.ps1
 ```
 
-Then install and restart the service. No password: this uses `wsl -u root`.
+Then install and restart the service. No password: this uses `wsl -u root`. Give it the same
+endpoint list you give the server, so the guest holds a ceiling of its own:
 
 ```powershell
-splat-mcp provision --apply
+splat-mcp provision --apply --egress 127.0.0.1:80
 ```
 
-Expect `daemon binary ... replaces it and restarts the service` followed by `enforcement live`.
+Expect `daemon binary ... replaces it and restarts the service`, a `lease ceiling` line naming
+the endpoints, and `enforcement live`. One thing to know before step 1, not after: once a ceiling
+is in the guest, the dev daemon that `run-daemon.sh` starts reads it too, and the probes dial
+`127.0.0.1:80` as their permitted endpoint. A ceiling that leaves it out fails those checks for a
+reason that has nothing to do with the kernel, so keep `127.0.0.1:80` in the list, or run the
+probes before writing one.
 
 ### Step 4 — The kernel-side change is in; step 1 is what proves it
 

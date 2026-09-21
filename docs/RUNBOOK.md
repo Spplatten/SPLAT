@@ -134,9 +134,14 @@ splat-mcp provision
 
 prints what the host still needs and changes nothing; `--apply` does it: writes `[boot]
 systemd=true` if PID 1 is not systemd (then `wsl --shutdown` is yours), checks `bpf` on the boot
-line, installs the daemon it carries at `/opt/splat/splat-agent` after hashing it and running it
-once, writes `/etc/systemd/system/splat-agent.service`, enables and starts it, then asks the
-daemon — through the authenticated health check — whether it is enforcing. The unit:
+line, closes the Windows drives to `nobody`, installs the daemon it carries at
+`/opt/splat/splat-agent` after hashing it and running it once, writes the lease ceiling at
+`/etc/splat/policy.json` from its `--egress` list (see [SCHEMA.md](SCHEMA.md#d-the-lease-ceiling-etcsplatpolicyjson)),
+writes `/etc/systemd/system/splat-agent.service`, enables and starts it (restarting it when the
+daemon or the ceiling changed), then asks the daemon — through the authenticated health check —
+whether it is enforcing. Pass the same `--egress` list you give the server, or a tighter one; with
+none, the ceiling bounds executables, protected paths and duration but not egress, and `doctor`
+says so. The unit:
 
 ```ini
 [Unit]
@@ -208,7 +213,7 @@ production host would need instead, and **none of it is built** unless the row s
 | Today, on purpose | Why it is acceptable here | Hardened, not built |
 | --- | --- | --- |
 | The daemon is root | It loads BPF, owns the cgroup tree and drops the *workload* to `nobody`; that drop is what the probes check | A unit with `CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SETUID CAP_SETGID CAP_KILL CAP_DAC_READ_SEARCH`, `AmbientCapabilities=` of the same, `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ReadWritePaths=/etc/splat /sys/fs/cgroup`. **Unverified** — the cgroup writes and the `cgroup.procs` join under a bounded set have not been tried |
-| Loopback TCP with a shared secret | An unprivileged guest process cannot read the 0600 token, and a squatter on the port gets one nonce | A transport carrying peer identity: `AF_VSOCK` with a guest-side allow-list, or `SO_PEERCRED` over `AF_UNIX`. Closes the gap that any Windows process running as the same user can read the token exactly as the bridge does |
+| Loopback TCP with a shared secret, bounded by a guest-side ceiling | An unprivileged guest process cannot read the 0600 token, a squatter on the port gets one nonce, and since 2026-09-21 a request from any token holder is intersected with `/etc/splat/policy.json`, which `provision --apply [--egress ...]` writes. A Windows process running as the same user can still read the token; what it buys is bounded by the ceiling | No transport tells the daemon which Windows process is asking, and a process running as you can do everything you can. The ceiling is the answer; the remaining step is to write it with a tighter egress list than the server's own |
 | The workload's mount namespace holds `/etc` whole, read-only | The resolver, certificates and passwd live there; what `nobody` may not read is denied by mode or by the inode deny-list, which bind mounts preserve. Built 2026-09-20, root proof pending | A curated slice of `/etc`, and the overlay in [`cow.rs`](../native/splat-agent/src/cow.rs) mounted inside the namespace as the working directory, which lifts the last refusal |
 | Maps and programs die with the daemon | Simple ownership; nothing to clean in `/sys/fs/bpf` | Pinned maps under `/sys/fs/bpf/splat`, so a daemon restart re-attaches instead of unpolicing. Today the daemon compensates by **killing** every leftover lease at startup and on SIGTERM |
 | Violations fan out through a 128-slot broadcast channel | A lease's forwarder tolerates lagging and says so | A per-lease queue with a drop counter surfaced in the `EXIT` frame |
@@ -225,6 +230,8 @@ production host would need instead, and **none of it is built** unless the row s
 | --- | --- | --- |
 | BPF programs fail to open, load or attach | Exits `1` unless `--mock-bpf` was passed | `main.rs`, startup |
 | Token file missing and cannot be created; or empty | Exits `1` | `auth.rs` |
+| `/etc/splat/policy.json` present but not root's, writable by others, or not a policy the daemon understands | Exits `1`; absent, the daemon runs without a ceiling and says so | `ceiling.rs` |
+| A request outside the ceiling | Refused naming the first offender; no cgroup is made | `ceiling.rs`, `main.rs` |
 | `--workload-uid` or `--workload-gid` is 0 | Exits `1` | `main.rs` |
 | A `splat_leases/mission_*` cgroup from a previous daemon | Killed and removed before serving; exits `1` if it will not drain | `cgroup.rs`, `reap_orphans` |
 | SIGTERM or SIGINT | Every live lease's cgroup is killed while its policy is still installed, then exit `0` | `main.rs` |

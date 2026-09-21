@@ -29,7 +29,13 @@ public record WslSubstrateStatus(
     /// or that could not prove it is the daemon — a different fault from an absent daemon, and from one
     /// that answers "not enforcing".
     /// </summary>
-    bool Authenticated = false);
+    bool Authenticated = false,
+    /// <summary>
+    /// Whether the guest holds a lease ceiling the daemon intersects every request with. Without one
+    /// the token alone authorizes whatever a request names; a daemon that predates the field reports
+    /// nothing, which reads here as none.
+    /// </summary>
+    bool CeilingPolicy = false);
 
 /// <summary>
 /// Probes and validates the status of the local WSL2 kernel substrate and BPF-LSM daemon.
@@ -170,7 +176,8 @@ public class WslSubstrateHealthChecker
                         : "SPLAT Linux daemon is reachable but NOT enforcing: leases it accepts do not reach the kernel. Treat any tool it runs as uncontained.",
                     Enforcing: enforcing,
                     // It answered, which it does only for a request that proved the token.
-                    Authenticated: true);
+                    Authenticated: true,
+                    CeilingPolicy: root.TryGetProperty("ceiling", out var ceiling) && ceiling.GetBoolean());
             }
         }
         catch (WslAgentHandshakeException ex)
