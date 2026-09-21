@@ -150,45 +150,36 @@ public record SingleToolTemplate(
     TemplateKind Kind = TemplateKind.DiagnosticAgent,
     TemplateOutputContract? OutputContract = null,
     string? SourceTemplateId = null,
-    bool IsUserCreated = false)
+    bool IsUserCreated = false,
+    // Declared, not guessed. See NetworkDenialMeasuredHarmless below.
+    bool NetworkDenialMeasuredHarmless = false)
 {
     public IReadOnlyList<RemediationAction> Remediations => AvailableRemediations ?? Array.Empty<RemediationAction>();
 
     /// <summary>
-    /// Local subsystems this tool talks to that an AppContainer cannot reach.
+    /// True when denying this tool the network has been MEASURED not to change what it reports.
     ///
-    /// Network denial is achieved by launching into an AppContainer, and that container is a wall
-    /// around far more than sockets: reaching WMI/CIM, the Event Log service, Defender's provider or
-    /// the Service Control Manager all go through RPC/DCOM endpoints whose security descriptors do
-    /// not admit an AppContainer SID. Measured on Windows 11 26200, inside the container and against
-    /// the same command outside it: <c>Get-WinEvent</c>, <c>Get-CimInstance</c> and
-    /// <c>Get-MpComputerStatus</c> each fail while <c>Get-Process</c>, <c>Get-ChildItem C:\Windows</c>
-    /// and <c>wevtutil qe</c> keep working - a native binary reads the event log fine, the managed
-    /// API does not.
+    /// Network denial is an AppContainer with no capabilities at Low integrity, and that is a wall
+    /// around far more than sockets. Reaching WMI/CIM, the Event Log service, Defender's provider or
+    /// the Service Control Manager goes through RPC endpoints whose security descriptors do not
+    /// admit an AppContainer SID; `ping` cannot open an ICMP handle; `netsh` answers "the following
+    /// command was not found"; a registry read can fail on integrity alone.
     ///
-    /// So containment is not free, and applying it blindly would have broken roughly half this
-    /// catalog while the tests still passed, because proving a socket is refused says nothing about
-    /// whether the sensor can still do its job.
+    /// This used to be inferred the other way round - a text match over the command line for eight
+    /// cmdlet names, exempting anything that matched. On 2026-09-20 each denied template was run
+    /// inside the container and outside it, same jail and same restricted token: 21 of the 33 the
+    /// match had left denied answered differently inside, and three returned nothing at all while
+    /// exiting 0, which a model reads as "nothing found".
+    ///
+    /// So the default is now the working sensor, and denial is a claim a template makes about
+    /// itself, which <c>NetworkToolsUnderDenialTests</c> proves by running the thing both ways. A
+    /// template that forgets the flag loses containment it could have had, and the same test names
+    /// it. A template that claims it wrongly fails the build. Those are the right two directions.
+    ///
+    /// It is still not the control this tier wants: a socket-layer filter would deny the network
+    /// without removing RPC. <c>docs/THREAT-MODEL.md</c> has the argument.
     /// </summary>
-    private static readonly string[] SubsystemMarkers =
-    {
-        "Get-CimInstance", "New-CimSession", "Get-WmiObject", "Get-WinEvent",
-        "Get-EventLog", "Get-MpComputerStatus", "Get-MpPreference", "Get-Service"
-    };
-
-    /// <summary>
-    /// True when this tool reaches a local subsystem an AppContainer would cut it off from, so the
-    /// mission must choose the sensor working over the sensor being network-denied.
-    ///
-    /// Deliberately a conservative text match over the tool's own command line rather than a flag a
-    /// template author must remember to set: a missed flag fails at run time, in front of an
-    /// operator, as an unexplained sensor error. A false positive here costs only containment for
-    /// that one template, which is the survivable direction. It is an interim measure - the durable
-    /// fix is per-template verification, or an egress control that does not double as an RPC wall.
-    /// </summary>
-    public bool ToolNeedsLocalSubsystems =>
-        SubsystemMarkers.Any(marker =>
-            (Tool.ArgumentsTemplate ?? string.Empty).Contains(marker, StringComparison.OrdinalIgnoreCase));
+    public bool ToolNeedsLocalSubsystems => !NetworkDenialMeasuredHarmless;
 
     public TemplateOutputContract EffectiveOutputContract => OutputContract ?? new TemplateOutputContract(
         "Diagnose the supplied evidence and identify the safest next action.",
@@ -215,13 +206,13 @@ public record SingleToolTemplate(
             tool,
             egressRule,
             systemPrompt,
-            ConvertDefaultsToFields(parameterDefaults),
+            FieldsFromDefaults(parameterDefaults),
             parameterDefaults,
             Array.Empty<RemediationAction>())
     {
     }
 
-    private static IReadOnlyList<TemplateParameterField> ConvertDefaultsToFields(IReadOnlyDictionary<string, string> defaults)
+    private static IReadOnlyList<TemplateParameterField> FieldsFromDefaults(IReadOnlyDictionary<string, string> defaults)
     {
         var list = new List<TemplateParameterField>();
         foreach (var (key, val) in defaults)

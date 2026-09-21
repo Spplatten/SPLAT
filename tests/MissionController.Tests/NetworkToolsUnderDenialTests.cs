@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -16,25 +17,17 @@ using Xunit.Abstractions;
 namespace MissionController.Tests;
 
 /// <summary>
-/// Network denial runs the tool in an AppContainer with no capabilities, at Low integrity. That
-/// takes away more than the network: the ICMP handle `ping` needs, the RPC `netsh`, `tasklist` and
-/// the Net* cmdlets need, and the registry reads a policy audit needs. `ToolNeedsLocalSubsystems`
-/// exempts a template from denial by matching a few cmdlet names in its command line, and this is
-/// the test that measures what that text match misses.
+/// The catalog claims, template by template, that denying the network does not change what a tool
+/// reports. This runs each claim: the template's own bound command line, inside the container the
+/// engine would give it and outside, same jail and same restricted token, the denial flag the only
+/// variable.
 ///
-/// Every network-denied template's own bound command line is run twice - inside the container the
-/// engine would give it, and outside, same jail and same restricted token, the container flag the
-/// only variable - and the ids whose answer changed are pinned below.
+/// It used to pin the opposite - the 21 of 33 templates that a text match had left denied while the
+/// container blinded them, three of them returning nothing at all and exiting 0. Those templates
+/// now keep their plumbing, and this test guards the claim rather than recording the damage.
 ///
-/// **21 of 33, measured 2026-09-20, and that is a floor.** Three return nothing at all and exit 0,
-/// which a model reads as findings. The criterion here only catches an error phrase or a halving of
-/// the evidence, so a template that answers confidently and wrongly counts as "same":
-/// `sysops-ad-dc-health` resolves its DC to 127.0.0.1 in the container and to the real server
-/// outside it, and is not in this list.
-///
-/// The list is pinned rather than asserted empty because emptying it is a catalog decision, not a
-/// test fix. What this guards is the pretence: nobody can now add a template to the denied census
-/// without this saying whether the agent still works in there.
+/// It is the slowest test in the suite, because it runs real processes rather than asserting about
+/// them. Capping the timeouts would measure the cap instead of the container.
 /// </summary>
 public class NetworkToolsUnderDenialTests
 {
@@ -42,56 +35,66 @@ public class NetworkToolsUnderDenialTests
 
     public NetworkToolsUnderDenialTests(ITestOutputHelper output) => _out = output;
 
-    /// <summary>Measured twice on 2026-09-20, identical both times.</summary>
-    private static readonly string[] AnswersDifferentlyInsideTheContainer =
-    {
-        "campus-dns-cache-hygiene",
-        "campus-subnet-latency-sweep",
-        "campus-switchport-neighbor",
-        "compliance-audit-policy",
-        "compliance-powershell-logging",
-        "compliance-security-baseline",
-        "endpoint-firewall-audit",
-        "identity-ad-group-hygiene",
-        "identity-gpo-rsop",
-        "identity-local-admin-drift",
-        "net-dns-audit",
-        "network-adapter-dhcp",
-        "network-path-mtu-route",
-        "network-port-exhaustion",
-        "network-proxy-config",
-        "network-smb-posture",
-        "network-wifi-8021x",
-        "secops-process-scan",
-        "sysops-software-inventory",
-        "sysops-time-sync",
-        "web-autonomous-site-deploy",
-    };
-
+    /// <summary>What a tool says when the container has taken something away from it.</summary>
     private static readonly string[] Errors =
     {
         "Unable to contact IP driver", "General failure", "Access is denied", "The RPC server is unavailable",
         "command was not found", "was not found", "cannot find", "is not recognized", "Exception",
+        // Added 2026-09-21 after sysops-boot-performance passed the coarse test while losing its
+        // boot time to this one. Every phrase here was seen in a real contained run.
+        "Attempted to perform an unauthorized operation",
+        "Requested registry access is not allowed",
+        "Object reference not set",
+        "System error 5",
     };
 
-    [Fact]
-    public async Task TheDeniedCensus_SaysWhichOfItsTemplatesStillWorkInThere()
-    {
-        var denied = GovernedTemplateCatalog.All
-            .Where(t => !t.EgressRule.ToolProcessNeedsNetwork && !t.ToolNeedsLocalSubsystems)
-            .OrderBy(t => t.TemplateId, StringComparer.Ordinal)
-            .ToList();
+    private sealed record Comparison(string Id, bool Changed, string Why, string Inside, string Outside);
 
-        // Four at a time, each in its own jail. This is the slowest test in the suite - about two
-        // minutes, most of it one template's tracert, which runs twice because the comparison is
-        // the whole point. Raising the concurrency does not help; capping the timeouts would
-        // measure the cap instead of the container. The cost is the price of the claim.
-        var findings = new System.Collections.Concurrent.ConcurrentBag<(string Id, string Why, string Line, string Contained)>();
+    [Fact]
+    public async Task EveryTemplateDeniedTheNetwork_AnswersTheSameInsideTheContainerAsOutsideIt()
+    {
+        var results = await CompareAsync(GovernedTemplateCatalog.All
+            .Where(t => !t.EgressRule.ToolProcessNeedsNetwork)
+            .OrderBy(t => t.TemplateId, StringComparer.Ordinal)
+            .ToList());
+
+        var denied = results.Where(r => IsDenied(r.Id)).ToList();
+        var changed = denied.Where(r => r.Changed).ToList();
+
+        foreach (var r in changed)
+        {
+            _out.WriteLine($"{r.Id,-34} {r.Why}");
+            _out.WriteLine($"    inside : {r.Inside}");
+            _out.WriteLine($"    outside: {r.Outside}");
+        }
+
+        // The other direction is reported, never failed. A template that would survive denial and is
+        // not claimed is containment left on the table, and worth knowing; but the answer depends on
+        // the machine - a desktop with no wireless adapter makes the Wi-Fi template look survivable -
+        // so it is not something to fail a build over.
+        var couldBeDenied = results.Where(r => !IsDenied(r.Id) && !r.Changed).Select(r => r.Id).ToList();
+        _out.WriteLine("");
+        _out.WriteLine($"{denied.Count} templates claim denial changes nothing; {changed.Count} of those claims are false.");
+        _out.WriteLine($"{couldBeDenied.Count} not claimed would have survived it here: {string.Join(", ", couldBeDenied)}");
+        Assert.True(changed.Count == 0,
+            "these templates are denied the network and the container changes what they report: " +
+            string.Join(", ", changed.Select(c => $"{c.Id} ({c.Why})")));
+    }
+
+    private static bool IsDenied(string templateId)
+    {
+        var template = GovernedTemplateCatalog.All.Single(t => t.TemplateId == templateId);
+        return !template.EgressRule.ToolProcessNeedsNetwork && !template.ToolNeedsLocalSubsystems;
+    }
+
+    private static async Task<List<Comparison>> CompareAsync(IReadOnlyList<Core.Models.SingleToolTemplate> templates)
+    {
+        var results = new ConcurrentBag<Comparison>();
         var jails = new NtAclJailManager();
         var launcher = new SuspendedProcessLauncher(new RestrictedTokenProvider());
         using var gate = new SemaphoreSlim(4);
 
-        await Task.WhenAll(denied.Select(async template =>
+        await Task.WhenAll(templates.Select(async template =>
         {
             await gate.WaitAsync();
             try
@@ -101,31 +104,31 @@ public class NetworkToolsUnderDenialTests
                 string jail = await jails.ProvisionJailAsync(missionId);
                 try
                 {
-                    using var inside = new Win32JobSandbox($"Denied_{missionId:N}");
+                    using var insideJob = new Win32JobSandbox($"Denied_{missionId:N}");
                     var contained = await launcher.LaunchSuspendedInJobAsync(
-                        template.Tool.ExecutablePath, arguments, jail, inside,
+                        template.Tool.ExecutablePath, arguments, jail, insideJob,
                         template.Tool.RequiresRestrictedToken, template.Tool.TimeoutSeconds, denyNetworkAccess: true);
 
-                    using var outside = new Win32JobSandbox($"Open_{missionId:N}");
+                    using var outsideJob = new Win32JobSandbox($"Open_{missionId:N}");
                     var uncontained = await launcher.LaunchSuspendedInJobAsync(
-                        template.Tool.ExecutablePath, arguments, jail, outside,
+                        template.Tool.ExecutablePath, arguments, jail, outsideJob,
                         template.Tool.RequiresRestrictedToken, template.Tool.TimeoutSeconds, denyNetworkAccess: false);
 
-                    string a = Payload(contained.StandardOutput + contained.StandardError);
-                    string b = Payload(uncontained.StandardOutput + uncontained.StandardError);
+                    string inside = Payload(contained.StandardOutput + contained.StandardError);
+                    string outside = Payload(uncontained.StandardOutput + uncontained.StandardError);
 
-                    // Two ways the container changes the answer: the tool says something it
-                    // otherwise would not, or it says much less than it otherwise would.
-                    bool spoke = Errors.Any(e => a.Contains(e, StringComparison.OrdinalIgnoreCase)
-                                                 && !b.Contains(e, StringComparison.OrdinalIgnoreCase));
-                    bool silenced = b.Length > 60 && a.Length < b.Length / 2;
+                    // Two ways the container changes the answer: the tool says something it would
+                    // not otherwise say, or it says much less than it would otherwise say.
+                    string? spoke = Errors.FirstOrDefault(e => inside.Contains(e, StringComparison.OrdinalIgnoreCase)
+                                                               && !outside.Contains(e, StringComparison.OrdinalIgnoreCase));
+                    bool silenced = outside.Length > 60 && inside.Length < outside.Length / 2;
 
-                    if (spoke || silenced)
-                    {
-                        findings.Add((template.TemplateId, spoke ? "error" : "silenced",
-                            $"exit {contained.ExitCode,3}/{uncontained.ExitCode,-3} evidence {a.Length,6}/{b.Length,-6}",
-                            Trim(a)));
-                    }
+                    results.Add(new Comparison(
+                        template.TemplateId,
+                        spoke is not null || silenced,
+                        spoke is not null ? $"says \"{spoke}\" only inside" : $"{inside.Length} chars inside against {outside.Length} outside",
+                        Trim(inside),
+                        Trim(outside)));
                 }
                 finally
                 {
@@ -138,16 +141,7 @@ public class NetworkToolsUnderDenialTests
             }
         }));
 
-        var broken = findings.Select(f => f.Id).OrderBy(s => s, StringComparer.Ordinal).ToList();
-        foreach (var f in findings.OrderBy(f => f.Id, StringComparer.Ordinal))
-        {
-            _out.WriteLine($"{f.Id,-34} {f.Why,-9} {f.Line}");
-            _out.WriteLine($"    contained: {f.Contained}");
-        }
-
-        _out.WriteLine($"{broken.Count} of {denied.Count} network-denied templates answer differently inside the container.");
-
-        Assert.Equal(AnswersDifferentlyInsideTheContainer.OrderBy(s => s, StringComparer.Ordinal), broken);
+        return results.OrderBy(r => r.Id, StringComparer.Ordinal).ToList();
     }
 
     /// <summary>The evidence, with the template's own echoed section headers taken out.</summary>

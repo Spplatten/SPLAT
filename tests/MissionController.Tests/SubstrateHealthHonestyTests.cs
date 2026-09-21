@@ -131,11 +131,15 @@ public class SubstrateHealthHonestyTests
         using var daemon = new FakeDaemon(EnforcingBody);
         var slowToken = new WslAgentToken(async ct =>
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(2500), ct);
+            await Task.Delay(TimeSpan.FromMilliseconds(5000), ct);
             return "0123456789abcdef";
         });
 
-        var status = await new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, slowToken, TimeSpan.FromSeconds(2))
+        // Five seconds of read against a four-second budget, rather than 2.5 against 2. The ratio is
+        // what the test proves - charging the read to the daemon would still blow the budget - and
+        // the larger numbers leave the daemon's own leg four seconds of headroom instead of two,
+        // which it needs on a machine where the catalog sweeps are running real processes alongside.
+        var status = await new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, slowToken, TimeSpan.FromSeconds(4))
             .CheckHealthAsync();
 
         Assert.True(status.DaemonReachable);

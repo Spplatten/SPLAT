@@ -147,6 +147,51 @@ public static partial class GovernedTemplateCatalog
     /// </summary>
     public static IReadOnlyList<SingleToolTemplate> All => _all ??= BuildAll();
 
+    /// <summary>
+    /// The templates whose answer does not change when the network is denied them.
+    ///
+    /// Network denial is an AppContainer with no capabilities at Low integrity, which takes RPC to
+    /// the system services and the ICMP handle away along with the sockets. On 2026-09-20 every
+    /// template then being denied was run inside the container and outside it, same jail and same
+    /// restricted token: 21 of 33 answered differently inside, three of them with nothing at all
+    /// and an exit code of 0. So the catalog no longer guesses from the command line which tools
+    /// survive in there. This list is the measurement, and
+    /// <c>NetworkToolsUnderDenialTests</c> re-runs it: a template named here that stops surviving
+    /// fails the build, and one not named here that would survive is reported so the list can grow.
+    ///
+    /// It is short, and honestly so. Four of these are templates that compose text and touch
+    /// nothing, five produce no evidence in or out of the container for reasons of their own
+    /// (<c>CatalogProducesEvidenceTests</c> holds those), and one - the SChannel audit - is a real
+    /// sensor that genuinely works while denied. The control this tier actually wants is a
+    /// socket-layer filter that does not double as an RPC wall; <c>docs/THREAT-MODEL.md</c> has the
+    /// argument, and the roadmap has the row.
+    /// </summary>
+    private static readonly HashSet<string> DenialMeasuredHarmless = new(StringComparer.Ordinal)
+    {
+        "dev-app-provisioner-bot",
+        "endpoint-bitlocker-compliance",
+        "grants-budget-compliance-auditor",
+        "grants-eligibility-proposal-engine",
+        "identity-kerberos-spn",
+        "identity-lockout-trace",
+        "marketing-social-campaign-publisher",
+        "secops-auth-inspector",
+        "secops-tls-cipher-audit",
+        "sysops-disk-space",
+        // Added 2026-09-21, after reading what they return rather than only the comparison's verdict.
+        "compliance-legacy-protocols",
+        "endpoint-mdm-enrollment",
+
+        // Three others the comparison calls unchanged are deliberately absent, because reading what
+        // they return says otherwise: sysops-ad-dc-health resolves its domain controller to
+        // 127.0.0.1 inside the container and to the real server outside it, identity-entra-hybrid-join
+        // loses about 700 characters of its device state, and sysops-boot-performance loses its boot
+        // time to "Attempted to perform an unauthorized operation". The test reports all three as
+        // containment left on the table. It is not.
+    };
+
+
+
     private static IReadOnlyList<SingleToolTemplate> BuildAll()
     {
         var all = new List<SingleToolTemplate>();
@@ -157,6 +202,14 @@ public static partial class GovernedTemplateCatalog
         all.AddRange(ComplianceTemplates());
         all.AddRange(CampusOperationsTemplates());
         all.AddRange(AutonomousOperationsTemplates());
+
+        for (int i = 0; i < all.Count; i++)
+        {
+            all[i] = all[i] with
+            {
+                NetworkDenialMeasuredHarmless = DenialMeasuredHarmless.Contains(all[i].TemplateId)
+            };
+        }
 
         // A duplicate TemplateId would not error at the storage layer - the registry upserts on
         // conflict, so the second definition would silently overwrite the first and the operator

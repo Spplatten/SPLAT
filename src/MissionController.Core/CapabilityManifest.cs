@@ -82,7 +82,9 @@ public static class CapabilityManifest
         new("The workload's root", LeaseEnforcement.Daemon),
         new("readOnlyFs", LeaseEnforcement.Daemon),
         new("overlayFs.enableCow", LeaseEnforcement.Refused),
-        new("UDP to an unconnected socket", LeaseEnforcement.NotPoliced),
+        // Closed 2026-09-21 by `lsm/socket_sendmsg`: a datagram that names its own destination is
+        // judged against the same allow-list a connect is, so it is no longer a way around the hook.
+        new("IPv4 datagrams", LeaseEnforcement.Kernel),
         new("AF_UNIX / AF_NETLINK", LeaseEnforcement.NotPoliced),
         new("Inherited file descriptors", LeaseEnforcement.NotPoliced),
         new("Filesystem writes and reads outside the jail's contents", LeaseEnforcement.NotPoliced),
