@@ -345,7 +345,31 @@ print("   A daemon that still accepted that form would make capturing the token 
 clear_health = show(call({"type": "HEALTH_CHECK"}, "health-protocol-2", clear=True), "health-protocol-2")
 
 print()
-print("== 15. JAIL: the workload's root holds the system, the workdir and nothing else ==")
+print("== 15. UDP: a datagram names its own destination, and is judged like a connection ==")
+print("   sendto() on an unconnected socket never reaches socket_connect, so every leased process")
+print("   had a full UDP path out - DNS included - while allowNetwork:false read as 'no network'.")
+print("   Both halves, because refusals alone would also be what a broken chain produces.")
+udp_bad = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-udp-bad",
+    "command": "/usr/bin/python3",
+    "argv": ["-c", "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);"
+                   "print('SENT' if s.sendto(b'x',('1.1.1.1',53)) else 'NOTHING')"],
+    "allowedExecPaths": ["/usr/bin/python3"],
+    "allowNetwork": True, "allowedEgressIps": ["127.0.0.1"], "allowedEgressPorts": [53],
+    "leaseDurationSeconds": 20,
+}, "udp-outside"), "udp-outside")
+udp_ok = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-udp-ok",
+    "command": "/usr/bin/python3",
+    "argv": ["-c", "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);"
+                   "print('SENT' if s.sendto(b'x',('127.0.0.1',53)) else 'NOTHING')"],
+    "allowedExecPaths": ["/usr/bin/python3"],
+    "allowNetwork": True, "allowedEgressIps": ["127.0.0.1"], "allowedEgressPorts": [53],
+    "leaseDurationSeconds": 20,
+}, "udp-inside"), "udp-inside")
+
+print()
+print("== 16. JAIL: the workload's root holds the system, the workdir and nothing else ==")
 print("   /home and /mnt are not hidden by a deny-list; they are absent from the root the workload")
 print("   sees. The system directories are read-only, /tmp is fresh and writable, the working")
 print("   directory is writable unless readOnlyFs says otherwise. All from sh builtins, so each")
@@ -504,6 +528,14 @@ jail_system_ro = "SYSTEM_READONLY" in text(jail_ro) and "WROTE_SYSTEM" not in te
 jail_rw_text = text(jail_rw)
 jail_workdir_rw = "WROTE_WORKDIR" in jail_rw_text and "WROTE_TMP" in jail_rw_text and "ETC_VISIBLE" in jail_rw_text
 jail_readonly_fs = "WORKDIR_READONLY" in text(jail_rofs) and "WROTE_WORKDIR" not in text(jail_rofs)
+# The datagram hook. The permitted half is the control: a lease that refused every datagram would
+# score the refusal True and prove only that nothing works.
+udp_blocked = had(udp_bad, "VIOLATION") and "SENT" not in text(udp_bad)
+udp_allowed = "SENT" in text(udp_ok) and not had(udp_ok, "VIOLATION")
+print()
+print(f"  UDP outside the lease refused  : {udp_blocked}")
+print(f"  UDP inside the lease permitted : {udp_allowed}  (the control)")
+
 print()
 print(f"  host has /home and /mnt        : {host_has_the_dirs}  (the control for the line below)")
 print(f"  jail hides /home and /mnt      : {jail_hides_host}")
@@ -567,6 +599,10 @@ evidence = {
         # collect - is refused even with the right token.
         "daemon_proved_it_holds_the_token": daemon_proved_itself,
         "protocol_2_token_in_the_clear_refused": clear_token_refused,
+        # A datagram that names its own destination never reaches socket_connect; socket_sendmsg
+        # judges it against the same allow-list.
+        "udp_outside_the_lease_blocked": udp_blocked,
+        "udp_inside_the_lease_allowed": udp_allowed,
         # P2: the workload's root is its own mount namespace, not the host's tree minus a deny-list.
         "jail_control_host_has_home_and_mnt": host_has_the_dirs,
         "jail_hides_home_and_mnt": jail_hides_host,
@@ -577,7 +613,7 @@ evidence = {
     "violations": [
         {k: m.get(k) for k in ("hook", "pid", "detail", "detailText", "comm") if k in m}
         for m in (shadow or []) + (dpkg or []) + (egress_bad or []) + (egress_off or [])
-              + (iso_b or []) + (port_bad or []) + (v6 or [])
+              + (iso_b or []) + (port_bad or []) + (v6 or []) + (udp_bad or [])
         if m.get("type") == "VIOLATION"
     ],
 }
@@ -608,6 +644,8 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["unauthenticated_health_check_refused"]
     and evidence["results"]["daemon_proved_it_holds_the_token"]
     and evidence["results"]["protocol_2_token_in_the_clear_refused"]
+    and evidence["results"]["udp_outside_the_lease_blocked"]
+    and evidence["results"]["udp_inside_the_lease_allowed"]
     # The jail, with its control: hidden directories only count when the host has them to hide.
     and evidence["results"]["jail_control_host_has_home_and_mnt"]
     and evidence["results"]["jail_hides_home_and_mnt"]

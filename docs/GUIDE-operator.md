@@ -53,6 +53,7 @@ mattered:
 | The lease was a deny-list on files, not a jail: everything not named was reachable, your Windows drives included | The one boundary that mattered most was a list of exceptions | Built: every leased command now runs in its own root with the system read-only, its working directory, a fresh `/tmp`, and no `/home` or `/mnt` at all. Unproven until step 1 |
 | Closing the Windows drives was a runbook line to remember | A host whose operator forgot it stayed open | `provision --apply` writes it and measures whether it took |
 | Anyone holding the guard's secret could ask it for any lease at all | A leaked secret bought the guard's whole authority | The guest now holds a ceiling of its own that every request is cut down to, written by `provision`; a leaked secret buys at most what the file allows |
+| A leased tool could send UDP anywhere, DNS included | The guard watched connections, and a datagram names its own destination instead of connecting | A fourth hook judges datagrams against the same list. **This changes behaviour:** a lease that wants to look a name up must name its resolver, or the lookup is refused |
 
 Then, on your say-so, the kernel program itself changed: each refusal record now carries the
 kernel's own clock and a sequence number, the program counts the refusals it had no room to
@@ -197,9 +198,14 @@ splat-mcp provision --apply --egress 127.0.0.1:80
 Expect `daemon binary ... replaces it and restarts the service`, a `lease ceiling` line naming
 the endpoints, and `enforcement live`. One thing to know before step 1, not after: once a ceiling
 is in the guest, the dev daemon that `run-daemon.sh` starts reads it too, and the probes dial
-`127.0.0.1:80` as their permitted endpoint. A ceiling that leaves it out fails those checks for a
-reason that has nothing to do with the kernel, so keep `127.0.0.1:80` in the list, or run the
-probes before writing one.
+`127.0.0.1:80` and `127.0.0.1:53` as their permitted endpoints. A ceiling that leaves either out
+fails those checks for a reason that has nothing to do with the kernel, so keep both in the list,
+or run the probes before writing one.
+
+Add your own resolver to the list as well if any leased tool will look a name up, for example
+`--egress 127.0.0.1:80,127.0.0.1:53,203.0.113.7:443`. Since the datagram hook landed, a DNS query
+is a destination like any other and is refused when the lease does not name one; `doctor` prints a
+`name lookups` line when your policy has none.
 
 ### Step 4 — The kernel-side change is in; step 1 is what proves it
 

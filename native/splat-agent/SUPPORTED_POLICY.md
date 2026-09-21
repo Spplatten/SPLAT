@@ -21,7 +21,8 @@ Protocol version 3. Anything else is refused; see `main.rs`, and `docs/SCHEMA.md
 | Executable identity | `bprm_check_security` | `(cgroup id, dev, ino)` against this lease's allow-list. Every exec, including one an already-running permitted tool performs. |
 | Protected files | `file_open` | `(cgroup id, dev, ino)` against this lease's deny-list. |
 | IPv4 egress | `socket_connect` | `(cgroup id, address, port)` — the destination must be an endpoint this lease approved. |
-| IPv6 egress | `socket_connect` | **Denied outright** for a leased process. The lease vocabulary has no v6 allow-list, so there is nothing an address could be checked against. |
+| IPv4 datagrams | `socket_sendmsg` | The same allow-list, for a datagram that names its own destination — a `sendto` on an unconnected socket, which never reaches `socket_connect`. A message with no destination of its own is on a socket `connect` already judged. **Consequence: a leased tool's DNS query is a destination like any other.** A lease with the network on and no resolver on port 53 can reach its addresses by IP and cannot look a name up; `doctor` says so, and nothing adds a resolver on the caller's behalf. |
+| IPv6 egress | `socket_connect`, `socket_sendmsg` | **Denied outright** for a leased process. The lease vocabulary has no v6 allow-list, so there is nothing an address could be checked against. |
 
 Policy is keyed per lease. Two concurrent missions do not see each other's permissions, and
 revoking one does not remove an entry another still holds.
@@ -57,8 +58,8 @@ These are reachable by a leased process. They are listed so nobody has to discov
 
 | Gap | Consequence |
 | --- | --- |
-| **UDP to an unconnected socket** | `socket_connect` does not fire for `sendto()` on an unconnected UDP socket. A `socket_sendmsg` hook would close it; it is not written, and shipping an unverified BPF program that the loader might reject would take the whole substrate down rather than tighten it. |
-| **AF_UNIX / AF_NETLINK** | Local IPC is untouched. Denying it wholesale would break name resolution and logging for the shipped catalogue; a per-socket allow-list is the real answer and does not exist. A leased tool can talk to any local daemon socket its uid can reach. |
+| **AF_UNIX / AF_NETLINK** | Local IPC is untouched. A per-socket allow-list keyed on the socket's inode is the real answer and does not exist. A leased tool can talk to any local daemon socket its uid can reach — including a resolver that answers over one, which is how a name lookup can still succeed on a host where `systemd-resolved` is reached that way rather than over UDP. |
+| **Raw and packet sockets** | Creating one needs `CAP_NET_RAW`, which a workload dropped to `nobody` does not have, so nothing policies it and nothing needs to. Not a claim about a workload that keeps capabilities: this daemon does not run one. |
 | **Inherited file descriptors** | The hooks fire on `open` and `connect`. A descriptor the tool inherits was opened by the daemon, before any of them ran. |
 | **Filesystem writes and reads outside the jail's contents** | Closed by the jail since 2026-09-20, pending its proof: the workload's root holds the system directories read-only, its working directory, a fresh `/tmp`, `/proc` and six device nodes, and nothing else. `/etc` travels whole and read-only; what `nobody` may not read there is still denied by mode, and the inode deny-list still applies inside the jail because bind mounts keep inode identity. Until the probe has run, treat the deny-list as the boundary it was: on 2026-09-18, `nobody` read a public key in the Windows user's `.ssh` folder through `/mnt/c`. Two things close that today: `/mnt` is absent from the jail, and `splat-mcp provision --apply` now writes the `[automount]` umask of 077 into the guest's `/etc/wsl.conf` when it is missing, which shuts `nobody` out of the Windows drives for anything not jailed once WSL restarts. |
 

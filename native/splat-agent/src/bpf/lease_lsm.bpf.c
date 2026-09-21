@@ -24,6 +24,7 @@
 //   bprm_check_security -> only allow-listed executable inodes may exec           (-EPERM)
 //   file_open           -> protected inodes cannot be opened by a leased process  (-EPERM)
 //   socket_connect      -> only allow-listed IPv4 /32 destinations are reachable  (-EPERM)
+//   socket_sendmsg      -> the same, for a datagram that names its own destination (-EPERM)
 //
 // A process is "leased" iff its current cgroup id is present in leased_cgroups. Anything
 // outside the lease is untouched, so the host and every other workload are unaffected.
@@ -72,6 +73,7 @@ enum splat_hook {
     HOOK_EXEC = 1,
     HOOK_OPEN = 2,
     HOOK_CONNECT = 3,
+    HOOK_SENDMSG = 4,
 };
 
 // One denial, as the daemon reads it: 56 bytes, 8-byte alignment, mirrored by RawViolationEvent in
@@ -301,5 +303,68 @@ int BPF_PROG(splat_socket_connect, struct socket *sock, struct sockaddr *address
         return 0; // Approved endpoint FOR THIS LEASE - this address on this port.
 
     report(cgid, HOOK_CONNECT, daddr);
+    return -EPERM;
+}
+
+// A datagram that carries its own destination, which socket_connect never sees.
+//
+// `sendto()` on an unconnected UDP socket names the address in the message rather than on the
+// socket, so no connect happens and the hook above never fires. That left every leased process a
+// full UDP path out - DNS included - while `allowNetwork: false` read as "no network". The same
+// allow-list answers both: a datagram destination is an endpoint like any other.
+//
+// A message with NO destination of its own is on a connected socket, which socket_connect already
+// judged at connect time; judging it again here would deny nothing new and cost a lookup per
+// datagram on an already-approved path.
+SEC("lsm/socket_sendmsg")
+int BPF_PROG(splat_socket_sendmsg, struct socket *sock, struct msghdr *msg, int size, int ret)
+{
+    if (ret != 0)
+        return ret;
+
+    __u64 cgid = bpf_get_current_cgroup_id();
+    if (!is_leased(cgid))
+        return 0;
+
+    void *name = BPF_CORE_READ(msg, msg_name);
+    if (!name)
+        return 0; // Connected socket: socket_connect settled this one.
+
+    int namelen = BPF_CORE_READ(msg, msg_namelen);
+
+    // The kernel copied this sockaddr in before the hook ran (move_addr_to_kernel), so it is kernel
+    // memory and its length is the one the kernel accepted, not the caller's claim.
+    struct sockaddr_in in = {};
+    if (namelen < (int)sizeof(in)) {
+        // Too short to hold an IPv4 destination. It may still be an AF_UNIX path, which this hook
+        // does not police, so read only the family and decide on that.
+        sa_family_t short_family = 0;
+        if (bpf_probe_read_kernel(&short_family, sizeof(short_family), name) != 0)
+            return 0;
+        if (short_family != AF_INET && short_family != AF_INET6)
+            return 0;
+        report(cgid, HOOK_SENDMSG, 0);
+        return -EPERM;
+    }
+
+    if (bpf_probe_read_kernel(&in, sizeof(in), name) != 0)
+        return 0; // Unreadable: nothing to judge, and the connect hook still guards connected paths.
+
+    if (in.sin_family == AF_INET6) {
+        report(cgid, HOOK_SENDMSG, 0); // As connect does: no v6 vocabulary, so no v6 destination.
+        return -EPERM;
+    }
+    if (in.sin_family != AF_INET)
+        return 0; // AF_UNIX and the rest: documented as not policed.
+
+    struct lease_ipv4_key k = {};
+    k.cgroup_id = cgid;
+    k.addr = in.sin_addr.s_addr; // network byte order, as the connect hook keys it
+    k.port = in.sin_port;
+    k._pad = 0;
+    if (bpf_map_lookup_elem(&allowed_connect_ipv4, &k) != NULL)
+        return 0;
+
+    report(cgid, HOOK_SENDMSG, in.sin_addr.s_addr);
     return -EPERM;
 }

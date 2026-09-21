@@ -68,6 +68,13 @@ workspace under `readOnlyFs` returns EROFS. Both need a root daemon.
 
 ## 2. Policing UDP
 
+> **Done 2026-09-21, pending the root probe.** The `lsm/socket_sendmsg` hook is in, judging a
+> datagram's own destination against the same allow-list, denying IPv6 and a too-short address as
+> `connect` does, and passing a message with no destination because `connect` already judged that
+> socket. Violations carry hook `4`, which `violation.rs` and `KernelViolationHook` name.
+> `doctor` warns when an egress policy has no resolver. The probe carries both halves. The
+> local-socket allow-list below is still not built.
+
 **What is true today.** The `socket_connect` hook fires for TCP and for a UDP socket that calls
 `connect()`. A datagram sent with `sendto()` on an unconnected socket never passes through it,
 so a leased tool can reach any address over UDP, including a resolver on port 53. AF_UNIX and

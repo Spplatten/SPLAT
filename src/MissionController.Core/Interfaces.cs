@@ -355,9 +355,11 @@ public record OverlayFsSpec(
 public enum KernelViolationHook
 {
     Unspecified = 0,
-    Exec = 1,    // bprm_check_security
-    Open = 2,    // file_open
-    Connect = 3  // socket_connect
+    Exec = 1,     // bprm_check_security
+    Open = 2,     // file_open
+    Connect = 3,  // socket_connect
+    // socket_sendmsg: a datagram naming its own destination, which never reaches socket_connect.
+    SendDatagram = 4
 }
 
 public record LeaseViolationEvent(

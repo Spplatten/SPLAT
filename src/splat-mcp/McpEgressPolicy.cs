@@ -34,6 +34,17 @@ public sealed class McpEgressPolicy
 
     public bool IsEmpty => _portsByAddress.Count == 0;
 
+    /// <summary>
+    /// Whether this policy names somewhere to go and no way to look a name up.
+    ///
+    /// Since the kernel started policing datagrams as well as connections, a leased tool's DNS query
+    /// is refused like any other destination - correctly, and surprisingly, because the symptom is a
+    /// tool that cannot resolve rather than one that cannot connect. A resolver is an endpoint like
+    /// any other and the operator names it or does not; nothing adds one on their behalf. This is the
+    /// line that tells them, and it is only a note: a policy of raw addresses needs no resolver.
+    /// </summary>
+    public bool NamesNoResolver => !IsEmpty && !_portsByAddress.Values.Any(ports => ports.Contains(53));
+
     /// <summary>The approved endpoints, for the startup note an operator reads on stderr.</summary>
     public override string ToString() => string.Join(", ",
         _portsByAddress.OrderBy(entry => entry.Key, StringComparer.Ordinal)

@@ -249,6 +249,33 @@ public sealed class SubstrateDoctorTests
         Assert.Contains("none in the guest, so the token alone authorizes", report.ToString());
     }
 
+    /// <summary>
+    /// Policing datagrams made a leased tool's DNS query a destination like any other, so a policy of
+    /// web endpoints with no resolver now means "reachable by IP, unresolvable by name". That is correct
+    /// and surprising, and the surprise belongs in the report rather than in a tool's error output.
+    /// </summary>
+    [Fact]
+    public async Task AnEgressPolicyWithNoResolver_SaysSo_AndOneWithAResolverIsQuiet()
+    {
+        var withoutResolver = new StringWriter();
+        await SubstrateDoctor.RunAsync(
+            new McpServerCommand.Doctor(null, McpEgressPolicy.Parse("203.0.113.7:443")),
+            withoutResolver,
+            wsl: (_, _) => Task.FromResult((0, "6.18.33.2\n---\nlsm=bpf\n")),
+            health: new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
+
+        Assert.Contains("names no resolver on port 53", withoutResolver.ToString());
+
+        var withResolver = new StringWriter();
+        await SubstrateDoctor.RunAsync(
+            new McpServerCommand.Doctor(null, McpEgressPolicy.Parse("203.0.113.7:443,203.0.113.53:53")),
+            withResolver,
+            wsl: (_, _) => Task.FromResult((0, "6.18.33.2\n---\nlsm=bpf\n")),
+            health: new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
+
+        Assert.DoesNotContain("names no resolver", withResolver.ToString());
+    }
+
     [Fact]
     public async Task AnEgressPolicy_IsReportedAsTheOperatorWroteIt()
     {

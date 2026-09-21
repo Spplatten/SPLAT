@@ -129,6 +129,14 @@ public static class SubstrateDoctor
                 ? "no --egress given, so a lease gets no network at all"
                 : $"may connect only to {doctor.Egress}");
 
+        if (doctor.Egress.NamesNoResolver)
+        {
+            Line(output, "--", "name lookups",
+                "this policy names no resolver on port 53, and the kernel refuses a leased tool's DNS "
+                + "datagram like any other destination - so a lease can reach these addresses by IP and "
+                + "cannot look a name up. Add your resolver as a.b.c.d:53 if a tool needs one.");
+        }
+
         output.WriteLine();
         output.WriteLine("What a lease enforces when one runs (native/splat-agent/SUPPORTED_POLICY.md)");
         foreach (var group in CapabilityManifest.Lease.GroupBy(row => row.Where))

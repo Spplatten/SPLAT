@@ -52,6 +52,8 @@ impl ViolationEvent {
             // rendering a v6 denial as a v4 address nobody dialled.
             3 if raw.detail == 0 => "socket_connect: denied outbound network connection (IPv6 destination, or IPv4 0.0.0.0)".to_string(),
             3 => format!("socket_connect: denied outbound network connection to unapproved IPv4 {}", be_u32_to_ipv4(raw.detail)),
+            4 if raw.detail == 0 => "socket_sendmsg: denied outbound datagram (IPv6 destination, or an address too short to hold one)".to_string(),
+            4 => format!("socket_sendmsg: denied outbound datagram to unapproved IPv4 {}", be_u32_to_ipv4(raw.detail)),
             _ => format!("unspecified kernel hook violation (hook {}, detail {})", raw.hook, raw.detail),
         };
 
@@ -134,6 +136,25 @@ mod tests {
             let raw = ipv4_to_be_u32(addr).unwrap();
             assert_eq!(be_u32_to_ipv4(raw), addr, "{addr} must survive parse then render");
         }
+    }
+
+    /// A datagram denial is not a connect denial, and reads as itself: the two hooks catch different
+    /// syscalls and an operator reading the ledger has to be able to tell which one fired.
+    #[test]
+    fn a_datagram_denial_names_the_hook_that_made_it() {
+        let raw = RawViolationEvent {
+            cgroup_id: 7,
+            ktime_ns: 1,
+            seq: 2,
+            pid: 3,
+            hook: 4,
+            detail: ipv4_to_be_u32("1.1.1.1").unwrap(),
+            comm: *b"dig\0\0\0\0\0\0\0\0\0\0\0\0\0",
+        };
+        let event = ViolationEvent::from_raw(&raw);
+        assert!(event.detail_text.contains("socket_sendmsg"), "{}", event.detail_text);
+        assert!(event.detail_text.contains("1.1.1.1"), "{}", event.detail_text);
+        assert!(!event.detail_text.contains("unspecified"), "{}", event.detail_text);
     }
 
     /// An IPv6 denial reaches the ring buffer with detail 0, which the old text rendered as a denial

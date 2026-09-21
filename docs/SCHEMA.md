@@ -67,8 +67,8 @@ entry.
 | 8 | 8 | `ktime_ns` | `bpf_ktime_get_ns()` at the denial: the kernel's monotonic clock, nanoseconds since boot. Not wall time |
 | 16 | 8 | `seq` | The denial's number, taken from `counters[0]` **before** the reservation. Global across every lease |
 | 24 | 4 | `pid` | The thread-group id (`bpf_get_current_pid_tgid() >> 32`) |
-| 28 | 4 | `hook` | `1` exec (`bprm_check_security`), `2` open (`file_open`), `3` connect (`socket_connect`) |
-| 32 | 4 | `detail` | Exec and open: the **low 32 bits** of the inode number. Connect: the destination IPv4 address in network byte order, or `0` for an IPv6 destination or an address too short to hold one |
+| 28 | 4 | `hook` | `1` exec (`bprm_check_security`), `2` open (`file_open`), `3` connect (`socket_connect`), `4` datagram (`socket_sendmsg`) |
+| 32 | 4 | `detail` | Exec and open: the **low 32 bits** of the inode number. Connect and datagram: the destination IPv4 address in network byte order, or `0` for an IPv6 destination or an address too short to hold one |
 | 36 | 16 | `comm` | The task's `comm`, NUL-terminated within the 16 bytes |
 | 52 | 4 | — | Padding. Unspecified; the reservation is not zeroed, so a consumer must not read it |
 
@@ -179,7 +179,7 @@ dimension the caller did not declare.
 | `argv` | string[] | yes | Verbatim arguments; an empty array is "no arguments". Anything but an array is refused |
 | `workingDirectory` | string | no (`/tmp`) | Falls back to `/tmp` if absent on disk |
 | `allowNetwork` | bool | no (`false`) | |
-| `allowedEgressIps` | string[] of dotted quads | when `allowNetwork` | Installed × `allowedEgressPorts`. Empty means nothing permitted |
+| `allowedEgressIps` | string[] of dotted quads | when `allowNetwork` | Installed × `allowedEgressPorts`. Empty means nothing permitted. The same list governs datagrams, so a resolver must appear here on port 53 for a name lookup to succeed |
 | `allowedEgressPorts` | int[] | when `allowNetwork` | 1–65535 |
 | `readOnlyFs` | bool | no | The working directory is bound read-only inside the jail. Refused only by a daemon that is not enforcing |
 | `missionId` (again) | | | Letters, digits, `-`, `_` and `.` only: it names a cgroup and a jail root |
@@ -236,7 +236,7 @@ by [`WslLeasedExecutor`](../src/MissionController.Infrastructure.Linux/WslLeased
 | `OverlayFs` | `overlayFs` | Sent with `enableCow: false` when present |
 
 `LeaseViolationEvent` is the `VIOLATION` frame one to one: `Hook` is `KernelViolationHook`
-(`Exec = 1`, `Open = 2`, `Connect = 3`, `Unspecified = 0`), `TimestampUtc` is `timestampMs`
+(`Exec = 1`, `Open = 2`, `Connect = 3`, `SendDatagram = 4`, `Unspecified = 0`), `TimestampUtc` is `timestampMs`
 when the daemon sent one, else the host's clock at receipt, and `Sequence` and `KernelTimeNs` are
 `seq` and `ktimeNs`, `0` from a daemon that predates them. A non-zero `violationsDropped` in
 `EXIT` is written into `StandardError` as a `[KERNEL_EVENTS_DROPPED]` line.

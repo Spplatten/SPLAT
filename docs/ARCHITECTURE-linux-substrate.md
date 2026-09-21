@@ -73,6 +73,7 @@ a libbpf-rs skeleton.
 | `lsm/bprm_check_security` | Exec allowed only when `(cgroup, dev, ino)` is on this lease's allow-list — including an exec by a tool that is already running |
 | `lsm/file_open` | Denied when `(cgroup, dev, ino)` is on this lease's deny-list |
 | `lsm/socket_connect` | IPv4 allowed only to an approved `(address, port)`; IPv6 denied outright; an AF_INET address too short to hold a `sockaddr_in` denied rather than read past; other families, such as AF_UNIX and AF_NETLINK, not policed |
+| `lsm/socket_sendmsg` | The same allow-list, for a datagram that carries its own destination — `sendto` on an unconnected socket, which `connect` never sees. A message without one is on a socket `connect` already judged, and passes |
 
 Three properties are load-bearing:
 
@@ -86,6 +87,11 @@ Three properties are load-bearing:
   at compile time that the Rust key layouts match the C structs.
 - **An earlier LSM's denial is never turned into an allow.** Each hook returns an existing
   non-zero verdict unchanged.
+- **A name lookup is a destination.** Since the datagram hook landed, a leased tool's DNS query is
+  judged against the same allow-list as everything else, so a lease with the network on and no
+  resolver on port 53 reaches its addresses by IP and cannot resolve a name. That is the vocabulary
+  working as written; nothing adds a resolver on a caller's behalf, and `doctor` says when a policy
+  names none.
 
 [`native/splat-canary`](../native/splat-canary) carries a deliberate fork of this program, frozen at
 the shape its recorded evidence was produced against. It proves the primitive with one lease at a

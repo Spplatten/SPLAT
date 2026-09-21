@@ -246,6 +246,7 @@ production host would need instead, and **none of it is built** unless the row s
 | The ring buffer poll returns an error | Logged; polling continues. It used to end the drain thread silently | `main.rs` |
 | The ring buffer is full when a denial happens | The `-EPERM` still happens; the record is dropped, its sequence number is skipped, the program's drop counter moves, and the lease's `EXIT` frame reports how far it moved | `lease_lsm.bpf.c`, `main.rs` |
 | A leased process connects with an AF_INET address shorter than `sockaddr_in` | Refused with a violation of detail `0` rather than judged on bytes past the caller's buffer | `lease_lsm.bpf.c` |
+| A leased tool looks up a name, and the lease names no resolver on port 53 | The DNS datagram is refused like any other destination, so the tool reports a resolution failure. `doctor` warns when a policy names none | `lease_lsm.bpf.c`, `SubstrateDoctor.cs` |
 | A tool prints a line longer than 64 KiB | Forwarded in 64 KiB frames, never buffered whole | `main.rs`, `pump_output` |
 | A request frame over 1 MiB | Refused; connection closed | `main.rs`, `read_frame` |
 | A request of unknown `type` | Refused with a `STDERR` frame naming the type; the connection stays open | `main.rs` |
