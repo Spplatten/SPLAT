@@ -34,8 +34,27 @@ public sealed partial class WorkspaceGuard
     private const uint GENERIC_WRITE = 0x4000_0000;
     private const uint FILE_SHARE_READ_WRITE_DELETE = 0x0000_0007;
     private const uint OPEN_EXISTING = 3;
-    private const uint CREATE_ALWAYS = 2;
+    private const uint OPEN_ALWAYS = 4;
     private const uint VOLUME_NAME_DOS = 0x0;
+
+    // FileStandardInfo rather than GetFileInformationByHandle: that one also reads the basic
+    // information, which needs FILE_READ_ATTRIBUTES, and a write handle is opened without it.
+    private const int FileStandardInfo = 1;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FILE_STANDARD_INFO
+    {
+        public long AllocationSize;
+        public long EndOfFile;
+        public uint NumberOfLinks;
+        public byte DeletePending;
+        public byte Directory;
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetFileInformationByHandleEx(
+        SafeFileHandle hFile, int fileInformationClass, out FILE_STANDARD_INFO info, uint dwBufferSize);
 
     [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     private static partial SafeFileHandle CreateFile(
@@ -124,6 +143,15 @@ public sealed partial class WorkspaceGuard
         return handle.IsInvalid ? null : FinalPathOf(handle);
     }
 
+    /// <summary>
+    /// Whether the handle's file has exactly one name. A hard link is not a reparse point, and the
+    /// kernel reports the name a file was opened BY, so a link inside the workspace to a file
+    /// outside it passes every final-path check while reading and writing the outside file.
+    /// </summary>
+    private static bool HasOneName(SafeFileHandle handle)
+        => GetFileInformationByHandleEx(handle, FileStandardInfo, out var info, (uint)Marshal.SizeOf<FILE_STANDARD_INFO>())
+           && info.NumberOfLinks == 1;
+
     private bool IsInside(string? finalPath)
     {
         if (string.IsNullOrEmpty(finalPath))
@@ -194,9 +222,10 @@ public sealed partial class WorkspaceGuard
         }
 
         finalPath = FinalPathOf(handle);
-        if (!IsInside(finalPath))
+        if (!IsInside(finalPath) || !HasOneName(handle))
         {
-            // Lexically in bounds, actually somewhere else: a link redirected the open.
+            // Lexically in bounds, actually somewhere else: a link redirected the open, or the file
+            // has another name that may sit outside - where its contents then also are.
             handle.Dispose();
             finalPath = null;
             return null;
@@ -211,10 +240,10 @@ public sealed partial class WorkspaceGuard
     /// Three separate ways out of the workspace, so three checks:
     ///   1. the PARENT directory must really be inside — catches `workspace\link-to-elsewhere\x.txt`,
     ///      where the leaf is innocent and the directory is not;
-    ///   2. an existing leaf must not itself be a reparse point — opening one with CREATE_ALWAYS
-    ///      follows it and truncates the target, so this is checked before anything is opened for
-    ///      writing rather than after;
-    ///   3. the handle that results must still land inside.
+    ///   2. an existing leaf must not itself be a reparse point — the write does not so much as open
+    ///      a file it cannot yet vouch for, so this is checked before anything is opened;
+    ///   3. the handle that results must still land inside, and its file have no second name,
+    ///      before anything in it is truncated.
     /// </summary>
     public SafeFileHandle? OpenForWrite(string requestedPath, out string? finalPath)
     {
@@ -248,19 +277,22 @@ public sealed partial class WorkspaceGuard
 
         if (File.Exists(candidate) && IsReparsePoint(candidate))
         {
-            // A link at the LEAF is refused for a mechanical reason, not a policy one: CREATE_ALWAYS
-            // follows the link and truncates its target, so by the time the handle exists and its
-            // final path can be checked, an out-of-bounds file has already been emptied. There is no
-            // check-then-truncate order that is safe here, so the link itself is refused.
+            // A link at the LEAF is refused rather than followed and then checked: the write should
+            // not so much as open a file this method cannot yet vouch for.
             //
             // A link in a PARENT directory is different and is allowed when it resolves inside: the
             // parent is verified before anything is opened, and nothing is destroyed by looking.
             return null;
         }
 
+        // OPEN_ALWAYS, and the file is emptied only once its handle has passed. CREATE_ALWAYS emptied
+        // it on open, so whatever the checks above cannot see - a hard link, or a junction swapped
+        // into the parent after the parent was verified - had truncated a file outside the workspace
+        // before the refusal below. A lost race can now leave an empty NEW file outside; a file that
+        // already existed is not changed.
         var handle = CreateFile(
             candidate, GENERIC_WRITE, FILE_SHARE_READ_WRITE_DELETE, IntPtr.Zero,
-            CREATE_ALWAYS, 0, IntPtr.Zero);
+            OPEN_ALWAYS, 0, IntPtr.Zero);
 
         if (handle.IsInvalid)
         {
@@ -269,7 +301,18 @@ public sealed partial class WorkspaceGuard
         }
 
         finalPath = FinalPathOf(handle);
-        if (!IsInside(finalPath))
+        if (!IsInside(finalPath) || !HasOneName(handle))
+        {
+            handle.Dispose();
+            finalPath = null;
+            return null;
+        }
+
+        try
+        {
+            RandomAccess.SetLength(handle, 0);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             handle.Dispose();
             finalPath = null;

@@ -149,6 +149,9 @@ public class DocumentationDriftTests
     // honest sentence is longer than both the boast and the disclaimer.
     [InlineData("do not filter network sockets")]
     [InlineData("do <strong>not</strong> filter network sockets")]
+    // True at 33 of 49, and still printed on the guide's ring diagram at 10 of 49.
+    [InlineData("most tools get no network at all")]
+    [InlineData("none for most tools")]
     public void RetiredOverclaims_DoNotReappear(string phrase)
     {
         // Widened past the README deliberately. Every phrase above was retired from the README, and

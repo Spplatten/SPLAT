@@ -1,6 +1,9 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Text;
@@ -50,6 +53,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
         IntPtr attributeList = IntPtr.Zero;
         IntPtr capabilitiesBlock = IntPtr.Zero;
         IntPtr appContainerSidBuffer = IntPtr.Zero;
+        IntPtr environmentBlock = IntPtr.Zero;
         var pi = new Win32Interop.PROCESS_INFORMATION();
 
         try
@@ -81,8 +85,9 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
                 ? $"\"{resolvedExecutable}\""
                 : $"\"{resolvedExecutable}\" {arguments}";
 
-            uint creationFlags = Win32Interop.CREATE_SUSPENDED | Win32Interop.CREATE_NO_WINDOW;
+            uint creationFlags = Win32Interop.CREATE_SUSPENDED | Win32Interop.CREATE_NO_WINDOW | Win32Interop.CREATE_UNICODE_ENVIRONMENT;
             bool success = false;
+            environmentBlock = Marshal.StringToHGlobalUni(ToolEnvironmentBlock());
 
             // Network denial is applied by launching into an AppContainer holding ZERO capability
             // SIDs. Capabilities are what grant an AppContainer its reach, so an empty set leaves the
@@ -158,7 +163,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
                             ref sa,
                             true,
                             creationFlags,
-                            IntPtr.Zero,
+                            environmentBlock,
                             workingDirectory,
                             ref siex,
                             out pi)
@@ -170,7 +175,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
                             ref sa,
                             true,
                             creationFlags,
-                            IntPtr.Zero,
+                            environmentBlock,
                             workingDirectory,
                             ref si,
                             out pi);
@@ -202,7 +207,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
                         ref sa,
                         true,
                         creationFlags,
-                        IntPtr.Zero,
+                        environmentBlock,
                         workingDirectory,
                         ref siex,
                         out pi)
@@ -213,7 +218,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
                         ref sa,
                         true,
                         creationFlags,
-                        IntPtr.Zero,
+                        environmentBlock,
                         workingDirectory,
                         ref si,
                         out pi);
@@ -323,7 +328,57 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
             }
             if (capabilitiesBlock != IntPtr.Zero) Marshal.FreeHGlobal(capabilitiesBlock);
             if (appContainerSidBuffer != IntPtr.Zero) Marshal.FreeHGlobal(appContainerSidBuffer);
+            if (environmentBlock != IntPtr.Zero) Marshal.FreeHGlobal(environmentBlock);
         }
+    }
+
+    /// <summary>
+    /// The environment a tool starts with: the operator's own, except for how a bare command name
+    /// is resolved. Templates name <c>klist</c>, <c>netsh</c> or <c>w32tm</c> without a directory,
+    /// and cmd.exe and PowerShell look those up on PATH, so an inherited PATH made the evidence
+    /// depend on install order. It already did: on the machine this was found on, a JDK installer
+    /// had put its bin directory ahead of System32, and identity-kerberos-spn ran Java's klist
+    /// and got back its usage text.
+    ///
+    /// So the Windows directories go first, and a name that ships with Windows always means the
+    /// Windows file. First rather than only: that was measured too, and it cost
+    /// web-autonomous-site-deploy its node, npm and git, which live wherever the operator installed
+    /// them. What stays shadowable is a name Windows does not ship, and only from a directory already
+    /// on the operator's PATH. NoDefaultCurrentDirectoryInExePath stops cmd.exe trying the working
+    /// directory before any of it: that is the jail, and a file a tool wrote there must not become
+    /// the next command. Everything else is inherited: a template reads %COMPUTERNAME%, and the
+    /// tools themselves read SystemRoot, TEMP and the profile paths.
+    /// </summary>
+    private static string ToolEnvironmentBlock()
+    {
+        string system = Environment.SystemDirectory;
+        var variables = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables())
+        {
+            variables[(string)entry.Key] = entry.Value as string ?? string.Empty;
+        }
+
+        string[] windowsDirectories =
+        {
+            system,
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            Path.Combine(system, "Wbem"),
+            Path.Combine(system, "WindowsPowerShell", "v1.0"),
+        };
+        var operatorDirectories = (variables.TryGetValue("PATH", out var inherited) ? inherited : string.Empty)
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(dir => !windowsDirectories.Contains(dir.TrimEnd('\\'), StringComparer.OrdinalIgnoreCase));
+        variables["PATH"] = string.Join(';', windowsDirectories.Concat(operatorDirectories));
+        variables["NoDefaultCurrentDirectoryInExePath"] = "1";
+
+        // CreateProcess wants the block sorted without regard to case: name=value\0 per variable,
+        // then one more \0 to end it.
+        var block = new StringBuilder();
+        foreach (var (name, value) in variables)
+        {
+            block.Append(name).Append('=').Append(value).Append('\0');
+        }
+        return block.Append('\0').ToString();
     }
 
     private static async Task<string> ReadStreamAsync(

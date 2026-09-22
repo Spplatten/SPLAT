@@ -160,8 +160,8 @@ public static partial class GovernedTemplateCatalog
     /// fails the build, and one not named here that would survive is reported so the list can grow.
     ///
     /// It is short, and honestly so. Four of these are templates that compose text and touch
-    /// nothing, five produce no evidence in or out of the container for reasons of their own
-    /// (<c>CatalogProducesEvidenceTests</c> holds those), and one - the SChannel audit - is a real
+    /// nothing, three produce no evidence in or out of the container because they need rights the
+    /// restricted token removes (<c>CatalogProducesEvidenceTests</c> holds those), and one - the SChannel audit - is a real
     /// sensor that genuinely works while denied. The control this tier actually wants is a
     /// socket-layer filter that does not double as an RPC wall; <c>docs/THREAT-MODEL.md</c> has the
     /// argument, and the roadmap has the row.
@@ -172,15 +172,18 @@ public static partial class GovernedTemplateCatalog
         "endpoint-bitlocker-compliance",
         "grants-budget-compliance-auditor",
         "grants-eligibility-proposal-engine",
-        "identity-kerberos-spn",
         "identity-lockout-trace",
         "marketing-social-campaign-publisher",
         "secops-auth-inspector",
         "secops-tls-cipher-audit",
-        "sysops-disk-space",
         // Added 2026-09-21, after reading what they return rather than only the comparison's verdict.
         "compliance-legacy-protocols",
         "endpoint-mdm-enrollment",
+
+        // Two left on 2026-09-22, when fixing them made them produce evidence at all. Denial had
+        // measured harmless because they answered with nothing on either side. sysops-disk-space
+        // now reads WMI, which the container refuses; identity-kerberos-spn's klist is refused its
+        // own ticket cache inside, and its SPN scan needs a domain controller.
 
         // Three others the comparison calls unchanged are deliberately absent, because reading what
         // they return says otherwise: sysops-ad-dc-health resolves its domain controller to

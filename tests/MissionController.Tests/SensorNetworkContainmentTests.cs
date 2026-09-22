@@ -201,6 +201,82 @@ public class SensorNetworkContainmentTests
             BreachOrNothing(confined, "a network-denied sensor reached 1.1.1.1:443 by raw IP."));
     }
 
+    private const int Resolved = 0;
+    private const int NotResolved = 9;
+
+    /// <summary>
+    /// The name channel. A process that resolves a hostname does not send the query itself: the DNS
+    /// Client service does, from svchost, on its behalf. The operator's threat-model note of
+    /// 2026-09-22 asked whether that carries a model-chosen name out of a network-denied tool. It
+    /// does not - the service refuses a container with no capabilities - and this holds that answer,
+    /// because the roadmap's WFP candidate would lose it: a filter keyed to the tool's SID never sees
+    /// the service's query.
+    ///
+    /// Each lookup is a fresh label under a public wildcard domain, so nothing can answer from a
+    /// cache and a resolved name proves the query left. The confined label is then looked for in the
+    /// DNS Client service's own cache beside the control's, which tells "refused before it left"
+    /// apart from "sent, and the answer withheld" - the second would still leak the name.
+    /// </summary>
+    [Fact]
+    public async Task ContainedSensor_CannotResolveAName_NotEvenThroughTheDnsClientService()
+    {
+        static string FreshName() => $"splat{Guid.NewGuid():N}.192.0.2.1.nip.io";
+        static string LookupScript(string name) =>
+            $"try {{ [Net.Dns]::GetHostAddresses('{name}') | Out-Null; exit {Resolved} }} catch {{ exit {NotResolved} }}";
+
+        if (!TestHostCanReachInternet() || !HostResolves(FreshName()))
+        {
+            return;
+        }
+
+        string open = FreshName();
+        int unconfined = await RunProbeAsync(LookupScript(open), denyNetworkAccess: false);
+        Assert.True(
+            unconfined == Resolved,
+            $"Control failed: this host resolves the wildcard domain but an UNCONFINED sensor could not " +
+            $"(exit {unconfined}). The launch path is broken, not the network.");
+
+        string denied = FreshName();
+        int confined = await RunProbeAsync(LookupScript(denied), denyNetworkAccess: true);
+        Assert.True(
+            confined == NotResolved,
+            confined == Resolved
+                ? "CONTAINMENT BREACH: a network-denied sensor resolved a name it chose."
+                : $"The network-denied sensor exited {confined}, neither resolving nor refused. Nothing about containment can be concluded.");
+
+        string cache = ResolverCache();
+        Assert.True(cache.Contains(open, StringComparison.OrdinalIgnoreCase),
+            "Control failed: the unconfined lookup is not in the DNS Client cache, so the cache cannot say where the confined one went.");
+        Assert.False(cache.Contains(denied, StringComparison.OrdinalIgnoreCase),
+            "CONTAINMENT BREACH: the network-denied sensor's name reached the DNS Client service's cache, so the query left even though the answer was withheld.");
+    }
+
+    private static bool HostResolves(string name)
+    {
+        try
+        {
+            return Dns.GetHostAddresses(name).Length > 0;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+    }
+
+    private static string ResolverCache()
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo(@"C:\Windows\System32\ipconfig.exe", "/displaydns")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            CreateNoWindow = true
+        };
+        using var ipconfig = System.Diagnostics.Process.Start(psi)!;
+        string text = ipconfig.StandardOutput.ReadToEnd();
+        ipconfig.WaitForExit();
+        return text;
+    }
+
     /// <summary>
     /// Containment must not be achieved by breaking the tool. If the confined process could not run
     /// at all, every connection test above would pass for the wrong reason.

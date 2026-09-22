@@ -127,6 +127,15 @@ public sealed class CapabilityManifestTests
             Assert.Equal(census.Templates, int.Parse(prose.Groups["total"].Value));
             Assert.Equal(census.NetworkDenied, int.Parse(prose.Groups["denied"].Value));
 
+            // The glossary and the paragraph's own remainder state it again. Neither was bound, and
+            // both still said twelve and thirty-seven a day after the sentence above said ten.
+            var glossary = Regex.Match(text, @"(?<denied>\d+) of the (?<total>\d+) specialists get this");
+            Assert.True(glossary.Success, $"{doc}'s glossary no longer states the census in the form this test reads");
+            Assert.Equal(census.NetworkDenied, int.Parse(glossary.Groups["denied"].Value));
+            var connected = Regex.Match(text, @"For the (?<open>\d+) with a connection");
+            Assert.True(connected.Success, $"{doc} no longer states how many keep a connection in the form this test reads");
+            Assert.Equal(census.Templates - census.NetworkDenied, int.Parse(connected.Groups["open"].Value));
+
             // The document names the catalog size three more times, and named it "40+" in two of
             // them while the sentence above said 49 - the vague number is the one that survives a
             // template being added, which is exactly why it should not be the one on the page. Swept

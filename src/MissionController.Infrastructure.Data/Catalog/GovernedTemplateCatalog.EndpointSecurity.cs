@@ -37,15 +37,21 @@ public static partial class GovernedTemplateCatalog
             CatEndpoint,
             ModelPro,
             new SingleToolDefinition(
-                "tasklist_tool",
-                "Tasklist Process Inspector",
-                @"C:\Windows\System32\tasklist.exe",
-                "/v /fo csv",
-                ExitOk,
+                "process_tree_tool",
+                "Process Tree & Image Path Reporter",
+                PowerShellExe,
+                // tasklist /v looks up a window title and an owner for every process: 105 s under
+                // the restricted token against 0.9 s without /v. That ran past the 45 s timeout, the
+                // job was killed (99 is the launcher's own timeout code, not tasklist's) and the model
+                // got a truncated list. It never had parent IDs or image paths either, both of which
+                // the prompt needs. CommandLine is left out on purpose: it is where tokens passed as
+                // arguments live, and DLP should not be the only thing between them and the model.
+                Ps(@"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,SessionId,WorkingSetSize,ExecutablePath | Sort-Object ProcessId | ConvertTo-Csv -NoTypeInformation"),
+                ExitOkOrPartial,
                 TimeoutSeconds: 45,
                 MaxMemoryBytes: Mb(256),
                 MaxCpuPercent: 60),
-            "You are a Tier-2 SecOps Analyst. Review the running processes for any unquoted service paths, anomalous process names, or suspicious background executables. Flag system-named binaries running from user-writable directories, processes with no window title running interactively, and duplicated instances of single-instance system processes.",
+            "You are a Tier-2 SecOps Analyst. Walk the process tree by ParentProcessId and flag parent-child pairs that do not belong together, such as an Office application or a browser starting a shell or a script host. Flag any system-named binary (svchost.exe, lsass.exe, csrss.exe, services.exe) whose ExecutablePath is outside System32, any executable running from a user-writable directory such as AppData or Temp, and duplicated instances of single-instance system processes (lsass.exe, wininit.exe, services.exe). ExecutablePath is blank for processes this restricted token cannot open, which is normal for SYSTEM processes and is not a finding by itself.",
             null),
 
         // --- Persistence / autoruns ---------------------------------------------------------------

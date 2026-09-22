@@ -69,7 +69,11 @@ public class CatalogProducesEvidenceTests
                     bool exitOk = template.Tool.AllowedExitCodes.Contains(run.ExitCode);
                     string? refusal = NotEvidence.FirstOrDefault(n => text.Contains(n, StringComparison.Ordinal));
 
+                    // Timed out comes first: the launcher kills the job with exit code 99, and read
+                    // as an exit code that looked like a tool breaking its contract when it was a
+                    // truncated answer.
                     string verdict =
+                        run.TimedOut ? "TIMED OUT" :
                         text.Length < 40 ? "EMPTY" :
                         refusal is not null ? "NO EVIDENCE" :
                         !exitOk ? "EXIT OUTSIDE CONTRACT" :
@@ -102,29 +106,40 @@ public class CatalogProducesEvidenceTests
     }
 
     /// <summary>
-    /// Measured 2026-09-21. Pinned rather than asserted empty, because each of these is a template
-    /// to rewrite or retire and that is content work, not a test fix. The list can only shrink
-    /// without someone editing this file, which is the point.
+    /// Measured 2026-09-22. Pinned rather than asserted empty, because each of these is a template
+    /// to give an elevated tier or retire, and that is the operator's decision, not a test fix.
     ///
-    /// Two call `wmic`, which Windows 11 has removed. One passes `klist` arguments it answers with
-    /// its usage text. Three want rights the restricted token deliberately removes - the Security
-    /// event log and `gpresult` need elevation - so those templates ask the tier for something it
-    /// is built not to give. One returns good evidence and exits outside its own contract.
+    /// All five want a right the restricted token deliberately removes: the Security event log
+    /// (identity-lockout-trace, secops-auth-inspector), <c>gpresult</c> (identity-gpo-rsop),
+    /// <c>secedit</c>'s policy export (compliance-security-baseline) and the BitLocker and TPM
+    /// cmdlets (endpoint-bitlocker-compliance, which answered with empty labels and so passed as
+    /// evidence until <see cref="Payload"/> stopped counting them).
+    ///
+    /// Four left on 2026-09-22 by being fixed. Two had called <c>wmic</c>, which Windows 11 removed.
+    /// identity-kerberos-spn had been running a JDK's <c>klist</c>, found ahead of System32 on the
+    /// host's PATH; the launcher now gives every tool the Windows default PATH. secops-process-scan
+    /// never exited outside its contract: 99 is the launcher's timeout code, and <c>tasklist /v</c>
+    /// needed 105 s of a 45 s budget. And sysops-time-sync, which asked the running time service for
+    /// its configuration, passed on 2026-09-21 and failed on 2026-09-22 with no line changed: the
+    /// service refuses this token only while it is running, and it starts on a trigger.
     /// </summary>
     private static readonly string[] ProduceNoEvidence =
     {
-        "campus-switchport-neighbor",
         "compliance-security-baseline",
+        "endpoint-bitlocker-compliance",
         "identity-gpo-rsop",
-        "identity-kerberos-spn",
         "identity-lockout-trace",
         "secops-auth-inspector",
-        "secops-process-scan",
-        "sysops-disk-space",
     };
 
+    /// <summary>
+    /// The evidence, less what carries none: the template's own echoed section headers, and a
+    /// property label with nothing after it. endpoint-bitlocker-compliance answered with seven such
+    /// labels and not one value, which read as a hundred characters of evidence.
+    /// </summary>
     private static string Payload(string text)
-        => Regex.Replace(text, @"---[^-\r\n]*---", " ").Replace("\r", " ").Replace("\n", " ").Trim();
+        => Regex.Replace(Regex.Replace(text, @"(?m)^[ \t]*[A-Za-z][\w .()-]*:[ \t]*\r?$", " "), @"---[^-\r\n]*---", " ")
+            .Replace("\r", " ").Replace("\n", " ").Trim();
 
     private static string Trim(string flat)
     {

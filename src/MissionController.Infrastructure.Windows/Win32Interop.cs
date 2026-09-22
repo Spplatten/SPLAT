@@ -10,6 +10,9 @@ internal static partial class Win32Interop
     public const uint CREATE_SUSPENDED = 0x00000004;
     public const uint CREATE_NO_WINDOW = 0x08000000;
     public const uint CREATE_NEW_CONSOLE = 0x00000010;
+
+    // lpEnvironment is read as ANSI unless this is set, and the block the launcher builds is UTF-16.
+    public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     public const uint STARTF_USESTDHANDLES = 0x00000100;
     public const uint HANDLE_FLAG_INHERIT = 0x00000001;
 

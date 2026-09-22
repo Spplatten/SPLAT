@@ -36,7 +36,8 @@ the command was written in advance.
 | Control | What it defends against here | What it costs |
 | --- | --- | --- |
 | Fixed command + argument binder | The injected model turning a sensor into an arbitrary command | Nothing. Every shipped template's arguments already fit the policy |
-| ACL jail (own directory, inheritance stripped) | A tool writing where the next mission or the operator would read it | Nothing measured |
+| Tool environment: the Windows directories first on PATH, and no search of the working directory | A bare command name resolving to a file the template's author did not mean. It did: a JDK installed ahead of System32 answered `klist` for identity-kerberos-spn until 2026-09-22 | Nothing measured. The Windows directories *alone* were measured first and cost web-autonomous-site-deploy its node, npm and git, so the operator's PATH follows them |
+| ACL jail (own directory, inheritance stripped) | One mission's files becoming the next mission's input. It is a working directory, not a write boundary: the restricted token keeps the operator's own SID, so a tool can write anywhere the operator can | Nothing measured |
 | Job object caps: memory, CPU, 32 processes, kill-on-close | A runaway or fork-bombing tool | Nothing measured |
 | Restricted token, Administrators deny-only, Medium integrity | A tool using the operator's admin rights | Three templates need rights it removes — see the open defects below. That is the cost, and it is the right side to fail on |
 | DLP on the output path | Secrets in tool output reaching the model provider | A scan budget, and false positives are possible |
@@ -44,7 +45,7 @@ the command was written in advance.
 | **Network denial (AppContainer, no capabilities, Low integrity)** | A tool binary exfiltrating, or a model-chosen hostname used as a signal through `ping` or `nslookup` | **Measured: it changed the answer of 21 of 33 templates.** It is not a socket control; it is a capability sandbox that also removes RPC to system services and drops integrity |
 
 **The decision, 2026-09-21:** network denial applies only to templates where it has been measured to
-change nothing — twelve of them today, named in the catalog and held there by
+change nothing — ten of them today, named in the catalog and held there by
 `NetworkToolsUnderDenialTests`. The others keep the local plumbing their job needs.
 
 That leaves a narrow channel open: an injected model picks a template whose scalar is a hostname and
@@ -65,9 +66,12 @@ namespace. `CapabilityManifest.Lease` states, row by row, what is enforced by th
 the daemon, what is refused outright and what is not policed — and a test fails if a row is not also
 in the substrate's own `SUPPORTED_POLICY.md`.
 
-`fs_read` and `fs_write` are a check inside SPLAT's own process against the workspace root. Real, and
-the manifest says in words that it is a user-space boundary and not a kernel one, because a client
-deciding what to trust must not read it as the lease.
+`fs_read` and `fs_write` are a check inside SPLAT's own process against the workspace root, made on
+the object rather than the name: `WorkspaceGuard` opens the file, asks the kernel where that handle
+landed, refuses a file that has a second name, and reads or writes through the handle it checked, so
+a junction swapped in after the check has nothing to redirect. Real, and the manifest says in words
+that it is a user-space boundary and not a kernel one, because a client deciding what to trust must
+not read it as the lease.
 
 ### Tier C — the one template that dials out
 
@@ -91,6 +95,10 @@ Stating these is the point of the page.
   not keep it home.
 - **A tool binary that is already compromised.** Tier A runs Microsoft's own binaries with fixed
   arguments. If one of those is subverted, nothing here notices.
+- **Anything already running as the operator.** The DLL search order, COM registrations under HKCU
+  and the PowerShell module folder in the operator's Documents can each redirect a Tier A tool, and
+  each needs write access to the operator's own profile or registry. Whoever has that does not need
+  SPLAT to act as the operator.
 - **Windows destination pinning.** Until a WFP filter exists, "one approved destination" is enforced
   on Linux and audited on Windows.
 
@@ -100,15 +108,18 @@ Stating these is the point of the page.
 
 Both are pinned by tests so they can only shrink.
 
-- **Eight templates produce no usable evidence even outside any container** (`CatalogProducesEvidenceTests`).
-  Two call `wmic`, which Windows 11 has removed. One passes `klist` arguments it answers with its
-  usage text. Three need rights the restricted token deliberately removes — the Security event log
-  and `gpresult` want elevation — which is the privilege drop working, and means those templates ask
-  for something the tier cannot give. One exits outside its own contract with good evidence in hand.
+- **Five templates produce no usable evidence even outside any container** (`CatalogProducesEvidenceTests`).
+  All five need a right the restricted token deliberately removes — the Security event log,
+  `gpresult`, `secedit`'s policy export, the BitLocker and TPM cmdlets — which is the privilege drop
+  working, and means those templates ask for something the tier cannot give. An elevated tier or
+  retirement is the operator's decision. Four others were fixed on 2026-09-22, and two of those had
+  been misdiagnosed here: the `klist` "arguments" were Java's `klist` answering in its place, and the
+  exit "outside its contract" was the launcher's own timeout code.
 - **Twenty-one templates were degraded by network denial** (`NetworkToolsUnderDenialTests`). Fixed by
   the re-tiering above; the test now holds every denied template to answering the same inside the
   container as outside it.
 
+---
 
 ****Edits & Considerations for updates 09/22/2026
 We have thoroughly mapped the front-door vectors (arguments, explicit network calls, elevation), but adversaries live in the peripheral state transitions and implied contracts between the application and the kernel.
@@ -142,3 +153,72 @@ The "Corporate Factor" Threat Model Additions
 When selling to an enterprise, their threat model expands beyond just the machine itself. They care about tenant isolation and data sovereignty.
 Identity-Bound Agents: Right now, SPLAT runs as the operator. Enterprises will want AI agents to run under dedicated Service Principal identities. If the grant-discovery agent reaches out, the enterprise firewall needs to see that request tagged with an "AI Agent" identity, not "Sean Platten's" identity, so they can apply agent-specific network policies.
 DLP (Data Loss Prevention) on the Output Path: We currently scrub tool output so we don't leak secrets to the model provider. In a corporate environment, they will want to inject their own DLP rules (e.g., regex for corporate intellectual property or SSNs) into our scan budget before data leaves their perimeter.
+
+---
+
+## Measured against the code, 2026-09-22
+
+The considerations above were checked against the source the day they were written, and run where
+they could be. Each verdict names what now holds it.
+
+**1. Implicit execution context — confirmed, already happening, and closed for PATH.** A template
+fixes its executable, but inside a `cmd /c` chain or a PowerShell script the commands are named bare,
+and that name was resolved against the operator's PATH. On the development machine a JDK installer
+had put its `bin` directory ahead of System32, so identity-kerberos-spn ran Java's `klist` and
+reported its usage text. The defect list had recorded that as "passes `klist` arguments it rejects";
+this note is what found the real cause. The launcher now puts the Windows directories first on every
+tool's PATH and sets `NoDefaultCurrentDirectoryInExePath`, so cmd.exe no longer tries the jail before
+PATH. `ToolCommandResolutionTests` holds both and fails with either line removed. The Windows
+directories *alone* were tried first, and cost web-autonomous-site-deploy its node, npm and git.
+The DLL search order, HKCU COM registrations and the operator's PowerShell module folder remain; all
+three need write access to the operator's own profile or registry, which is the "already running as
+the operator" line above. Application Verifier and Image File Execution Options live in HKLM and need
+an administrator.
+
+**2. Check-then-use races in `fs_read` and `fs_write` — the race was handled; two gaps beside it were
+not, and are closed.** `WorkspaceGuard` does not check a path and then open it. It opens the object,
+asks the kernel where the handle landed, and reads or writes through that same handle, so a junction
+swapped in after the check has nothing to redirect. This page's earlier sentence, "a check inside
+SPLAT's own process", undersold that. Checking it found what the race points toward without needing
+one: a **hard link** inside the workspace to a file outside it passed every check, because a hard link
+is not a reparse point and the kernel reports the name a file was opened by. `fs_read` returned the
+outside file and `fs_write` overwrote it. Writes also opened with `CREATE_ALWAYS`, which empties a file
+before any check can refuse it. Now a file with a second name is refused, and a write empties a file
+only after its handle has passed. `WorkspaceConfinementTests` holds both, and both tests failed
+against the previous guard. A lost race can still leave an empty *new* file outside the workspace; it
+needs an adversary who can make junctions there, which no SPLAT tool can do on Windows.
+
+**3. Window station — true, and open.** Tools run on the operator's desktop and the job object sets no
+UI restrictions, so a tool could read the clipboard or send messages to the operator's other windows
+at the same integrity. The command is fixed, so this matters only for a tool binary that misbehaves —
+the adversary network denial is also for. The job object's UI limits would close most of it. By this
+page's rule they ship once all 49 templates are shown to report the same with them on, and once the
+run record reads them back like the other job limits.
+
+**4. Service-brokered network calls — measured: today's container blocks DNS, and the WFP plan must
+keep it that way.** Inside the network-denied container, resolving a fresh name under a public wildcard
+domain failed within half a second through `getaddrinfo`, `ping` and `nslookup`, and the name never
+reached the DNS Client service's cache. The same lookup outside resolved and was cached for an hour.
+So a model-chosen hostname does not leave through the DNS Client service today;
+`SensorNetworkContainmentTests` holds that, cache check included. The point bites on the roadmap's
+WFP candidate instead: a filter keyed to the tool's SID would not see the query the service makes on
+the tool's behalf, so swapping the container for it would quietly reopen the name channel. The WFP
+row on the roadmap now carries that condition.
+
+**5. Storage and I/O — true, and accepted.** The job caps memory, CPU and processes, not disk space or
+I/O. Windows can rate-limit a job's I/O but has no per-job disk quota, and the restricted token keeps
+the operator's own SID, so a tool can write wherever the operator can; the jail row above now says so.
+Tier A's tools are fixed, read-mostly Microsoft binaries, each run ends at its timeout, and a model
+starts them one mission at a time. The worst case is a nuisance the operator sees, not a new
+capability. Revisit if a template that writes in bulk arrives.
+
+**6. Second-order prompt injection — already this tier's adversary; what stays undefended is the
+conclusion.** Tier A is written against "a model that has been prompt-injected — by the tool's own
+output". The tier bounds what an injected model can *do*: pick a template, and a scalar the binder
+accepts. It does not bound what the model *says*. An injected model can still write a wrong analysis,
+and the run record keeps the raw evidence beside it so a person can check one against the other. That
+is the whole defence, and it is only as good as the habit of looking.
+
+**The enterprise considerations** — agents that run under an identity of their own, and a customer's
+own DLP rules on the output path — are product requirements rather than gaps in this model. They are
+on the roadmap as candidates.

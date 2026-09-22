@@ -127,6 +127,12 @@ public static partial class GovernedTemplateCatalog
         // performs an authenticated LDAP read, both of which work correctly at Medium integrity.
         // 'klist tgt' is deliberately excluded - it requires elevation and its only unique output
         // is the TGT itself, which is credential material that must never enter the egress stream.
+        // 'klist sessions' is excluded too: listing other logon sessions needs elevation, and under
+        // this token it answered nine of eleven sessions with access-denied errors.
+        // The network is not denied. setspn's duplicate scan is an LDAP query to a domain
+        // controller, so on a domain member - the only machine where this template has anything to
+        // find - the container would blind it. Denial measured harmless only on a workgroup machine,
+        // where there is no controller to reach from either side.
         Template(
             "identity-kerberos-spn",
             "Kerberos Ticket & Duplicate SPN Auditor",
@@ -137,7 +143,7 @@ public static partial class GovernedTemplateCatalog
                 "kerberos_spn_tool",
                 "KList Cache & SetSPN Duplicate Scanner",
                 CmdExe,
-                "/c klist & echo --- CACHED SESSIONS --- & klist sessions & echo --- DOMAIN DUPLICATE SPN SCAN --- & setspn -X -P & echo --- COMPUTER ACCOUNT SPNs --- & setspn -L %COMPUTERNAME%",
+                "/c klist & echo --- DOMAIN DUPLICATE SPN SCAN --- & setspn -X -P & echo --- COMPUTER ACCOUNT SPNs --- & setspn -L %COMPUTERNAME%",
                 ExitOkOrToolAbsent,
                 TimeoutSeconds: 120,
                 MaxMemoryBytes: Mb(192),

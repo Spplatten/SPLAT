@@ -15,15 +15,20 @@ public static partial class GovernedTemplateCatalog
             CatSysOps,
             ModelFlash,
             new SingleToolDefinition(
-                "wmic_disk_tool",
-                "WMIC Logical Disk Query",
-                CmdExe,
-                "/c wmic logicaldisk get Caption,FreeSpace,Size,VolumeName /format:csv",
-                ExitOk,
-                TimeoutSeconds: 30,
-                MaxMemoryBytes: Mb(128),
+                "disk_volume_tool",
+                "Volume Capacity & Health Query",
+                PowerShellExe,
+                // wmic is gone from Windows 11, and this template answered "'wmic' is not recognized"
+                // for as long as nobody ran it. The perf class supplies the percentage free, so the
+                // prompt's 15% line is a comparison rather than the model dividing twelve-digit byte
+                // counts. Both halves need WMI, which is why the network is not denied here: inside
+                // the container Get-CimInstance is refused and DriveInfo returns nothing at all.
+                Ps(@"Get-Volume | Where-Object DriveLetter | Select-Object DriveLetter,FileSystemLabel,FileSystem,DriveType,HealthStatus,OperationalStatus,SizeRemaining,Size | Format-Table -AutoSize; Write-Output '--- PERCENT FREE ---'; Get-CimInstance Win32_PerfFormattedData_PerfDisk_LogicalDisk | Where-Object Name -Match ':' | Select-Object Name,PercentFreeSpace,FreeMegabytes | Format-Table -AutoSize"),
+                ExitOkOrPartial,
+                TimeoutSeconds: 60,
+                MaxMemoryBytes: Mb(256),
                 MaxCpuPercent: 40),
-            "You are a Senior Windows System Administrator. Analyze the storage volume output and report any drives with less than 15% free space with remediation suggestions.",
+            "You are a Senior Windows System Administrator. Analyze the storage volume output and report any drives with less than 15% free space with remediation suggestions. A HealthStatus other than Healthy means the file system itself has reported a fault; say so before any advice about capacity.",
             null),
 
         // --- Patch compliance -------------------------------------------------------------------------
@@ -139,7 +144,11 @@ public static partial class GovernedTemplateCatalog
                 "time_sync_tool",
                 "W32Time Status & Stripchart Probe",
                 CmdExe,
-                "/c w32tm /query /status /verbose & echo --- CONFIGURATION --- & w32tm /query /configuration & echo --- PEERS --- & w32tm /query /peers & echo --- LIVE OFFSET SAMPLES --- & w32tm /stripchart /computer:{TimeSourceHost} /samples:{SampleCount} /dataonly",
+                // The configuration is read from the registry because 'w32tm /query /configuration'
+                // asks the running service, which refuses the restricted token with 0x80070005 - and
+                // only while it runs. W32Time starts on a trigger, so the same template produced
+                // evidence one day and an access-denied the next.
+                @"/c w32tm /query /status /verbose & echo --- CONFIGURATION --- & reg query HKLM\SYSTEM\CurrentControlSet\Services\W32Time\Parameters & reg query HKLM\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpClient & echo --- PEERS --- & w32tm /query /peers & echo --- LIVE OFFSET SAMPLES --- & w32tm /stripchart /computer:{TimeSourceHost} /samples:{SampleCount} /dataonly",
                 ExitOkOrToolAbsent,
                 TimeoutSeconds: 120,
                 MaxMemoryBytes: Mb(128),

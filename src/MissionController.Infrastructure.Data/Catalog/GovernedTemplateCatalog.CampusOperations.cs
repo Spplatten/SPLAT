@@ -46,14 +46,16 @@ public static partial class GovernedTemplateCatalog
             new SingleToolDefinition(
                 "switchport_neighbor_tool",
                 "ARP, Neighbour & Link Layer Reporter",
-                CmdExe,
+                PowerShellExe,
                 // There is no supported user-space LLDP reader on stock Windows, so the switch is
                 // inferred indirectly: the ARP entry for the default gateway gives the upstream
                 // MAC whose OUI identifies the vendor, and the link speed plus adapter state
                 // bounds which port profile is in play. This is the most a zero-admin workstation
                 // template can establish without an agent, and the prompt says so explicitly
                 // rather than letting the model overstate its certainty.
-                "/c ipconfig /all & echo --- ARP TABLE --- & arp -a & echo --- NEIGHBOUR CACHE --- & netsh interface ipv4 show neighbors & echo --- LINK STATE --- & netsh interface show interface & echo --- ADAPTER SPEED AND DUPLEX --- & wmic nic where NetEnabled=true get Name,Speed,MACAddress,NetConnectionID /format:list",
+                // Link speed came from wmic, which Windows 11 has removed; Win32_NetworkAdapter is the
+                // class wmic was reading. It never reported duplex, so the section no longer says so.
+                Ps(@"ipconfig /all; Write-Output '--- ARP TABLE ---'; arp -a; Write-Output '--- NEIGHBOUR CACHE ---'; netsh interface ipv4 show neighbors; Write-Output '--- LINK STATE ---'; netsh interface show interface; Write-Output '--- ADAPTER LINK SPEED ---'; Get-CimInstance Win32_NetworkAdapter -Filter 'NetEnabled=true' | Select-Object Name,NetConnectionID,MACAddress,Speed | Format-List"),
                 ExitOkOrPartial,
                 TimeoutSeconds: 90,
                 MaxMemoryBytes: Mb(192),

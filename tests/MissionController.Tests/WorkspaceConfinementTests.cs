@@ -219,6 +219,69 @@ public class WorkspaceConfinementTests : IDisposable
         Assert.Equal("OUT-OF-BOUNDS", File.ReadAllText(outsideFile));
     }
 
+    // ---------------------------------------------------------------- hard links
+
+    /// <summary>
+    /// A hard link is not a reparse point, and the kernel reports the name a file was opened BY, so
+    /// every final-path check calls a link to an outside file in bounds. Found 2026-09-22 while
+    /// checking the operator's threat-model note on check-then-use races: the race was handled, and
+    /// this needed no race at all. Creating one needs no privilege, only write access to the target.
+    /// </summary>
+    private static bool TryMakeHardLink(string link, string target)
+    {
+        var psi = new ProcessStartInfo("cmd.exe", $"/c mklink /H \"{link}\" \"{target}\"")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        using var p = Process.Start(psi);
+        p!.WaitForExit(10_000);
+        return p.ExitCode == 0 && File.Exists(link);
+    }
+
+    [Fact]
+    public void AHardLinkInsideTheWorkspaceCannotBeReadThrough()
+    {
+        Assert.True(TryMakeHardLink(Path.Combine(_workspace, "notes.txt"), Path.Combine(_outside, "secret.txt")),
+            "could not create the hard link this test needs");
+
+        using var handle = Guard().OpenForRead("notes.txt", out string? final);
+
+        Assert.Null(handle);
+        Assert.Null(final);
+    }
+
+    [Fact]
+    public void AHardLinkInsideTheWorkspaceCannotBeWrittenThrough_AndItsTargetIsNotEmptied()
+    {
+        Assert.True(TryMakeHardLink(Path.Combine(_workspace, "notes.txt"), Path.Combine(_outside, "secret.txt")),
+            "could not create the hard link this test needs");
+
+        using var handle = Guard().OpenForWrite("notes.txt", out _);
+
+        Assert.Null(handle);
+        // CREATE_ALWAYS emptied this on open, before any check had the chance to refuse the write.
+        Assert.Equal("OUT-OF-BOUNDS", File.ReadAllText(Path.Combine(_outside, "secret.txt")));
+    }
+
+    /// <summary>The truncation moved to after the checks; a write must still replace, not overlay.</summary>
+    [Fact]
+    public void AWriteReplacesAnExistingFile_RatherThanOverlayingIt()
+    {
+        File.WriteAllText(Path.Combine(_workspace, "log.txt"), "a much longer first version");
+
+        using (var handle = Guard().OpenForWrite("log.txt", out _))
+        {
+            Assert.NotNull(handle);
+            using var stream = new FileStream(handle!, FileAccess.Write);
+            stream.Write("short"u8);
+        }
+
+        Assert.Equal("short", File.ReadAllText(Path.Combine(_workspace, "log.txt")));
+    }
+
     // ---------------------------------------------------------------- through the MCP tools
 
     private static async Task<McpJsonRpcMessage> CallAsync(McpServerHandler handler, string tool, object args)
