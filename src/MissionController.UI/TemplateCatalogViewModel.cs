@@ -49,9 +49,63 @@ public partial class TemplateCatalogViewModel : ObservableObject
     [ObservableProperty]
     private bool _isLoading;
 
+    /// <summary>
+    /// What the list shows: <see cref="Templates"/> narrowed by <see cref="SearchText"/>. Kept as a
+    /// separate collection rather than filtering Templates in place, because Templates is also the
+    /// source the custom-template builder picks its base from, and that list must never be narrowed
+    /// by whatever the operator last typed into the search box.
+    /// </summary>
+    public ObservableCollection<SingleToolTemplate> FilteredTemplates { get; } = new();
+
+    [ObservableProperty]
+    private string _searchText = string.Empty;
+
+    /// <summary>"12 of 51 templates" - raised by <see cref="ApplyFilter"/>, since neither Count notifies through x:Bind on its own.</summary>
+    public string CountSummary => $"{FilteredTemplates.Count} of {Templates.Count} templates";
+
     public TemplateCatalogViewModel(ITemplateRegistry registry)
     {
         _registry = registry;
+    }
+
+    partial void OnSearchTextChanged(string value) => ApplyFilter();
+
+    /// <summary>
+    /// Case-insensitive match over the fields an operator actually thinks in: the name, the
+    /// category, the description, the tool's name and the template id. Every word typed must match
+    /// somewhere, so "defender endpoint" finds the Defender audit and "identity kerberos" narrows
+    /// to one template instead of unioning two categories.
+    /// </summary>
+    public static bool Matches(SingleToolTemplate template, string searchText)
+    {
+        if (string.IsNullOrWhiteSpace(searchText))
+            return true;
+
+        string haystack = string.Join('\n',
+            template.Name, template.Category, template.Description, template.Tool.Name, template.TemplateId);
+        foreach (string word in searchText.Split(' ', System.StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!haystack.Contains(word, System.StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        return true;
+    }
+
+    private void ApplyFilter()
+    {
+        FilteredTemplates.Clear();
+        foreach (var template in Templates)
+        {
+            if (Matches(template, SearchText))
+                FilteredTemplates.Add(template);
+        }
+
+        // A selection the filter just hid would leave the inspector showing a template that is not
+        // in the list; move it to the first match so what is shown is always something clickable.
+        if (SelectedTemplate is null || !FilteredTemplates.Contains(SelectedTemplate))
+            SelectedTemplate = FilteredTemplates.FirstOrDefault();
+
+        OnPropertyChanged(nameof(CountSummary));
     }
 
     partial void OnSelectedTemplateChanged(SingleToolTemplate? value)
@@ -158,10 +212,7 @@ public partial class TemplateCatalogViewModel : ObservableObject
             {
                 Templates.Add(t);
             }
-            if (Templates.Count > 0 && SelectedTemplate == null)
-            {
-                SelectedTemplate = Templates[0];
-            }
+            ApplyFilter();
         }
         finally
         {

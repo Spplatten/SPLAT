@@ -35,44 +35,64 @@
 
         <!-- Main Content -->
         <Grid Grid.Row="1" ColumnSpacing="16">
+            <!-- The list gets the larger share: it is where the operator reads and chooses, and at
+                 a fixed 380 px every name wrapped and every description was cut at two lines. The
+                 inspector on the right only needs room for one template at a time. -->
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="380" />
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="4*" MinWidth="460" MaxWidth="760" />
+                <ColumnDefinition Width="5*" />
             </Grid.ColumnDefinitions>
 
-            <!-- Left: Template List -->
+            <!-- Left: Search + Template List -->
             <Border Grid.Column="0" Style="{StaticResource SplatCardStyle}" Padding="12">
-                <ListView
-                    ItemsSource="{x:Bind ViewModel.Templates, Mode=OneWay}"
-                    SelectedItem="{x:Bind ViewModel.SelectedTemplate, Mode=TwoWay}"
-                    SelectionChanged="ListView_SelectionChanged">
-                    <ListView.ItemTemplate>
-                        <DataTemplate x:DataType="models:SingleToolTemplate">
-                            <Grid Padding="8,10" RowSpacing="4">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
+                <Grid RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
 
-                                <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
-                                    <Border Background="{ThemeResource SplatAccentSubtleBrush}" CornerRadius="4" Padding="6,2">
-                                        <TextBlock Text="{x:Bind Category}" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource SplatAccentBrush}" />
-                                    </Border>
-                                    <TextBlock Text="{x:Bind Name}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
-                                </StackPanel>
+                    <TextBox
+                        Grid.Row="0"
+                        PlaceholderText="Search by name, category, tool or id — every word must match"
+                        Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        FontSize="14" />
 
-                                <TextBlock Grid.Row="1" Text="{x:Bind Description}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" MaxLines="2" />
+                    <TextBlock Grid.Row="1" Text="{x:Bind ViewModel.CountSummary, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
 
-                                <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10" Margin="0,2,0,0">
-                                    <TextBlock Text="{x:Bind TargetModel}" FontSize="10" Foreground="#D29BFF" />
-                                    <TextBlock Text="•" FontSize="10" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                                    <TextBlock Text="{x:Bind Tool.Name}" FontSize="10" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                                </StackPanel>
-                            </Grid>
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                </ListView>
+                    <ListView
+                        Grid.Row="2"
+                        ItemsSource="{x:Bind ViewModel.FilteredTemplates, Mode=OneWay}"
+                        SelectedItem="{x:Bind ViewModel.SelectedTemplate, Mode=TwoWay}"
+                        SelectionChanged="ListView_SelectionChanged">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="models:SingleToolTemplate">
+                                <Grid Padding="8,12" RowSpacing="5">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+                                        <Border Background="{ThemeResource SplatAccentSubtleBrush}" CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                                            <TextBlock Text="{x:Bind Category}" FontSize="11" FontWeight="Bold" Foreground="{ThemeResource SplatAccentBrush}" />
+                                        </Border>
+                                        <TextBlock Text="{x:Bind Name}" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                    </StackPanel>
+
+                                    <TextBlock Grid.Row="1" Text="{x:Bind Description}" FontSize="12.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" MaxLines="3" />
+
+                                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10" Margin="0,2,0,0">
+                                        <TextBlock Text="{x:Bind TargetModel}" FontSize="11" Foreground="{ThemeResource SplatVioletBrush}" />
+                                        <TextBlock Text="•" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                        <TextBlock Text="{x:Bind Tool.Name}" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
             </Border>
 
             <!-- Right: Template Inspector & Dynamic Parameter Inputs -->
