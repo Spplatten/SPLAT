@@ -42,9 +42,9 @@ internal static class MissionFixtureExporter
     private static readonly Regex TelemetryMarker = new(@"\r?\nTELEMETRY:\r?\n", RegexOptions.Compiled);
     private static readonly Regex AnalysisMarker = new(@"\r?\nANALYSIS:", RegexOptions.Compiled | RegexOptions.RightToLeft);
 
-    public static async Task<IReadOnlyList<string>> ExportAsync(string fixtureDirectory, Action<string> log)
+    public static async Task<IReadOnlyList<string>> ExportAsync(string fixtureDirectory, Action<string> log, string? databasePath = null)
     {
-        string dbPath = SqliteStorageContext.GetDefaultDatabasePath();
+        string dbPath = databasePath ?? SqliteStorageContext.GetDefaultDatabasePath();
         if (!File.Exists(dbPath))
         {
             log($"export: no console database at {dbPath}; nothing to export");

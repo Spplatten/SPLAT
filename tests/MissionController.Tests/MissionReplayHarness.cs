@@ -58,11 +58,19 @@ internal static class MissionReplayHarness
         ?? throw new InvalidOperationException(
             $"the fixture names template '{fixture.TemplateId}', which is not in the shipped catalog; a fixture replays the catalog's template so that the template's prompt is the one under test");
 
-    /// <summary>Replays one fixture and returns everything the pipeline produced.</summary>
-    public static async Task<MissionReplay> ReplayAsync(MissionFixture fixture, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Replays one fixture and returns everything the pipeline produced. With <paramref name="alsoWriteTo"/>
+    /// and <paramref name="memory"/> the same run is also written where a host would write it - a real
+    /// ledger and a real memory index - which is how a test stands up "a run the console did".
+    /// </summary>
+    public static async Task<MissionReplay> ReplayAsync(
+        MissionFixture fixture,
+        IAuditLedger? alsoWriteTo = null,
+        ISemanticMemoryIndex? memory = null,
+        CancellationToken cancellationToken = default)
     {
         var template = TemplateFor(fixture);
-        var ledger = new RecordingLedger();
+        var ledger = new RecordingLedger(alsoWriteTo);
         var client = new ReplayModelClient(fixture);
         var dlp = new RegexDataLossPreventionSanitizer();
         var credentials = new PromptCredentialSanitizer();
@@ -83,7 +91,7 @@ internal static class MissionReplayHarness
             client,
             ledger,
             _ => new ReplayJobSandbox(),
-            semanticMemoryIndex: null,
+            semanticMemoryIndex: memory,
             dlpSanitizer: dlp,
             credentialSanitizer: credentials,
             revocationManager: null,
@@ -286,6 +294,9 @@ internal static class MissionReplayHarness
     private sealed class RecordingLedger : IAuditLedger
     {
         private readonly List<(string Action, string Details)> _rows = new();
+        private readonly IAuditLedger? _forward;
+
+        public RecordingLedger(IAuditLedger? forward = null) => _forward = forward;
 
         public IReadOnlyList<string> Actions
         {
@@ -303,16 +314,21 @@ internal static class MissionReplayHarness
             }
         }
 
-        public Task AppendLogAsync(Guid missionId, string templateId, string action, string details, string operatorIdentity, CancellationToken cancellationToken = default)
+        public async Task AppendLogAsync(Guid missionId, string templateId, string action, string details, string operatorIdentity, CancellationToken cancellationToken = default)
         {
             lock (_rows) _rows.Add((action, details));
-            return Task.CompletedTask;
+            if (_forward is not null)
+            {
+                await _forward.AppendLogAsync(missionId, templateId, action, details, operatorIdentity, cancellationToken);
+            }
         }
 
         public Task<IReadOnlyList<AuditLogEntry>> GetAuditLogsAsync(Guid? missionId = null, int limit = 100, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<AuditLogEntry>>(Array.Empty<AuditLogEntry>());
+            _forward?.GetAuditLogsAsync(missionId, limit, cancellationToken)
+            ?? Task.FromResult<IReadOnlyList<AuditLogEntry>>(Array.Empty<AuditLogEntry>());
 
-        public Task<bool> VerifyLedgerIntegrityAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
+        public Task<bool> VerifyLedgerIntegrityAsync(CancellationToken cancellationToken = default) =>
+            _forward?.VerifyLedgerIntegrityAsync(cancellationToken) ?? Task.FromResult(true);
     }
 
     private sealed class ReplayJailManager : IJailManager

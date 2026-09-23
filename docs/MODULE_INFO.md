@@ -213,7 +213,8 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
   code but 0 - the only run-time check of the pages there is.
 - **Tests:** source-level only, because a test project cannot reference the WinUI app:
   `CompositionRootTests`, `UiWarningSuppressionTests`, `ShaderAssetVerificationTests`,
-  `XamlResourceKeyTests`; the pages themselves are checked by the self-test above.
+  `XamlResourceKeyTests`; the pages themselves are checked by the self-test above, and
+  `CompositionRootTests` holds its page list to every view under `Views/` and every menu item.
 
 ## splat-mcp
 

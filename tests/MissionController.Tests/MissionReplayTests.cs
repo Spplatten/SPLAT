@@ -4,7 +4,11 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
 using MissionController.Core.Replay;
+using MissionController.Infrastructure.Data;
+using MissionController.Infrastructure.Data.Audit;
+using MissionController.Infrastructure.Data.Vector;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -149,5 +153,93 @@ public sealed class MissionReplayTests
             Environment.NewLine + string.Join(Environment.NewLine, failures) + Environment.NewLine + Environment.NewLine +
             "If the pipeline is right and the fixture is stale, re-derive its expectations rather than editing them: " +
             $"{BlessVariable}=1 dotnet test --filter FullyQualifiedName~MissionReplayTests, then review the diff.");
+    }
+
+    /// <summary>
+    /// The export is the operator's route from a day of console runs to a fixture set, and it reads two
+    /// tables the console writes rather than anything built for it: the memory index's document and the
+    /// ledger's sealed facts. So it is tested against a database those same classes wrote. A run goes
+    /// through the pipeline into a real ledger and a real index, the export reads it back read-only,
+    /// and the fixture it writes replays to the run's own verdict and rows; a second export writes
+    /// nothing, because the mission is a fixture already.
+    /// </summary>
+    [Fact]
+    public async Task TheExporter_TurnsARunTheConsoleIndexed_IntoAFixtureThatReplaysClean()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "splat-export-" + Guid.NewGuid().ToString("N"));
+        string fixtures = Path.Combine(dir, "fixtures");
+        string dbPath = Path.Combine(dir, "missioncontroller.db");
+        Directory.CreateDirectory(dir);
+
+        try
+        {
+            var context = new SqliteStorageContext(dbPath);
+            var ledger = new SqliteChainedAuditLedger(context);
+            var memory = new SqliteSemanticMemoryIndex(context);
+
+            // The run, as the console would have done it: real sensor-shaped text with a credential
+            // in it that the scrub takes out before anything is indexed, and a model answer that
+            // quotes the telemetry.
+            var run = new MissionFixture
+            {
+                TemplateId = "secops-ir-triage-snapshot",
+                Model = "Anthropic/claude-sonnet-5",
+                Sensor = new FixtureSensor
+                {
+                    ExitCode = 0,
+                    Stdout = "--- TCP CONNECTIONS (ESTABLISHED / LISTEN) ---\r\n" +
+                             "State  LocalAddress LocalPort RemoteAddress RemotePort OwningProcess\r\n" +
+                             "Listen 0.0.0.0      3389      0.0.0.0       0          1204\r\n" +
+                             "--- SERVICES OUTSIDE WINDOWS AND PROGRAM FILES ---\r\n" +
+                             "Name    State   StartName                 PathName\r\n" +
+                             "backup  Running svc_backup password=Sup3rSecret! D:\\tools\\backup.exe\r\n",
+                },
+                Attempts =
+                {
+                    new FixtureAttempt
+                    {
+                        Index = 0,
+                        Model = "claude-sonnet-5",
+                        Response = "RDP is listening and one service runs outside the Windows folders.\n" +
+                                   "```json\n{\"status\":\"Warning\",\"headline\":\"RDP on 3389 and a service at D:\\\\tools\\\\backup.exe\"," +
+                                   "\"findings\":[\"Port 3389 is in Listen state, owned by process 1204\"," +
+                                   "\"Service backup runs D:\\\\tools\\\\backup.exe as svc_backup\"]," +
+                                   "\"recommendedActions\":[\"Confirm RDP is expected on this host\"]}\n```",
+                    },
+                },
+            };
+
+            var live = await MissionReplayHarness.ReplayAsync(run, alsoWriteTo: ledger, memory: memory);
+            Assert.Equal("Completed", live.Facts.ExecutionState);
+            var liveRows = (await ledger.GetAuditLogsAsync(live.Facts.MissionId, 500)).OrderBy(e => e.Id).Select(e => e.Action).ToList();
+            Assert.Equal(live.LedgerActions, liveRows);
+
+            var written = await MissionFixtureExporter.ExportAsync(fixtures, _out.WriteLine, dbPath);
+            string file = Assert.Single(written);
+            var fixture = MissionFixture.Load(file);
+
+            Assert.Equal(live.Facts.MissionId, fixture.MissionId);
+            Assert.Equal(MissionFixtureExporter.RecordedByLabel, fixture.RecordedBy);
+            Assert.Equal(live.Payload!.Replace("\r\n", "\n"), fixture.Sensor.Stdout.Replace("\r\n", "\n"));
+            Assert.DoesNotContain("Sup3rSecret", fixture.Serialize());
+            Assert.Equal(live.Analysis, fixture.Attempts.Single().Response);
+            Assert.Equal(liveRows, fixture.Expected.LedgerActions);
+            Assert.Equal("Warning", fixture.Expected.Status);
+            Assert.NotEmpty(fixture.SystemPromptSha256);
+
+            var replay = await MissionReplayHarness.ReplayAsync(fixture);
+            Assert.Null(replay.PayloadMismatch());
+            Assert.Empty(fixture.Expected.DifferencesFrom(replay.Observed()));
+            Assert.Empty(replay.Notes());
+
+            Assert.Empty(await MissionFixtureExporter.ExportAsync(fixtures, _out.WriteLine, dbPath));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            try { Directory.Delete(dir, recursive: true); } catch { /* the pool may still hold the db */ }
+        }
     }
 }
