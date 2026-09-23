@@ -110,7 +110,7 @@ them.
 | Runtime | `net10.0-windows10.0.19041.0`, Windows App SDK 2.5.1, self-contained | `net10.0-windows` |
 | Database | `%LOCALAPPDATA%\MissionController\Data\missioncontroller.db` | `%LOCALAPPDATA%\SPLAT\audit_ledger.db` |
 | Operator identity | `WindowsOperatorIdentityProvider("winui-console")` | `McpOperatorIdentityProvider` — the logon session, or a validated `SPLAT_MCP_CLIENT_CREDENTIAL` |
-| Revocation check before a mission | Wired | Not wired — the engine is constructed with `null` |
+| Revocation check before a mission | Wired | Wired since 2026-09-19 (F19): `Program.cs` passes the same `IncidentRevocationManager` the tool-call gate uses. This row said "constructed with `null`" until 2026-09-23 |
 | Remediation engine | Wired | Absent |
 | Linux substrate | Not referenced | `WslLeasedExecutor` behind `run_command` and `run_code` |
 | Workflow engine | Registered; no screen resolves it yet | Absent |
@@ -127,8 +127,8 @@ streams `MissionChunk`s while it runs. In order:
 
 1. **Validate** the template's shape — one model, one tool, one FQDN, declared exit codes, bounded
    timeout and limits.
-2. **Revocation** — the console checks the operator against the circuit breaker; `splat-mcp` does
-   not.
+2. **Revocation** — both hosts check the operator against the circuit breaker; an unreadable
+   list refuses the mission rather than clearing it (F19, 2026-09-19).
 3. **Bind** the parameters into the command line. A value the binder cannot place refuses the
    mission before anything is provisioned (`MISSION_BLOCKED_PARAMETER_REJECTED`).
 4. **Record** `MISSION_INITIATED`, then provision the jail. From here a `finally` drains the jail on

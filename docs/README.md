@@ -4,7 +4,7 @@
 
 # docs/ — what is in here, and which of it is still true
 
-Last reconciled **2026-09-10**, when the architecture, context and module reference was added.
+Last reconciled **2026-09-23**, when the two governance templates and the status-gate record were added; the architecture, context and module reference dates from 2026-09-10.
 Read [the OEM subtraction plan](audits/2026-09-09-oem-subtraction-plan.md) first; everything else
 is either an input to it, an artifact it produces, or a record of how the project got here. To
 change the code rather than the plan, start with [CONTEXT.md](CONTEXT.md).
@@ -20,6 +20,7 @@ change the code rather than the plan, start with [CONTEXT.md](CONTEXT.md).
 | [audits/2026-09-09-oem-subtraction-plan.md](audits/2026-09-09-oem-subtraction-plan.md) | **The current plan.** Phases P0–P3, the monetization argument, the term-sheet defects. Supersedes every plan document below it. |
 | [RUNBOOK-human-steps.md](RUNBOOK-human-steps.md) | What only a human can do — the `sudo` steps, the SDK installs, the reboots. Nothing in it is open right now — Part 0, the .NET 10 SDK, closed 2026-09-09. |
 | [GUIDE-operator.md](GUIDE-operator.md) | For the operator, after the 2026-09-20 substrate audit: what changed and why, a reading order for the Linux side, and the root steps that are theirs, with commands and expected output. |
+| [audits/2026-09-23-status-gate-and-gap-analysis.md](audits/2026-09-23-status-gate-and-gap-analysis.md) | The five-layer status gate read out of the tree at `40caaa0` — sandbox, telemetry, state machine, auth broker, audit trail — with the top three critical-path fixes, the pragmatism-versus-decoupling verdict, and the minimal demonstration set for an external evaluator. |
 | [audits/2026-09-20-substrate-hardening.md](audits/2026-09-20-substrate-hardening.md) | The five weaknesses of the Linux lease after the audit — deny-list not jail, UDP unpoliced, nothing survives the daemon, the shared secret, the unproven record change — with a recommendation, an order and a proof for each. Feeds P2 of the plan. |
 | [audits/2026-09-05-orchestration-plan.md](audits/2026-09-05-orchestration-plan.md) | Re-sequenced, not retired. Its Phase 1 was subtracted and its Phase 2 rescoped, but its ordering argument still holds. |
 
@@ -38,6 +39,16 @@ Reference, not plan: these describe the tree as it is, and are corrected when th
 | [SCHEMA.md](SCHEMA.md) | The lease's three contracts: BPF map keys and the ring-buffer record byte for byte, the protocol 3 frames and proofs, and the C# records they map to — with what the protocol does not promise. Added 2026-09-20. |
 | [RUNBOOK.md](RUNBOOK.md) | What a kernel and a guest need for the daemon to enforce, copy-paste setup for WSL2, the installed unit, and where a developer's shortcuts diverge from a hardened deployment. Added 2026-09-20. |
 | [MODULE_INFO.md](MODULE_INFO.md) | Every buildable unit: target, references, packages, what it owns, its tests, and whether it ships. |
+
+## Governance templates
+
+Reusable shapes for the two kinds of document this project writes, added 2026-09-23. Both are
+scanned by `DocumentationDriftTests` like every other file here.
+
+| Document | Audience | What it is |
+| --- | --- | --- |
+| [RFC_TEMPLATE.md](RFC_TEMPLATE.md) | Systems engineers, kernel programmers, core contributors | The technical design specification: continuum placement with a trade-off matrix, a memory and concurrency contract, kernel and host invariants, a byte-level interface and wire specification, and an evidence plan. Copy to `docs/rfcs/RFC-NNNN-<slug>.md`. |
+| [EXECUTIVE_STATUS_TEMPLATE.md](EXECUTIVE_STATUS_TEMPLATE.md) | Enterprise buyers, CISOs, compliance officers, executive sponsors | The readiness and governance report: an attested executive summary, the auditability and non-repudiation scorecard, reliability and SLA tracking, and the milestone and risk heatmap. Every cell carries an attestation level. Copy to `docs/status/<date>-executive-status.md`. |
 
 ## Coursework
 

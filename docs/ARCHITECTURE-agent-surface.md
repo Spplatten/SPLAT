@@ -70,8 +70,9 @@ LangSmith or OpenTelemetry trace joins the ledger on one value. If anchoring fai
 so instead of silently omitting it. The anchor points into this host's own ledger,
 `%LOCALAPPDATA%\SPLAT\audit_ledger.db`.
 
-**What this host does not have:** a revocation check before a mission (its engine is constructed
-with `null`), a remediation engine, or a crew registry beyond the built-in catalog. Its ledger and
+**What this host does not have:** a remediation engine, or a crew registry beyond the built-in
+catalog. Its mission engine has checked revocation before binding anything since F19 on
+2026-09-19; this sentence said otherwise until 2026-09-23. Its ledger and
 incident memory are separate from the console's.
 
 ## `splat-langgraph`
