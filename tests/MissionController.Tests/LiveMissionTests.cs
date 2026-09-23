@@ -25,6 +25,7 @@ using MissionController.Infrastructure.Windows.Jails;
 using MissionController.Infrastructure.Windows.JobObjects;
 using MissionController.Infrastructure.Windows.Process;
 using MissionController.Infrastructure.Windows.Security;
+using MissionController.Core.Replay;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -198,6 +199,130 @@ public sealed class LiveMissionTests
             // Last, because it is the only part that depends on the provider being reachable.
             Assert.DoesNotContain("MODEL REQUEST FAILED", analysis);
             Assert.NotEqual(0, analysis.Trim().Length);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            try { Directory.Delete(dir, recursive: true); } catch { /* the pool may still hold the db */ }
+        }
+    }
+
+    /// <summary>The template the canary runs unless <c>SPLAT_CANARY_TEMPLATE</c> names another: the largest sensor in the catalog.</summary>
+    public const string DefaultCanaryTemplate = "secops-ir-triage-snapshot";
+
+    /// <summary>
+    /// The canary: one live mission on a large template, and the proof that recording it loses nothing.
+    ///
+    /// The replay suite runs real answers with no model, so it is only as good as the recording. This
+    /// runs the biggest sensor in the catalog - tens of kilobytes of connections, processes, signatures,
+    /// accounts, tasks and DNS cache - through the real model, records the fixture the engine's own
+    /// recorder writes, replays it offline through the same harness the suite uses, and holds the
+    /// replay to the live verdict and the live ledger. A change in the scrub, the prompt, the island or
+    /// the grounder that the fixture format cannot carry would show up here, on a real answer, before
+    /// it hid in a fixture that replays to the wrong thing.
+    ///
+    /// The fixture is left in <c>SPLAT_RECORD_MISSIONS_DIR</c> when that is set, ready to be reviewed and
+    /// promoted; otherwise in a temporary directory that is removed with the run.
+    /// </summary>
+    [Fact]
+    public async Task TheCanary_ALargeTemplateRunsLive_AndItsRecordingReplaysToTheSameVerdict()
+    {
+        if (!await HaveKeyAsync()) { _out.WriteLine("SKIPPED: no Anthropic key in the vault or the environment."); return; }
+
+        string templateId = Environment.GetEnvironmentVariable("SPLAT_CANARY_TEMPLATE") is { Length: > 0 } chosen
+            ? chosen.Trim()
+            : DefaultCanaryTemplate;
+        var template = GovernedTemplateCatalog.All.Single(t => t.TemplateId == templateId);
+
+        string dir = Path.Combine(Path.GetTempPath(), "splat-canary-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string recordTo = Environment.GetEnvironmentVariable(MissionFixtureDirectoryRecorder.EnvironmentVariable) is { Length: > 0 } named
+            ? named
+            : dir;
+
+        try
+        {
+            var ledger = new SqliteChainedAuditLedger(new SqliteStorageContext(Path.Combine(dir, "ledger.db")));
+            var recorder = new MissionFixtureDirectoryRecorder(recordTo, "LiveMissionTests canary");
+
+            var engine = new MissionExecutionEngine(
+                new NtAclJailManager(),
+                new SuspendedProcessLauncher(new RestrictedTokenProvider()),
+                NewClient(),
+                ledger,
+                name => new Win32JobSandbox(name),
+                semanticMemoryIndex: null,
+                dlpSanitizer: new RegexDataLossPreventionSanitizer(),
+                credentialSanitizer: new PromptCredentialSanitizer(),
+                revocationManager: null,
+                findingsExtractor: new JsonFindingsExtractor(),
+                recorder: recorder);
+
+            var clock = Stopwatch.StartNew();
+            var chunks = new List<MissionChunk>();
+            await foreach (var chunk in engine.ExecuteMissionAsync(template, new Dictionary<string, string>(), "live-test-operator"))
+            {
+                chunks.Add(chunk);
+            }
+
+            Guid missionId = chunks[0].MissionId;
+            string telemetry = string.Concat(chunks.Where(c => c.ChunkType == MissionChunkType.Stdout).Select(c => c.Content));
+            string analysis = string.Concat(chunks.Where(c => c.ChunkType == MissionChunkType.AiToken).Select(c => c.Content));
+            _out.WriteLine($"mission {missionId} on {templateId}: {telemetry.Length:N0} chars of telemetry, {analysis.Length:N0} chars of analysis, {clock.Elapsed.TotalSeconds:F1}s");
+            foreach (var warning in chunks.Where(c => c.ChunkType is MissionChunkType.SystemWarning or MissionChunkType.Stderr))
+            {
+                _out.WriteLine($"  {warning.ChunkType}: {(warning.Content.Length > 300 ? warning.Content[..300] + "…" : warning.Content)}");
+            }
+
+            // The sensor is the point of a large template: a canary whose tool printed nothing has
+            // measured nothing about the scrub, the prompt or the grounder.
+            Assert.True(telemetry.Length > 0, "the sensor produced no output, so nothing downstream was exercised");
+            Assert.True(chunks.Any(c => c.ChunkType is MissionChunkType.Completed) || analysis.Length > 0,
+                "the mission ended before any analysis: " + (chunks.LastOrDefault(c => c.ChunkType == MissionChunkType.Stderr)?.Content ?? "no reason reported"));
+            Assert.DoesNotContain("MODEL REQUEST FAILED", analysis);
+            Assert.DoesNotContain("MODEL STREAM TIMEOUT", analysis);
+
+            // The engine wrote the fixture as part of the mission, or said why not.
+            Assert.True(recorder.LastWrittenPath is not null && File.Exists(recorder.LastWrittenPath),
+                "the engine recorded no fixture: " + (chunks.FirstOrDefault(c => c.ChunkType == MissionChunkType.SystemWarning)?.Content ?? "and gave no reason"));
+            var fixture = MissionFixture.Load(recorder.LastWrittenPath!);
+            _out.WriteLine($"recorded {Path.GetFileName(recorder.LastWrittenPath)}: {fixture.Attempts.Count} attempt(s), verdict {fixture.Expected.Status}, accepted {fixture.Expected.Accepted}, " +
+                           $"{fixture.Expected.Grounded} grounded / {fixture.Expected.PartiallyGrounded} partial / {fixture.Expected.Unsupported} unsupported / {fixture.Expected.Unattributed} unattributed");
+
+            Assert.Equal(missionId, fixture.MissionId);
+            Assert.Equal(telemetry.Replace("\r\n", "\n"), fixture.Sensor.Stdout.Replace("\r\n", "\n"));
+            Assert.NotEmpty(fixture.Attempts);
+            Assert.Equal(MissionFixture.Sha256Hex(analysis), fixture.Expected.OutputSha256);
+
+            // The same mission, offline, through the suite's harness: the model is the recording, the
+            // sandbox is a stand-in, and every verdict-bearing piece in between is the real code.
+            var replay = await MissionReplayHarness.ReplayAsync(fixture);
+            var observed = replay.Observed();
+            Assert.Null(replay.PayloadMismatch());
+
+            var differences = fixture.Expected.DifferencesFrom(observed);
+            Assert.True(differences.Count == 0,
+                "the offline replay does not reach the live verdict, so the fixture does not carry what the pipeline needs:" +
+                Environment.NewLine + string.Join(Environment.NewLine, differences));
+
+            // And the live ledger's rows are the replay's rows: the mission's audit trail is a function
+            // of its inputs, not of the run that happened to write it.
+            var liveActions = (await ledger.GetAuditLogsAsync(missionId, 500))
+                .OrderBy(entry => entry.Id)
+                .Select(entry => entry.Action)
+                .ToList();
+            Assert.Equal(liveActions, replay.LedgerActions.ToList());
+
+            foreach (string note in replay.Notes())
+            {
+                _out.WriteLine("note: " + note);
+            }
+
+            _out.WriteLine(recordTo == dir
+                ? "the fixture was recorded to a temporary directory; set SPLAT_RECORD_MISSIONS_DIR to keep one for review"
+                : $"the fixture is at {recorder.LastWrittenPath}, ready to review and promote into tests/MissionController.Tests/Fixtures/Missions");
         }
         finally
         {

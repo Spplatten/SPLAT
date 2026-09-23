@@ -251,4 +251,9 @@ two decisions (the distro, the certificate).
 - Two of the smaller findings above were closed the same day, because each was an afternoon:
   `MerkleTreeEngine` proves by leaf position, one sibling lookup per level, and `run_command`
   takes its clamps from `LeaseResourceLimits`' defaults rather than restating them.
+- Later the same day, from the operator's "robustness first" note: the console's `--self-test`
+  switch and the packaging gate that runs it, and the mission replay fixtures - engine-side recorder,
+  exporter from the console's database, `MissionReplayTests`, and the live canary on the largest
+  catalog sensor. Layer 2's gap ("none of the interplay was reachable by a unit test") is closed by
+  construction once a run is recorded; the recordings themselves are the operator's to export.
 - Nothing else. Every other gap above is a roadmap row or a decision, and is left there.

@@ -131,7 +131,7 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 656`, on a line ending `(net10.0)`. The `dotnet` on this
+**Expect:** `Passed! - Failed: 0, Passed: 658`, on a line ending `(net10.0)`. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
 
@@ -316,6 +316,19 @@ process with no window** and a blank title. Note the timestamp on `%LOCALAPPDATA
 load — and an old one proves nothing either way. The working directory is set explicitly so the
 launch does not depend on where your shell happens to be.
 
+Since 2026-09-23 the console can run that check itself and say the result in its exit code:
+
+```powershell
+Start-Process C:\C_AGENT_BUILDER\dist\App\MissionController.UI.exe -WorkingDirectory C:\C_AGENT_BUILDER\dist\App -ArgumentList '--self-test' -Wait -PassThru | Select-Object ExitCode
+Get-Content "$env:LOCALAPPDATA\SPLAT\self-test.json"
+```
+
+**Expect:** `ExitCode 0` and a report listing every page as `ok`. It opens all nine pages, waits for
+each to load, and exits: 2 names the page that failed, 1 means it failed before its window, 3 means
+it did not finish. `packaging\build-client-dist.ps1` runs exactly this on the published console and
+refuses to zip a package that returns anything but 0. Two pages that threw the moment they were
+opened had passed the window check above on 2026-09-23; this is the check that would have caught them.
+
 #### Refreshing `dist\App`
 
 After pulling changes, or when the crash log names something the source has already fixed.
@@ -347,6 +360,39 @@ robocopy C:\C_AGENT_BUILDER\src\MissionController.UI\bin\x64\Release\net10.0-win
 it is not a failure; 8 and above is. Then repeat the launch check. This sequence ran on 2026-09-09 to
 ship the patched `e_sqlite3.dll`; the folder held 290 files before and after. Self-contained, it
 holds 545 (2026-09-18).
+
+---
+
+### 1.9 Today's missions become regression tests, without running them again
+
+The defects that reach a real mission are in the interplay of the sensor's output, the scrub, the
+prompt, the model's answer and the grounder, and a unit test with a made-up telemetry string reaches
+none of it. A recorded mission does. The console indexes every accepted mission with its scrubbed
+telemetry and the model's answer, so a day's runs can be exported as fixtures and replayed through the
+real post-tool pipeline with no model and no API spend:
+
+```powershell
+$env:SPLAT_EXPORT_MISSION_FIXTURES = "1"
+& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~MissionReplayTests" --logger "console;verbosity=detailed"
+Remove-Item Env:\SPLAT_EXPORT_MISSION_FIXTURES
+```
+
+**Expect:** one line per mission indexed today naming the file written under
+`tests\MissionController.Tests\Fixtures\Missions\`, then `1 fixture(s) replayed, 0 failed` for each
+file. `SPLAT_EXPORT_MISSION_FIXTURES_SINCE=2026-09-20` reaches further back. Read each file before
+committing it: the telemetry is this machine's, after the scrub. From now on, starting the console or
+`splat-mcp` with `SPLAT_RECORD_MISSIONS_DIR` set records every mission in full - parameters, every
+model attempt, a rejected first answer - which the export cannot recover from the index.
+
+The live canary runs the largest catalog sensor against the real model, records it, and replays the
+recording before it passes:
+
+```powershell
+& "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~TheCanary" --logger "console;verbosity=detailed"
+```
+
+**Expect:** the mission's size, the recorded verdict, and a pass. It reads the key from the DPAPI
+vault like the other live tests, and says `SKIPPED` out loud without one.
 
 ---
 

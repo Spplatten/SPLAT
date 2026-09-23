@@ -205,8 +205,15 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
   `UiWarningSuppressionTests` fails if AOT or trimming is ever switched on, the one case where the
   warning would matter.
 - **Runs from** `dist\App`, a `dotnet publish` output — see [CONTEXT.md](CONTEXT.md#working-in-this-tree).
+- **Self-test:** `MissionController.UI.exe --self-test [--self-test-report <path>]` opens every page in
+  [`MainWindow.EveryPage`](../src/MissionController.UI/MainWindow.xaml.cs), waits for each to load,
+  writes a JSON report and exits 0, or 2 when a page failed, 1 when the console failed before its
+  window, 3 when it did not finish ([`ConsoleSelfTest.cs`](../src/MissionController.UI/ConsoleSelfTest.cs)).
+  `packaging/build-client-dist.ps1` runs it on the published console and fails the package on any
+  code but 0 - the only run-time check of the pages there is.
 - **Tests:** source-level only, because a test project cannot reference the WinUI app:
-  `CompositionRootTests`, `UiWarningSuppressionTests`, `ShaderAssetVerificationTests`.
+  `CompositionRootTests`, `UiWarningSuppressionTests`, `ShaderAssetVerificationTests`,
+  `XamlResourceKeyTests`; the pages themselves are checked by the self-test above.
 
 ## splat-mcp
 
@@ -244,6 +251,11 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 - **Constraint:** data-driven tests use `[InlineData]` only. `NoDataSourceEscapesTheTestCounter`
   fails on `[MemberData]` or `[ClassData]`, because the documentation's test count is computed by
   reflection and could not see them.
+- **Replay fixtures:** [`Fixtures/Missions/`](../tests/MissionController.Tests/Fixtures/Missions/README.md)
+  holds recorded missions - the sensor's scrubbed output, the model's answer, the verdict - and
+  `MissionReplayTests` runs every one through the real post-tool pipeline with no model, via
+  `MissionReplayHarness`; `MissionFixtureExporter` turns the console's own indexed runs into fixtures.
+  The live canary in `LiveMissionTests` records a large template's run and replays it before it passes.
 - **Cross-cutting:** `DocumentationDriftTests`, `EndToEndVerificationTests` with
   `DiagnosticVerificationRunner`.
 

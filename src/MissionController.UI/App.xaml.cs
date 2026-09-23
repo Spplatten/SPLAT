@@ -5,6 +5,7 @@ using MissionController.Core;
 using MissionController.Core.Brain;
 using MissionController.Core.Crew;
 using MissionController.Core.Interfaces;
+using MissionController.Core.Replay;
 using MissionController.Core.Workflow;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
@@ -33,11 +34,18 @@ public partial class App : Application
     public static IServiceProvider Services { get; private set; } = null!;
     public static Window? MainWindowInstance { get; private set; }
 
+    /// <summary>The self-test the command line asked for, or null for a normal start. See <see cref="ConsoleSelfTest"/>.</summary>
+    internal static ConsoleSelfTest? SelfTest { get; private set; }
+
     public App()
     {
         this.UnhandledException += OnUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
         System.Threading.Tasks.TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
+        // Decided before anything is built: in a self-test nobody is there to close a dialog, so
+        // every fatal path below has to know which kind of run this is.
+        SelfTest = ConsoleSelfTest.FromCommandLine(Environment.GetCommandLineArgs());
 
         InitializeComponent();
         ConfigureServices();
@@ -92,6 +100,24 @@ public partial class App : Application
     {
         LogFatal("WinUI UnhandledException", e.Exception);
 
+        // A self-test reports instead of asking. With the window up, the failure belongs to the page
+        // that was open and the run goes on to the next; before the window, the console did not start,
+        // and the run ends with the code a normal start would give.
+        if (SelfTest is { } selfTest)
+        {
+            e.Handled = true;
+            if (MainWindowInstance is null)
+            {
+                selfTest.AbortForStartupFailure(e.Exception);
+            }
+            else
+            {
+                selfTest.RecordUnhandled(e.Exception);
+            }
+
+            return;
+        }
+
         // Startup failures used to be swallowed here. Handled=true kept the process alive with no
         // window, which is precisely how a XAML load error presented as "I double-click it and
         // nothing happens" - the app was running, just permanently invisible. If the main window
@@ -116,6 +142,7 @@ public partial class App : Application
     private void OnAppDomainUnhandledException(object sender, System.UnhandledExceptionEventArgs e)
     {
         LogFatal("AppDomain UnhandledException", e.ExceptionObject);
+        SelfTest?.NoteFatal(e.ExceptionObject);
     }
 
     private void OnUnobservedTaskException(object? sender, System.Threading.Tasks.UnobservedTaskExceptionEventArgs e)
@@ -192,6 +219,13 @@ public partial class App : Application
 
         // Core Engine & Cognitive Brain
         services.AddSingleton<IDiagnosticFindingsExtractor, JsonFindingsExtractor>();
+        // Every mission's post-tool path is written as a replay fixture when the operator names a
+        // directory. Registered only then: the engine's recorder parameter is optional, and the
+        // container passes null for an unregistered optional, so an unset variable records nothing.
+        if (MissionFixtureDirectoryRecorder.FromEnvironment("console") is { } recorder)
+        {
+            services.AddSingleton<IMissionRecorder>(recorder);
+        }
         services.AddSingleton<ICognitiveGoalDecomposer, CognitiveGoalDecomposer>();
         services.AddSingleton<IAgentBrain, AgentBrainEngine>();
         services.AddSingleton<IMissionExecutionEngine, MissionExecutionEngine>();
@@ -235,5 +269,12 @@ public partial class App : Application
     {
         MainWindowInstance = new MainWindow();
         MainWindowInstance.Activate();
+
+        // The window is shown first, as in a normal start, so what the self-test opens is what an
+        // operator would see. It exits the process itself when it is done.
+        if (SelfTest is { } selfTest)
+        {
+            _ = selfTest.RunAsync((MainWindow)MainWindowInstance);
+        }
     }
 }
