@@ -599,6 +599,9 @@ except OSError:
 evidence = {
     "schema": 3,
     "bpf_source_sha256": bpf_sha,
+    # The kernel the daemon enforced under, as the canary and the last-hop probe already record:
+    # a claim about "a stock kernel" needs the record to say which one.
+    "kernel_release": os.uname().release,
     "protocol_version": 3,
     "recorded_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "subject": "splat-agent daemon (end-to-end over the JSON protocol)",

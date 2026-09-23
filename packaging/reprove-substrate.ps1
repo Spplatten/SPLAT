@@ -19,7 +19,8 @@
     classifier refuses an agent every route to a root daemon, so this is for your own terminal.
 
     In order:
-      1. Read the installed unit's state, so it can be put back exactly.
+      1. Read the installed unit's state, so it can be put back exactly; refuse to go on if `bpf`
+         is not on the guest's boot line or a lease ceiling would refuse what the probes dial.
       2. Build the daemon in the guest as the default user, touching the BPF source first so the
          kernel program is recompiled rather than reused from a previous build.
       3. Stop the installed unit if it is running, and wait for the port to be free. A daemon that
@@ -134,11 +135,58 @@ Write-Host "   evidence: $evidenceDir"
 $guestCrate = ConvertTo-GuestPath $crate
 $guestEvidence = ConvertTo-GuestPath $evidenceDir
 
-Write-Host "[1/8] the installed unit's state" -ForegroundColor Cyan
-# 0 active, 3 inactive, 4 no such unit. Read now so step 7 can put back exactly what was there.
-$unitState = Invoke-Guest -AsRoot 'systemctl is-active splat-agent 2>/dev/null; echo "RC=$?"'
-$unitWasActive = ($unitState.Output -match 'RC=0')
-Write-Host ("   splat-agent.service: {0}" -f ($unitState.Output -replace '\s*RC=\d+$', ''))
+Write-Host "[1/8] the guest's state: the installed unit, the boot line, the lease ceiling" -ForegroundColor Cyan
+# All three read before anything is changed, because each is a way the run fails for a reason
+# that says nothing about the kernel: a unit to put back exactly as it was, `bpf` absent from the
+# boot line (the program cannot attach, and the daemon exits), and a ceiling that does not admit
+# what the probes dial - which turned a healthy kernel into an INCOMPLETE on 2026-09-21.
+$state = Invoke-Guest -AsRoot @'
+echo "UNIT=$(systemctl is-active splat-agent 2>/dev/null)"
+echo "CMDLINE=$(cat /proc/cmdline)"
+echo "POLICY_BEGIN"
+cat /etc/splat/policy.json 2>/dev/null
+echo
+echo "POLICY_END"
+'@
+$unitWasActive = ($state.Output -match '(?m)^UNIT=active\s*$')
+Write-Host ("   splat-agent.service: {0}" -f ([regex]::Match($state.Output, '(?m)^UNIT=(\S*)').Groups[1].Value))
+
+# The same reading of the boot line that `doctor` and `provision` make: the lsm= list must name bpf.
+$cmdline = [regex]::Match($state.Output, '(?m)^CMDLINE=(.*)$').Groups[1].Value
+$lsmList = @($cmdline -split '\s+' | Where-Object { $_.StartsWith('lsm=') } | ForEach-Object { $_.Substring(4) -split ',' })
+if ($lsmList -notcontains 'bpf') {
+    Write-Error 'bpf is NOT on the guest kernel''s boot command line, so no BPF-LSM program can attach and the daemon would exit. `splat-mcp provision --apply` appends the lsm= stanza to .wslconfig; then `wsl --shutdown`, which is yours.'
+    exit 1
+}
+Write-Host '   boot line: bpf is on the lsm= list'
+
+$policyText = [regex]::Match($state.Output, '(?s)POLICY_BEGIN\r?\n(.*?)\r?\nPOLICY_END').Groups[1].Value.Trim()
+if ($policyText) {
+    try { $policy = $policyText | ConvertFrom-Json }
+    catch { Write-Error "the guest's lease ceiling at /etc/splat/policy.json is not JSON this script can read: $($_.Exception.Message)"; exit 1 }
+    # What the probes name: 127.0.0.1:80 for the connect checks, 127.0.0.1:53 for the datagram
+    # check, and six executables. A ceiling that leaves one out refuses those leases before the
+    # kernel sees them, and the run reads as a kernel failure.
+    $missing = @()
+    if ($null -ne $policy.allowedEgress) {
+        foreach ($endpoint in @('127.0.0.1:80', '127.0.0.1:53')) {
+            if (@($policy.allowedEgress) -notcontains $endpoint) { $missing += $endpoint }
+        }
+    }
+    $prefixes = @($policy.allowedExecPrefixes | ForEach-Object { if ($_.EndsWith('/')) { $_ } else { "$_/" } })
+    foreach ($exe in @('/usr/bin/id', '/bin/cat', '/bin/sh', '/usr/bin/curl', '/bin/sleep', '/usr/bin/python3')) {
+        if (-not ($prefixes | Where-Object { $exe.StartsWith($_) })) { $missing += $exe }
+    }
+    if ($missing.Count -gt 0) {
+        Write-Error ("the guest's lease ceiling at /etc/splat/policy.json does not admit what the probes use: {0}. " -f ($missing -join ', ') +
+            'Re-run `splat-mcp provision --apply --egress 127.0.0.1:80,127.0.0.1:53,<your endpoints>` so it does, or remove the ceiling for the length of this run.')
+        exit 1
+    }
+    Write-Host '   lease ceiling: present, and it admits what the probes dial and run'
+}
+else {
+    Write-Host '   lease ceiling: none - the token alone bounds a lease on this guest'
+}
 
 if (-not $SkipBuild) {
     Write-Host "[2/8] building the daemon in the guest (a touched BPF source, so the kernel program is recompiled)" -ForegroundColor Cyan
