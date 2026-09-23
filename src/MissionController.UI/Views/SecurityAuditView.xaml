@@ -131,7 +131,7 @@
         </Border>
 
         <!-- One mission's run record -->
-        <Border Grid.Row="3" Background="{ThemeResource SplatSurfaceBrush}" BorderBrush="{ThemeResource SplatLineBrush}" BorderThickness="1" CornerRadius="6" Padding="14,10" Margin="0,0,0,10">
+        <Border Grid.Row="3" Background="{ThemeResource SplatSurfaceBrush}" BorderBrush="{ThemeResource SplatBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="14,10" Margin="0,0,0,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
