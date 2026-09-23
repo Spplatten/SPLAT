@@ -30,6 +30,9 @@ public sealed class GeminiStreamClient : IModelStreamClient
     private const string GeminiHost = "generativelanguage.googleapis.com";
     private const string DefaultModel = "gemini-2.5-flash";
 
+    /// <summary>How long the stream may go silent between lines before the mission gives up on it. Matches <see cref="ClaudeStreamClient"/>.</summary>
+    private static readonly TimeSpan StreamSilenceBudget = TimeSpan.FromSeconds(120);
+
     /// <summary>
     /// Vault key for the user's Gemini API key. This is intentionally the exact string the
     /// onboarding wizard has always written, so keys stored before this client existed light up.
@@ -123,7 +126,9 @@ public sealed class GeminiStreamClient : IModelStreamClient
             while (true)
             {
                 using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                readCts.CancelAfter(TimeSpan.FromSeconds(30));
+                // Per line, so any keep-alive restarts it; see ClaudeStreamClient for why 30 s was
+                // too short for a large prompt's first token.
+                readCts.CancelAfter(StreamSilenceBudget);
 
                 try
                 {
@@ -152,7 +157,7 @@ public sealed class GeminiStreamClient : IModelStreamClient
 
             if (timedOut)
             {
-                yield return "\n⚠ MODEL STREAM TIMEOUT: Remote AI provider stream stalled after 30s of inactivity.";
+                yield return $"\n⚠ MODEL STREAM TIMEOUT: Remote AI provider stream stalled after {StreamSilenceBudget.TotalSeconds:F0}s of inactivity.";
             }
         }
     }

@@ -36,6 +36,32 @@ public class TelemetryGroundingTests
         Assert.Contains("10.0.0.5", attested.Attestation.Findings[0].MissingClaims);
     }
 
+    /// <summary>
+    /// A finding that maps what it saw to ATT&amp;CK or a CVE cites a catalogue the telemetry cannot
+    /// contain. On 2026-09-23 the "001" in T1543.003-style ids read as an invented count, two grounded
+    /// findings were marked unsupported, and a persistence audit failed its quality gate twice. The
+    /// ids are knowledge and are not claims; the measurements beside them still are.
+    /// </summary>
+    [Fact]
+    public void ExtractClaims_FrameworkIdentifiers_AreKnowledgeNotClaims()
+    {
+        var claims = TelemetryGrounder.ExtractClaims(
+            "Run key 'Updater' launches C:\\Users\\Public\\svc.exe (T1547.001, T1547) - see CVE-2024-3094 for the loader");
+
+        Assert.DoesNotContain("001", claims);
+        Assert.DoesNotContain("3094", claims);
+        Assert.DoesNotContain("2024", claims);
+        // The path is one claim; the binary name inside it is not extracted twice.
+        Assert.Contains(@"C:\Users\Public\svc.exe", claims);
+
+        var attested = TelemetryGrounder.Attest(
+            Verdict(DiagnosticHealthStatus.Warning, "Autorun from a public folder",
+                "Run key 'Updater' launches C:\\Users\\Public\\svc.exe (T1547.001)"),
+            "Updater : C:\\Users\\Public\\svc.exe");
+
+        Assert.Equal(GroundingState.Grounded, attested.Attestation!.Findings[0].State);
+    }
+
     [Fact]
     public void Attest_ClaimsPresentInTelemetry_MarkedGroundedAndLeftUnannotated()
     {

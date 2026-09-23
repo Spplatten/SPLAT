@@ -52,7 +52,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 150,
                 MaxMemoryBytes: Mb(256),
                 MaxCpuPercent: 50),
-            "You are a Patch Management Engineer. ResultCode 2 is Succeeded, 3 SucceededWithErrors, 4 Failed, 5 Aborted - list every non-2 result with its HResult and the update title. A repeatedly failing update is a higher priority than a single miss because it will never self-heal. Either pending-reboot indicator being true means the patch level reported is not the patch level in effect, so state that caveat before any compliance conclusion. From the update policy, identify whether the endpoint targets WSUS, Intune, or public Windows Update, and flag deferral values that exceed the organisation's patch window. Report the OS build against current servicing support.",
+            Reasoned("You are a Patch Management Engineer. ResultCode 2 is Succeeded, 3 SucceededWithErrors, 4 Failed, 5 Aborted - list every non-2 result with its HResult and the update title. A repeatedly failing update is a higher priority than a single miss because it will never self-heal. Either pending-reboot indicator being true means the patch level reported is not the patch level in effect, so state that caveat before any compliance conclusion. From the update policy, identify whether the endpoint targets WSUS, Intune, or public Windows Update, and flag deferral values that exceed the organisation's patch window. Read the OS build and the hotfix list against what you know of Windows servicing: which release the build belongs to, whether that release is still in support, and roughly how far behind the newest cumulative update the installed set is - all as knowledge with its date. A build number or KB you cite from knowledge goes in the analysis, never in a finding."),
             new Dictionary<string, string>
             {
                 { "MaxHistoryCount", "60" }
@@ -64,7 +64,7 @@ public static partial class GovernedTemplateCatalog
             "Installed Software Inventory & EOL Detection",
             "Enumerates installed software from the uninstall registry for licence reconciliation and end-of-life version detection.",
             CatSysOps,
-            ModelFlash,
+            ModelPro,
             new SingleToolDefinition(
                 "software_inventory_tool",
                 "Uninstall Registry Inventory Reader",
@@ -79,7 +79,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 120,
                 MaxMemoryBytes: Mb(384),
                 MaxCpuPercent: 50),
-            "You are a Software Asset Manager. Group the inventory by publisher and flag anything end-of-life or unsupported (legacy Java runtimes, Flash, old .NET Framework versions, browsers well behind current, unsupported Office builds). Separately list per-user installs, since these bypass machine-wide packaging and are invisible to SCCM inventory - on a shared campus workstation they are the usual source of licence and vulnerability drift. Identify remote-access and file-sync tools that may violate policy. Do not attempt to price or licence-audit; report only what is present and its support status.",
+            Reasoned("You are a Software Asset Manager. Group the inventory by publisher and flag anything end-of-life or unsupported (legacy Java runtimes, Flash, old .NET Framework versions, browsers well behind current, unsupported Office builds). Separately list per-user installs, since these bypass machine-wide packaging and are invisible to SCCM inventory - on a shared campus workstation they are the usual source of licence and vulnerability drift. Identify remote-access and file-sync tools that may violate policy. Do not attempt to price or licence-audit; report only what is present and its support status. You know what the listing does not: for each product you flag, state the support status you know - the end-of-life date, or the currently supported major version the installed one is behind - as knowledge with the caveat that your knowledge has a date, and rank by exposure: browsers, Java, PDF readers, remote-access and file-sync tools first, because they open documents and connections from outside."),
             null),
 
         // --- Service failures ---------------------------------------------------------------------------------
@@ -127,7 +127,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 150,
                 MaxMemoryBytes: Mb(384),
                 MaxCpuPercent: 60),
-            "You are a Tier-2 Escalation Engineer. Do not list events chronologically - cluster them by provider and root cause, then rank clusters by operational impact and state how many occurrences each represents. Event 41 with 6008 means the machine lost power or hard-hung rather than shutting down, which points at hardware, thermal, or driver faults, not software. Disk provider errors (Event 7, 51, 153) indicate failing storage and outrank everything else on the list. Explicitly separate benign recurring noise from genuine faults, and name the single most likely root cause with the evidence supporting it.",
+            Reasoned("You are a Tier-2 Escalation Engineer. Do not list events chronologically - cluster them by provider and root cause, then rank clusters by operational impact and state how many occurrences each represents. Event 41 with 6008 means the machine lost power or hard-hung rather than shutting down, which points at hardware, thermal, or driver faults, not software. Disk provider errors (Event 7, 51, 153) indicate failing storage and outrank everything else on the list. Explicitly separate benign recurring noise from genuine faults, and name the single most likely root cause with the evidence supporting it. The narrative is the point: build the timeline across providers, say which cluster is the cause and which are its symptoms, and name the driver, service or hardware component most likely responsible with the specific event pairs that support it. Where you know the usual fix for an event id - a driver family, a cumulative update, a service dependency - say so as knowledge."),
             new Dictionary<string, string>
             {
                 { "MaxEventCount", "250" }

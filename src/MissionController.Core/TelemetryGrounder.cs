@@ -53,6 +53,14 @@ public static class TelemetryGrounder
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
+    /// MITRE ATT&amp;CK technique and sub-technique ids (T1547, T1547.001) and CVE ids: the two
+    /// catalogues a finding legitimately cites without the telemetry containing them.
+    /// </summary>
+    private static readonly Regex KnowledgeIdentifierRegex = new(
+        @"\bT\d{4}(?:\.\d{3})?\b|\bCVE-\d{4}-\d{4,}\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
     /// Presentation prefixes this codebase adds to bullets. Stripped before analysis so a marker
     /// glyph is never mistaken for part of a claim.
     /// </summary>
@@ -174,6 +182,14 @@ public static class TelemetryGrounder
     public static IReadOnlyList<string> ExtractClaims(string finding)
     {
         var claims = new List<string>();
+
+        // Framework identifiers are knowledge, not measurements: a finding that maps a Run key to
+        // ATT&CK T1547.001 or a version to CVE-2024-3094 cites a catalogue, and no sensor's stdout
+        // will ever contain the catalogue. Left in, "001" and "3094" read as fabricated counts and the
+        // finding is marked unsupported - which on 2026-09-23 sank an otherwise grounded persistence
+        // audit below the quality threshold twice and failed the mission. The ids are removed before
+        // extraction; every other specific in the finding is still checked.
+        finding = KnowledgeIdentifierRegex.Replace(finding, " ");
 
         foreach (Match match in ClaimTokenRegex.Matches(finding))
         {

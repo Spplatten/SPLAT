@@ -13,7 +13,7 @@ public static partial class GovernedTemplateCatalog
             "DNS & Network Connectivity Diagnostic",
             "Performs DNS resolution tests, gateway ping latency analysis, and active socket inspection.",
             CatNetwork,
-            ModelFlash,
+            ModelPro,
             new SingleToolDefinition(
                 "netstat_tool",
                 "Netstat & Ping Diagnostic",
@@ -23,7 +23,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 30,
                 MaxMemoryBytes: Mb(128),
                 MaxCpuPercent: 50),
-            "You are an expert Enterprise Network Engineer. Analyze the command output and highlight any high-latency packets, listening unexpected ports, or connectivity anomalies.",
+            Reasoned("You are an expert Enterprise Network Engineer. Read the ping and netstat output together rather than section by section: latency and loss to the gateway, set against the resolvers and the public target, tells you whether the fault is the local link, the resolver, or the path beyond it. Flag high or variable latency, packet loss, listening ports that do not belong on a workstation, and established connections to unexpected remote ports. Say what the pattern means - a healthy gateway with a slow public target is upstream, loss to the gateway is local, resolution failing while raw addresses answer is DNS - and name the next measurement that would confirm it."),
             new Dictionary<string, string> { { "TargetHost", "8.8.8.8" } }),
 
         // --- TLS / SChannel posture ----------------------------------------------------------------

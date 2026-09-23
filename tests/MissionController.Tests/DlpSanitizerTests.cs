@@ -34,6 +34,40 @@ public class DlpSanitizerTests
         Assert.Contains("[REDACTED_PASSWORD]", result.SanitizedContent);
     }
 
+    /// <summary>
+    /// svchost's -p is a process-mitigation flag and the -s after it names the service. On a stock
+    /// Windows 11 host that is 55 auto-start services, and on 2026-09-23 every one of them reached
+    /// the model as "-p [REDACTED_PASSWORD] DusmSvc" - a password finding the sanitizer invented.
+    /// A switch is never a password value.
+    /// </summary>
+    [Fact]
+    public void Sanitize_LeavesSwitchAfterPasswordFlagAlone()
+    {
+        var sanitizer = new RegexDataLossPreventionSanitizer();
+        string input = @"C:\Windows\System32\svchost.exe -k LocalServiceNetworkRestricted -p -s DusmSvc";
+
+        var result = sanitizer.Sanitize(input);
+
+        Assert.Equal(0, result.RedactedCount);
+        Assert.Equal(input, result.SanitizedContent);
+    }
+
+    /// <summary>
+    /// The same flag at the end of a Format-List line: the next line is the next field, never the
+    /// password. 53 services on the same host lost their StartName to this.
+    /// </summary>
+    [Fact]
+    public void Sanitize_DoesNotReadTheNextLineAsThePassword()
+    {
+        var sanitizer = new RegexDataLossPreventionSanitizer();
+        string input = "PathName    : C:\\Windows\\system32\\svchost.exe -k wsappx -p\r\nStartName   : LocalSystem";
+
+        var result = sanitizer.Sanitize(input);
+
+        Assert.Equal(0, result.RedactedCount);
+        Assert.Contains("StartName   : LocalSystem", result.SanitizedContent);
+    }
+
     [Fact]
     public void Sanitize_MasksNtlmHashes()
     {

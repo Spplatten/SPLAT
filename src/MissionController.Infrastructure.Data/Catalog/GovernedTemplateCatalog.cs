@@ -111,6 +111,40 @@ public static partial class GovernedTemplateCatalog
         "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"" + script + "\"";
 
     /// <summary>
+    /// The work a table cannot do. Every sensor here is a PowerShell one-liner an engineer could run
+    /// in a console; what the console cannot return is the judgement - which of forty autoruns is
+    /// the one that matters, what this host has been doing across all six sections at once, the
+    /// benign reading and the hostile reading of the same line, and the order to work in. This
+    /// block asks for exactly that, in labelled parts, from the templates whose evidence rewards it.
+    ///
+    /// It sits inside the honesty invariant rather than around it. Findings still quote the output
+    /// and are still attested against it by <c>TelemetryGrounder</c>; what the model knows from
+    /// outside the output - ATT&amp;CK technique ids, CIS items, end-of-life dates, what a vendor's
+    /// agent normally looks like - goes in the analysis and the actions, labelled as knowledge, where
+    /// nothing can mistake it for a measurement. The anti-hedging evaluator penalises "cannot be
+    /// determined", so the block asks for what is missing instead.
+    /// </summary>
+    private const string AnalystReasoning =
+        "\n\n[ANALYST REASONING - what a table cannot do]\n" +
+        "Before the JSON, write four short labelled parts:\n" +
+        "STORY - three to five sentences: what this host has been doing according to the evidence, read across " +
+        "every section of the output at once, naming the two or three items that decide the verdict.\n" +
+        "KNOWN-GOOD - the entries an experienced engineer would recognise and wave through (Windows components, " +
+        "signed vendor agents, management tooling) with a one-line reason each is expected here, and the " +
+        "lookalike that would NOT be waved through.\n" +
+        "HYPOTHESES - for each item you flag, the most likely benign explanation, the most likely hostile one, " +
+        "and the single piece of evidence that would settle it.\n" +
+        "PLAN - the order to work in and why: the cheap check that refutes the worst hypothesis first, then " +
+        "containment, then cleanup.\n" +
+        "Then the JSON. Findings quote values from the output. recommendedActions carry the plan: each names " +
+        "the exact command, setting or event to check, and where it applies the MITRE ATT&CK technique id or " +
+        "CIS benchmark item it maps to, labelled as knowledge. Give a verdict; where evidence is thin, say what " +
+        "is missing rather than that it cannot be determined.";
+
+    /// <summary>A role prompt with <see cref="AnalystReasoning"/> appended. Opt-in per template, on purpose.</summary>
+    private static string Reasoned(string rolePrompt) => rolePrompt + AnalystReasoning;
+
+    /// <summary>
     /// Builds a template already bound to the single approved egress rule, enforcing the
     /// 1 Template -> 1 Model -> 1 Tool -> 1 Egress FQDN contract at construction time.
     ///

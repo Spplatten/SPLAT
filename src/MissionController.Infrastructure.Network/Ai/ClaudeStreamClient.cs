@@ -32,6 +32,9 @@ public sealed class ClaudeStreamClient : IModelStreamClient
     private const string AnthropicHost = "api.anthropic.com";
     private const string MessagesEndpoint = "https://api.anthropic.com/v1/messages";
     private const string ApiVersion = "2023-06-01";
+
+    /// <summary>How long the stream may go silent between SSE lines before the mission gives up on it.</summary>
+    private static readonly TimeSpan StreamSilenceBudget = TimeSpan.FromSeconds(120);
     // Current ids, one per size. The Claude 3 snapshots these replaced are retired and answer 404,
     // which failed every live mission's first request until the quality island escalated.
     private const string DefaultModel = "claude-sonnet-5";
@@ -131,7 +134,14 @@ public sealed class ClaudeStreamClient : IModelStreamClient
             while (true)
             {
                 using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                readCts.CancelAfter(TimeSpan.FromSeconds(30));
+                // Per line, not per response: any SSE line - a ping, a thinking delta - restarts the
+                // budget, so this only fires when the provider has gone silent. It was 30 s, and on
+                // 2026-09-23 a 65 KB persistence audit under adaptive thinking went silent for
+                // longer than that before its first token, twice, and the mission failed with an
+                // 83-character timeout notice as its whole analysis. Two minutes is what a large
+                // prompt's prefill and thinking can take on a busy day; a genuinely dead stream
+                // still ends the mission, two minutes later than before.
+                readCts.CancelAfter(StreamSilenceBudget);
 
                 try
                 {
@@ -160,7 +170,7 @@ public sealed class ClaudeStreamClient : IModelStreamClient
 
             if (timedOut)
             {
-                yield return "\n⚠ MODEL STREAM TIMEOUT: Remote AI provider stream stalled after 30s of inactivity.";
+                yield return $"\n⚠ MODEL STREAM TIMEOUT: Remote AI provider stream stalled after {StreamSilenceBudget.TotalSeconds:F0}s of inactivity.";
             }
         }
     }

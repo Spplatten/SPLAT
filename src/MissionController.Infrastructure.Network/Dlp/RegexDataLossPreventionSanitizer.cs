@@ -56,9 +56,16 @@ public sealed class RegexDataLossPreventionSanitizer : IDataLossPreventionSaniti
             ),
 
             // 4. CLI Password Arguments (-p <pass>, /p:<pass>, -password <pass>)
+            // Two things the value is not: a switch, and the next line. `svchost.exe -k Group -p`
+            // is 55 of the auto-start services on an ordinary Windows 11 host - its -p is a
+            // mitigation flag - and on 2026-09-23 the pattern redacted the `-s Name` after it on
+            // two of them and, because \s crosses a newline, the `StartName` field on the other 53,
+            // writing [REDACTED_PASSWORD] into a listing that held no password. A model reads that
+            // as a password on the command line: a finding the sanitizer fabricated. The value must
+            // now sit on the same line and must not begin with a dash.
             new(
                 "CliPasswordArgument",
-                new Regex(@"(?i)(\s-(?:p|password|pwd)\s+)([^\s]+)", RegexOptions.Compiled, PatternTimeout),
+                new Regex(@"(?i)(\s-(?:p|password|pwd)[ \t]+)([^\s-][^\s]*)", RegexOptions.Compiled, PatternTimeout),
                 "$1[REDACTED_PASSWORD]"
             ),
             new(

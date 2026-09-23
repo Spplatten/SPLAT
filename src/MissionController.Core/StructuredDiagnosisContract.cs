@@ -29,7 +29,8 @@ public static class StructuredDiagnosisContract
 
 
 [REQUIRED RESPONSE FORMAT]
-First write a brief plain-English analysis for the operator (2-4 sentences).
+First write a plain-English analysis for the operator: 2-4 sentences, or the labelled parts your
+role instructions ask for when they ask for a structured analysis.
 Then close your response with exactly one fenced JSON block in this schema, and nothing after it:
 
 ```json
@@ -53,5 +54,9 @@ Rules:
   exhaustion; Warning for degradation or something needing attention; Healthy only when the
   evidence genuinely supports it.
 - Write findings for a non-expert operator: state what was measured and what it means.
+- What you know from outside the tool output - framework mappings, known end-of-life dates, what a
+  vendor's agent normally looks like, the value a setting is expected to hold - belongs in the
+  analysis and in recommendedActions, labelled as knowledge. A finding quotes only what the output
+  contains; a finding that names a value the output does not contain is reported as unsupported.
 """;
 }
