@@ -298,6 +298,11 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 - [`install-enterprise.ps1`](../packaging/install-enterprise.ps1) and
   [`uninstall-enterprise.ps1`](../packaging/uninstall-enterprise.ps1) are the silent Intune and
   SCCM install and removal.
+- [`reprove-substrate.ps1`](../packaging/reprove-substrate.ps1), added 2026-09-23, re-records the
+  daemon and last-hop evidence in one command: a fresh build started as root through `wsl -u root`,
+  both probes with their evidence written into the tree, the installed unit put back, and exit 0
+  only when both verdicts are PASS against the kernel program in the tree. For the operator's own
+  terminal; an agent is refused every route to a root daemon.
 - Deferred: the runbook leaves MSIX out on purpose, and the live plan ships `splat-mcp` without an
   installer.
 

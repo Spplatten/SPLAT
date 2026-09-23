@@ -368,7 +368,14 @@ public record MerkleTreeNode(
 public record MerkleTree(
     string RootHash,
     MerkleTreeNode? RootNode,
-    int LeafCount);
+    int LeafCount,
+    // Every level's hashes, leaves first, and each entry's position among the leaves. A proof is
+    // then a walk of one sibling lookup per level rather than a search of the whole tree at every
+    // level, which is what GenerateProof did before: O(n) per level, O(n log n) per proof, and a
+    // bundle of n entries paid it n times over. Null on a tree built without them, which the engine
+    // then walks the old way.
+    IReadOnlyList<IReadOnlyList<string>>? Levels = null,
+    IReadOnlyDictionary<long, int>? LeafPositions = null);
 
 public record MerkleProofStep(
     string SiblingHash,

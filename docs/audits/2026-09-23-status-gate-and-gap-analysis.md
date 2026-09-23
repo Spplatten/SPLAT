@@ -241,4 +241,9 @@ two decisions (the distro, the certificate).
   [`ARCHITECTURE.md`](../ARCHITECTURE.md), [`ARCHITECTURE-control-plane.md`](../ARCHITECTURE-control-plane.md)
   and [`ARCHITECTURE-agent-surface.md`](../ARCHITECTURE-agent-surface.md): F19 wired it into the
   MCP host's mission engine on 2026-09-19, and `Program.cs` shows it.
+- The script half of fix 1 landed the same day: [`packaging/reprove-substrate.ps1`](../../packaging/reprove-substrate.ps1).
+  The run is the operator's.
+- Two of the smaller findings above were closed the same day, because each was an afternoon:
+  `MerkleTreeEngine` proves by leaf position, one sibling lookup per level, and `run_command`
+  takes its clamps from `LeaseResourceLimits`' defaults rather than restating them.
 - Nothing else. Every other gap above is a roadmap row or a decision, and is left there.

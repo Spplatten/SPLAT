@@ -169,6 +169,13 @@ This needs no root to prove: the intersection is a pure function with tests in `
 
 ## 5. The unproven change
 
+> **Done 2026-09-23, the script half.** [`packaging/reprove-substrate.ps1`](../../packaging/reprove-substrate.ps1)
+> is the one command set out below: it builds, stops the installed unit, starts the fresh binary as
+> root through `wsl -u root`, runs `probe-daemon.sh` as root in the guest and `probe-last-hop.ps1`
+> from Windows with both evidence paths pointed at the tree, restarts the unit, and exits 0 only when
+> both verdicts are PASS and both hashes match the source that ships. The run is still the
+> operator's, for the reason given below.
+
 **What is true today.** The record change of 2026-09-20 compiles, its layout is asserted, and
 its hooks are still straight-line code. Whether the verifier accepts it and the hooks still
 refuse correctly is unknown until `probe-daemon.sh` and `probe-last-hop.ps1` run against a root

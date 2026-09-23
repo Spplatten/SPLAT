@@ -17,15 +17,19 @@ public sealed class MerkleTreeEngine : IMerkleProofEngine
             return new MerkleTree("0000000000000000000000000000000000000000000000000000000000000000", null, 0);
         }
 
-        // Build leaf nodes
+        // Build leaf nodes, and remember where each entry sits among them.
         var currentLevel = new List<MerkleTreeNode>();
+        var leafPositions = new Dictionary<long, int>();
         foreach (var entry in entries.OrderBy(e => e.Id))
         {
             string leafHash = ComputeLeafHash(entry);
+            // First occurrence wins, which is the leaf the root-down search used to find.
+            leafPositions.TryAdd(entry.Id, currentLevel.Count);
             currentLevel.Add(new MerkleTreeNode(leafHash, null, null, entry.Id));
         }
 
         int leafCount = currentLevel.Count;
+        var levels = new List<IReadOnlyList<string>> { currentLevel.Select(n => n.Hash).ToList() };
 
         // Build tree bottom-up
         while (currentLevel.Count > 1)
@@ -40,10 +44,11 @@ public sealed class MerkleTreeEngine : IMerkleProofEngine
                 nextLevel.Add(new MerkleTreeNode(combinedHash, left, right, null));
             }
             currentLevel = nextLevel;
+            levels.Add(currentLevel.Select(n => n.Hash).ToList());
         }
 
         var rootNode = currentLevel[0];
-        return new MerkleTree(rootNode.Hash, rootNode, leafCount);
+        return new MerkleTree(rootNode.Hash, rootNode, leafCount, levels, leafPositions);
     }
 
     public MerkleProof GenerateProof(MerkleTree tree, long entryId)
@@ -53,6 +58,13 @@ public sealed class MerkleTreeEngine : IMerkleProofEngine
             throw new InvalidOperationException("Cannot generate proof on an empty Merkle tree.");
         }
 
+        if (tree.Levels is { Count: > 0 } levels && tree.LeafPositions is not null)
+        {
+            return ProveByPosition(tree, levels, entryId);
+        }
+
+        // A tree built without its levels - by hand, or by an older engine - is walked from the root,
+        // asking every subtree whether it holds the entry. Correct, and O(n log n) per proof.
         var proofSteps = new List<MerkleProofStep>();
         string? leafHash = null;
 
@@ -63,6 +75,35 @@ public sealed class MerkleTreeEngine : IMerkleProofEngine
         }
 
         return new MerkleProof(entryId, leafHash, tree.RootHash, proofSteps);
+    }
+
+    /// <summary>
+    /// One sibling per level, read by position. The steps are ordered leaf-first, and each says
+    /// which side its sibling was hashed on, exactly as the root-down walk recorded them - so a
+    /// proof from either path verifies under the same <see cref="VerifyProof"/> and rebuilds under
+    /// the bundle's own scripts, which only ever knew the leaf-first shape. An odd level's last
+    /// node was paired with itself when its parent was built, and its sibling here is itself.
+    /// </summary>
+    private static MerkleProof ProveByPosition(MerkleTree tree, IReadOnlyList<IReadOnlyList<string>> levels, long entryId)
+    {
+        if (!tree.LeafPositions!.TryGetValue(entryId, out int index) || index >= levels[0].Count)
+        {
+            throw new KeyNotFoundException($"EntryId {entryId} was not found in the Merkle tree.");
+        }
+
+        string leafHash = levels[0][index];
+        var steps = new List<MerkleProofStep>(levels.Count);
+        for (int level = 0; level < levels.Count - 1; level++)
+        {
+            var row = levels[level];
+            bool isRightChild = (index & 1) == 1;
+            int siblingIndex = isRightChild ? index - 1 : index + 1;
+            string sibling = siblingIndex < row.Count ? row[siblingIndex] : row[index];
+            steps.Add(new MerkleProofStep(sibling, IsLeftSibling: isRightChild));
+            index >>= 1;
+        }
+
+        return new MerkleProof(entryId, leafHash, tree.RootHash, steps);
     }
 
     public bool VerifyProof(MerkleProof proof)
