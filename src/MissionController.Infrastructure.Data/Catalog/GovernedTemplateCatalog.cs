@@ -179,6 +179,9 @@ public static partial class GovernedTemplateCatalog
         // Added 2026-09-21, after reading what they return rather than only the comparison's verdict.
         "compliance-legacy-protocols",
         "endpoint-mdm-enrollment",
+        // Added 2026-09-23. It exists to meet the container: its connect attempt is the one line
+        // that changes inside, from ALLOWED to BLOCKED, and that is the evidence it is for.
+        "compliance-containment-self-proof",
 
         // Two left on 2026-09-22, when fixing them made them produce evidence at all. Denial had
         // measured harmless because they answered with nothing on either side. sysops-disk-space
