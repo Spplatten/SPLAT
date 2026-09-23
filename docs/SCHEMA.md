@@ -112,8 +112,8 @@ than installed partially ([`LeaseManager::register_lease`](../native/splat-agent
 
 | Direction | Frame |
 | --- | --- |
-| bridge → daemon | `{"type":"HELLO","protocolVersion":3,"clientNonce":"<64 hex>"}` |
-| daemon → bridge | `{"type":"CHALLENGE","protocolVersion":3,"serverNonce":"<64 hex>","serverProof":"<64 hex>"}` |
+| bridge → daemon | `{"type":"HELLO","protocolVersion":3,"clientNonce":"<64 hex>","proveFrames":true}` |
+| daemon → bridge | `{"type":"CHALLENGE","protocolVersion":3,"serverNonce":"<64 hex>","serverProof":"<64 hex>","framesProven":true}` |
 
 Nonces are 32 bytes from the kernel's CSPRNG. Hex is lowercase on the wire; the daemon's parser
 also accepts uppercase, and refuses anything that is not exactly 64 hex digits.
@@ -121,29 +121,44 @@ also accepts uppercase, and refuses anything that is not exactly 64 hex digits.
 The bridge checks `serverProof` in fixed time **before sending anything else**. A listener that
 took the daemon's port learns one nonce and nothing more.
 
+`proveFrames` and `framesProven` date from 2026-09-23 (roadmap 2.6). A bridge that sends the first
+asks for every frame the daemon answers with to be proven; a daemon that agrees says so with the
+second and proves its `CHALLENGE` under the `daemon+frames` label below, so the agreement is in the
+proof and a relay that stripped the field would leave a `CHALLENGE` the bridge refuses. A daemon that
+predates the field ignores it, proves its `CHALLENGE` under the plain label, and answers unwrapped;
+the bridge accepts that and reports `FramesProven` as false, which `doctor` prints.
+
 ### Proofs
 
 The key is the UTF-8 bytes of the token as written in `/etc/splat/agent.token` (64 lowercase hex
 characters). The token itself never crosses the wire.
 
 ```
-daemon_proof  = HMAC-SHA256(key, "splat-agent/3 daemon"  || 0x00 || clientNonce || serverNonce)
+daemon_proof  = HMAC-SHA256(key, "splat-agent/3 daemon"        || 0x00 || clientNonce || serverNonce)   # framesProven absent
+daemon_proof  = HMAC-SHA256(key, "splat-agent/3 daemon+frames" || 0x00 || clientNonce || serverNonce)   # framesProven: true
 request_proof = HMAC-SHA256(key, "splat-agent/3 request" || 0x00 || clientNonce || serverNonce
                                  || sequence as big-endian u64 || request bytes)
+frame_proof   = HMAC-SHA256(key, "splat-agent/3 frame"   || 0x00 || clientNonce || serverNonce
+                                 || sequence as big-endian u64 || frame bytes)
 ```
 
 `sequence` starts at 0 on each connection and increments once per **accepted** `AUTHENTICATED`
 frame, so a proof is good for one request, in one place, on one connection. The request is proven
-over its exact bytes, before any of them is parsed; that is why it travels as a string.
+over its exact bytes, before any of them is parsed; that is why it travels as a string. The
+daemon's frames are numbered the same way, from 0 for the first frame after the `CHALLENGE`, and
+proven over their exact bytes for the same reason.
 
 Test vectors, asserted on both sides (token `0123456789abcdef` × 4; client nonce bytes `00..1f`;
 server nonce bytes `20..3f`; request `{"type":"HEALTH_CHECK"}`):
 
 | Proof | Value |
 | --- | --- |
-| daemon | `52265f2b72fe6c7801c6ffadbd9745a0a69bb165d31d71f31007e81f1c01ea7d` |
+| daemon, `framesProven` absent | `52265f2b72fe6c7801c6ffadbd9745a0a69bb165d31d71f31007e81f1c01ea7d` |
+| daemon, `framesProven: true` | `c1fb43f8ecb070c29c61eb34189d0917d3c0738dd7f120920c9607fc71661d3d` |
 | request, sequence 0 | `835749efc2b9219f33027ab8571edebb135df57a55b6a0fbc79e1cc68c42c5aa` |
 | request, sequence 1 | `2bb2251468dd196a6a88d2684c95beacdf2954864d0555e0143a124c30ca755d` |
+| frame, sequence 0, over `{"type":"EXIT","exitCode":0}` | `a8105556e4245abee3c9221c484065cef75ada4422251d572ee802ddae1f08f4` |
+| frame, sequence 1, over the same | `1787bcf29e2992298a87cfa606ff26f6afe6e496f61b95f42f3ff8e4baf6f3bf` |
 
 ### Requests
 
@@ -208,11 +223,27 @@ failure or an oversized frame is answered with a `STDERR` frame and the connecti
 request of an unknown `type` is answered with a `STDERR` refusal naming the type, and the
 connection stays open.
 
-### What the daemon's own frames carry
+### The daemon's frames
 
-Nothing: after the handshake the daemon's frames are not authenticated. On loopback nothing sits
-between the two ends, and the handshake settled who is at each. A transport that carries peer
-identity is the work that would change this.
+On a connection whose `CHALLENGE` said `framesProven`, every frame the daemon sends after it — the
+`HEALTH_RESPONSE`, every `STDOUT`, `STDERR`, `VIOLATION` and `EXIT`, and every refusal — travels
+wrapped:
+
+```json
+{"type":"PROVEN","proof":"<64 hex>","frame":"<the frame, as a JSON string>"}
+```
+
+The bridge checks the proof in fixed time over the frame's exact bytes and for its number on the
+connection before it parses any of them, and hands the frame inside up to its caller. A frame that
+does not prove itself — unwrapped, proven under another connection's nonces, or proven for a place
+already taken, which is what a replay or a reordering looks like — ends the session: what came
+before it stands, and nothing after it is read. The bridge reports it as a `TransportError`, and
+`WslAgentSessionTests` holds the refusal to the vectors above.
+
+On a connection whose `CHALLENGE` did not say so — a daemon older than 2026-09-23 — the frames
+travel bare and are believed on the strength of the handshake, as they always were. The bridge
+says which kind of session it got (`WslAgentSession.FramesProven`), the health check carries it,
+and `doctor` prints it. A transport that carries peer identity is still separate work (roadmap 2.4).
 
 ---
 
@@ -249,7 +280,7 @@ when the daemon sent one, else the host's clock at receipt, and `Sequence` and `
 | `-1` | `AbruptDisconnect` | The connection closed before `EXIT` |
 | `-2` | `LocalDeadlineExpired` | The bridge's own deadline fired; `TimedOut` is `true`. Closing the connection makes the daemon kill the workload |
 | `-3` | `CallerCancelled` | The caller's token was cancelled |
-| `-1` | `TransportError` | Connect, token or handshake failed; `StandardError` says which |
+| `-1` | `TransportError` | Connect, token or handshake failed, or a frame did not prove itself; `StandardError` says which |
 
 `FinalMetrics` is always `JobResourceMetrics.Unavailable`: the `EXIT` frame carries no cgroup
 accounting, and the bridge reports the absence rather than a number nobody measured.
@@ -308,7 +339,8 @@ know, a schema it does not speak, a file that is not root's, and one that group 
   may not be the whole inode number on a filesystem that uses the high bits.
 - **`STDOUT` and `STDERR` interleave arbitrarily** relative to each other; each is ordered within
   itself.
-- **Frames after the handshake are not proven** by the daemon.
+- **Frames from a daemon that did not say `framesProven`** are not proven, and are accepted. A
+  daemon that said so is held to it: one frame that does not prove itself ends the connection.
 - **Changing any layout in section A** requires updating the `const` assertions in `lease.rs` and
   `violation.rs`, re-running the canary and the daemon probe as root, and committing the evidence;
   `DocumentationDriftTests` withdraws the README's enforcement claim until that is done.

@@ -243,6 +243,11 @@ two decisions (the distro, the certificate).
   MCP host's mission engine on 2026-09-19, and `Program.cs` shows it.
 - The script half of fix 1 landed the same day: [`packaging/reprove-substrate.ps1`](../../packaging/reprove-substrate.ps1).
   The run is the operator's.
+- Fix 2(b), roadmap 2.6, landed the same day, ahead of 2.3 because it touches no kernel program:
+  the daemon's frames prove themselves for their place on the connection when the bridge asks, the
+  agreement is bound into the handshake proof, the bridge refuses the session at the first frame
+  that does not hold, and the root probe scores it. Fix 2(a), the signed Linux run record, is still
+  the next piece of agent work after the re-proof.
 - Two of the smaller findings above were closed the same day, because each was an afternoon:
   `MerkleTreeEngine` proves by leaf position, one sibling lookup per level, and `run_command`
   takes its clamps from `LeaseResourceLimits`' defaults rather than restating them.

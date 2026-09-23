@@ -35,7 +35,13 @@ public record WslSubstrateStatus(
     /// the token alone authorizes whatever a request names; a daemon that predates the field reports
     /// nothing, which reads here as none.
     /// </summary>
-    bool CeilingPolicy = false);
+    bool CeilingPolicy = false,
+    /// <summary>
+    /// Whether the daemon agreed to prove every frame it sends, so that what this host reads back from a
+    /// lease - output, kernel refusals, the exit - is proven for its place on the connection and not only
+    /// believed on the strength of the handshake. False from a daemon older than 2026-09-23.
+    /// </summary>
+    bool FramesProven = false);
 
 /// <summary>
 /// Probes and validates the status of the local WSL2 kernel substrate and BPF-LSM daemon.
@@ -177,7 +183,8 @@ public class WslSubstrateHealthChecker
                     Enforcing: enforcing,
                     // It answered, which it does only for a request that proved the token.
                     Authenticated: true,
-                    CeilingPolicy: root.TryGetProperty("ceiling", out var ceiling) && ceiling.GetBoolean());
+                    CeilingPolicy: root.TryGetProperty("ceiling", out var ceiling) && ceiling.GetBoolean(),
+                    FramesProven: session.FramesProven);
             }
         }
         catch (WslAgentHandshakeException ex)

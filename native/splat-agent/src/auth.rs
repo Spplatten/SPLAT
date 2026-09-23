@@ -20,8 +20,14 @@
 //     process running as that user can obtain it. Closing that requires a transport that carries
 //     peer identity (AF_VSOCK with a guest-side allow-list, or SO_PEERCRED over AF_UNIX); it is
 //     the wire-contract work, not this.
-//   * The frames this daemon sends after the handshake carry no proof of their own. On loopback
-//     nothing sits between the two ends of a connection, and the handshake settled who is at each.
+//   * The frames this daemon sends after the handshake prove themselves too, when the caller asked
+//     for it in its HELLO (2026-09-23; roadmap 2.6). Each travels in a PROVEN wrapper whose proof
+//     covers both nonces, the frame's number on the connection and its exact bytes - the request
+//     proof's shape, in the other direction - and the CHALLENGE that agreed to it is proven under a
+//     label of its own, so the agreement cannot be stripped off in transit. A caller that did not
+//     ask, which is every bridge older than that date, is answered unwrapped as before. On loopback
+//     nothing sits between the two ends of a connection; this is what makes the protocol symmetric
+//     before anything leaves the host.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -39,14 +45,21 @@ const TOKEN_BYTES: usize = 32;
 /// Bytes in a handshake nonce, and in a proof, which is SHA-256's output: 64 hex digits on the wire.
 pub const NONCE_BYTES: usize = 32;
 
-// Distinct labels, so neither proof can be passed off as the other.
+// Distinct labels, so no proof can be passed off as another kind.
 const DAEMON_LABEL: &[u8] = b"splat-agent/3 daemon";
+/// The daemon's handshake proof on a connection whose frames it will prove: a CHALLENGE that agreed
+/// to prove frames verifies only under this label, so dropping `framesProven` from it in transit
+/// leaves a proof the caller refuses rather than a quieter connection.
+const DAEMON_FRAMES_LABEL: &[u8] = b"splat-agent/3 daemon+frames";
 const REQUEST_LABEL: &[u8] = b"splat-agent/3 request";
+const FRAME_LABEL: &[u8] = b"splat-agent/3 frame";
 
-/// The two nonces that name one connection's handshake. Every request on it is proven over both.
+/// The two nonces that name one connection's handshake, and whether the daemon's frames on it are
+/// proven. Every request on it is proven over both nonces; so is every frame back, when asked.
 pub struct Session {
     pub client_nonce: [u8; NONCE_BYTES],
     pub server_nonce: [u8; NONCE_BYTES],
+    pub prove_frames: bool,
 }
 
 pub struct PeerAuth {
@@ -126,9 +139,17 @@ impl PeerAuth {
     /// This daemon's answer to a HELLO: proof that it holds the token, over the caller's nonce and its
     /// own. A caller checks it before sending anything else, which is what keeps it from handing a
     /// request - or, under protocol 2, the token itself - to whatever took this daemon's port.
-    pub fn daemon_proof(&self, client_nonce: &[u8; NONCE_BYTES], server_nonce: &[u8; NONCE_BYTES]) -> [u8; NONCE_BYTES] {
+    ///
+    /// Under a label of its own when this connection's frames will be proven, so a CHALLENGE that
+    /// agreed to that cannot be passed off as one that did not.
+    pub fn daemon_proof(
+        &self,
+        client_nonce: &[u8; NONCE_BYTES],
+        server_nonce: &[u8; NONCE_BYTES],
+        proves_frames: bool,
+    ) -> [u8; NONCE_BYTES] {
         let mut mac = self.mac();
-        mac.update(DAEMON_LABEL);
+        mac.update(if proves_frames { DAEMON_FRAMES_LABEL } else { DAEMON_LABEL });
         mac.update(&[0]);
         mac.update(client_nonce);
         mac.update(server_nonce);
@@ -153,6 +174,29 @@ impl PeerAuth {
         self.request_mac(client_nonce, server_nonce, sequence, request)
             .verify_slice(proof)
             .is_ok()
+    }
+
+    /// This daemon's proof of one frame it sends: over both nonces, the frame's number on the
+    /// connection and its exact bytes, so a captured frame is good for one place on one connection
+    /// and a replayed or reordered one is refused by the bridge. The request proof's shape, sent the
+    /// other way, under its own label.
+    pub fn frame_proof(
+        &self,
+        client_nonce: &[u8; NONCE_BYTES],
+        server_nonce: &[u8; NONCE_BYTES],
+        sequence: u64,
+        frame: &[u8],
+    ) -> [u8; NONCE_BYTES] {
+        let mut mac = self.mac();
+        mac.update(FRAME_LABEL);
+        mac.update(&[0]);
+        mac.update(client_nonce);
+        mac.update(server_nonce);
+        mac.update(&sequence.to_be_bytes());
+        mac.update(frame);
+        let mut proof = [0u8; NONCE_BYTES];
+        proof.copy_from_slice(&mac.finalize().into_bytes());
+        proof
     }
 
     /// The proof a caller holding this token makes. The daemon only ever checks one, so only the tests
@@ -263,8 +307,12 @@ mod tests {
         let (client, server) = vector_nonces();
 
         assert_eq!(
-            hex(&auth.daemon_proof(&client, &server)),
+            hex(&auth.daemon_proof(&client, &server, false)),
             "52265f2b72fe6c7801c6ffadbd9745a0a69bb165d31d71f31007e81f1c01ea7d"
+        );
+        assert_eq!(
+            hex(&auth.daemon_proof(&client, &server, true)),
+            "c1fb43f8ecb070c29c61eb34189d0917d3c0738dd7f120920c9607fc71661d3d"
         );
         assert_eq!(
             hex(&auth.request_proof(&client, &server, 0, VECTOR_REQUEST)),
@@ -274,6 +322,40 @@ mod tests {
             hex(&auth.request_proof(&client, &server, 1, VECTOR_REQUEST)),
             "2bb2251468dd196a6a88d2684c95beacdf2954864d0555e0143a124c30ca755d"
         );
+    }
+
+    /// The frame vectors, asserted by WslAgentSessionTests too. Computed independently with Python's
+    /// hmac module on 2026-09-23.
+    #[test]
+    fn the_frame_proofs_match_the_vector_the_bridge_is_tested_against() {
+        let auth = PeerAuth::from_token(VECTOR_TOKEN);
+        let (client, server) = vector_nonces();
+        let frame = br#"{"type":"EXIT","exitCode":0}"#;
+
+        assert_eq!(
+            hex(&auth.frame_proof(&client, &server, 0, frame)),
+            "a8105556e4245abee3c9221c484065cef75ada4422251d572ee802ddae1f08f4"
+        );
+        assert_eq!(
+            hex(&auth.frame_proof(&client, &server, 1, frame)),
+            "1787bcf29e2992298a87cfa606ff26f6afe6e496f61b95f42f3ff8e4baf6f3bf"
+        );
+    }
+
+    /// A frame's proof, a request's proof and the two handshake proofs are four different things,
+    /// and none stands in for another: the labels are what keep a captured value in its place.
+    #[test]
+    fn no_proof_of_one_kind_passes_as_another() {
+        let auth = PeerAuth::from_token(VECTOR_TOKEN);
+        let (client, server) = vector_nonces();
+        let bytes = VECTOR_REQUEST;
+
+        let frame = auth.frame_proof(&client, &server, 0, bytes);
+        let request = auth.request_proof(&client, &server, 0, bytes);
+        assert_ne!(frame, request, "the same bytes at the same place, proven as a frame and as a request");
+        assert_ne!(auth.daemon_proof(&client, &server, false), auth.daemon_proof(&client, &server, true));
+        assert_ne!(auth.frame_proof(&client, &server, 1, bytes), frame, "a frame proof names its place");
+        assert_ne!(auth.frame_proof(&server, &client, 0, bytes), frame, "and its connection");
     }
 
     #[test]

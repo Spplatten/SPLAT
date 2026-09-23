@@ -641,14 +641,20 @@ async fn open_session(
     let refusal = match read_frame(reader, line).await {
         Ok(0) => return Ok(None),
         Ok(_) => match hello_nonce(line.trim()) {
-            Ok(client_nonce) => {
-                let session = auth::Session { client_nonce, server_nonce: auth::random_bytes()? };
-                let challenge = serde_json::json!({
+            Ok((client_nonce, prove_frames)) => {
+                let session = auth::Session { client_nonce, server_nonce: auth::random_bytes()?, prove_frames };
+                let mut challenge = serde_json::json!({
                     "type": "CHALLENGE",
                     "protocolVersion": PROTOCOL_VERSION,
                     "serverNonce": auth::hex(&session.server_nonce),
-                    "serverProof": auth::hex(&peer_auth.daemon_proof(&session.client_nonce, &session.server_nonce)),
+                    "serverProof": auth::hex(&peer_auth.daemon_proof(&session.client_nonce, &session.server_nonce, prove_frames)),
                 });
+                if prove_frames {
+                    // Said in the frame AND bound into the proof above by its label: a relay that
+                    // dropped this field would leave a proof the caller checks under the other label
+                    // and refuses, rather than a connection that quietly went unproven.
+                    challenge["framesProven"] = serde_json::Value::Bool(true);
+                }
                 writer.write_all(format!("{challenge}\n").as_bytes()).await?;
                 return Ok(Some(session));
             }
@@ -666,8 +672,10 @@ async fn open_session(
     Ok(None)
 }
 
-/// The client nonce from a protocol 3 HELLO, or why the frame is not one.
-fn hello_nonce(frame: &str) -> std::result::Result<[u8; auth::NONCE_BYTES], String> {
+/// The client nonce from a protocol 3 HELLO, and whether the caller asked for this daemon's frames
+/// to be proven - or why the frame is not a HELLO. A caller that does not ask is one older than the
+/// field, and is answered unwrapped; the field is how a bridge and a daemon of different ages agree.
+fn hello_nonce(frame: &str) -> std::result::Result<([u8; auth::NONCE_BYTES], bool), String> {
     let hello: serde_json::Value =
         serde_json::from_str(frame).map_err(|e| format!("the first frame is not JSON ({e})"))?;
 
@@ -687,11 +695,57 @@ fn hello_nonce(frame: &str) -> std::result::Result<[u8; auth::NONCE_BYTES], Stri
         ));
     }
 
-    hello
+    let client_nonce = hello
         .get("clientNonce")
         .and_then(|n| n.as_str())
         .and_then(auth::from_hex)
-        .ok_or_else(|| format!("a HELLO carries its clientNonce as {} hex digits", auth::NONCE_BYTES * 2))
+        .ok_or_else(|| format!("a HELLO carries its clientNonce as {} hex digits", auth::NONCE_BYTES * 2))?;
+    let prove_frames = hello.get("proveFrames").and_then(|p| p.as_bool()).unwrap_or(false);
+    Ok((client_nonce, prove_frames))
+}
+
+/// Every frame this daemon sends on one connection after the CHALLENGE, proven when the caller asked.
+///
+/// Protocol 3 proved every request and none of the answers: VIOLATION, STDOUT and EXIT reached the
+/// bridge, and through it the ledger, on the strength of the handshake alone. On loopback that was
+/// defensible; before anything leaves the host it has to be symmetric. A caller that sent
+/// `proveFrames` in its HELLO is answered with each frame wrapped as
+/// `{"type":"PROVEN","proof":<hex>,"frame":<the frame, as a string>}`, proven over both nonces, the
+/// frame's number on this connection and its exact bytes - the request proof's shape, in the other
+/// direction. One that did not ask is answered as before, so a bridge older than the daemon keeps
+/// working, and reports the frames as unproven rather than believing them proven.
+struct FrameSink<W> {
+    writer: W,
+    proving: Option<(Arc<PeerAuth>, [u8; auth::NONCE_BYTES], [u8; auth::NONCE_BYTES])>,
+    sequence: u64,
+}
+
+impl<W: AsyncWrite + Unpin> FrameSink<W> {
+    fn new(writer: W, session: &auth::Session, peer_auth: &Arc<PeerAuth>) -> Self {
+        Self {
+            writer,
+            proving: session
+                .prove_frames
+                .then(|| (peer_auth.clone(), session.client_nonce, session.server_nonce)),
+            sequence: 0,
+        }
+    }
+
+    /// One frame on its own line, wrapped and proven when this connection asked for it.
+    async fn send(&mut self, frame: &serde_json::Value) -> std::io::Result<()> {
+        let line = match &self.proving {
+            Some((peer_auth, client_nonce, server_nonce)) => {
+                // Proven over the frame's bytes exactly as they travel, carried as a string, so the
+                // bridge checks the proof over those bytes before it parses any of them.
+                let bytes = frame.to_string();
+                let proof = peer_auth.frame_proof(client_nonce, server_nonce, self.sequence, bytes.as_bytes());
+                self.sequence += 1;
+                serde_json::json!({ "type": "PROVEN", "proof": auth::hex(&proof), "frame": bytes }).to_string()
+            }
+            None => frame.to_string(),
+        };
+        self.writer.write_all(format!("{line}\n").as_bytes()).await
+    }
 }
 
 /// The request inside an AUTHENTICATED frame, once its proof holds for this session and for its place
@@ -744,6 +798,9 @@ async fn handle_client(
     let Some(session) = open_session(&mut buf_reader, &mut writer, &mut line, &peer_auth).await? else {
         return Ok(());
     };
+    // From here every frame this daemon sends goes through the sink, which proves each one when the
+    // caller asked - refusals included, because a refusal is a frame the caller acts on.
+    let mut out = FrameSink::new(writer, &session, &peer_auth);
     let mut sequence: u64 = 0;
 
     loop {
@@ -759,7 +816,7 @@ async fn handle_client(
                     "type": "STDERR",
                     "data": format!("SPLAT refused the request: {e}.\n")
                 });
-                let _ = writer.write_all(format!("{err_resp}\n").as_bytes()).await;
+                let _ = out.send(&err_resp).await;
                 break;
             }
         }
@@ -780,7 +837,7 @@ async fn handle_client(
                     "type": "STDERR",
                     "data": format!("SPLAT refused the request: {reason}.\n")
                 });
-                let _ = writer.write_all(format!("{err_resp}\n").as_bytes()).await;
+                let _ = out.send(&err_resp).await;
                 break;
             }
         };
@@ -809,7 +866,7 @@ async fn handle_client(
                     // authorizes whatever a request names.
                     "ceiling": lease_ceiling.is_some()
                 });
-                writer.write_all(format!("{resp}\n").as_bytes()).await?;
+                out.send(&resp).await?;
             }
 
             "EXECUTE_TOOL" => {
@@ -830,9 +887,9 @@ async fn handle_client(
                             "SPLAT refused the request: protocol version {protocol_version} is not supported. \
                              This daemon speaks version {PROTOCOL_VERSION}, which requires an explicit argv array.\n")
                     });
-                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                    out.send(&err_chunk).await?;
                     let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
-                    writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                    out.send(&exit_chunk).await?;
                     line.clear();
                     continue;
                 }
@@ -853,9 +910,9 @@ async fn handle_client(
                             "data": "SPLAT refused the request: argv must be an array of strings. \
                                      A pre-quoted argument string cannot be split back into arguments.\n"
                         });
-                        writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                        out.send(&err_chunk).await?;
                         let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
-                        writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                        out.send(&exit_chunk).await?;
                         line.clear();
                         continue;
                     }
@@ -915,9 +972,9 @@ async fn handle_client(
                             unsupported.join("; ")
                         )
                     });
-                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                    out.send(&err_chunk).await?;
                     let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
-                    writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                    out.send(&exit_chunk).await?;
                     line.clear();
                     continue;
                 }
@@ -954,9 +1011,9 @@ async fn handle_client(
                             undeclared.join(", nor ")
                         )
                     });
-                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                    out.send(&err_chunk).await?;
                     let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
-                    writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                    out.send(&exit_chunk).await?;
                     line.clear();
                     continue;
                 }
@@ -987,9 +1044,9 @@ async fn handle_client(
                                  is the operator's, in the guest, and the token does not raise it.\n"
                             )
                         });
-                        writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                        out.send(&err_chunk).await?;
                         let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
-                        writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                        out.send(&exit_chunk).await?;
                         line.clear();
                         continue;
                     }
@@ -1044,9 +1101,9 @@ async fn handle_client(
                             "type": "STDERR",
                             "data": format!("SPLAT refused to execute: no lease could be provisioned ({e}).\n")
                         });
-                        writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                        out.send(&err_chunk).await?;
                         let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
-                        writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                        out.send(&exit_chunk).await?;
                         line.clear();
                         continue;
                     }
@@ -1126,9 +1183,9 @@ async fn handle_client(
                         "data": format!(
                             "SPLAT refused to execute: '{command}' is not in this lease's allowedExecPaths.\n")
                     });
-                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                    out.send(&err_chunk).await?;
                     let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
-                    writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                    out.send(&exit_chunk).await?;
                     line.clear();
                     continue;
                 }
@@ -1142,9 +1199,9 @@ async fn handle_client(
                         "type": "STDERR",
                         "data": format!("SPLAT refused to execute: the capability lease could not be installed ({e}).\n")
                     });
-                    writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                    out.send(&err_chunk).await?;
                     let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
-                    writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                    out.send(&exit_chunk).await?;
                     line.clear();
                     continue;
                 }
@@ -1172,9 +1229,9 @@ async fn handle_client(
                                 "type": "STDERR",
                                 "data": format!("SPLAT refused to execute: the workload's root could not be prepared ({e}).\n")
                             });
-                            writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                            out.send(&err_chunk).await?;
                             let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
-                            writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                            out.send(&exit_chunk).await?;
                             line.clear();
                             continue;
                         }
@@ -1245,9 +1302,9 @@ async fn handle_client(
                                 "type": "STDERR",
                                 "data": "SPLAT refused to execute: the lease cgroup path could not be used.\n"
                             });
-                            writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                            out.send(&err_chunk).await?;
                             let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
-                            writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                            out.send(&exit_chunk).await?;
                             line.clear();
                             continue;
                         }
@@ -1283,7 +1340,7 @@ async fn handle_client(
                             while tokio::time::Instant::now() < deadline {
                                 match tokio::time::timeout(Duration::from_millis(60), viol_rx.recv()).await {
                                     Ok(Ok(v)) if v.cgroup_id == target_cgid => {
-                                        writer.write_all(format!("{}\n", violation_frame(&v)).as_bytes()).await?;
+                                        out.send(&violation_frame(&v)).await?;
                                         break;
                                     }
                                     Ok(Ok(_)) => continue,
@@ -1298,13 +1355,13 @@ async fn handle_client(
                             "type": "STDERR",
                             "data": format!("Failed to spawn process '{command}': {e}\n")
                         });
-                        writer.write_all(format!("{err_chunk}\n").as_bytes()).await?;
+                        out.send(&err_chunk).await?;
 
                         let exit_chunk = serde_json::json!({
                             "type": "EXIT",
                             "exitCode": -1
                         });
-                        writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                        out.send(&exit_chunk).await?;
                         line.clear();
                         continue;
                     }
@@ -1420,7 +1477,7 @@ async fn handle_client(
                 // inside the installed policy, then withdraw the policy.
                 let mut pump_error: Option<std::io::Error> = None;
                 while let Some(msg) = rx.recv().await {
-                    if let Err(e) = writer.write_all(format!("{msg}\n").as_bytes()).await {
+                    if let Err(e) = out.send(&msg).await {
                         pump_error = Some(e);
                         break;
                     }
@@ -1457,7 +1514,7 @@ async fn handle_client(
                     // VIOLATION frames above are incomplete, which the caller must be told.
                     "violationsDropped": lease_mgr.dropped_events().saturating_sub(dropped_before)
                 });
-                writer.write_all(format!("{exit_chunk}\n").as_bytes()).await?;
+                out.send(&exit_chunk).await?;
 
                 // 3. Atomically revoke lease upon exit
                 lease_mgr.revoke_lease(cg.cgroup_id);
@@ -1472,7 +1529,7 @@ async fn handle_client(
                     "type": "STDERR",
                     "data": format!("SPLAT refused the request: '{req_type}' is not a request this daemon knows.\n")
                 });
-                writer.write_all(format!("{err_resp}\n").as_bytes()).await?;
+                out.send(&err_resp).await?;
             }
         }
 
@@ -1619,8 +1676,79 @@ mod session_tests {
         assert_eq!(challenge["serverNonce"].as_str(), Some(auth::hex(&session.server_nonce).as_str()));
         assert_eq!(
             challenge["serverProof"].as_str(),
-            Some(auth::hex(&auth.daemon_proof(&client_nonce, &session.server_nonce)).as_str())
+            Some(auth::hex(&auth.daemon_proof(&client_nonce, &session.server_nonce, false)).as_str())
         );
+        // A caller that did not ask for proven frames is a bridge older than the field: answered as
+        // before, and told nothing it would not understand.
+        assert!(!session.prove_frames);
+        assert!(challenge.get("framesProven").is_none());
+    }
+
+    /// A HELLO that asks for proven frames is answered under the frames label, and says so.
+    #[tokio::test]
+    async fn a_hello_that_asks_for_proven_frames_is_answered_under_the_frames_label() {
+        let auth = PeerAuth::from_token(TOKEN);
+        let client_nonce = [9u8; auth::NONCE_BYTES];
+        let hello = serde_json::json!({
+            "type": "HELLO",
+            "protocolVersion": PROTOCOL_VERSION,
+            "clientNonce": auth::hex(&client_nonce),
+            "proveFrames": true,
+        });
+        let input = format!("{hello}\n");
+        let mut reader = BufReader::new(input.as_bytes());
+        let mut written: Vec<u8> = Vec::new();
+        let mut line = String::new();
+
+        let session = open_session(&mut reader, &mut written, &mut line, &auth)
+            .await
+            .unwrap()
+            .expect("a HELLO opens a session");
+
+        let challenge: serde_json::Value = serde_json::from_slice(&written).unwrap();
+        assert!(session.prove_frames);
+        assert_eq!(challenge["framesProven"], true);
+        assert_eq!(
+            challenge["serverProof"].as_str(),
+            Some(auth::hex(&auth.daemon_proof(&client_nonce, &session.server_nonce, true)).as_str()),
+            "the agreement is bound into the proof, not only stated beside it"
+        );
+    }
+
+    /// The sink wraps and numbers every frame on a connection that asked, and none on one that did not.
+    #[tokio::test]
+    async fn frames_are_proven_for_their_place_only_on_a_connection_that_asked() {
+        let auth = std::sync::Arc::new(PeerAuth::from_token(TOKEN));
+        let asked = auth::Session { client_nonce: [1; auth::NONCE_BYTES], server_nonce: [2; auth::NONCE_BYTES], prove_frames: true };
+        let mut written: Vec<u8> = Vec::new();
+        let mut sink = super::FrameSink::new(&mut written, &asked, &auth);
+        let first = serde_json::json!({ "type": "STDOUT", "data": "hello\n" });
+        let second = serde_json::json!({ "type": "EXIT", "exitCode": 0 });
+        sink.send(&first).await.unwrap();
+        sink.send(&second).await.unwrap();
+
+        let lines: Vec<serde_json::Value> = String::from_utf8(written.clone())
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2);
+        for (i, (line, frame)) in lines.iter().zip([&first, &second]).enumerate() {
+            assert_eq!(line["type"], "PROVEN");
+            let inner = line["frame"].as_str().expect("the frame travels as a string");
+            assert_eq!(inner, frame.to_string(), "the frame's bytes are exactly what was proven");
+            assert_eq!(
+                line["proof"].as_str(),
+                Some(auth::hex(&auth.frame_proof(&asked.client_nonce, &asked.server_nonce, i as u64, inner.as_bytes())).as_str()),
+                "frame {i} is proven for its place"
+            );
+        }
+
+        let did_not_ask = auth::Session { client_nonce: [1; auth::NONCE_BYTES], server_nonce: [2; auth::NONCE_BYTES], prove_frames: false };
+        let mut plain: Vec<u8> = Vec::new();
+        let mut sink = super::FrameSink::new(&mut plain, &did_not_ask, &auth);
+        sink.send(&second).await.unwrap();
+        assert_eq!(String::from_utf8(plain).unwrap(), format!("{second}\n"), "an older caller is answered as before");
     }
 
     /// A protocol 2 caller opens with its token in the clear. It is refused, and no session opens.
@@ -1645,7 +1773,7 @@ mod session_tests {
     #[test]
     fn a_request_is_believed_only_with_its_proof() {
         let auth = PeerAuth::from_token(TOKEN);
-        let session = auth::Session { client_nonce: [1; auth::NONCE_BYTES], server_nonce: [2; auth::NONCE_BYTES] };
+        let session = auth::Session { client_nonce: [1; auth::NONCE_BYTES], server_nonce: [2; auth::NONCE_BYTES], prove_frames: false };
         let request = r#"{"type":"HEALTH_CHECK"}"#;
         let frame = |proof: &[u8]| {
             serde_json::json!({ "type": "AUTHENTICATED", "proof": auth::hex(proof), "request": request }).to_string()

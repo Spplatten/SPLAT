@@ -95,7 +95,7 @@ From a WSL terminal, the guard's own tests:
 cd /mnt/c/C_AGENT_BUILDER/native/splat-agent && cargo test
 ```
 
-Expect `test result: ok. 44 passed`. From PowerShell, the bridge's tests against a stand-in guard:
+Expect `test result: ok. 65 passed` (the count on 2026-09-23; it grows with the guard). From PowerShell, the bridge's tests against a stand-in guard:
 
 ```powershell
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~WslLeasedExecutorWire|FullyQualifiedName~WslAgentSession"

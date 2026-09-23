@@ -21,8 +21,14 @@ namespace MissionController.Infrastructure.Linux;
 /// nonces, its place on the connection and its exact bytes, so a proof is good for one request on one
 /// connection and a captured one is worth nothing.
 ///
-/// What it does not do: authenticate the frames that come back after the handshake. On loopback nothing
-/// sits between the two ends of a connection, and the handshake has already settled who is at the far one.
+/// Since 2026-09-23 the frames that come back prove themselves too (roadmap 2.6). The HELLO asks for it,
+/// a daemon that agrees says so in its CHALLENGE - under a label of its own, so the agreement cannot be
+/// stripped off in transit - and then wraps every frame it sends as PROVEN, proven over both nonces, the
+/// frame's number on the connection and its exact bytes: the request proof's shape, in the other
+/// direction. A frame that does not prove itself ends the session, because nothing after it can be
+/// believed, including where the next frame begins. A daemon that predates the field answers unwrapped
+/// and is believed as before; <see cref="FramesProven"/> says which kind this session got, so a host can
+/// report it rather than assume it.
 /// </summary>
 public sealed class WslAgentSession : IDisposable
 {
@@ -32,9 +38,11 @@ public sealed class WslAgentSession : IDisposable
     /// <summary>Bytes in a nonce, and in a proof, which is SHA-256's output: 64 hex characters on the wire.</summary>
     public const int ProofBytes = 32;
 
-    // Distinct labels, so neither proof can be passed off as the other.
+    // Distinct labels, so no proof can be passed off as another kind.
     private static readonly byte[] DaemonLabel = Encoding.ASCII.GetBytes("splat-agent/3 daemon");
+    private static readonly byte[] DaemonFramesLabel = Encoding.ASCII.GetBytes("splat-agent/3 daemon+frames");
     private static readonly byte[] RequestLabel = Encoding.ASCII.GetBytes("splat-agent/3 request");
+    private static readonly byte[] FrameLabel = Encoding.ASCII.GetBytes("splat-agent/3 frame");
 
     /// <summary>
     /// The most of one frame this side will hold while waiting for its newline: the daemon's own cap on a
@@ -49,15 +57,23 @@ public sealed class WslAgentSession : IDisposable
     private readonly byte[] _clientNonce;
     private readonly byte[] _serverNonce;
     private ulong _sequence;
+    private ulong _framesRead;
 
-    private WslAgentSession(FrameReader reader, StreamWriter writer, byte[] key, byte[] clientNonce, byte[] serverNonce)
+    private WslAgentSession(FrameReader reader, StreamWriter writer, byte[] key, byte[] clientNonce, byte[] serverNonce, bool framesProven)
     {
         _reader = reader;
         _writer = writer;
         _key = key;
         _clientNonce = clientNonce;
         _serverNonce = serverNonce;
+        FramesProven = framesProven;
     }
+
+    /// <summary>
+    /// Whether the daemon agreed to prove every frame it sends on this connection. False from a daemon
+    /// older than 2026-09-23, whose frames are then believed on the strength of the handshake alone.
+    /// </summary>
+    public bool FramesProven { get; }
 
     /// <summary>
     /// Runs the handshake on <paramref name="stream"/>. Throws <see cref="WslAgentHandshakeException"/>,
@@ -85,6 +101,9 @@ public sealed class WslAgentSession : IDisposable
                 type = "HELLO",
                 protocolVersion = ProtocolVersion,
                 clientNonce = Hex(clientNonce),
+                // Ask for the daemon's frames to be proven. An older daemon ignores the field and
+                // answers under the plain label, which is how the two ages agree.
+                proveFrames = true,
             });
             await writer.WriteLineAsync(hello.AsMemory(), ct);
 
@@ -119,8 +138,12 @@ public sealed class WslAgentSession : IDisposable
 
             byte[]? serverNonce = FixedHex(challenge, "serverNonce");
             byte[]? proof = FixedHex(challenge, "serverProof");
+            // Checked under the label for what the daemon SAID: a CHALLENGE that claims proven frames
+            // must have been proven as one, and one that stays silent must have been proven as plain.
+            // So a relay that added or removed the claim leaves a proof this check refuses.
+            bool framesProven = challenge.TryGetProperty("framesProven", out var fp) && fp.ValueKind == JsonValueKind.True;
             if (serverNonce is null || proof is null
-                || !CryptographicOperations.FixedTimeEquals(proof, DaemonProof(key, clientNonce, serverNonce)))
+                || !CryptographicOperations.FixedTimeEquals(proof, DaemonProof(key, clientNonce, serverNonce, framesProven)))
             {
                 throw new WslAgentHandshakeException(
                     "What answered on the daemon's port did not prove it holds this host's token, so nothing was sent "
@@ -128,7 +151,7 @@ public sealed class WslAgentSession : IDisposable
                     + "SPLAT daemon.");
             }
 
-            return new WslAgentSession(reader, writer, key, clientNonce, serverNonce);
+            return new WslAgentSession(reader, writer, key, clientNonce, serverNonce, framesProven);
         }
         catch
         {
@@ -154,12 +177,72 @@ public sealed class WslAgentSession : IDisposable
         await _writer.WriteLineAsync(frame.AsMemory(), ct);
     }
 
-    /// <summary>The daemon's next frame, or null once it has closed the connection.</summary>
-    public ValueTask<string?> ReadLineAsync(CancellationToken ct) => _reader.ReadLineAsync(ct);
+    /// <summary>
+    /// The daemon's next frame, or null once it has closed the connection. On a session whose frames are
+    /// proven, the frame is unwrapped from its PROVEN envelope only once its proof holds for its place;
+    /// a frame that does not prove itself throws <see cref="WslAgentFrameException"/>, and nothing after
+    /// it should be read.
+    /// </summary>
+    public async ValueTask<string?> ReadLineAsync(CancellationToken ct)
+    {
+        string? line = await _reader.ReadLineAsync(ct);
+        return line is null || !FramesProven ? line : Unwrap(line);
+    }
 
-    /// <summary>The daemon's answer to a HELLO: HMAC-SHA256 under the token, over the caller's nonce and its own.</summary>
-    public static byte[] DaemonProof(byte[] key, byte[] clientNonce, byte[] serverNonce) =>
-        HMACSHA256.HashData(key, Concat(DaemonLabel, [0], clientNonce, serverNonce));
+    /// <summary>
+    /// The frame inside a PROVEN envelope, checked over its exact bytes and for its number on this
+    /// connection before any of them is parsed - the same order the daemon uses for a request.
+    /// </summary>
+    private string Unwrap(string line)
+    {
+        string? frame = null;
+        byte[]? proof = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            if ((root.TryGetProperty("type", out var type) ? type.GetString() : null) == "PROVEN"
+                && root.TryGetProperty("frame", out var inner) && inner.ValueKind == JsonValueKind.String)
+            {
+                frame = inner.GetString();
+                proof = FixedHex(root, "proof");
+            }
+        }
+        catch (JsonException)
+        {
+            // Not an envelope at all: refused below, like one whose proof does not hold.
+        }
+
+        if (frame is null || proof is null
+            || !CryptographicOperations.FixedTimeEquals(proof, FrameProof(_key, _clientNonce, _serverNonce, _framesRead, Encoding.UTF8.GetBytes(frame))))
+        {
+            throw new WslAgentFrameException(
+                $"The daemon agreed to prove every frame on this connection, and frame {_framesRead} did not prove itself "
+                + "for its place, so nothing from here on is believed. Either something sits between this host and the "
+                + "daemon, or the daemon and this bridge disagree about the protocol.");
+        }
+
+        _framesRead++;
+        return frame;
+    }
+
+    /// <summary>
+    /// The daemon's answer to a HELLO: HMAC-SHA256 under the token, over the caller's nonce and its own -
+    /// under a label of its own when the daemon will prove its frames, so that agreement is in the proof.
+    /// </summary>
+    public static byte[] DaemonProof(byte[] key, byte[] clientNonce, byte[] serverNonce, bool provesFrames = false) =>
+        HMACSHA256.HashData(key, Concat(provesFrames ? DaemonFramesLabel : DaemonLabel, [0], clientNonce, serverNonce));
+
+    /// <summary>
+    /// A daemon frame's proof: HMAC-SHA256 under the token, over both nonces, the number of frames the daemon
+    /// already sent on the connection, and the frame's own bytes.
+    /// </summary>
+    public static byte[] FrameProof(byte[] key, byte[] clientNonce, byte[] serverNonce, ulong sequence, byte[] frame)
+    {
+        byte[] place = new byte[sizeof(ulong)];
+        BinaryPrimitives.WriteUInt64BigEndian(place, sequence);
+        return HMACSHA256.HashData(key, Concat(FrameLabel, [0], clientNonce, serverNonce, place, frame));
+    }
 
     /// <summary>
     /// A request's proof: HMAC-SHA256 under the token, over both nonces, the number of requests already sent on
@@ -287,6 +370,18 @@ public sealed class WslAgentSession : IDisposable
         }
 
         return all;
+    }
+}
+
+/// <summary>
+/// A frame the daemon sent on a connection it agreed to prove did not prove itself for its place. The
+/// session is over: what came before it stands, and nothing after it is read.
+/// </summary>
+public sealed class WslAgentFrameException : Exception
+{
+    public WslAgentFrameException(string message)
+        : base(message)
+    {
     }
 }
 

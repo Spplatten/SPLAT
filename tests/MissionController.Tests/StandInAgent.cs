@@ -34,15 +34,20 @@ internal static class StandInAgent
         bool proven = false;
         try
         {
-            byte[]? clientNonce = ClientNonce(await ReadLineAsync(stream, raw, ct));
+            string? hello = await ReadLineAsync(stream, raw, ct);
+            byte[]? clientNonce = ClientNonce(hello);
             if (clientNonce is null)
             {
                 return new Exchange(raw.ToArray(), null, false);
             }
 
+            // As the daemon does since 2026-09-23: a HELLO that asks gets its frames proven, and the
+            // CHALLENGE that agrees is proven under the frames label. A HELLO that does not is answered
+            // as before, which is how the tests for an older bridge still read.
+            bool proveFrames = AsksForProvenFrames(hello);
             byte[] key = Encoding.UTF8.GetBytes(token);
             byte[] serverNonce = RandomNumberGenerator.GetBytes(WslAgentSession.ProofBytes);
-            await WriteLineAsync(stream, Challenge(serverNonce, WslAgentSession.DaemonProof(key, clientNonce, serverNonce)), ct);
+            await WriteLineAsync(stream, Challenge(serverNonce, WslAgentSession.DaemonProof(key, clientNonce, serverNonce, proveFrames), proveFrames), ct);
 
             string? frame = await ReadLineAsync(stream, raw, ct);
             if (frame is not null)
@@ -56,9 +61,10 @@ internal static class StandInAgent
                         WslAgentSession.RequestProof(key, clientNonce, serverNonce, 0, Encoding.UTF8.GetBytes(request)));
 
                 // A real daemon answers a request that does not prove itself with a refusal, and so does this.
+                ulong sent = 0;
                 foreach (string reply in proven ? replies : new[] { Refusal })
                 {
-                    await WriteLineAsync(stream, reply, ct);
+                    await WriteLineAsync(stream, proveFrames ? Proven(key, clientNonce, serverNonce, sent++, reply) : reply, ct);
                 }
             }
         }
@@ -95,14 +101,51 @@ internal static class StandInAgent
         return raw.ToArray();
     }
 
-    /// <summary>A CHALLENGE frame, with whatever proof the caller chooses to put in it.</summary>
-    public static string Challenge(byte[] serverNonce, byte[] proof) => JsonSerializer.Serialize(new
+    /// <summary>A CHALLENGE frame, with whatever proof the caller chooses to put in it, and the frames claim if asked.</summary>
+    public static string Challenge(byte[] serverNonce, byte[] proof, bool framesProven = false) => framesProven
+        ? JsonSerializer.Serialize(new
+        {
+            type = "CHALLENGE",
+            protocolVersion = WslAgentSession.ProtocolVersion,
+            serverNonce = WslAgentSession.Hex(serverNonce),
+            serverProof = WslAgentSession.Hex(proof),
+            framesProven = true,
+        })
+        : JsonSerializer.Serialize(new
+        {
+            type = "CHALLENGE",
+            protocolVersion = WslAgentSession.ProtocolVersion,
+            serverNonce = WslAgentSession.Hex(serverNonce),
+            serverProof = WslAgentSession.Hex(proof),
+        });
+
+    /// <summary>A daemon frame in its PROVEN envelope, proven for <paramref name="sequence"/> on the connection the nonces name.</summary>
+    public static string Proven(byte[] key, byte[] clientNonce, byte[] serverNonce, ulong sequence, string frame) =>
+        JsonSerializer.Serialize(new
+        {
+            type = "PROVEN",
+            proof = WslAgentSession.Hex(WslAgentSession.FrameProof(key, clientNonce, serverNonce, sequence, Encoding.UTF8.GetBytes(frame))),
+            frame,
+        });
+
+    /// <summary>Whether a HELLO asked for the daemon's frames to be proven, as the bridge does since 2026-09-23.</summary>
+    internal static bool AsksForProvenFrames(string? hello)
     {
-        type = "CHALLENGE",
-        protocolVersion = WslAgentSession.ProtocolVersion,
-        serverNonce = WslAgentSession.Hex(serverNonce),
-        serverProof = WslAgentSession.Hex(proof),
-    });
+        if (hello is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(hello);
+            return doc.RootElement.TryGetProperty("proveFrames", out var ask) && ask.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>The frames in what was sent, one per line.</summary>
     public static string[] Frames(byte[] raw) =>
