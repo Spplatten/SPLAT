@@ -24,7 +24,7 @@ public sealed partial class SplashWindow : Window
     // Device-independent pixels. AppWindow.Resize takes physical pixels, so these are scaled by the
     // display's DPI before use - at 150% a 460px window would otherwise clip its own content.
     private const int WidthDips = 460;
-    private const int HeightDips = 336;
+    private const int HeightDips = 392;
 
     [LibraryImport("user32.dll")]
     private static partial uint GetDpiForWindow(IntPtr hwnd);

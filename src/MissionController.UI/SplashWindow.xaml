@@ -18,14 +18,14 @@
         <Image
             Grid.Row="0"
             Source="ms-appx:///Assets/splat-lockup.png"
-            Height="198"
-            Margin="0,30,0,0"
+            Height="186"
+            Margin="0,26,0,0"
             VerticalAlignment="Center"
             HorizontalAlignment="Center"
             Stretch="Uniform"
             AutomationProperties.Name="SPLAT — Software Infrastructure" />
 
-        <StackPanel Grid.Row="1" Spacing="10" Margin="0,0,0,22" HorizontalAlignment="Center">
+        <StackPanel Grid.Row="1" Spacing="10" Margin="0,0,0,18" HorizontalAlignment="Center">
             <ProgressBar
                 Width="196"
                 Height="2"
@@ -38,6 +38,28 @@
                 CharacterSpacing="120"
                 HorizontalAlignment="Center"
                 Foreground="#71839D" />
+
+            <!-- The enterprise mark, emblem and strapline only: its own SPLAT wordmark would be the
+                 second one on this plate. The eBPF guard it names is proven in isolation and not yet
+                 on the mission path (docs/SPLAT-Field-Guide.html, Part 7) - this is the product line,
+                 not a claim about what the console enforces today. -->
+            <Border Height="1" Width="240" Background="#16233A" Margin="0,4,0,2" />
+            <StackPanel Orientation="Horizontal" Spacing="9" HorizontalAlignment="Center">
+                <Image
+                    Source="ms-appx:///Assets/splat-enterprise-emblem.png"
+                    Height="32"
+                    Stretch="Uniform"
+                    VerticalAlignment="Center"
+                    AutomationProperties.Name="SPLAT Enterprise" />
+                <TextBlock
+                    Text="ENTERPRISE eBPF SECURITY"
+                    FontSize="9"
+                    FontWeight="SemiBold"
+                    CharacterSpacing="140"
+                    VerticalAlignment="Center"
+                    Foreground="#A9B7CA" />
+            </StackPanel>
+
             <TextBlock
                 Text="© PLATTEN INDUSTRIES 2026"
                 FontSize="8"
