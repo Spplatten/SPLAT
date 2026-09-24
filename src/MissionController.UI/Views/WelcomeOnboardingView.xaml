@@ -170,9 +170,11 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Deep-dive companion to this wizard; opens in the default browser. -->
+                    <!-- Deep-dive companion to this wizard. Opens the copy that shipped inside this
+                         build, not a URL: the source repository is private, and this console is
+                         expected to run on machines with no egress. -->
                     <HyperlinkButton
-                        NavigateUri="https://github.com/Platten-Industries/SPLAT/blob/main/docs/TUTORIAL.md"
+                        Click="FieldGuideButton_Click"
                         HorizontalAlignment="Center"
                         Padding="8,4">
                         <StackPanel Orientation="Horizontal" Spacing="8">
@@ -180,6 +182,14 @@
                             <TextBlock Text="Read the SPLAT Field Guide — the whole system explained in plain English" FontSize="12" />
                         </StackPanel>
                     </HyperlinkButton>
+
+                    <TextBlock
+                        x:Name="FieldGuideStatus"
+                        Visibility="Collapsed"
+                        FontSize="11"
+                        TextWrapping="Wrap"
+                        HorizontalAlignment="Center"
+                        Foreground="{ThemeResource SplatWarningBrush}" />
                 </StackPanel>
             </Grid>
         </Border>

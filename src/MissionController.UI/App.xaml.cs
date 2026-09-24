@@ -37,6 +37,19 @@ public partial class App : Application
     /// <summary>The self-test the command line asked for, or null for a normal start. See <see cref="ConsoleSelfTest"/>.</summary>
     internal static ConsoleSelfTest? SelfTest { get; private set; }
 
+    /// <summary>
+    /// How long the splash stays up once the main window is up, and the point at which it gives up
+    /// waiting for that. The minimum stops a fast machine turning the mark into a flicker; the
+    /// maximum means a main window that never comes up cannot leave a borderless always-on-top
+    /// window sitting over the desktop.
+    /// </summary>
+    private static readonly TimeSpan SplashMinimumVisible = TimeSpan.FromMilliseconds(1100);
+    private static readonly TimeSpan SplashMaximumVisible = TimeSpan.FromSeconds(8);
+
+    private SplashWindow? _splash;
+    private DispatcherTimer? _splashTimer;
+    private bool _mainWindowReady;
+
     public App()
     {
         this.UnhandledException += OnUnhandledException;
@@ -99,6 +112,10 @@ public partial class App : Application
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
         LogFatal("WinUI UnhandledException", e.Exception);
+
+        // Before anything else: the splash is always-on-top, and a startup failure hidden behind the
+        // logo is exactly the "it does nothing when I open it" symptom this handler exists to end.
+        DismissSplash();
 
         // A self-test reports instead of asking. With the window up, the failure belongs to the page
         // that was open and the run goes on to the next; before the window, the console did not start,
@@ -267,7 +284,48 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // Shown first and deliberately: constructing MainWindow parses the whole XAML tree and
+        // resolves the composition root, and until now that interval was blank desktop. A self-test
+        // gets none of it - it counts the console's own windows and drives them, and a second
+        // always-on-top window is not something an unattended run should have to reason about.
+        _splash = SelfTest is null ? SplashWindow.TryShow() : null;
+
+        if (_splash is null)
+        {
+            StartMainWindow();
+            return;
+        }
+
+        // Both windows live on this one UI thread, and a thread building XAML is a thread not
+        // drawing: constructing MainWindow immediately left the splash on screen as an unpainted
+        // white rectangle for its whole life. Yielding first lets it render, and DWM then keeps
+        // that frame composited while the thread is busy.
+        var handoff = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260) };
+        handoff.Tick += (_, _) =>
+        {
+            handoff.Stop();
+            StartMainWindow();
+        };
+        handoff.Start();
+    }
+
+    private void StartMainWindow()
+    {
+        var visible = System.Diagnostics.Stopwatch.StartNew();
+
         MainWindowInstance = new MainWindow();
+        MainWindowInstance.Activated += OnMainWindowActivated;
+
+        // Activation alone is not a reliable signal that the window is up. The splash is
+        // always-on-top, so it keeps the foreground and SetForegroundWindow on the main window
+        // fails: measured, the main window was visible from t+0.8s and never raised Activated, and
+        // the splash stayed until the 8-second cap took it down. Loaded fires off the visual tree
+        // rather than focus, and one of the two always arrives.
+        if (MainWindowInstance.Content is FrameworkElement root)
+        {
+            root.Loaded += OnMainWindowContentLoaded;
+        }
+
         MainWindowInstance.Activate();
 
         // The window is shown first, as in a normal start, so what the self-test opens is what an
@@ -275,6 +333,62 @@ public partial class App : Application
         if (SelfTest is { } selfTest)
         {
             _ = selfTest.RunAsync((MainWindow)MainWindowInstance);
+            return;
+        }
+
+        if (_splash is null)
+        {
+            return;
+        }
+
+        // Polled rather than chained off the readiness events alone, so the dismissal has one exit
+        // the main window cannot fail to reach. A tick can only happen when the UI thread is free,
+        // so the splash covers exactly the interval during which the console cannot draw.
+        _splashTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        _splashTimer.Tick += (_, _) =>
+        {
+            if ((_mainWindowReady && visible.Elapsed >= SplashMinimumVisible)
+                || visible.Elapsed >= SplashMaximumVisible)
+            {
+                DismissSplash();
+            }
+        };
+        _splashTimer.Start();
+    }
+
+    private void OnMainWindowActivated(object sender, WindowActivatedEventArgs e)
+    {
+        _mainWindowReady = true;
+
+        if (MainWindowInstance is not null)
+        {
+            MainWindowInstance.Activated -= OnMainWindowActivated;
+        }
+    }
+
+    private void OnMainWindowContentLoaded(object sender, RoutedEventArgs e)
+    {
+        _mainWindowReady = true;
+
+        if (sender is FrameworkElement root)
+        {
+            root.Loaded -= OnMainWindowContentLoaded;
+        }
+    }
+
+    /// <summary>Takes the splash down. Safe to call repeatedly, from any point in the launch.</summary>
+    private void DismissSplash()
+    {
+        try
+        {
+            _splashTimer?.Stop();
+            _splashTimer = null;
+            _splash?.Dismiss();
+            _splash = null;
+        }
+        catch (Exception)
+        {
+            // Nothing above this is load-bearing enough to take the app down for.
         }
     }
 }

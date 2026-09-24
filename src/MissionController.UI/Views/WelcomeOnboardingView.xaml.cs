@@ -1,6 +1,9 @@
+using System;
+using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using MissionController.Core;
 using MissionController.UI.ViewModels;
 
 namespace MissionController.UI.Views;
@@ -45,6 +48,41 @@ public sealed partial class WelcomeOnboardingView : Page
         if (e.Key == Windows.System.VirtualKey.Enter && !ViewModel.IsTestingKey)
         {
             await ViewModel.ValidateKeyAsync();
+        }
+    }
+
+    /// <summary>
+    /// Opens the Field Guide that shipped with this build in the default browser. A failure is
+    /// reported in place rather than swallowed: a link that does nothing when clicked is the same
+    /// dead end as the private-repository URL this replaced, just quieter.
+    /// </summary>
+    private void FieldGuideButton_Click(object sender, RoutedEventArgs e)
+    {
+        string? guide = ShippedFieldGuide.Locate();
+
+        if (guide is null)
+        {
+            Report($"This build did not ship {ShippedFieldGuide.FileName}. Expected it in the docs "
+                   + $"folder beside {AppContext.BaseDirectory}");
+            return;
+        }
+
+        try
+        {
+            // UseShellExecute is required: the target is a document, and the browser that opens it
+            // is whatever this machine has associated with .html.
+            Process.Start(new ProcessStartInfo(guide) { UseShellExecute = true });
+            FieldGuideStatus.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception ex)
+        {
+            Report($"Could not open {guide}: {ex.Message}");
+        }
+
+        void Report(string message)
+        {
+            FieldGuideStatus.Text = message;
+            FieldGuideStatus.Visibility = Visibility.Visible;
         }
     }
 

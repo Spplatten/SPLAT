@@ -39,9 +39,10 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                <Border Width="28" Height="28" Background="{ThemeResource SplatAccentSubtleBrush}" CornerRadius="7">
-                    <FontIcon Glyph="&#xE756;" FontSize="15" Foreground="{ThemeResource SplatAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Border>
+                <!-- The real mark, not the Segoe glyph that stood in for it. Emblem only: the
+                     lockup's wordmark is white artwork and would vanish in the light theme. -->
+                <Image Source="ms-appx:///Assets/splat-emblem.png" Width="28" Height="28"
+                       Stretch="Uniform" AutomationProperties.Name="SPLAT" />
                 <StackPanel Spacing="0" VerticalAlignment="Center">
                     <TextBlock Text="SPLAT" FontWeight="Bold" FontSize="14" Foreground="{ThemeResource SplatTextPrimaryBrush}" />
                     <TextBlock Text="MISSION CONTROL" FontSize="9" CharacterSpacing="120" Foreground="{ThemeResource SplatTextTertiaryBrush}" />

@@ -205,6 +205,22 @@ public sealed partial class MainWindow : Window
             appWindow.Title = "SPLAT — Autonomous AI Agent Fleet & System Appliance";
             appWindow.Resize(new SizeInt32(1280, 840));
 
+            // The taskbar button, alt-tab and the window corner read the WINDOW's icon. The
+            // <ApplicationIcon> baked into the executable covers Explorer and a pinned shortcut and
+            // nothing else, so without this the running app still showed the WinUI placeholder.
+            string icon = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "splat.ico");
+            if (System.IO.File.Exists(icon))
+            {
+                try
+                {
+                    appWindow.SetIcon(icon);
+                }
+                catch (Exception)
+                {
+                    // Cosmetic. A window that opens with the wrong icon beats one that does not open.
+                }
+            }
+
             // Center window on screen
             var displayArea = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary);
             if (displayArea != null)

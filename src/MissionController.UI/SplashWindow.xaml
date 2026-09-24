@@ -1,0 +1,49 @@
+<Window
+    x:Class="MissionController.UI.SplashWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="SPLAT"
+    mc:Ignorable="d">
+
+    <!-- Fixed dark plate in both themes, on purpose: the mark is white-on-dark artwork, and the
+         wordmark disappears entirely against the light theme's page background. -->
+    <Grid Background="#070B14" BorderBrush="{ThemeResource SplatBorderBrush}" BorderThickness="1">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Image
+            Grid.Row="0"
+            Source="ms-appx:///Assets/splat-lockup.png"
+            Height="198"
+            Margin="0,30,0,0"
+            VerticalAlignment="Center"
+            HorizontalAlignment="Center"
+            Stretch="Uniform"
+            AutomationProperties.Name="SPLAT — Software Infrastructure" />
+
+        <StackPanel Grid.Row="1" Spacing="10" Margin="0,0,0,22" HorizontalAlignment="Center">
+            <ProgressBar
+                Width="196"
+                Height="2"
+                IsIndeterminate="True"
+                Foreground="{ThemeResource SplatAccentBrush}"
+                Background="#16233A" />
+            <TextBlock
+                Text="STARTING MISSION CONTROL"
+                FontSize="9"
+                CharacterSpacing="120"
+                HorizontalAlignment="Center"
+                Foreground="#71839D" />
+            <TextBlock
+                Text="© PLATTEN INDUSTRIES 2026"
+                FontSize="8"
+                CharacterSpacing="80"
+                HorizontalAlignment="Center"
+                Foreground="#4A5A72" />
+        </StackPanel>
+    </Grid>
+</Window>
