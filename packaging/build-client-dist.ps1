@@ -19,8 +19,20 @@
     runtime marker, a symbol left behind, or a published console that cannot open every one of its
     pages each stop this script with a non-zero exit.
 
-    dist\App - the tree the operator runs from - is never touched. The output is a separate
-    dist\Client\ stage so a bad build here cannot break the working console.
+    dist\App - the tree the operator runs from - is never touched unless -InstallToApp says so, and
+    then only after every gate above has passed. The output is otherwise a separate dist\Client\
+    stage, so a bad build here cannot break the working console.
+
+.PARAMETER InstallToApp
+    Replace dist\App with this build once it has passed, verify every file by hash, and remove the
+    staging copy. Without it the build stops at dist\Client and dist\App is left alone.
+
+    This is the switch to use on the machine that runs SPLAT: the operator launches dist\App, so a
+    stage they then have to copy by hand is a second copy to keep in step and a step to forget. The
+    zip is still produced either way - that is the artifact for a different machine.
+
+    Refused while the console is running, rather than closing it: a mission in flight is writing to
+    the ledger.
 
 .PARAMETER SkipTests
     Skip the unit test gate. For iterating on the packaging itself only - a shipped package is
@@ -40,6 +52,7 @@ param(
     [string]$Configuration = 'Release',
     [string]$Runtime = 'win-x64',
     [string]$OutputDir,
+    [switch]$InstallToApp,
     [switch]$SkipTests,
     [switch]$SkipSmokeTest,
     [switch]$IncludeMcp
@@ -293,3 +306,63 @@ Write-Host "sha256   : $zipHash"
 Write-Host "commit   : $commit"
 Write-Host "runtime  : .NET $netRuntime + Windows App SDK $appSdk, bundled"
 Write-Host "self-test: $smoke"
+
+# ------------------------------------------------------------------------------------------------
+# Install over the console the operator actually runs.
+#
+# Deliberately last, after every gate above has passed: the tests, the runtime markers, the symbol
+# strip, and the published console opening all nine of its pages. Each of those calls Fail on the
+# way, which exits, so reaching this line is the build saying it is fit to run. dist\App is never
+# touched before that point - a half-built or failing package must not be able to break the console
+# that currently works.
+#
+# The stage is still built, verified and zipped first rather than publishing straight into App. The
+# zip is the artifact for another machine, and a staged copy is what makes "every file matches"
+# checkable at all.
+# ------------------------------------------------------------------------------------------------
+if ($InstallToApp) {
+    Write-Host ''
+    $appDir = Join-Path $OutputDir 'App'
+
+    # A running console holds its own files open, and a mission in flight is writing to the ledger.
+    # Refused rather than stopped: killing the app mid-mission to save a prompt is the wrong trade,
+    # and a half-copied App directory is the failure this whole script exists to prevent.
+    $running = Get-Process -Name 'MissionController.UI' -ErrorAction SilentlyContinue
+    if ($running) {
+        Fail ("SPLAT is running (process $($running.Id -join ', ')), so $appDir cannot be replaced while " +
+              'its files are open. Close the console - let any mission finish first - and run this again. ' +
+              "The package is already built and verified at $stage.")
+    }
+
+    Write-Host "[install] replacing $appDir with the build that just passed" -ForegroundColor Cyan
+
+    # robocopy /MIR rather than a delete-and-copy: it leaves no window in which App is absent, and it
+    # removes files this build no longer ships. Exit codes 0-7 are success (8 and above are real
+    # failures); anything else is a partial copy and must stop the script.
+    & robocopy "$stage\App" $appDir /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+    $robocopy = $LASTEXITCODE
+    $global:LASTEXITCODE = 0
+    if ($robocopy -ge 8) { Fail "robocopy could not mirror $stage\App into $appDir (exit $robocopy)" }
+
+    # Verified by content, not by robocopy's word: every file the stage holds must be present in App
+    # with the same hash, and App must hold nothing else.
+    $staged = @{}
+    foreach ($file in Get-ChildItem "$stage\App" -Recurse -File) {
+        $staged[$file.FullName.Substring("$stage\App".Length)] = (Get-FileHash $file.FullName -Algorithm SHA256).Hash
+    }
+    $installed = Get-ChildItem $appDir -Recurse -File
+    $wrong = @($installed | Where-Object {
+        $rel = $_.FullName.Substring($appDir.Length)
+        -not $staged.ContainsKey($rel) -or $staged[$rel] -ne (Get-FileHash $_.FullName -Algorithm SHA256).Hash
+    })
+    if ($installed.Count -ne $staged.Count -or $wrong.Count -gt 0) {
+        Fail ("$appDir does not match the build: $($installed.Count) files against the stage's $($staged.Count), " +
+              "$($wrong.Count) with the wrong contents. The stage at $stage is intact; nothing was removed.")
+    }
+
+    # Only now is the stage redundant, and it is removed so it cannot be mistaken for a second copy
+    # to keep in step by hand.
+    Remove-Item $stage -Recurse -Force
+    Write-Host "installed: $appDir  ($($installed.Count) files verified by hash; the staging copy has been removed)"
+    Write-Host "launch   : $appDir\MissionController.UI.exe"
+}
