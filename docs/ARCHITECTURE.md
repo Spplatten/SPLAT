@@ -217,7 +217,7 @@ A class that no host constructs is not a capability, however well it is tested. 
 
 | Code | State |
 | --- | --- |
-| [`TemplatePolicyCompiler`](../src/MissionController.Infrastructure.Linux/TemplatePolicyCompiler.cs) | `splat-mcp` constructs it and hands it to the handler, which never calls it — `run_command` builds its lease inline. Exercised by tests |
+| [`TemplatePolicyCompiler`](../src/MissionController.Infrastructure.Linux/TemplatePolicyCompiler.cs) | **Wired 2026-09-24**, and kept in this table only so the row records the change: `LinuxLeaseSubstrate` compiles every catalog template whose tool names the Linux lease into that mission's `LeaseSpec`, from the console and `splat-mcp` alike. `run_command` still builds its own lease inline |
 | HMAC keying in [`SqliteChainedAuditLedger`](../src/MissionController.Infrastructure.Data/SqliteChainedAuditLedger.cs) | Since 2026-09-18, from a key file the operator keeps: `--ledger-key` on `splat-mcp`, `SPLAT_LEDGER_KEY_FILE` for either host. Unkeyed until one is given |
 | [`DataRetentionService`](../src/MissionController.Infrastructure.Data/Retention/DataRetentionService.cs) | Implemented and tested; no host schedules it |
 | [`VertexAiStreamClient`](../src/MissionController.Infrastructure.Network/VertexAiStreamClient.cs), [`PkceLoopbackAuthService`](../src/MissionController.Infrastructure.Network/PkceLoopbackAuthService.cs), [`ServiceAccountAuthService`](../src/MissionController.Infrastructure.Network/ServiceAccountAuthService.cs) | Constructed by neither host |

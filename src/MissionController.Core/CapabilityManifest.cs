@@ -37,11 +37,18 @@ public sealed record LeaseCapability(string What, LeaseEnforcement Where);
 
 public sealed record ToolCapability(string Tool, ToolEnforcement Enforcement, string Detail);
 
-/// <summary>How many catalog templates run inside the Windows network-denied AppContainer, and why not.</summary>
-public sealed record WindowsSensorCensus(int Templates, int NetworkDenied, int NeedsNetwork, int LocalSubsystems)
+/// <summary>
+/// How many catalog templates run inside the Windows network-denied AppContainer, and why not; and how
+/// many run on the other substrate altogether, under the Linux lease, where the kernel holds the
+/// network and the executable by allow-list rather than by removing a stack.
+/// </summary>
+public sealed record WindowsSensorCensus(int Templates, int NetworkDenied, int NeedsNetwork, int LocalSubsystems, int Leased = 0)
 {
-    /// <summary>Templates whose tool keeps a network stack, for either reason.</summary>
+    /// <summary>Templates whose tool keeps a Windows network stack, for either reason.</summary>
     public int Unconfined => NeedsNetwork + LocalSubsystems;
+
+    /// <summary>Templates whose tool runs in the Windows sensor sandbox at all.</summary>
+    public int Windows => Templates - Leased;
 }
 
 /// <summary>
@@ -106,13 +113,13 @@ public static class CapabilityManifest
         new("fs_write", ToolEnforcement.ControlPlaneOnly,
             "a handle-based workspace check inside this process - a user-space boundary, not a kernel one"),
         new("diagnose_system", ToolEnforcement.WindowsSensorSandbox,
-            "the Windows sensor sandbox: job object clamps, a restricted token, an ACL jail, and network denial for every template that can take it"),
+            "the Windows sensor sandbox: job object clamps, a restricted token, an ACL jail, and network denial for every template that can take it; a template that names the Linux lease runs its tool in the guest under that lease instead"),
         new("investigate_system", ToolEnforcement.WindowsSensorSandbox,
-            "the Windows sensor sandbox, once per step of the loop"),
+            "the Windows sensor sandbox, once per step of the loop, or the Linux lease for a step whose template names it"),
         new("run_agent_brain", ToolEnforcement.WindowsSensorSandbox,
-            "the Windows sensor sandbox, once per mission the plan spawns"),
+            "the Windows sensor sandbox, once per mission the plan spawns, or the Linux lease for a mission whose template names it"),
         new("run_governed_crew", ToolEnforcement.WindowsSensorSandbox,
-            "the Windows sensor sandbox, once per crew member, with each hand-off scrubbed"),
+            "the Windows sensor sandbox, once per crew member, with each hand-off scrubbed, or the Linux lease for a member whose template names it"),
         new("get_substrate_health", ToolEnforcement.ControlPlaneOnly, "read-only: it reports, and changes nothing"),
         new("list_diagnostic_templates", ToolEnforcement.ControlPlaneOnly, "read-only: it reports, and changes nothing"),
         new("list_governed_crews", ToolEnforcement.ControlPlaneOnly, "read-only: it reports, and changes nothing"),
@@ -130,12 +137,17 @@ public static class CapabilityManifest
     public static WindowsSensorCensus CensusOf(IEnumerable<SingleToolTemplate> templates)
     {
         var all = templates.ToList();
-        int needsNetwork = all.Count(t => t.EgressRule.ToolProcessNeedsNetwork);
-        int localSubsystems = all.Count(t => !t.EgressRule.ToolProcessNeedsNetwork && t.ToolNeedsLocalSubsystems);
+        // The AppContainer question is asked only of tools that launch on Windows. A template whose
+        // tool runs under the Linux lease is counted on its own: the kernel there holds the network
+        // by allow-list, so "denied" and "keeps a stack" are not its categories.
+        var windows = all.Where(t => t.Tool.Substrate == ToolSubstrate.Windows).ToList();
+        int needsNetwork = windows.Count(t => t.EgressRule.ToolProcessNeedsNetwork);
+        int localSubsystems = windows.Count(t => !t.EgressRule.ToolProcessNeedsNetwork && t.ToolNeedsLocalSubsystems);
         return new WindowsSensorCensus(
             Templates: all.Count,
-            NetworkDenied: all.Count(t => !t.EgressRule.ToolProcessNeedsNetwork && !t.ToolNeedsLocalSubsystems),
+            NetworkDenied: windows.Count(t => !t.EgressRule.ToolProcessNeedsNetwork && !t.ToolNeedsLocalSubsystems),
             NeedsNetwork: needsNetwork,
-            LocalSubsystems: localSubsystems);
+            LocalSubsystems: localSubsystems,
+            Leased: all.Count - windows.Count);
     }
 }

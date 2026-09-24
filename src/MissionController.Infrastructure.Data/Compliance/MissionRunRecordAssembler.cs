@@ -194,6 +194,21 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
     // Read from the tool's token, not from the request: the AppContainer is what removes the network.
     private static string EgressEnforcementOf(MissionRunFacts facts)
     {
+        // The Linux lease reports itself: the kernel's socket hooks hold the tool to the lease's
+        // address list, which is empty for a template with no sensor destination. "enforcing" is
+        // the daemon's own word for holding live map handles; without it the tool ran as nobody in
+        // the guest with nothing policing its sockets, and the record says that instead.
+        string? lease = facts.AppliedControls.FirstOrDefault(c => c.StartsWith("lease:", StringComparison.Ordinal));
+        if (lease is not null)
+        {
+            bool enforcing = facts.AppliedControls.Contains("lease:enforcing");
+            return enforcing
+                ? (facts.NetworkDenialRequested
+                    ? "enforced: the Linux lease named no destination, so the kernel refused every connect and datagram (BPF-LSM socket_connect and socket_sendmsg)"
+                    : "enforced: the kernel held the tool to the lease's IPv4 allow-list (BPF-LSM socket_connect and socket_sendmsg)")
+                : "NOT enforced: the daemon reported it was not enforcing, so no kernel hook held the tool's sockets";
+        }
+
         string? container = facts.AppliedControls.FirstOrDefault(c => c.StartsWith("token:appcontainer=", StringComparison.Ordinal));
         return container switch
         {

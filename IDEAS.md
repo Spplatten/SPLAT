@@ -26,7 +26,7 @@ Enterprises, MSPs, and campus IT organizations are actively looking to deploy au
 * **Zero-Fork Stock Microsoft Kernel:** Operates on the stock Microsoft WSL2 kernel (6.6+/6.18+) with `CONFIG_BPF_LSM=y`, `CONFIG_HYPERV_VSOCKETS=y`, `CONFIG_OVERLAY_FS=y`, and `CONFIG_DEBUG_INFO_BTF=y`. Activating BPF-LSM requires only a single `kernelCommandLine = ...lsm=...,bpf` entry in `.wslconfig`—eliminating custom kernel fork maintenance, CVE tracking burdens, and global Docker Desktop conflicts.
 * **Blast-Radius Containment (Not Magic Detection):** Kernel policy contains the blast radius of compromised or injected agents; it does not claim semantic detection of prompt injection. If an allowed endpoint or path is leased, an injected agent's actions are constrained strictly to that lease's boundaries.
 * **Compiled Tool Contracts & Leased Tokens:** Tool contracts compile down to cgroup-scoped kernel capabilities with deterministic, seconds-scale single-use leases (robust against scheduler jitter).
-* **Enforcement Performance:** Near-zero overhead on the kernel enforcement path.
+* **Enforcement Performance:** Measured on the Windows path only: 4.12 ms p50 / 9.88 ms p95 added by the governed launch (`src/splat-bench`). The Linux lease has no recorded figure; "near-zero" was an estimate and is retired.
 * **Market Comps:** Anchored against verified priced rounds (e.g., n8n's \$2.5B valuation from their \$180M Series C in October 2025).
 
 ---

@@ -28,6 +28,16 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
         "/proc/kcore"
     };
 
+    /// <summary>
+    /// The paths the daemon guards on every lease of its own accord, so naming them can never be
+    /// refused for failing to resolve: they are the daemon's precondition, not this compiler's guess.
+    /// </summary>
+    private static readonly IReadOnlyList<string> DaemonGuardedPaths = new[]
+    {
+        "/etc/shadow",
+        "/etc/sudoers"
+    };
+
     public TemplatePolicyCompiler() : this(new SystemHostAddressResolver())
     {
     }
@@ -54,27 +64,54 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
 
         // 1. Resolve Executable Inodes / Allowed Binaries
         var allowedExecList = new List<InodeIdentifierModel>();
-        string exeName = System.IO.Path.GetFileName(template.Tool.ExecutablePath).ToLowerInvariant();
-        if (exeName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        if (template.Tool.Substrate == ToolSubstrate.LinuxLease)
         {
-            exeName = exeName[..^4];
-        }
+            // A template written for the lease names the one executable it runs, by its guest path,
+            // and that path is the whole allow-list: no shell, no env, no second candidate under
+            // another prefix. The 1:1:1 rule, compiled rather than approximated from a Windows name.
+            string guestPath = template.Tool.ExecutablePath.Trim();
+            if (!guestPath.StartsWith('/') || guestPath.Contains("/../", StringComparison.Ordinal) || guestPath.EndsWith("/..", StringComparison.Ordinal))
+            {
+                throw new PolicyCompilationException(
+                    $"A Linux-lease template's tool must name an absolute guest path without '..'; '{template.Tool.ExecutablePath}' does not.");
+            }
 
-        // Core system exec allowlist based on template tool
-        var targetPaths = GetStandardLinuxBinaryPaths(exeName);
-        foreach (var path in targetPaths)
+            allowedExecList.Add(new InodeIdentifierModel(0, 0, guestPath));
+        }
+        else
         {
-            allowedExecList.Add(new InodeIdentifierModel(0, 0, path));
-        }
+            string exeName = System.IO.Path.GetFileName(template.Tool.ExecutablePath).ToLowerInvariant();
+            if (exeName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                exeName = exeName[..^4];
+            }
 
-        // Always allow standard shell wrappers if invoked through /bin/sh
-        allowedExecList.Add(new InodeIdentifierModel(0, 0, "/bin/sh"));
-        allowedExecList.Add(new InodeIdentifierModel(0, 0, "/bin/dash"));
-        allowedExecList.Add(new InodeIdentifierModel(0, 0, "/usr/bin/env"));
+            // Core system exec allowlist based on template tool
+            var targetPaths = GetStandardLinuxBinaryPaths(exeName);
+            foreach (var path in targetPaths)
+            {
+                allowedExecList.Add(new InodeIdentifierModel(0, 0, path));
+            }
+
+            // Always allow standard shell wrappers if invoked through /bin/sh
+            allowedExecList.Add(new InodeIdentifierModel(0, 0, "/bin/sh"));
+            allowedExecList.Add(new InodeIdentifierModel(0, 0, "/bin/dash"));
+            allowedExecList.Add(new InodeIdentifierModel(0, 0, "/usr/bin/env"));
+        }
 
         // 2. Protected Files / Sensitive Inodes
+        //
+        // The daemon resolves every path named here to an inode in the guest and refuses the whole
+        // lease when one does not resolve, because a protected path that silently failed to resolve
+        // is a file that is silently not protected. This side of the wire runs on Windows and cannot
+        // know what the guest holds - on 2026-09-24 the first leased catalog mission was refused
+        // because the guest had no /root/.gnupg, no /var/run/docker.sock and no /proc/kcore. So a
+        // template that runs under the lease names exactly the two paths the daemon always guards
+        // itself (main.rs unions them in whether or not they are asked for), the way run_command
+        // does; the ceiling adds the operator's, and the jail keeps /root, /var and /mnt out of the
+        // workload's view altogether, which is what the other six on the default list were for.
         var protectedList = new List<InodeIdentifierModel>();
-        foreach (var p in DefaultProtectedPaths)
+        foreach (var p in template.Tool.Substrate == ToolSubstrate.LinuxLease ? DaemonGuardedPaths : DefaultProtectedPaths)
         {
             protectedList.Add(new InodeIdentifierModel(0, 0, p));
         }
@@ -192,7 +229,10 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
             AllowedExecInodes: allowedExecList,
             LeaseDurationSeconds: clampedDuration,
             Limits: limits,
-            OverlayFs: overlay);
+            OverlayFs: overlay,
+            // A governed mission's workspace is the daemon's to make and remove; a caller that
+            // compiled a Windows template for the guest keeps naming a directory of its own.
+            EphemeralWorkspace: template.Tool.Substrate == ToolSubstrate.LinuxLease);
     }
 
     private static IReadOnlyList<string> GetStandardLinuxBinaryPaths(string toolName)

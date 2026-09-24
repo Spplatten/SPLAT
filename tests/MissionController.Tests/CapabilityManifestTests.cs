@@ -104,8 +104,12 @@ public sealed class CapabilityManifestTests
     {
         var census = CapabilityManifest.CensusOf(GovernedTemplateCatalog.All);
 
-        Assert.Equal(census.Templates, census.NetworkDenied + census.NeedsNetwork + census.LocalSubsystems);
+        // Every template is in exactly one of the four: denied its Windows network, keeps one because
+        // its sensor dials out, keeps one because the container would break it, or runs under the
+        // Linux lease where the kernel holds the network by allow-list and the question does not arise.
+        Assert.Equal(census.Templates, census.NetworkDenied + census.NeedsNetwork + census.LocalSubsystems + census.Leased);
         Assert.True(census.Templates > 0, "the catalog is empty, so the census is meaningless");
+        Assert.True(census.Leased > 0, "no catalog template runs under the Linux lease, so the product's own agents never meet it");
 
         // The roadmap states these numbers to a reader; counting them here is what stops that
         // sentence from rotting the next time a template is added.
@@ -114,6 +118,9 @@ public sealed class CapabilityManifestTests
         Assert.True(stated.Success, "the roadmap no longer states the census in the form this test reads");
         Assert.Equal(census.Templates, int.Parse(stated.Groups["total"].Value));
         Assert.Equal(census.NetworkDenied, int.Parse(stated.Groups["denied"].Value));
+        var leasedRow = Regex.Match(roadmap, @"(?<leased>\d+) run their tool under the Linux lease");
+        Assert.True(leasedRow.Success, "the roadmap no longer states how many templates run under the Linux lease in the form this test reads");
+        Assert.Equal(census.Leased, int.Parse(leasedRow.Groups["leased"].Value));
 
         // The Field Guide states the same census in prose, in both synced copies. That document is
         // what a non-engineer reads to decide whether to trust this, and it spent weeks telling them
@@ -134,7 +141,13 @@ public sealed class CapabilityManifestTests
             Assert.Equal(census.NetworkDenied, int.Parse(glossary.Groups["denied"].Value));
             var connected = Regex.Match(text, @"For the (?<open>\d+) with a connection");
             Assert.True(connected.Success, $"{doc} no longer states how many keep a connection in the form this test reads");
-            Assert.Equal(census.Templates - census.NetworkDenied, int.Parse(connected.Groups["open"].Value));
+            Assert.Equal(census.Windows - census.NetworkDenied, int.Parse(connected.Groups["open"].Value));
+
+            // The four that run in the guest are the newest way of not having a Windows network at
+            // all, and the sentence that says so is bound like the rest.
+            var leased = Regex.Match(text, @"(?<leased>\d+) run inside the Linux guest");
+            Assert.True(leased.Success, $"{doc} no longer states how many run under the Linux lease in the form this test reads");
+            Assert.Equal(census.Leased, int.Parse(leased.Groups["leased"].Value));
 
             // The document names the catalog size three more times, and named it "40+" in two of
             // them while the sentence above said 49 - the vague number is the one that survives a

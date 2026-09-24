@@ -205,16 +205,19 @@ dimension the caller did not declare.
 | `limits.maxCpuPercent` | int | no | Ceiling 50 |
 | `limits.maxPids` | int | no | Ceiling 100 |
 | `overlayFs.enableCow` | bool | no | `true` is **refused** |
+| `ephemeralWorkspace` | bool | no (`false`) | The daemon makes `workingDirectory` for this lease and removes it at the lease's end. Accepted only for a directory directly under the daemon's missions root (`--missions-root`, default `/var/lib/splat/missions`) named by one component of letters, digits, `-`, `_` and `.`; anywhere else is **refused**. Daemons before 2026-09-24 ignore the field and fall back to `/tmp` for a directory that is not there |
 
-The answer is a stream, in this order: zero or more `STDOUT`, `STDERR` and `VIOLATION` frames,
-then exactly one `EXIT`. Every `VIOLATION` belonging to the lease precedes `EXIT`; the daemon waits
-250 ms after the child exits and flushes the ring buffer before it writes `EXIT`.
+The answer is a stream, in this order: one `LEASE` (daemons since 2026-09-24; earlier ones send
+none), then zero or more `STDOUT`, `STDERR` and `VIOLATION` frames, then exactly one `EXIT`. Every
+`VIOLATION` belonging to the lease precedes `EXIT`; the daemon waits 250 ms after the child exits
+and flushes the ring buffer before it writes `EXIT`.
 
 | Frame | Fields | Notes |
 | --- | --- | --- |
+| `LEASE` | `missionId`, `cgroupId`, `cgroupPath`, `enforcing`, `limitsReadBack`, `limits.{maxMemoryBytes,maxCpuPercent,maxPids}`, `jailed`, `readOnlyFs`, `workspace`, `workspaceCreated`, `workloadUid` | What was installed, before the tool's first byte. `enforcing` is a real cgroup under live BPF map handles; `limitsReadBack` says whether `limits` are the controllers' own values (a real cgroup) or the request as lowered (the non-enforcing path, which is not a readback). `workspace` is the working directory the tool runs in, `workspaceCreated` whether this lease made it |
 | `STDOUT` / `STDERR` | `data`: string | At most 64 KiB of text per frame. Not line-aligned: a longer line arrives as several frames, which the bridge concatenates. A multi-byte character is never split across frames |
 | `VIOLATION` | `cgroupId`, `pid`, `hook`, `detail` (u64 holding the record's u32), `detailText`, `comm`, `timestampMs`, `ktimeNs`, `seq` | Only events for **this** lease's cgroup. `timestampMs` is the daemon's clock, milliseconds since the Unix epoch, taken when the event was drained; `ktimeNs` and `seq` are the record's own. Daemons before 2026-09-20 omit all three |
-| `EXIT` | `exitCode`: int; `violationsDropped`: int | The child's exit status; `-1` when it died by signal, could not be spawned, or the request was refused. `violationsDropped` is how far the kernel's drop counter moved while this lease ran, across every lease on the host; anything but `0` means the `VIOLATION` frames above are incomplete |
+| `EXIT` | `exitCode`: int; `violationsDropped`: int; `workspaceRemoved`: bool | The child's exit status; `-1` when it died by signal, could not be spawned, or the request was refused. `violationsDropped` is how far the kernel's drop counter moved while this lease ran, across every lease on the host; anything but `0` means the `VIOLATION` frames above are incomplete. `workspaceRemoved` is present only when the lease made its workspace, and says whether it is gone - on a request refused after the workspace was made as well, where it follows the refusal's `STDERR` with no `LEASE` frame before it |
 
 A refused request (policy the daemon cannot enforce, an undeclared dimension, a command outside its
 own lease, a cgroup or map that could not be provisioned) is answered with a `STDERR` frame whose
@@ -284,6 +287,12 @@ when the daemon sent one, else the host's clock at receipt, and `Sequence` and `
 
 `FinalMetrics` is always `JobResourceMetrics.Unavailable`: the `EXIT` frame carries no cgroup
 accounting, and the bridge reports the absence rather than a number nobody measured.
+
+`ProcessExecutionResult.Lease` is the `LEASE` frame one to one (`LeaseOutcome`), with `WorkspaceRemoved`
+taken from `EXIT`; null from a daemon that sent no `LEASE`, except a refusal that removed the workspace it had made, which is an outcome marked not installed and carrying nothing but the directory's fate. `LimitsReadBack` is `limits` as a
+`JobLimitsReadback` only when `limitsReadBack` was true. A governed mission run through
+`LinuxLeaseSubstrate` writes both into its run facts as the substrate's applied controls and the
+kernel-held limits, beside the Windows path's job-object readback.
 
 ### Timestamp origins
 

@@ -37,6 +37,7 @@ revoking one does not remove an entry another still holds.
 | Lease lifetime | expiry reaper | On expiry the cgroup is killed and drained *before* its policy is withdrawn. |
 | Caller identity | protocol 3 handshake | A root-owned 0600 shared secret that never crosses the wire. Every connection opens with `HELLO`, and the daemon answers with an HMAC-SHA256 over the caller's nonce and its own, which the caller checks before it sends anything more. Every request then travels in an `AUTHENTICATED` frame whose proof covers both nonces, its place on the connection and its exact bytes, checked in fixed time before the request is parsed. Required on **every** request, `HEALTH_CHECK` included since 2026-09-11: that answer carries `enforcing`, the kernel version and the live lease count, so leaving it open told an unauthenticated caller exactly when this daemon would run work it cannot contain. Since 2026-09-23 the answers prove themselves too: a caller that asks in its `HELLO` receives every later frame in a `PROVEN` wrapper whose proof covers both nonces, the frame's number on the connection and its exact bytes, and the `CHALLENGE` that agreed to it is proven under a label of its own, so the agreement cannot be stripped off in transit. A caller that does not ask is answered unwrapped, as before. |
 | Workload privilege | `pre_exec` | `setgroups` / `setresgid` / `setresuid` before exec; a drop that fails fails the spawn. |
+| A mission's workspace | `ephemeralWorkspace`, before the cgroup exists | A governed mission's working directory, made by the daemon directly under its missions root (`--missions-root`, default `/var/lib/splat/missions`), one path component named like a mission id, owned by the workload at mode 0700, and removed after the workload exits and its cgroup is drained; `EXIT` says whether it went. A request refused after the directory was made - a lease that could not be installed, a command outside its own lease, a jail that could not be prepared - removes it with the refusal and says so on the same `EXIT`. A request naming a workspace anywhere else is refused before anything is made. The `LEASE` frame that follows reports the cgroup, the clamps its controllers took, whether the daemon is enforcing, the jail, the workspace and the workload's uid, so the bridge records what was installed rather than what was asked. **Built 2026-09-24, pending the root probe.** |
 | Command coherence | request | A command absent from its own lease's `allowedExecPaths` is refused before it reaches the kernel. |
 | The lease ceiling | `/etc/splat/policy.json`, root-owned, read at startup | The most any lease may name on this host, whoever holds the token: executables under the listed directories only, endpoints from the listed set (or unbounded when the file names none), paths always protected, a duration and clamps the request can only lower. A request outside it is refused before a cgroup exists. Written by `splat-mcp provision --apply [--egress ...]`; absent, the daemon says so at startup and in `HEALTH_RESPONSE`. A file that is not root's or that others can write stops the daemon from starting. |
 
@@ -74,9 +75,10 @@ enforcement while the hash does not match what ships — so the proof cannot out
 > kernel's clock, a sequence number and a drop counter, and the connect hook refuses an AF_INET
 > address too short to hold one — so the daemon and last-hop evidence below name the program as it
 > was, not as it ships. The same day the daemon gained the jail above, which `probe-daemon.sh` now
-> checks with five results of its own, none yet recorded. The README's claims are withdrawn until
-> `probe-daemon.sh` and `probe-last-hop.ps1` are re-run under root; `docs/GUIDE-operator.md` has
-> the steps.
+> checks with five results of its own, none yet recorded. On 2026-09-24 the daemon gained the
+> mission workspace and the `LEASE` frame above, which no root run has seen either. The README's
+> claims are withdrawn until `probe-daemon.sh` and `probe-last-hop.ps1` are re-run under root;
+> `docs/GUIDE-operator.md` has the steps.
 
 | Claim | Evidence |
 | --- | --- |

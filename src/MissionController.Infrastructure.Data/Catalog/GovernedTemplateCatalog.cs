@@ -85,6 +85,7 @@ public static partial class GovernedTemplateCatalog
     private const string CatCompliance = "Compliance & Audit";
     private const string CatCampus = "Campus & Branch Operations";
     private const string CatAutonomous = "Autonomous Operations & Marketing";
+    private const string CatLinuxGuest = "Linux Guest (WSL2)";
 
     // --- Exit code policies -----------------------------------------------------------------
     private static readonly int[] ExitOk = { 0 };
@@ -242,6 +243,7 @@ public static partial class GovernedTemplateCatalog
         all.AddRange(ComplianceTemplates());
         all.AddRange(CampusOperationsTemplates());
         all.AddRange(AutonomousOperationsTemplates());
+        all.AddRange(LinuxLeaseTemplates());
 
         for (int i = 0; i < all.Count; i++)
         {

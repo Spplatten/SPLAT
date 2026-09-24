@@ -256,4 +256,11 @@ two decisions (the distro, the certificate).
   exporter from the console's database, `MissionReplayTests`, and the live canary on the largest
   catalog sensor. Layer 2's gap ("none of the interplay was reachable by a unit test") is closed by
   construction once a run is recorded; the recordings themselves are the operator's to export.
+- 2026-09-24, on the operator's "work the discrepancies with the written future" note: the
+  product's own specialists run under the Linux lease. `ToolSubstrate` on the tool definition, a
+  `MissionSubstrate` the engine asks a host-composed selector for, `LinuxLeaseSubstrate` in the
+  bridge project with `TemplatePolicyCompiler` as the lease's author, four Linux templates in the
+  catalog, the daemon's mission workspace and `LEASE` frame, and the one-pager's "the console never
+  routes one through the daemon" retired. Layer 1's row above stays In-Progress: the kernel's part
+  is still 2.3's to prove.
 - Nothing else. Every other gap above is a roadmap row or a decision, and is left there.

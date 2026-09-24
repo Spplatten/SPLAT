@@ -444,6 +444,46 @@ host_has_the_dirs = os.path.isdir("/home") and os.path.isdir("/mnt")
 import shutil
 shutil.rmtree(jail_ws, ignore_errors=True)
 
+print()
+print("== 17. THE MISSION WORKSPACE: made by the daemon for the lease, and gone with it ==")
+print("   A governed mission from Windows cannot make a directory in the guest; the lease asks the")
+print("   daemon to, under its missions root only. The LEASE frame says it was made, the tool")
+print("   writes in it, EXIT says it went, and the host's view is the control.")
+missions_root = "/var/lib/splat/missions"
+mission_ws = missions_root + "/probe-workspace"
+shutil.rmtree(mission_ws, ignore_errors=True)
+workspace = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-workspace",
+    "command": "/bin/sh", "argv": ["-c", "pwd; touch made-here && echo WROTE_WORKSPACE; ls -ld ."],
+    "allowedExecPaths": ["/bin/sh"],
+    "workingDirectory": mission_ws, "ephemeralWorkspace": True,
+    "leaseDurationSeconds": 20,
+}, "workspace"), "workspace")
+workspace_gone_after = not os.path.exists(mission_ws)
+# And one that asks for a workspace somewhere else, which must be refused before anything is made.
+elsewhere = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-workspace-elsewhere",
+    "command": "/bin/sh", "argv": ["-c", "echo RAN"],
+    "allowedExecPaths": ["/bin/sh"],
+    "workingDirectory": "/tmp/splat-probe-elsewhere", "ephemeralWorkspace": True,
+    "leaseDurationSeconds": 20,
+}, "workspace-elsewhere"), "workspace-elsewhere")
+elsewhere_not_made = not os.path.exists("/tmp/splat-probe-elsewhere")
+# And one refused AFTER the workspace was made: a protected path the guest does not hold fails the
+# lease install, which comes after the directory exists. The refusal must take the directory with
+# it and the EXIT frame must say so; three refused missions left theirs behind on 2026-09-24.
+refused_ws = missions_root + "/probe-workspace-refused"
+shutil.rmtree(refused_ws, ignore_errors=True)
+refused_after = show(call({
+    "type": "EXECUTE_TOOL", "missionId": "probe-workspace-refused",
+    "command": "/bin/sh", "argv": ["-c", "echo RAN"],
+    "allowedExecPaths": ["/bin/sh"],
+    "protectedPaths": ["/nonexistent/splat-probe-never-here"],
+    "workingDirectory": refused_ws, "ephemeralWorkspace": True,
+    "leaseDurationSeconds": 20,
+}, "workspace-refused-after-creation"), "workspace-refused-after-creation")
+refused_ws_gone = not os.path.exists(refused_ws)
+
 def had(msgs, t):
     return any(m.get("type") == t for m in (msgs or []))
 
@@ -568,6 +608,35 @@ jail_system_ro = "SYSTEM_READONLY" in text(jail_ro) and "WROTE_SYSTEM" not in te
 jail_rw_text = text(jail_rw)
 jail_workdir_rw = "WROTE_WORKDIR" in jail_rw_text and "WROTE_TMP" in jail_rw_text and "ETC_VISIBLE" in jail_rw_text
 jail_readonly_fs = "WORKDIR_READONLY" in text(jail_rofs) and "WROTE_WORKDIR" not in text(jail_rofs)
+# The LEASE frame: what the daemon installed, told before the tool ran. Scored on the permitted
+# session, where a real cgroup under live hooks must report itself as enforcing.
+def lease_frame(msgs):
+    return next((m for m in (msgs or []) if m.get("type") == "LEASE"), None)
+lease_reports_enforcing = bool(lease_frame(allowed)) and lease_frame(allowed).get("enforcing") is True
+# The mission workspace: made for the lease (the frame says so and the tool wrote in it), gone
+# after it (EXIT says so and the host agrees), and refused anywhere but under the missions root.
+ws_frame = lease_frame(workspace) or {}
+ws_exit = next((m for m in (workspace or []) if m.get("type") == "EXIT"), {})
+workspace_made_and_removed = (
+    ws_frame.get("workspaceCreated") is True
+    and mission_ws in text(workspace)
+    and "WROTE_WORKSPACE" in text(workspace)
+    and ws_exit.get("workspaceRemoved") is True
+    and workspace_gone_after
+)
+workspace_elsewhere_refused = (
+    "SPLAT refused the request" in text(elsewhere)
+    and "ephemeralWorkspace" in text(elsewhere)
+    and "RAN" not in text(elsewhere)
+    and elsewhere_not_made
+)
+refused_exit = next((m for m in (refused_after or []) if m.get("type") == "EXIT"), {})
+workspace_removed_on_refusal = (
+    "could not be installed" in text(refused_after)
+    and "RAN" not in text(refused_after)
+    and refused_exit.get("workspaceRemoved") is True
+    and refused_ws_gone
+)
 # The datagram hook. The permitted half is the control: a lease that refused every datagram would
 # score the refusal True and prove only that nothing works.
 udp_blocked = had(udp_bad, "VIOLATION") and "SENT" not in text(udp_bad)
@@ -582,6 +651,11 @@ print(f"  jail hides /home and /mnt      : {jail_hides_host}")
 print(f"  system dirs read-only in jail  : {jail_system_ro}")
 print(f"  workdir, /tmp writable, /etc visible : {jail_workdir_rw}")
 print(f"  readOnlyFs makes workdir read-only   : {jail_readonly_fs}")
+print()
+print(f"  LEASE frame reports enforcing  : {lease_reports_enforcing}")
+print(f"  workspace made, used, removed  : {workspace_made_and_removed}")
+print(f"  workspace elsewhere refused    : {workspace_elsewhere_refused}")
+print(f"  workspace removed on refusal   : {workspace_removed_on_refusal}")
 
 # A run that is not recorded is not proof - the same rule the canary follows.
 import datetime
@@ -655,6 +729,12 @@ evidence = {
         "jail_system_dirs_read_only": jail_system_ro,
         "jail_workdir_and_tmp_writable": jail_workdir_rw,
         "read_only_fs_makes_workdir_read_only": jail_readonly_fs,
+        # 2026-09-24: the daemon tells the bridge what it installed, and makes a governed mission's
+        # workspace under its missions root only.
+        "lease_frame_reports_enforcing": lease_reports_enforcing,
+        "mission_workspace_made_and_removed": workspace_made_and_removed,
+        "mission_workspace_elsewhere_refused": workspace_elsewhere_refused,
+        "mission_workspace_removed_on_refusal": workspace_removed_on_refusal,
     },
     "violations": [
         {k: m.get(k) for k in ("hook", "pid", "detail", "detailText", "comm") if k in m}
@@ -699,6 +779,10 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["jail_system_dirs_read_only"]
     and evidence["results"]["jail_workdir_and_tmp_writable"]
     and evidence["results"]["read_only_fs_makes_workdir_read_only"]
+    and evidence["results"]["lease_frame_reports_enforcing"]
+    and evidence["results"]["mission_workspace_made_and_removed"]
+    and evidence["results"]["mission_workspace_elsewhere_refused"]
+    and evidence["results"]["mission_workspace_removed_on_refusal"]
 ) else "INCOMPLETE"
 
 out_dir = os.environ.get("SPLAT_EVIDENCE_DIR", "/mnt/c/C_AGENT_BUILDER/native/splat-agent/evidence")

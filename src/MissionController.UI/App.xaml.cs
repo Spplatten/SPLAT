@@ -12,6 +12,7 @@ using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Compliance;
 using MissionController.Infrastructure.Data.Templates;
 using MissionController.Infrastructure.Data.Vector;
+using MissionController.Infrastructure.Linux;
 using MissionController.Infrastructure.Network.Dlp;
 using MissionController.Infrastructure.Network.Edr;
 using MissionController.Infrastructure.Network.Http;
@@ -237,6 +238,14 @@ public partial class App : Application
         services.AddSingleton<ICredentialSanitizer, PromptCredentialSanitizer>();
         services.AddSingleton<IRevocationStore, SqliteRevocationStore>();
         services.AddSingleton<IIncidentRevocationManager, IncidentRevocationManager>();
+
+        // Infrastructure - the Linux lease, for the catalog templates whose tool names it. The
+        // engine asks the selector for every mission; a Windows template gets null and runs as it
+        // always has. A leased mission reaches the daemon the way run_command does, through the
+        // same bridge, with its lease compiled from the template rather than authored by a caller.
+        services.AddSingleton<ILeasedExecutor>(_ => new WslLeasedExecutor());
+        services.AddSingleton<ITemplatePolicyCompiler, TemplatePolicyCompiler>();
+        services.AddSingleton<IMissionSubstrateSelector, LinuxLeaseSubstrate>();
 
         // Core Engine & Cognitive Brain
         services.AddSingleton<IDiagnosticFindingsExtractor, JsonFindingsExtractor>();
