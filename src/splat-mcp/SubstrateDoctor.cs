@@ -239,8 +239,26 @@ public static class SubstrateDoctor
     private static string Short(string text) =>
         text.Length <= 90 ? text.ReplaceLineEndings(" ") : text.ReplaceLineEndings(" ")[..90] + "...";
 
-    /// <summary>The real runner, shared with the provisioner so both reach the guest the same way.</summary>
-    internal static async Task<(int, string)> RunWslAsync(IReadOnlyList<string> args, CancellationToken ct)
+    /// <summary>
+    /// How long one wsl.exe probe gets. A budget rather than a limit: exceeding it is an answer -
+    /// this host did not say in time - and the report prints that instead of failing.
+    /// </summary>
+    internal static readonly TimeSpan ProbeBudget = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// The real runner, shared with the provisioner so both reach the guest the same way. Two
+    /// parameters, not three with a default: this signature is the one <see cref="WslRunner"/>
+    /// names, and an optional parameter would stop it converting to that delegate.
+    /// </summary>
+    internal static Task<(int, string)> RunWslAsync(IReadOnlyList<string> args, CancellationToken ct) =>
+        RunWslAsync(args, ct, ProbeBudget);
+
+    /// <summary>
+    /// The same probe under an explicit budget, so the suite can reach the timeout path in
+    /// milliseconds rather than waiting fifteen seconds for it.
+    /// </summary>
+    internal static async Task<(int, string)> RunWslAsync(
+        IReadOnlyList<string> args, CancellationToken ct, TimeSpan budget)
     {
         var start = new ProcessStartInfo("wsl.exe")
         {
@@ -257,7 +275,7 @@ public static class SubstrateDoctor
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            cts.CancelAfter(budget);
             using var process = Process.Start(start);
             if (process is null)
             {
@@ -271,11 +289,21 @@ public static class SubstrateDoctor
             await process.WaitForExitAsync(cts.Token);
             return (process.ExitCode, OutputOf(process.ExitCode, await stdout, await stderr));
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || ct.IsCancellationRequested)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             // A missing wsl.exe, a distro that will not start, or a probe that outlived its patience:
             // all three mean the same thing to a reader - this host cannot answer for the substrate.
-            return (-1, ex.Message);
+            //
+            // The filter turns on the CALLER's token, and it used to turn on the exception type,
+            // which excluded the one case the comment above promises: the budget above is this
+            // method's own, so when it fired - ct untouched - the OperationCanceledException was
+            // rethrown and `doctor` died with it instead of reporting. That is not theoretical.
+            // It took down the packaging gate on 2026-09-24, on a loaded machine, on a commit that
+            // touched neither WSL nor the doctor. A caller who cancels still gets its cancellation,
+            // because then this filter is false and the exception goes on up.
+            return (-1, ex is OperationCanceledException
+                ? $"wsl.exe did not answer within {budget.TotalSeconds:0.##}s"
+                : ex.Message);
         }
     }
 

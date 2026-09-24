@@ -27,6 +27,15 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
+  <!--
+    The suite holds one thing this executable does not expose: the wsl.exe probe's budget is a
+    budget, so exceeding it has to come back as a report rather than an exception. Visible to the
+    tests rather than made public, because nothing outside this repository references this project.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="MissionController.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\MissionController.Core\MissionController.Core.csproj" />
     <ProjectReference Include="..\MissionController.Infrastructure.Linux\MissionController.Infrastructure.Linux.csproj" />

@@ -28,6 +28,31 @@ public sealed class SubstrateDoctorTests
     private static WslAgentToken HermeticToken => new(authToken: "0123456789abcdef");
 
     /// <summary>
+    /// The probe's budget is a budget, not a limit: a wsl.exe that outlives it is an answer the
+    /// report prints, never an exception the doctor dies of.
+    ///
+    /// It died of one. The catch filter read <c>ex is not OperationCanceledException ||
+    /// ct.IsCancellationRequested</c>, which excluded precisely the case its own comment promised
+    /// to handle - the internal budget firing while the caller's token was untouched - so on a
+    /// loaded machine `doctor` threw instead of reporting. That is how the packaging gate failed on
+    /// 2026-09-24, on a commit that touched neither WSL nor the doctor.
+    ///
+    /// The budget is passed in milliseconds here, so the test costs no wall clock. Both endings are
+    /// the contract: on a host with WSL the sleep outlives the budget, on one without it wsl.exe
+    /// never starts, and either way the caller is told rather than thrown at.
+    /// </summary>
+    [Fact]
+    public async Task AProbeThatOutlivesItsBudget_IsReported_RatherThanThrown()
+    {
+        var (exit, output) = await SubstrateDoctor.RunWslAsync(
+            new[] { "-e", "sleep", "10" }, CancellationToken.None, TimeSpan.FromMilliseconds(250));
+
+        Assert.Equal(-1, exit);
+        Assert.False(string.IsNullOrWhiteSpace(output),
+            "A probe that cannot answer has to say why - this line is what the report prints.");
+    }
+
+    /// <summary>
     /// One canned answer on loopback, given after protocol 3's handshake. The doctor's own probe does the
     /// talking, so what is under test is what it concludes from a real exchange rather than from a status
     /// object handed to it.
