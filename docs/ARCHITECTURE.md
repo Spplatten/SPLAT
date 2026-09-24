@@ -110,7 +110,7 @@ them.
 | Runtime | `net10.0-windows10.0.19041.0`, Windows App SDK 2.5.1, self-contained | `net10.0-windows` |
 | Database | `%LOCALAPPDATA%\MissionController\Data\missioncontroller.db` | `%LOCALAPPDATA%\SPLAT\audit_ledger.db` |
 | Operator identity | `WindowsOperatorIdentityProvider("winui-console")` | `McpOperatorIdentityProvider` — the logon session, or a validated `SPLAT_MCP_CLIENT_CREDENTIAL` |
-| Revocation check before a mission | Wired | Not wired — the engine is constructed with `null` |
+| Revocation check before a mission | Wired | Wired since 2026-09-19 (F19): `Program.cs` passes the same `IncidentRevocationManager` the tool-call gate uses. This row said "constructed with `null`" until 2026-09-23 |
 | Remediation engine | Wired | Absent |
 | Linux substrate | Not referenced | `WslLeasedExecutor` behind `run_command` and `run_code` |
 | Workflow engine | Registered; no screen resolves it yet | Absent |
@@ -127,8 +127,8 @@ streams `MissionChunk`s while it runs. In order:
 
 1. **Validate** the template's shape — one model, one tool, one FQDN, declared exit codes, bounded
    timeout and limits.
-2. **Revocation** — the console checks the operator against the circuit breaker; `splat-mcp` does
-   not.
+2. **Revocation** — both hosts check the operator against the circuit breaker; an unreadable
+   list refuses the mission rather than clearing it (F19, 2026-09-19).
 3. **Bind** the parameters into the command line. A value the binder cannot place refuses the
    mission before anything is provisioned (`MISSION_BLOCKED_PARAMETER_REJECTED`).
 4. **Record** `MISSION_INITIATED`, then provision the jail. From here a `finally` drains the jail on
@@ -177,7 +177,7 @@ judged on what the layer has to hold, not on how enterprise it looks.
 | BPF hooks ↔ kernel structs | Coupled: CO-RE reads of `linux_binprm`, `file`, `inode` and `sockaddr_in`; fixed-layout map keys; no serialization | Coupled | The hooks run inside the syscall. Three straight-line programs, no loops, 79–116 instructions, 40 bytes of stack. Any abstraction here is instructions the verifier must prove and latency on every exec, open and connect on the host |
 | Ring-buffer record ↔ daemon | Coupled: a `#[repr(C)]` cast of the record, its size asserted at compile time | Coupled | A serializer between kernel and daemon would cost a copy per event and could not make the layout safer than the assertion already does |
 | Lease keys ↔ maps | One trait, `BpfMapSync`, with a live implementation and a recording one | As is | The one seam the daemon needs: the isolation tests exercise the real key construction against a fake map, and the rollback test needs a map that fails on purpose |
-| Daemon ↔ bridge | Decoupled: JSON lines, a versioned protocol, proofs over exact bytes | Decoupled | Two languages, two machines, a trust boundary. Zero-copy would buy nothing at the rate a tool prints; what matters is that a frame is refused before it is parsed and that neither side can drift from the other's test vectors |
+| Daemon ↔ bridge | Decoupled: JSON lines, a versioned protocol, proofs over exact bytes in both directions | Decoupled | Two languages, two machines, a trust boundary. Zero-copy would buy nothing at the rate a tool prints; what matters is that a frame is refused before it is parsed and that neither side can drift from the other's test vectors |
 | Bridge ↔ control plane | Decoupled: `ILeasedExecutor`, `ITemplatePolicyCompiler`, `IHostAddressResolver` | Decoupled | The wire tests need a stand-in daemon and the compiler tests a stand-in resolver; nothing on this path is hot |
 | Mission engine | Coupled: one sequence in one process, a `try`/`finally` around the jail | Coupled | The order — validate, bind, record, launch, scrub, judge — *is* the safety property. A pluggable pipeline would let a step be reordered or skipped by configuration |
 | Engines that compose missions | Decoupled from each other, all coupled to `IMissionExecutionEngine` | As is | They decide what runs next and never run a process; one execution tier is the invariant |

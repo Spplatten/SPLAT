@@ -105,6 +105,12 @@ validate button. An organisation-scoped Anthropic key is refused; use a workspac
 The graphics layer could not start. Update the display driver, then try again. Remote Desktop
 sessions without GPU acceleration can also show this.
 
+**You want to check the package without clicking through every page.**
+From inside the `App` folder, run `MissionController.UI.exe --self-test`. The console opens every
+page, writes `%LOCALAPPDATA%\SPLAT\self-test.json`, and exits with a code: 0 when every page opened
+and loaded, 2 when a page failed (the report names it and why), 1 when the console could not start,
+3 when the check did not finish. The package build runs this same check before it zips.
+
 **Antivirus quarantines a file from `App\`.**
 Restore it and add the package folder to the exclusion list, or re-unzip the package. Check
 `SHA256SUMS.txt` if you want to confirm the file is the one that shipped.

@@ -5,7 +5,7 @@
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](src/)
 [![Rust](https://img.shields.io/badge/Rust-libbpf--rs%20%2B%20eBPF-CE412B?logo=rust&logoColor=white)](native/splat-agent/)
 [![WinUI 3](https://img.shields.io/badge/UI-WinUI%203%20%2F%20Windows%20App%20SDK-0078D6?logo=windows&logoColor=white)](src/MissionController.UI/)
-[![Tests](https://img.shields.io/badge/Tests-659%2F659%20passing-success)](tests/MissionController.Tests/)
+[![Tests](https://img.shields.io/badge/Tests-660%2F660%20passing-success)](tests/MissionController.Tests/)
 [![Build](https://img.shields.io/badge/Build-0%20errors-success)](src/)
 
 **New here, or allergic to jargon?** Start with **[The SPLAT Field Guide](docs/TUTORIAL.md)** — the whole system explained in plain English.
@@ -39,12 +39,12 @@ Technical evaluations of agent sandboxes tend to blur together into generic "iso
 | Component | State |
 | :--- | :--- |
 | Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
-| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 659/659 automated tests passing |
+| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Shipped** — 660/660 automated tests passing |
 | Zero-warning build gate | **Enforced** — [`src`](src/Directory.Build.props) and [`tests`](tests/Directory.Build.props) compile with `TreatWarningsAsErrors`, so a cold solution build reports 0 warnings and 0 errors. No project is exempt: the console joined on 2026-09-18, when it moved to Windows App SDK 2.5.1 on .NET 10 and built without a warning, and `WarningGateTests` fails if an exemption appears |
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented** — stdio JSON-RPC, 12 tools. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining ten run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
 | Linux lease daemon (`splat-agent`) | **Enforcing under root as last recorded on 2026-09-15; re-proof pending** — the kernel program gained a per-record clock, sequence number and drop counter on 2026-09-20, so the recorded run no longer names the program that ships, and the claim stays withdrawn until the probe is re-run ([docs/GUIDE-operator.md](docs/GUIDE-operator.md)). That run: nineteen checks against a root daemon on kernel 6.18.33.2, recorded in [evidence/daemon-probe.json](native/splat-agent/evidence/daemon-probe.json) and bound to the SHA-256 of the BPF source it exercised, so the proof cannot outlive the program it tested. All three hooks: a protected file the workload *could* read (`/etc/hostname`, 644 — a control run reads it, the leased run is denied, so only the lease accounts for the difference), an unleased second exec refused mid-`sh`, and egress held to one address and one port. Two concurrent leases proven not to lend each other permissions. The tool runs as `uid=65534(nobody)` with supplementary groups cleared, not as the daemon's root. IPv6 denied outright. An overrunning workload killed by the reaper 5.5s into a 60s sleep rather than merely unpoliced. A lease dimension the caller did not declare refused rather than defaulted. It proves it holds its token before a caller sends anything, and refuses the token sent in the clear. The daemon refuses to start at all unless enforcement is live |
-| Host↔guest caller identity | **Partly built** — the bridge speaks a versioned JSON protocol over loopback TCP, and protocol 3 authenticates both ends with a root-owned shared secret that never crosses the wire: the daemon proves it holds the secret before the bridge sends anything but a nonce, and every request proves it back. A process that takes the port while the daemon is down learns nothing it can use. It does not stop another process running as the same Windows user, which can read the secret exactly as the bridge does. The code's own notes name AF_VSOCK, or `SO_PEERCRED` over a Unix socket, as the way to identify the peer instead — which callers either would actually exclude is not yet worked out. See the [roadmap](docs/ROADMAP.md) |
+| Host↔guest caller identity | **Partly built** — the bridge speaks a versioned JSON protocol over loopback TCP, and protocol 3 authenticates both ends with a root-owned shared secret that never crosses the wire: the daemon proves it holds the secret before the bridge sends anything but a nonce, every request proves it back, and since 2026-09-23 every frame the daemon answers with proves itself for its place on the connection. A process that takes the port while the daemon is down learns nothing it can use. It does not stop another process running as the same Windows user, which can read the secret exactly as the bridge does. The code's own notes name AF_VSOCK, or `SO_PEERCRED` over a Unix socket, as the way to identify the peer instead — which callers either would actually exclude is not yet worked out. See the [roadmap](docs/ROADMAP.md) |
 | Launch-overhead benchmark ([`src/splat-bench`](src/splat-bench)) | **Recorded** — the governed Windows path adds **4.12 ms p50 / 9.88 ms p95** over the same tool run bare, on Windows `10.0.26200`, 50 alternating iterations ([evidence](src/splat-bench/evidence)). The locks account for ~2.4 ms; the rest is process creation both arms pay. This retired the inherited `<1ms` marketing figure, which the measurement missed by about 4× |
 
 That table is the contract: nothing above it is aspirational, and nothing below it is hidden.
@@ -179,10 +179,10 @@ Every call lands in the audit ledger attributed to a resolved principal — the 
 
 ```text
 $ dotnet test tests/MissionController.Tests/MissionController.Tests.csproj
-Passed!  - Failed: 0, Passed: 659, Skipped: 0, Total: 659, Duration: 25 s - MissionController.Tests.dll (net10.0)
+Passed!  - Failed: 0, Passed: 660, Skipped: 0, Total: 660, Duration: 25 s - MissionController.Tests.dll (net10.0)
 ```
 
-659 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
+660 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
 
 **On the warning count.** An incremental `dotnet build` reports zero warnings, but that is an artifact of caching rather than a property of the source: a cold `--no-incremental` build re-runs the CommunityToolkit source generators and emits **186 `MVVMTK0045` warnings**, one per `[ObservableProperty]` field that should be declared as a partial property for WinRT marshalling. They are cosmetic and confined to the view models, but a "zero warnings" claim would only have been true on the build nobody runs from clean. Converting the fields is tracked work; the badge above claims zero *errors*, which holds either way.
 
@@ -201,7 +201,7 @@ SPLAT/
 ├── native/
 │   ├── splat-agent/                             # Rust eBPF daemon: lease_lsm.bpf.c + libbpf-rs loader
 │   └── splat-canary/                            # Minimal -EPERM proof harness (preflight → canary)
-├── tests/MissionController.Tests/               # 659 xUnit unit / integration / security tests
+├── tests/MissionController.Tests/               # 660 xUnit unit / integration / security tests
 ├── packaging/                                   # Signed MSIX build + Intune/SCCM silent install scripts
 └── docs/                                        # Architecture, context and module maps; briefs, plans, audits - index in docs/README.md
 ```

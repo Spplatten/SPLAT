@@ -95,7 +95,7 @@ From a WSL terminal, the guard's own tests:
 cd /mnt/c/C_AGENT_BUILDER/native/splat-agent && cargo test
 ```
 
-Expect `test result: ok. 44 passed`. From PowerShell, the bridge's tests against a stand-in guard:
+Expect `test result: ok. 65 passed` (the count on 2026-09-23; it grows with the guard). From PowerShell, the bridge's tests against a stand-in guard:
 
 ```powershell
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj --filter "FullyQualifiedName~WslLeasedExecutorWire|FullyQualifiedName~WslAgentSession"
@@ -126,7 +126,18 @@ Two kinds of root exist here, and only one of them needs you.
 Both the guard and its kernel program changed today, so this step is required, not optional: the
 recorded daemon and last-hop proofs name a program that no longer ships, and the README says so
 until you have run this. The standalone canary is a frozen copy and does not need re-running.
-Three runs, in two terminals.
+Three runs, in two terminals - or, since 2026-09-23, one command from PowerShell, which does all
+three without a password because it starts the guard through `wsl -u root` rather than `sudo`:
+
+```powershell
+C:\C_AGENT_BUILDER\packaging\reprove-substrate.ps1
+```
+
+It builds the guard, stops the installed service for the length of the run, starts the fresh build
+as root, runs both probes with their evidence written into the tree, starts the service again, and
+ends with `RE-PROOF PASS` or a list of what did not hold. Paste its last screen either way. If it
+passes, skip to step 2; the three runs below are the same thing by hand, for when something in it
+needs looking at.
 
 Terminal one, inside WSL. This builds the guard and starts it with `sudo`, which prompts:
 

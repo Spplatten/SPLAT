@@ -37,6 +37,10 @@ token = sys.argv[3] if len(sys.argv) > 3 else ""
 # One entry per session: its label, and whether the daemon proved it holds the token. Kept out of the
 # messages, which the checks below read as the daemon's own words.
 handshakes = []
+# One entry per session that asked for proven frames: its label, and whether the daemon agreed; and
+# every frame that then failed to prove itself for its place. Since 2026-09-23 (roadmap 2.6).
+frame_sessions = []
+frame_failures = []
 
 def read_line(s, buf):
     """One frame from the socket, and whatever arrived after it."""
@@ -63,6 +67,8 @@ def call(req, label, settle=2.0, forge=None, clear=False):
     if req.get("type") == "EXECUTE_TOOL":
         req = dict(req, protocolVersion=3)
     out = []
+    proves = False
+    client_nonce = server_nonce = b""
     try:
         s = socket.create_connection((host, port), timeout=5)
     except OSError as e:
@@ -75,7 +81,8 @@ def call(req, label, settle=2.0, forge=None, clear=False):
                 s.sendall((json.dumps(dict(req, authToken=token)) + "\n").encode())
             else:
                 client_nonce = os.urandom(32)
-                hello = {"type": "HELLO", "protocolVersion": 3, "clientNonce": client_nonce.hex()}
+                # Ask for the daemon's frames to be proven, as the bridge does since 2026-09-23.
+                hello = {"type": "HELLO", "protocolVersion": 3, "clientNonce": client_nonce.hex(), "proveFrames": True}
                 s.sendall((json.dumps(hello) + "\n").encode())
                 first, buf = read_line(s, buf)
                 try:
@@ -89,10 +96,16 @@ def call(req, label, settle=2.0, forge=None, clear=False):
                     server_nonce = bytes.fromhex(str(challenge.get("serverNonce", "")))
                 except ValueError:
                     server_nonce = b""
-                expected = prove(token.encode(), b"splat-agent/3 daemon", client_nonce, server_nonce)
+                # A daemon that agrees to prove its frames proves the CHALLENGE under a label of its
+                # own, so the agreement cannot be stripped off in transit; one that predates the field
+                # answers under the plain label and unwrapped, and is scored below as not proving.
+                proves = challenge.get("framesProven") is True
+                daemon_label = b"splat-agent/3 daemon+frames" if proves else b"splat-agent/3 daemon"
+                expected = prove(token.encode(), daemon_label, client_nonce, server_nonce)
                 proven = len(server_nonce) == 32 and hmac.compare_digest(
                     expected.encode(), str(challenge.get("serverProof", "")).encode(errors="replace"))
                 handshakes.append((label, proven))
+                frame_sessions.append((label, proves))
                 if not proven:
                     return out
                 body = json.dumps(req)
@@ -113,14 +126,36 @@ def call(req, label, settle=2.0, forge=None, clear=False):
                 # the next one - so waiting for the socket to go quiet meant every call paid the
                 # full settle timeout. That made elapsed time meaningless: the expiry probe read
                 # 25.7s for a workload the reaper had killed at about 7.
-                if b'"EXIT"' in buf or b'"type": "EXIT"' in buf:
+                # Inside a PROVEN wrapper the frame's quotes are escaped, so the EXIT is looked for
+                # in that spelling too.
+                if b'"EXIT"' in buf or b'"type": "EXIT"' in buf or b'\\"type\\":\\"EXIT\\"' in buf:
                     break
         except socket.timeout:
             pass
+    seq = 0
     for line in buf.decode(errors="replace").splitlines():
         line = line.strip()
         if not line:
             continue
+        if proves:
+            # On a session the daemon agreed to prove, every frame after the CHALLENGE travels in a
+            # PROVEN wrapper, proven over both nonces, its number and its exact bytes. One that does
+            # not, or whose proof does not hold for its place, is a finding rather than a frame.
+            try:
+                wrapper = json.loads(line)
+            except json.JSONDecodeError:
+                wrapper = None
+            inner = wrapper.get("frame") if isinstance(wrapper, dict) and wrapper.get("type") == "PROVEN" else None
+            if not isinstance(inner, str):
+                frame_failures.append((label, "a frame arrived unwrapped: " + line[:80]))
+                out.append({"type": "RAW", "data": line})
+                continue
+            expected = prove(token.encode(), b"splat-agent/3 frame", client_nonce, server_nonce,
+                             seq.to_bytes(8, "big") + inner.encode())
+            if not hmac.compare_digest(expected, str(wrapper.get("proof", ""))):
+                frame_failures.append((label, f"frame {seq} did not prove itself for its place"))
+            seq += 1
+            line = inner
         try:
             out.append(json.loads(line))
         except json.JSONDecodeError:
@@ -510,10 +545,15 @@ health_answered = had(health, "HEALTH_RESPONSE")
 unauth_health_refused = not had(unauth_health, "HEALTH_RESPONSE") and "proof" in text(unauth_health)
 daemon_proved_itself = bool(handshakes) and all(proven for _, proven in handshakes)
 clear_token_refused = not had(clear_health, "HEALTH_RESPONSE") and "protocol 3" in text(clear_health)
+# Every session that asked was agreed to, and every frame on them proved itself for its place.
+daemon_frames_proven = bool(frame_sessions) and all(p for _, p in frame_sessions) and not frame_failures
 print(f"  health check answers a holder  : {health_answered}")
 print(f"  health check refuses a stranger: {unauth_health_refused}")
 print(f"  daemon proved it holds token   : {daemon_proved_itself}")
 print(f"  token in the clear refused     : {clear_token_refused}")
+print(f"  daemon frames proven           : {daemon_frames_proven}")
+for session_label, why in frame_failures:
+    print(f"    [{session_label}] {why}")
 
 # The jail. Absence is only a measurement when the host has the directory: a guest with no /mnt
 # would score "absent" for the wrong reason, so the host's own view is the control.
@@ -559,6 +599,9 @@ except OSError:
 evidence = {
     "schema": 3,
     "bpf_source_sha256": bpf_sha,
+    # The kernel the daemon enforced under, as the canary and the last-hop probe already record:
+    # a claim about "a stock kernel" needs the record to say which one.
+    "kernel_release": os.uname().release,
     "protocol_version": 3,
     "recorded_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
@@ -599,6 +642,9 @@ evidence = {
         # collect - is refused even with the right token.
         "daemon_proved_it_holds_the_token": daemon_proved_itself,
         "protocol_2_token_in_the_clear_refused": clear_token_refused,
+        # Roadmap 2.6: the answers prove themselves too. Every session here asked, so a daemon that
+        # answered one unwrapped, or proved a frame for the wrong place, fails this.
+        "daemon_frames_proven": daemon_frames_proven,
         # A datagram that names its own destination never reaches socket_connect; socket_sendmsg
         # judges it against the same allow-list.
         "udp_outside_the_lease_blocked": udp_blocked,
@@ -644,6 +690,7 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["unauthenticated_health_check_refused"]
     and evidence["results"]["daemon_proved_it_holds_the_token"]
     and evidence["results"]["protocol_2_token_in_the_clear_refused"]
+    and evidence["results"]["daemon_frames_proven"]
     and evidence["results"]["udp_outside_the_lease_blocked"]
     and evidence["results"]["udp_inside_the_lease_allowed"]
     # The jail, with its control: hidden directories only count when the host has them to hide.

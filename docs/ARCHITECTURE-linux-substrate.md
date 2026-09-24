@@ -127,6 +127,11 @@ under the token, which the caller checks before it sends anything more. Each req
 an `AUTHENTICATED` frame whose proof covers both nonces, the request's place on the connection and its
 exact bytes, checked in fixed time before any of them is parsed. A frame that does not prove itself —
 including a protocol 2 request carrying the token itself — is refused, and the connection closed.
+Since 2026-09-23 the answers are proven the same way (roadmap 2.6): a bridge that asks in its
+`HELLO` gets every later frame wrapped as `PROVEN`, proven over both nonces, the frame's number on
+the connection and its exact bytes, and refuses the session at the first frame that does not hold.
+An older bridge that does not ask is answered unwrapped; an older daemon that cannot agree is
+believed as before, and `doctor` says so.
 
 **`EXECUTE_TOOL`, in order:**
 
@@ -244,7 +249,7 @@ is labelled `[SPLAT POLICY]`, never reported as a kernel denial, and ledgered as
 Loopback TCP, reached from Windows through WSL2 localhost forwarding. Every connection opens with
 protocol 3's handshake, and every request — `HEALTH_CHECK` included, because it answers with
 `enforcing`, the kernel version and the live lease count — proves the shared secret without sending
-it. Both callers read that secret through
+it, and every answer proves itself back for its place on the connection (since 2026-09-23). Both callers read that secret through
 [`WslAgentToken`](../src/MissionController.Infrastructure.Linux/WslAgentToken.cs), once per host,
 and speak through [`WslAgentSession`](../src/MissionController.Infrastructure.Linux/WslAgentSession.cs).
 An unprivileged process **inside the guest** cannot read the token, and taking the port while the

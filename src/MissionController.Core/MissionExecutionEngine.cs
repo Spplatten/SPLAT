@@ -12,6 +12,7 @@ using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 using MissionController.Core.QualityIsland;
 using MissionController.Core.QualityIsland.Contracts;
+using MissionController.Core.Replay;
 
 namespace MissionController.Core;
 
@@ -28,6 +29,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
     private readonly IIncidentRevocationManager? _revocationManager;
     private readonly IDiagnosticFindingsExtractor? _findingsExtractor;
     private readonly IIsolatedQualityIsland _qualityIsland;
+    private readonly IMissionRecorder? _recorder;
 
     // Recall tuning. topK stays small because the system prompt is the scarcest resource in a
     // mission - three verdict-led snippets ground the model without crowding out the template's own
@@ -50,9 +52,11 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         ICredentialSanitizer? credentialSanitizer = null,
         IIncidentRevocationManager? revocationManager = null,
         IDiagnosticFindingsExtractor? findingsExtractor = null,
-        IIsolatedQualityIsland? qualityIsland = null)
+        IIsolatedQualityIsland? qualityIsland = null,
+        IMissionRecorder? recorder = null)
     {
         _findingsExtractor = findingsExtractor;
+        _recorder = recorder;
         _jailManager = jailManager;
         _processLauncher = processLauncher;
         _modelClient = modelClient;
@@ -734,6 +738,44 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             (islandResult.Telemetry.InitialFailureReason is { Length: > 0 } reason ? $" | {reason}" : string.Empty),
             operatorIdentity,
             cancellationToken);
+
+        // 8.5 The replay fixture, when a recorder is attached: the sensor text as the model saw it,
+        // every attempt's answer, and the verdict reached - captured here, where the engine holds all
+        // of it, so nothing is reconstructed later from the ledger or the memory index. Recording is
+        // never a gate: a recorder that cannot write costs the fixture, not the mission, and says so.
+        string? recordingFailure = null;
+        if (_recorder is not null)
+        {
+            try
+            {
+                var extractor = _findingsExtractor ?? new JsonFindingsExtractor();
+                var fixture = MissionFixture.Capture(
+                    template,
+                    parameters.ToDictionary(pair => pair.Key, pair => Scrub(pair.Value)),
+                    facts,
+                    rawStdout,
+                    rawStderr,
+                    execResult.ExitCode,
+                    execResult.TimedOut,
+                    effectiveSystemPrompt,
+                    islandResult,
+                    extractor.ExtractFindings(islandResult.OutputContent, sanitizedPayload, template.Name));
+                await _recorder.RecordAsync(fixture, CancellationToken.None);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                recordingFailure = $"{ex.GetType().Name}: {ex.Message}";
+            }
+        }
+
+        if (recordingFailure is not null)
+        {
+            yield return new MissionChunk(
+                missionId,
+                MissionChunkType.SystemWarning,
+                $"The mission's replay fixture was not recorded ({recordingFailure}). The mission itself is unaffected.",
+                DateTime.UtcNow);
+        }
 
         // 9. Index into In-Process Semantic Memory - only what the quality gate accepted. An
         // unaccepted analysis indexed here is worse than no memory at all: every later mission

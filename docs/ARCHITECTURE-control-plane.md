@@ -73,7 +73,7 @@ with the ledger action each step writes:
 | # | Step | Ledger action | When it fails |
 | --- | --- | --- | --- |
 | 1 | `ValidateStrictRules()` | — | Throws before any row is written |
-| 2 | Revocation check (console only) | — | A `SECURITY ABORT` chunk; nothing provisioned |
+| 2 | Revocation check (both hosts since F19, 2026-09-19) | — | A `SECURITY ABORT` chunk; nothing provisioned; an unreadable list refuses too |
 | 3 | Bind arguments | `MISSION_BLOCKED_PARAMETER_REJECTED` | Refused before provisioning |
 | 4 | Start | `MISSION_INITIATED` | — |
 | 5 | Jail, job object, suspended launch | — | `MISSION_FAILED`; the jail is drained |
@@ -165,7 +165,7 @@ look.
 Every ledger row names a principal that the operating system or a validator established, never a
 string the caller supplied. The console attributes to the Windows logon session;
 [`splat-mcp`](ARCHITECTURE-agent-surface.md#splat-mcp) adds an optional validated credential. When
-an `IIncidentRevocationManager` is wired — the console only — the mission engine refuses a revoked
+an `IIncidentRevocationManager` is wired — both hosts, since F19 on 2026-09-19 — the mission engine refuses a revoked
 operator before binding anything.
 
 ## Evidence and memory

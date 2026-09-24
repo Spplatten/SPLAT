@@ -739,10 +739,10 @@ public class McpServerHandler
             // meant the daemon assembled its own, which made the request its own authorization.
             AllowedExecInodes: new List<InodeIdentifierModel> { new(0, 0, command) },
             LeaseDurationSeconds: timeoutSec,
-            Limits: new LeaseResourceLimits(
-                MaxMemoryBytes: 256 * 1024 * 1024,
-                MaxCpuPercent: 50,
-                MaxPids: 100));
+            // The record's own defaults, restated here as literals until 2026-09-23: two copies of
+            // one policy on this side of the wire, beside the daemon's ceilings in main.rs and the
+            // operator's in policy.json, each of which may only lower what this asks for.
+            Limits: new LeaseResourceLimits());
 
         var violations = new List<LeaseViolationEvent>();
         var violationProgress = new SynchronousProgress<LeaseViolationEvent>(v =>

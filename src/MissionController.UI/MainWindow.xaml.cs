@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -9,6 +10,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Navigation;
 using Microsoft.UI.Xaml.Shapes;
 using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Windows.Jails;
@@ -30,6 +32,25 @@ public sealed partial class MainWindow : Window
 
     private const int SW_RESTORE = 9;
     private bool _isNavigating;
+    private readonly Task _selfCheck;
+
+    /// <summary>
+    /// Every page the navigation offers, in the order it lists them, Settings last. The self-test
+    /// opens exactly these, so a page added to the menu without being added here is the one failure
+    /// the self-test cannot see: keep the two lists together.
+    /// </summary>
+    internal static readonly Type[] EveryPage =
+    {
+        typeof(QuickDiagnosticianView),
+        typeof(WelcomeOnboardingView),
+        typeof(LiveMissionMonitorView),
+        typeof(TemplateCatalogView),
+        typeof(ProjectStudioView),
+        typeof(SecurityAuditView),
+        typeof(SemanticSearchView),
+        typeof(JailInspectorView),
+        typeof(SettingsView),
+    };
 
     public MainWindow()
     {
@@ -37,8 +58,82 @@ public sealed partial class MainWindow : Window
         // Read from the runtime the app is on: typed into the XAML, it said ".NET 9" through the move to 10.
         RuntimeLabel.Text = $"GOVERNED APPLIANCE  ·  .NET {Environment.Version.Major}";
         ConfigureWindow();
-        _ = RunSelfCheckAsync();
+        _selfCheck = RunSelfCheckAsync();
         NavigateTo(typeof(QuickDiagnosticianView), SlideNavigationTransitionEffect.FromRight);
+    }
+
+    /// <summary>The status bar's lights as they read once the start-up check has run, or as they stand when the budget is spent.</summary>
+    internal async Task<string[]> ReadStatusBarAsync(TimeSpan budget)
+    {
+        await Task.WhenAny(_selfCheck, Task.Delay(budget));
+        return new[] { JobSandboxLabel.Text, JailLabel.Text, LedgerLabel.Text, SelfCheckLabel.Text };
+    }
+
+    /// <summary>
+    /// Opens one page the way the navigation does and reports whether it arrived and loaded. Three ways
+    /// a page fails are caught here: navigation throwing, the frame reporting a failed navigation, and a
+    /// page that is shown but never raises Loaded. The fourth - an exception from a Loaded handler's
+    /// first await - reaches the application's unhandled-exception path, which the self-test also reads.
+    /// </summary>
+    internal async Task<PageProbe> ProbePageAsync(Type pageType, TimeSpan loadBudget)
+    {
+        var clock = Stopwatch.StartNew();
+        Exception? failed = null;
+        void OnNavigationFailed(object sender, NavigationFailedEventArgs e)
+        {
+            failed = e.Exception;
+            e.Handled = true;
+        }
+
+        ContentFrame.NavigationFailed += OnNavigationFailed;
+        try
+        {
+            NavigateTo(pageType, SlideNavigationTransitionEffect.FromRight);
+        }
+        catch (Exception ex)
+        {
+            return new PageProbe(false, $"navigation threw {ex.GetType().Name}: {ex.Message}", clock.ElapsedMilliseconds);
+        }
+        finally
+        {
+            ContentFrame.NavigationFailed -= OnNavigationFailed;
+        }
+
+        if (failed is not null)
+        {
+            return new PageProbe(false, $"navigation failed: {failed.GetType().Name}: {failed.Message}", clock.ElapsedMilliseconds);
+        }
+
+        if (ContentFrame.Content is not FrameworkElement page)
+        {
+            return new PageProbe(false, "the frame shows nothing after navigation", clock.ElapsedMilliseconds);
+        }
+
+        if (page.GetType() != pageType)
+        {
+            return new PageProbe(false, $"the frame shows {page.GetType().Name} instead", clock.ElapsedMilliseconds);
+        }
+
+        if (!page.IsLoaded)
+        {
+            var loaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            void OnLoaded(object sender, RoutedEventArgs e) => loaded.TrySetResult(true);
+
+            page.Loaded += OnLoaded;
+            try
+            {
+                if (await Task.WhenAny(loaded.Task, Task.Delay(loadBudget)) != loaded.Task)
+                {
+                    return new PageProbe(false, $"the page did not raise Loaded within {loadBudget.TotalSeconds:F0} s", clock.ElapsedMilliseconds);
+                }
+            }
+            finally
+            {
+                page.Loaded -= OnLoaded;
+            }
+        }
+
+        return new PageProbe(true, "opened and loaded", clock.ElapsedMilliseconds);
     }
 
     /// <summary>

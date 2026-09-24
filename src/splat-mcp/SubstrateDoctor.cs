@@ -110,6 +110,16 @@ public static class SubstrateDoctor
                         ? $"live: a lease reaches the kernel ({status.ActiveLeaseCount} active)"
                         : "the daemon answers but holds no BPF maps: treat anything it runs as UNCONTAINED");
 
+            if (status.Authenticated)
+            {
+                // Not a failure either: an older daemon answers unwrapped and is believed as before. It
+                // is the line that says whether what comes back from a lease is proven or only trusted.
+                Line(output, status.FramesProven ? "ok" : "--", "daemon frames",
+                    status.FramesProven
+                        ? "proven: every frame the daemon sends back is proven for its place on the connection"
+                        : "unproven: this daemon predates 2026-09-23 and answers unwrapped; `splat-mcp provision --apply` installs the one this executable carries");
+            }
+
             // Not a failure: a host without one is as it was before ceilings existed. It is the line
             // that says what a stolen token would buy.
             Line(output, status.CeilingPolicy ? "ok" : "--", "lease ceiling",

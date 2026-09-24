@@ -10,6 +10,7 @@ using MissionController.Core;
 using MissionController.Core.Brain;
 using MissionController.Core.Crew;
 using MissionController.Core.Interfaces;
+using MissionController.Core.Replay;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Catalog;
@@ -159,6 +160,14 @@ public static class Program
         var geminiClient = new GeminiStreamClient(httpClient, firewallHandler, vault);
         var modelRouter = new ModelClientRouter(claudeClient, geminiClient);
 
+        // The same switch the console reads: a directory named in the environment gets every
+        // mission's replay fixture, and the client's log says so before the first one is written.
+        var recorder = MissionFixtureDirectoryRecorder.FromEnvironment("splat-mcp");
+        if (recorder is not null)
+        {
+            Console.Error.WriteLine($"splat-mcp: every mission's replay fixture is written to {recorder.DirectoryPath}");
+        }
+
         // 4. Core Cognitive Engine
         var missionEngine = new MissionExecutionEngine(
             jailManager,
@@ -170,7 +179,8 @@ public static class Program
             dlpSanitizer,
             credSanitizer,
             revocationManager,
-            findingsExtractor);
+            findingsExtractor,
+            recorder: recorder);
 
         var investigationLoop = new GovernedInvestigationLoop(
             missionEngine,

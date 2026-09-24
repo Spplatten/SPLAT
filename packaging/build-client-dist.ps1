@@ -16,8 +16,8 @@
 
     Every step is checked, in the same spirit as publish-splat-mcp.ps1: a packaging script that can
     announce success while producing nothing is worse than none. A failed test run, a missing
-    runtime marker, a symbol left behind, or a published console that cannot show a window each
-    stop this script with a non-zero exit.
+    runtime marker, a symbol left behind, or a published console that cannot open every one of its
+    pages each stop this script with a non-zero exit.
 
     dist\App - the tree the operator runs from - is never touched. The output is a separate
     dist\Client\ stage so a bad build here cannot break the working console.
@@ -27,8 +27,8 @@
     built with the gate on.
 
 .PARAMETER SkipSmokeTest
-    Skip launching the published console. For a build agent with no interactive desktop; the
-    result is then an unproven package and the summary says so.
+    Skip launching the published console for its self-test. For a build agent with no interactive
+    desktop; the result is then an unproven package and the summary says so.
 
 .PARAMETER IncludeMcp
     Also build splat-mcp.exe via publish-splat-mcp.ps1 (needs WSL with cargo) and ship it under
@@ -137,46 +137,85 @@ if ($pdbs) {
 if (Get-ChildItem $appDir -Recurse -Filter '*.pdb') { Fail 'symbol files survived stripping' }
 
 # ------------------------------------------------------------------------------------------------
-# Smoke test. A console that cannot open its window is not a package. Startup XAML failures present
-# as a live, windowless process, so "the process is running" proves nothing: the window handle
-# does. The crash log's timestamp is read before launch so an older crash cannot be mistaken for
-# this one.
+# Self-test. A console that cannot open its pages is not a package, and neither "the process is
+# running" nor "a window appeared" says anything about the pages: the XAML compiler does not check
+# resource keys, so two pages that threw the moment they were opened shipped through a green build
+# and a green window check on 2026-09-23. The published console is started with --self-test: it
+# opens every page its navigation offers, waits for each to load, writes a report, and exits with a
+# code - the one channel a windowed executable has back to a script. The crash log's timestamp is
+# read before launch so an older crash cannot be mistaken for this one.
 # ------------------------------------------------------------------------------------------------
 $smoke = 'SKIPPED'
 if ($SkipSmokeTest) {
-    Write-Host '[5/8] smoke test: SKIPPED by request - the package is unproven' -ForegroundColor Yellow
+    Write-Host '[5/8] self-test: SKIPPED by request - the package is unproven' -ForegroundColor Yellow
 } else {
-    Write-Host '[5/8] smoke test: launching the published console and waiting for its window' -ForegroundColor Cyan
+    Write-Host '[5/8] self-test: launching the published console with --self-test; it opens every page and exits' -ForegroundColor Cyan
     $crashLog = Join-Path $env:LOCALAPPDATA 'SPLAT\crash.log'
     $crashBefore = if (Test-Path $crashLog) { (Get-Item $crashLog).LastWriteTimeUtc } else { [datetime]::MinValue }
+    $report = Join-Path $OutputDir "SPLAT-Client-$commit.self-test.json"
+    if (Test-Path $report) { Remove-Item $report -Force }
 
     # DOTNET_ROOT cleared: a self-contained app must not be steered to a machine runtime.
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $exe
+    $psi.Arguments = "--self-test --self-test-report `"$report`""
     $psi.WorkingDirectory = $appDir
     $psi.UseShellExecute = $false
     $psi.Environment['DOTNET_ROOT'] = ''
     $proc = [System.Diagnostics.Process]::Start($psi)
 
-    $deadline = (Get-Date).AddSeconds(45)
+    # The window is still watched for: a self-test that exited 0 without ever showing one would have
+    # tested nothing. 180 s covers the console's own 150 s ceiling and its start.
+    $deadline = (Get-Date).AddSeconds(180)
     $handle = [IntPtr]::Zero
+    $title = ''
     while ((Get-Date) -lt $deadline -and -not $proc.HasExited) {
         Start-Sleep -Milliseconds 500
         $proc.Refresh()
-        if ($proc.MainWindowHandle -ne [IntPtr]::Zero) { $handle = $proc.MainWindowHandle; break }
+        if ($handle -eq [IntPtr]::Zero -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
+            $handle = $proc.MainWindowHandle
+            $title = $proc.MainWindowTitle
+        }
     }
-    $title = $proc.MainWindowTitle
-    if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) }
+    if (-not $proc.HasExited) {
+        $proc.Kill()
+        $proc.WaitForExit(5000)
+        Fail "the published console's self-test did not finish within 180 s (window shown: $($handle -ne [IntPtr]::Zero))"
+    }
+    $code = $proc.ExitCode
 
     $crashAfter = if (Test-Path $crashLog) { (Get-Item $crashLog).LastWriteTimeUtc } else { [datetime]::MinValue }
     if ($crashAfter -gt $crashBefore) {
         Write-Host (Get-Content $crashLog -Tail 30 | Out-String)
-        Fail "the published console wrote to $crashLog during the smoke test"
     }
-    if ($handle -eq [IntPtr]::Zero) {
-        Fail "the published console never showed a window within 45 s (exited: $($proc.HasExited), exit code: $(if ($proc.HasExited) { $proc.ExitCode } else { 'n/a' }))"
+
+    $pagesOpened = 0
+    $pagesTotal = 0
+    if (Test-Path $report) {
+        $result = Get-Content $report -Raw | ConvertFrom-Json
+        foreach ($page in @($result.pages)) {
+            $pagesTotal++
+            if ($page.ok) { $pagesOpened++ }
+            $mark = if ($page.ok) { 'ok  ' } else { 'FAIL' }
+            $colour = if ($page.ok) { 'Green' } else { 'Red' }
+            Write-Host ("      {0} {1,-26} {2,6} ms  {3}" -f $mark, $page.page, $page.ms, $page.detail) -ForegroundColor $colour
+        }
+        foreach ($problem in @($result.unhandled)) {
+            Write-Host "      unhandled on $($problem.page): $($problem.error)" -ForegroundColor Red
+        }
+        Write-Host "      status bar: $(@($result.statusBar) -join ' | ')"
+        Write-Host "      $($result.summary)"
+    } else {
+        Write-Host "      no report was written at $report" -ForegroundColor Yellow
     }
-    $smoke = "window shown: '$title'"
+
+    if ($crashAfter -gt $crashBefore) { Fail "the published console wrote to $crashLog during the self-test" }
+    if ($code -ne 0) {
+        Fail "the published console's self-test exited $code (1: failed before its window, 2: a page failed, 3: did not finish); the report is $report"
+    }
+    if ($handle -eq [IntPtr]::Zero) { Fail 'the published console exited 0 from its self-test without ever showing a window' }
+    if ($pagesTotal -eq 0) { Fail "the self-test exited 0 but its report at $report lists no pages" }
+    $smoke = "self-test passed: $pagesOpened of $pagesTotal pages opened and loaded in '$title'"
     Write-Host "      $smoke" -ForegroundColor Green
 }
 
@@ -224,7 +263,7 @@ dotnet sdk    : $sdkVersion
 windows appsdk: $appSdk (bundled)
 app files     : $fileCount files, $sizeMb MB
 tests         : $(if ($SkipTests) { 'SKIPPED' } else { 'passed' })
-smoke test    : $smoke
+self-test     : $smoke
 "@ + "`n", $utf8)
 
 $sums = Get-ChildItem $stage -Recurse -File |
@@ -253,4 +292,4 @@ Write-Host "zip      : $zip  ($([math]::Round((Get-Item $zip).Length / 1MB, 1)) 
 Write-Host "sha256   : $zipHash"
 Write-Host "commit   : $commit"
 Write-Host "runtime  : .NET $netRuntime + Windows App SDK $appSdk, bundled"
-Write-Host "smoke    : $smoke"
+Write-Host "self-test: $smoke"
