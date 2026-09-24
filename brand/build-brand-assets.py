@@ -197,6 +197,30 @@ def cut(rgba, top, bottom, pad=6):
                        min(strip.width, right + pad), min(strip.height, down + pad)))
 
 
+def on_glass(art, radius=9, opacity=0.62, passes=2):
+    """The same mark with a soft dark shadow under it, for drawing on a transparent window.
+
+    The splash has no plate any more, so the white half of the wordmark was invisible against a
+    light desktop - it is white artwork on whatever the operator happens to have behind it. A blur
+    of the mark's own alpha, laid down in near-black beneath it, gives the white letters an edge on
+    a white background without putting a rectangle back. Padding is part of the asset: a shadow
+    cropped at the bbox is a shadow with a straight edge.
+    """
+    pad = radius * 3
+    canvas = Image.new("RGBA", (art.width + (2 * pad), art.height + (2 * pad)), (0, 0, 0, 0))
+
+    shadow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    shadow.paste(Image.new("RGBA", art.size, (2, 5, 12, 255)), (pad, pad), art.getchannel("A"))
+    shadow.putalpha(shadow.getchannel("A")
+                    .filter(ImageFilter.GaussianBlur(radius))
+                    .point(lambda v: min(255, int(v * opacity))))
+
+    for _ in range(passes):                 # stacked rather than deepened: keeps the falloff soft
+        canvas.alpha_composite(shadow)
+    canvas.paste(art, (pad, pad), art)
+    return canvas
+
+
 def centred(art, size, fill=0.94):
     """Fit art into a transparent canvas, longest side to `fill` of it, centred."""
     cw, ch = size
@@ -237,14 +261,19 @@ def main():
     # Row bands measured off the alpha channel: crystal 125-470, SPLAT 500-603, strapline 623-645,
     # copyright 729-740. The copyright strip is cut everywhere - the app draws its own.
     p_emblem = cut(primary, 118, 478)
+    p_lockup = cut(primary, 118, 652)
     save(p_emblem, "splat-emblem.png")
-    save(cut(primary, 118, 652), "splat-lockup.png")
+    save(p_lockup, "splat-lockup.png")
+    # The splash window is transparent, so its copies carry their own shadow. Kept as separate
+    # assets: the title-bar chip and the icons sit on solid surfaces and want the clean mark.
+    save(on_glass(p_lockup, opacity=0.68, passes=3), "splat-lockup-onglass.png")
 
     print("keying SPLAT-enterprise.jpg ...")
     enterprise = key(BRAND / "SPLAT-enterprise.jpg")
     # Bands here: hexagon 134-458, SPLAT 478-567, strapline 581-606, copyright 660-676.
     e_emblem = cut(enterprise, 126, 466)
     save(e_emblem, "splat-enterprise-emblem.png")
+    save(on_glass(e_emblem, radius=6), "splat-enterprise-emblem-onglass.png")
     save(cut(enterprise, 126, 614), "splat-enterprise-lockup.png")
 
     print("icons ...")

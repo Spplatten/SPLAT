@@ -29,6 +29,18 @@ public sealed partial class SplashWindow : Window
     [LibraryImport("user32.dll")]
     private static partial uint GetDpiForWindow(IntPtr hwnd);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Margins
+    {
+        public int Left;
+        public int Right;
+        public int Top;
+        public int Bottom;
+    }
+
+    [LibraryImport("dwmapi.dll")]
+    private static partial int DwmExtendFrameIntoClientArea(IntPtr hwnd, in Margins margins);
+
     private SplashWindow()
     {
         InitializeComponent();
@@ -95,6 +107,15 @@ public sealed partial class SplashWindow : Window
 
         // A splash in alt-tab and on the taskbar reads as a second application.
         appWindow.IsShownInSwitchers = false;
+
+        // Per-pixel alpha. A WinUI window with a transparent root still composes onto its own
+        // opaque surface, which is why "no background" renders black rather than see-through; this
+        // SDK has MicaBackdrop and DesktopAcrylicBackdrop but no TransparentBackdrop, and both of
+        // those are blur, not transparency. Extending the frame across the whole client area hands
+        // the surface to DWM, which honours the alpha the XAML actually drew - so the marks float
+        // over whatever is behind the window and the keyed-out backdrop stays keyed out.
+        var sheetOfGlass = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        DwmExtendFrameIntoClientArea(hwnd, sheetOfGlass);
 
         uint dpi = GetDpiForWindow(hwnd);
         double scale = dpi == 0 ? 1.0 : dpi / 96.0;
