@@ -1,0 +1,71 @@
+{
+  "Schema": 1,
+  "MissionId": "1dc04447-ac7e-4d7e-ad0b-ceddba6f89b2",
+  "RecordedAtUtc": "2026-09-24T02:08:59.3380759Z",
+  "RecordedBy": "export from the console database: the accepted answer, replayed as the first attempt",
+  "Note": "Exported from the console's own run of 2026-09-23T21:00:13.4749860Z. Parameters were not indexed; the template's defaults bind on replay.",
+  "TemplateId": "marketing-social-campaign-publisher",
+  "TemplateName": "Autonomous Social Campaign & Developer App Publisher",
+  "TemplateSha256": "sha256:39b63b386d7c801c70dd34ba44951c6b37b885dc24547ef068a88ab6a88264d9",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "752468c62ad3172f4d42bbc637a6003a77636d77ec42d197c9165a450ad33cca",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "=== SPLAT AUTONOMOUS CAMPAIGN GENERATOR ===\r\nPlatform: Twitter_X\r\nCampaign Theme: KETO_PRO www.ketoproservices.com\r\nTarget Audience: Health & Fitness :KETO\r\nThread Length: 3 posts\r\nCall to Action: https://ketoproservices.com/tiktok/console\r\nPublish Mode: DraftAndValidate\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_1dc04447ac7e4d7ead0bceddba6f89b2",
+      "token:integrity=Low",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=0-capabilities"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "This request doesn't fit the actual capability implied by the system context. The instructions I'm operating under describe a developer-marketing copywriter role (GitHub repos, docs, benchmarks, technical audiences), but the actual campaign brief asks for consumer health/diet supplement promotion (\"KETO_PRO\") aimed at a fitness audience, driving traffic to `ketoproservices.com/tiktok/console` — a URL pattern that doesn't correspond to any real TikTok product surface and reads as a generic tracking/redirect endpoint rather than a documented app or repo destination.\n\nI'm not going to draft persuasive health/diet marketing copy here for two reasons: (1) I have no verifiable technical or clinical substantiation for \"KETO_PRO\" — writing hook/proof/CTA posts implying credibility or results for a supplement product to a health-focused audience risks manufacturing unsubstantiated health claims; (2) the destination link and campaign framing don't match any established, inspectable product documentation the way a \"Technical Proof Post\" campaign requires (no repo, no benchmarks, no docs to cite — the format literally cannot be filled with grounded claims). Rather than fabricate benchmark-style \"technical proof\" for a diet product, I'm flagging this as a mismatched/unverifiable campaign request instead of generating the thread.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Campaign request targets an unverifiable health product with a non-standard redirect URL, incompatible with the technical-proof format required\",\n  \"findings\": [\n    \"Campaign theme 'KETO_PRO' targets a Health & Fitness audience, but the operating template requires technical proof (architecture, benchmarks, repo/docs links) — none exist for this product\",\n    \"Call-to-action URL 'https://ketoproservices.com/tiktok/console' does not match any known TikTok product, API, or documentation path pattern\",\n    \"No source material (docs, GitHub repo, benchmark data) was supplied to substantiate any 'Technical Proof Post' claims about KETO_PRO\"\n  ],\n  \"recommendedActions\": [\n    \"Confirm the actual product/domain and provide verifiable documentation, clinical substantiation, or technical specs before generating claim-based marketing copy\",\n    \"If this is meant to be a developer-tool campaign, supply the correct repo/theme instead of a health/diet product\",\n    \"Verify the destination link independently before using it in any published content\"\n  ]\n}\n```",
+      "LatencyMs": 0,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9749999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "5c908cd2591f8b3be3e233d2a34bb424e258344b18c8666377e18dd4d638a763",
+    "Status": "Warning",
+    "Headline": "Campaign request targets an unverifiable health product with a non-standard redirect URL, incompatible with the technical-proof format required",
+    "Findings": [
+      "⚠ Campaign theme 'KETO_PRO' targets a Health & Fitness audience, but the operating template requires technical proof (architecture, benchmarks, repo/docs links) — none exist for this product",
+      "⚠ Call-to-action URL 'https://ketoproservices.com/tiktok/console' does not match any known TikTok product, API, or documentation path pattern",
+      "⚠ No source material (docs, GitHub repo, benchmark data) was supplied to substantiate any 'Technical Proof Post' claims about KETO_PRO"
+    ],
+    "RecommendedActions": [
+      "Confirm the actual product/domain and provide verifiable documentation, clinical substantiation, or technical specs before generating claim-based marketing copy",
+      "If this is meant to be a developer-tool campaign, supply the correct repo/theme instead of a health/diet product",
+      "Verify the destination link independently before using it in any published content"
+    ],
+    "Grounded": 0,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 3,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "Schema": 1,
+  "MissionId": "7742d3ab-bd4d-4b33-aab7-80aa6f993e78",
+  "RecordedAtUtc": "2026-09-24T02:08:59.3070937Z",
+  "RecordedBy": "export from the console database: the accepted answer, replayed as the first attempt",
+  "Note": "Exported from the console's own run of 2026-09-23T21:02:24.5696577Z. Parameters were not indexed; the template's defaults bind on replay.",
+  "TemplateId": "grants-opportunity-ingestion",
+  "TemplateName": "Grant Opportunity Ingestion",
+  "TemplateSha256": "sha256:b011a85d775f7d9f435cf8b88da9e1885d903a855c57201a0c20d4d8370ee5ef",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "d7f2f5e3422a2af565cec30d31aa910210694b7706cc1d0d0c73a9caec8554a0",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "=== SPLAT GRANT OPPORTUNITY INGESTION ===\r\nEndpoint: https://api.grants.gov/v1/api/search2 (public Search2 API)\r\nKeyword: ebpf software\r\nStatus filter: posted | Max rows: 25\r\nAgency filter: \r\n--- GOVERNANCE POSTURE ---\r\nRead-only discovery. No credential is presented and no application is filed.\r\nDeclared tool egress: api.grants.gov:443 - kernel-pinned on the Linux substrate, audited declaration on Windows.\r\n--- FETCH ---\r\nAPI_STATUS: errorcode=0 msg=Webservice Succeeds\r\nTOTAL_MATCHING_PROGRAMS: 272\r\nRETURNED_THIS_PAGE: 25\r\n---\r\nIDX: 1\r\nOPP_NUMBER: RFA-OD-24-011\r\nTITLE: NIH Research Software Engineer (RSE) Award (R50 Clinical Trials Not Allowed)\r\nAGENCY: HHS-NIH11 National Institutes of Health\r\nSTATUS: posted\r\nOPEN: 07/17/2024 CLOSE: 12/04/2026\r\n---\r\nIDX: 2\r\nOPP_NUMBER: O-BJA-2026-172761\r\nTITLE: BJA FY 2026 Rural Violent Crime Reduction Initiative\r\nAGENCY: USDOJ-OJP-BJA Bureau of Justice Assistance\r\nSTATUS: posted\r\nOPEN: 09/21/2026 CLOSE: 10/30/2026\r\n---\r\nIDX: 3\r\nOPP_NUMBER: DE-FOA-0003657\r\nTITLE: The DOE Quantum Genesis Q Competition\r\nAGENCY: PAMS-SC Office of Science\r\nSTATUS: posted\r\nOPEN: 09/17/2026 CLOSE: 10/19/2026\r\n---\r\nIDX: 4\r\nOPP_NUMBER: ED-GRANTS-080626-003\r\nTITLE: Institute of Education Sciences (IES): National Center for Education Research (NCER): Statistical and Research Methodology in Education, Assistance Listing Number (ALN) 84.305D\r\nAGENCY: ED Department of Education\r\nSTATUS: posted\r\nOPEN: 08/06/2026 CLOSE: 10/01/2026\r\n---\r\nIDX: 5\r\nOPP_NUMBER: W911NF-22-S-0011\r\nTITLE: Tactical Behaviors for Autonomous Maneuver\r\nAGENCY: DOD-AMC Dept of the Army -- Materiel Command\r\nSTATUS: posted\r\nOPEN: 04/22/2022 CLOSE: \r\n---\r\nIDX: 6\r\nOPP_NUMBER: RFA-RM-27-012\r\nTITLE: PRIMED-AI: Data-to-Model Academic-Industrial Partnerships (D2M-AIP) for Precision Medicine with AI: Integrating Imaging with Multimodal Data (UG3/UH3 Clinical Trial Optional)\r\nAGENCY: HHS-NIH11 National Institutes of Health\r\nSTATUS: posted\r\nOPEN: 06/30/2026 CLOSE: 10/19/2026\r\n---\r\nIDX: 7\r\nOPP_NUMBER: RFA-RM-27-013\r\nTITLE: Model-to-Clinic (M2C) for Precision Medicine with AI: Integrating Imaging with Multimodal Data (PRIMED-AI) (UG3/UH3, Clinical Trial Optional)\r\nAGENCY: HHS-NIH11 National Institutes of Health\r\nSTATUS: posted\r\nOPEN: 06/30/2026 CLOSE: 10/19/2026\r\n---\r\nIDX: 8\r\nOPP_NUMBER: PAR-25-286\r\nTITLE: Neuromodulation/Neurostimulation Device Development for Mental Health Applications (R21 Clinical Trial Not Allowed)\r\nAGENCY: HHS-NIH11 National Institutes of Health\r\nSTATUS: posted\r\nOPEN: 11/21/2024 CLOSE: 01/07/2028\r\n---\r\nIDX: 9\r\nOPP_NUMBER: PAR-25-416\r\nTITLE: NIGMS National and Regional Resources (R24 - Clinical Trial Not Allowed)\r\nAGENCY: HHS-NIH11 National Institutes of Health\r\nSTATUS: posted\r\nOPEN: 06/11/2025 CLOSE: 06/14/2027\r\n---\r\nIDX: 10\r\nOPP_NUMBER: PD-24-8084\r\nTITLE: Computational and Data-Enabled Science and Engineering\r\nAGENCY: NSF U.S. National Science Foundation\r\nSTATUS: posted\r\nOPEN: 08/15/2024 CLOSE: \r\n---\r\nIDX: 11\r\nOPP_NUMBER: PAR-25-287\r\nTITLE: Neuromodulation/Neurostimulation Device Development for Mental Health Applications (R01 Clinical Trial Not Allowed)\r\nAGENCY: HHS-NIH11 National Institutes of Health\r\nSTATUS: posted\r\nOPEN: 11/21/2024 CLOSE: 01/07/2028\r\n---\r\nIDX: 12\r\nOPP_NUMBER: 25-515\r\nTITLE: Security, Privacy, and Trust in Cyberspace\r\nAGENCY: NSF U.S. National Science Foundation\r\nSTATUS: posted\r\nOPEN: 12/06/2024 CLOSE: 09/28/2026\r\n---\r\nIDX: 13\r\nOPP_NUMBER: PD-23-277Y\r\nTITLE: Research Infrastructure in the Social and Behavioral Sciences\r\nAGENCY: NSF U.S. National Science Foundation\r\nSTATUS: posted\r\nOPEN: 10/05/2023 CLOSE: \r\n---\r\nIDX: 14\r\nOPP_NUMBER: 24-598\r\nTITLE: Mid-scale Research Infrastructure-1\r\nAGENCY: NSF U.S. National Science Foundation\r\nSTATUS: posted\r\nOPEN: 08/20/2024 CLOSE: 02/08/2027\r\n---\r\nIDX: 15\r\nOPP_NUMBER: 25-533\r\nTITLE: Findable Accessible Interoperable Reusable Open Science\r\nAGENCY: NSF U.S. National Science Foundation\r\nSTATUS: posted\r\nOPEN: 01/07/2025 CLOSE: 04/14/2027\r\n---\r\nIDX: 16\r\nOPP_NUMBER: 26-506\r\nTITLE: Pathways to Enable Secure Open-Source Ecosystems (PESOSE)\r\nAGENCY: NSF U.S. National Science Foundation\r\nSTATUS: posted\r\nOPEN: 02/19/2026 CLOSE: 03/02/2027\r\n---\r\nIDX: 17\r\nOPP_NUMBER: 25-543\r\nTITLE: Computer and Information Science and Engineering (CISE): Future Computing Research (Future CoRe)\r\nAGENCY: NSF U.S. National Science Foundation\r\nSTATUS: posted\r\nOPEN: 07/25/2025 CLOSE: 02/04/2027\r\n---\r\nIDX: 18\r\nOPP_NUMBER: O-OJJDP-2026-172765\r\nTITLE: OJJDP FY 2026 Invited to Apply - Internet Crimes Against Children Data System Enhancements\r\nAGENCY: USDOJ-OJP-OJJDP Office of Juvenile Justice Delinquency Prevention \r\nSTATUS: posted\r\nOPEN: 09/23/2026 CLOSE: 10/01/2026\r\n---\r\nIDX: 19\r\nOPP_NUMBER: RFA-CA-27-021\r\nTITLE: Sustained Support for Informatics Technologies for Cancer Research and Management (U24 Clinical Trial Optional)\r\nAGENCY: HHS-NIH11 National Institutes of Health\r\nSTATUS: posted\r\nOPEN: 05/21/2026 CLOSE: 10/19/2026\r\n---\r\nIDX: 20\r\nOPP_NUMBER: RFA-CA-27-020\r\nTITLE: Advanced Development of Informatics Technologies for Cancer Research and Management (U24 Clinical Trial Optional)\r\nAGENCY: HHS-NIH11 National Institutes of Health\r\nSTATUS: posted\r\nOPEN: 05/21/2026 CLOSE: 10/19/2026\r\n---\r\nIDX: 21\r\nOPP_NUMBER: FA238424S2233\r\nTITLE: Continuing Human Enabling Enhancing Restoring and Sustaining\r\nAGENCY: DOD-AFRL Air Force -- Research Lab\r\nSTATUS: posted\r\nOPEN: 08/07/2025 CLOSE: 08/22/2044\r\n---\r\nIDX: 22\r\nOPP_NUMBER: RFA-CA-27-019\r\nTITLE: Early-Stage Development of Informatics Technologies for Cancer Research and Management (U01 Clinical Trial Optional)\r\nAGENCY: HHS-NIH11 National Institutes of Health\r\nSTATUS: posted\r\nOPEN: 05/21/2026 CLOSE: 10/19/2027\r\n---\r\nIDX: 23\r\nOPP_NUMBER: FA2391-23-S-2403\r\nTITLE: Pioneering Aerospace Capabilities, Engineering and Research (PACER)\r\nAGENCY: DOD-AFRL Air Force -- Research Lab\r\nSTATUS: posted\r\nOPEN: 07/26/2023 CLOSE: 05/10/2043\r\n---\r\nIDX: 24\r\nOPP_NUMBER: PAR-27-068\r\nTITLE: Limited Competition: NIGMS Mature Synchrotron Resources (MSR) for Structural Biology (P30 - Clinical Trial Not Allowed)\r\nAGENCY: HHS-NIH11 National Institutes of Health\r\nSTATUS: posted\r\nOPEN: 08/31/2026 CLOSE: 10/02/2028\r\n---\r\nIDX: 25\r\nOPP_NUMBER: HR001126S0011\r\nTITLE: Information Processing Techniques Office Office-Wide\r\nAGENCY: DOD-DARPA-IPTO DARPA - Information Processing Technologies Office\r\nSTATUS: posted\r\nOPEN: 06/22/2026 CLOSE: 06/22/2027\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_7742d3abbd4d4b33aab780aa6f993e78",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "## Analysis\n\nThe retrieval succeeded but presents a critical mismatch: the search for \"ebpf software\" returned 272 total matching programs, yet the 25 records displayed show **no declared applicant sector** in the operator directive, making ranking by sector fit impossible. More significantly, the returned results are dominated by life sciences (NIH clinical trials, cancer informatics, neuromodulation), education research, and defense R&D—none of which align with eBPF (extended Berkeley Packet Filter) as a software development or cybersecurity tool domain. The single closest fit—NSF 26-506 \"Pathways to Enable Secure Open-Source Ecosystems (PESOSE)\"—is present but buried at rank 16. This suggests either the Grants.gov search algorithm is returning low-precision results for the \"ebpf software\" query, or the feed is displaying a default/irrelevant sample. **The shortlist is truncated** (25 of 272), and no sector directive was provided to establish ranking criteria.\n\n---\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Search returned 272 matches but display shows low-relevance sample; operator sector directive missing, preventing ranked analysis.\",\n  \"findings\": [\n    \"TOTAL_MATCHING_PROGRAMS = 272 but RETURNED_THIS_PAGE = 25, indicating substantial truncation. Operator has not examined 247 additional candidates.\",\n    \"No applicant sector named in operator directive; ranking instruction cannot be executed.\",\n    \"Returned sample is dominated by life sciences (NIH R50, R21, R01, R24, U24, U01, P30 awards; cancer informatics; neuromodulation) and defense R&D (DOD-AMC, DARPA, AFRL), with minimal representation of open-source or systems software development.\",\n    \"One record with potential relevance: NSF 26-506 'Pathways to Enable Secure Open-Source Ecosystems (PESOSE)' (close: 03/02/2027, ~90 days remaining) ranks 16th of 25, suggesting search relevance ranking may be misaligned with 'ebpf software' intent.\",\n    \"Five records lack close dates (IDX 5, 10, 13), indicating stale or incomplete feed data; all dates must be verified against full solicitation text.\"\n  ],\n  \"recommendedActions\": [\n    \"Provide the applicant's sector (e.g., 'cybersecurity startup,' 'infrastructure software vendor,' 'systems research') so ranking can proceed.\",\n    \"Refine search query: 'ebpf software' may be too broad. Consider 'kernel observability,' 'eBPF tools development,' or 'Linux systems software' to improve precision.\",\n    \"Review full Grants.gov records for the subset likely to match eBPF work—particularly NSF CISE (25-543, 26-506, 25-533), DOD/DARPA (25, HR001126S0011), and any opportunities in the 247 unreturned records.\",\n    \"Verify all close dates and eligibility text against live solicitations before committing proposal effort.\"\n  ]\n}\n```",
+      "LatencyMs": 0,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9099999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "e1e2572ed1d9d885a0423d69c0e524ed4b32ee41b5c3c036ca9787acad25d168",
+    "Status": "Warning",
+    "Headline": "Search returned 272 matches but display shows low-relevance sample; operator sector directive missing, preventing ranked analysis.",
+    "Findings": [
+      "⚠ TOTAL_MATCHING_PROGRAMS = 272 but RETURNED_THIS_PAGE = 25, indicating substantial truncation. Operator has not examined 247 additional candidates.  [PARTIALLY VERIFIED]",
+      "⚠ No applicant sector named in operator directive; ranking instruction cannot be executed.",
+      "⚠ Returned sample is dominated by life sciences (NIH R50, R21, R01, R24, U24, U01, P30 awards; cancer informatics; neuromodulation) and defense R&D (DOD-AMC, DARPA, AFRL), with minimal representation of open-source or systems software development.",
+      "⚠ One record with potential relevance: NSF 26-506 'Pathways to Enable Secure Open-Source Ecosystems (PESOSE)' (close: 03/02/2027, ~90 days remaining) ranks 16th of 25, suggesting search relevance ranking may be misaligned with 'ebpf software' intent.  [PARTIALLY VERIFIED]",
+      "⚠ Five records lack close dates (IDX 5, 10, 13), indicating stale or incomplete feed data; all dates must be verified against full solicitation text."
+    ],
+    "RecommendedActions": [
+      "Provide the applicant's sector (e.g., 'cybersecurity startup,' 'infrastructure software vendor,' 'systems research') so ranking can proceed.",
+      "Refine search query: 'ebpf software' may be too broad. Consider 'kernel observability,' 'eBPF tools development,' or 'Linux systems software' to improve precision.",
+      "Review full Grants.gov records for the subset likely to match eBPF work—particularly NSF CISE (25-543, 26-506, 25-533), DOD/DARPA (25, HR001126S0011), and any opportunities in the 247 unreturned records.",
+      "Verify all close dates and eligibility text against live solicitations before committing proposal effort."
+    ],
+    "Grounded": 1,
+    "PartiallyGrounded": 2,
+    "Unsupported": 0,
+    "Unattributed": 2,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

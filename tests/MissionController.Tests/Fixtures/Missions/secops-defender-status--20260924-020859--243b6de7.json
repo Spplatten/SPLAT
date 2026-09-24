@@ -1,0 +1,75 @@
+{
+  "Schema": 1,
+  "MissionId": "243b6de7-b1ca-4860-9f00-85327cb2602b",
+  "RecordedAtUtc": "2026-09-24T02:08:59.2754136Z",
+  "RecordedBy": "export from the console database: the accepted answer, replayed as the first attempt",
+  "Note": "Exported from the console's own run of 2026-09-23T21:13:23.2713880Z. Parameters were not indexed; the template's defaults bind on replay.",
+  "TemplateId": "secops-defender-status",
+  "TemplateName": "Defender Endpoint & Tamper Protection Audit",
+  "TemplateSha256": "sha256:ac88f1dea7b81ac57d1b45ec3adab99558747de43746b3e6743a8f364a54fe30",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "d56b531146065c93667136c26aa8e2b4c5f365d21444bf0f7589c4b8f48abae6",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "\r\n\r\nAMServiceEnabled              : True\r\nAntivirusEnabled              : True\r\nAntispywareEnabled            : True\r\nRealTimeProtectionEnabled     : True\r\nBehaviorMonitorEnabled        : True\r\nIoavProtectionEnabled         : True\r\nOnAccessProtectionEnabled     : True\r\nIsTamperProtected             : True\r\nTamperProtectionSource        : Signatures\r\nAntivirusSignatureVersion     : 1.459.343.0\r\nAntivirusSignatureLastUpdated : 9/22/2026 4:50:20 PM\r\nNISSignatureVersion           : 1.459.343.0\r\nDefenderSignaturesOutOfDate   : False\r\nQuickScanAge                  : 0\r\nFullScanAge                   : 4294967295\r\nAMRunningMode                 : Normal\r\n\r\n\r\n\r\n--- DEFENDER POLICY PREFERENCES ---\r\n\r\n\r\nDisableRealtimeMonitoring : False\r\nDisableBehaviorMonitoring : False\r\nDisableScriptScanning     : False\r\nDisableIOAVProtection     : False\r\nMAPSReporting             : 2\r\nSubmitSamplesConsent      : 1\r\nPUAProtection             : 2\r\nExclusionPath             : {N/A: Must be an administrator to view exclusions}\r\nExclusionProcess          : {N/A: Must be an administrator to view exclusions}\r\nExclusionExtension        : {N/A: Must be an administrator to view exclusions}\r\n\r\n\r\n\r\n--- ATTACK SURFACE REDUCTION RULES ---\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_243b6de7b1ca48609f0085327cb2602b",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "The core Defender engine looks compliant: tamper protection is enabled, real-time and behavior monitoring are both on, signatures were updated 9/22/2026 (within the 3-day freshness window), DefenderSignaturesOutOfDate is False, and AMRunningMode is Normal. However, the audit itself is incomplete — exclusion paths/processes/extensions could not be read due to insufficient privileges, and no ASR rule data was returned at all, so persistence blind spots and ASR enforcement (Block vs Disabled/Warn) cannot be verified this run. Additionally, FullScanAge shows the sentinel value 4294967295, indicating a full scan may never have completed.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Core AV protections are compliant, but exclusions and ASR rule status could not be verified this run\",\n  \"findings\": [\n    \"IsTamperProtected: True (Source: Signatures) — tamper protection is active\",\n    \"RealTimeProtectionEnabled: True and BehaviorMonitorEnabled: True — both required monitors are active\",\n    \"AntivirusSignatureLastUpdated: 9/22/2026 4:50:20 PM with DefenderSignaturesOutOfDate: False — signatures are current\",\n    \"AMRunningMode: Normal — engine is not running in a reduced/passive mode\",\n    \"ExclusionPath, ExclusionProcess, and ExclusionExtension all returned 'N/A: Must be an administrator to view exclusions' — persistence blind spots cannot be audited without elevated permissions\",\n    \"The ATTACK SURFACE REDUCTION RULES section contains no Ids/Actions data — ASR enforcement state (Block/Warn/Disabled) is unknown for this endpoint\",\n    \"FullScanAge: 4294967295 (the uint32 'never' sentinel) — no full scan has a recorded completion time, only QuickScanAge: 0\"\n  ],\n  \"recommendedActions\": [\n    \"Re-run the exclusion query with administrator/elevated credentials to confirm no broad exclusions (drive roots, profile roots, wildcards) are configured\",\n    \"Re-run the ASR query with sufficient privileges or the correct cmdlet to retrieve Ids/Actions and confirm no rule is set to 0 (Disabled) or 6 (Warn)\",\n    \"Schedule or verify a full scan, since FullScanAge indicates one may never have completed on this host\"\n  ]\n}\n```",
+      "LatencyMs": 0,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9821428571428572
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "75ae4be8a0b4075cdd81056e19851e2798139085d8cbfe1b8192681be0162554",
+    "Status": "Warning",
+    "Headline": "Core AV protections are compliant, but exclusions and ASR rule status could not be verified this run",
+    "Findings": [
+      "⚠ IsTamperProtected: True (Source: Signatures) — tamper protection is active",
+      "⚠ RealTimeProtectionEnabled: True and BehaviorMonitorEnabled: True — both required monitors are active",
+      "⚠ AntivirusSignatureLastUpdated: 9/22/2026 4:50:20 PM with DefenderSignaturesOutOfDate: False — signatures are current",
+      "⚠ AMRunningMode: Normal — engine is not running in a reduced/passive mode",
+      "⚠ ExclusionPath, ExclusionProcess, and ExclusionExtension all returned 'N/A: Must be an administrator to view exclusions' — persistence blind spots cannot be audited without elevated permissions",
+      "⚠ The ATTACK SURFACE REDUCTION RULES section contains no Ids/Actions data — ASR enforcement state (Block/Warn/Disabled) is unknown for this endpoint",
+      "⚠ FullScanAge: 4294967295 (the uint32 'never' sentinel) — no full scan has a recorded completion time, only QuickScanAge: 0"
+    ],
+    "RecommendedActions": [
+      "Re-run the exclusion query with administrator/elevated credentials to confirm no broad exclusions (drive roots, profile roots, wildcards) are configured",
+      "Re-run the ASR query with sufficient privileges or the correct cmdlet to retrieve Ids/Actions and confirm no rule is set to 0 (Disabled) or 6 (Warn)",
+      "Schedule or verify a full scan, since FullScanAge indicates one may never have completed on this host"
+    ],
+    "Grounded": 2,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 5,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

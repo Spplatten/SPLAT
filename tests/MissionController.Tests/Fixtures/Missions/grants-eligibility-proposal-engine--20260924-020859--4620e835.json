@@ -1,0 +1,73 @@
+{
+  "Schema": 1,
+  "MissionId": "4620e835-6d1c-4558-8a42-ad30dc5dbf1a",
+  "RecordedAtUtc": "2026-09-24T02:08:59.4042814Z",
+  "RecordedBy": "export from the console database: the accepted answer, replayed as the first attempt",
+  "Note": "Exported from the console's own run of 2026-09-23T20:48:52.8830251Z. Parameters were not indexed; the template's defaults bind on replay.",
+  "TemplateId": "grants-eligibility-proposal-engine",
+  "TemplateName": "Autonomous Grant Discovery & Proposal Engine",
+  "TemplateSha256": "sha256:a243426c41b610704ae82410a7955c2a8f5f7eb3d7b5971e2792a2fc6273d9b5",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "f06cc234228afc1a0c300983f78b5f9b1c23c44f1f384eeca5768cce3fc860d3",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "=== SPLAT AUTONOMOUS GRANT DISCOVERY & PROPOSAL ENGINE ===\r\nApplicant: Platten Industries LLC [LLC - Pre-IPO For-Profit]\r\nHeadquarters: 27 Pledger Pkwy\r\nHeadcount: 3 FTE | Sector: AI Agent Containment / Cybersecurity Software\r\nTechnology Readiness: TRL 6\r\nCore IP: SPLAT kernel-enforced agent containment (BPF-LSM egress leases, chained audit ledger)\r\nAcademic Partner: None - \r\nTarget Program: NSF SBIR Phase I + LaunchTN SBIR/STTR Matching Fund\r\nRequest: 275000 USD over 12 months\r\nScoring Focus: TRL advancement, commercialization viability, TN economic impact\r\n--- GOVERNANCE POSTURE ---\r\nDraft-only mission: no submission egress; portal credentials never enter this sandbox.\r\nOutput is a reviewable draft requiring operator sign-off before any filing.\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_4620e8356d1c45588a42ad30dc5dbf1a",
+      "token:integrity=Low",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=0-capabilities"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "Stage 1 audit yields a **CAUTION**, not a clean pass: headcount (3 FTE) clears both NSF SBIR small-business and LaunchTN thresholds, and the LLC pre-IPO for-profit status satisfies SBIR entity rules, but the profile gives no city/state or tenure for \"27 Pledger Pkwy,\" so the LaunchTN 24-month Tennessee-HQ residency covenant cannot be confirmed. The program name also blends \"NSF SBIR Phase I\" with \"SBIR/STTR Matching Fund\" while listing no academic partner — STTR structurally requires a research-institution subrecipient, so the track choice needs disambiguation before drafting proceeds. Per governance rules, this is a draft-eligibility finding only; no proposal text, award-ceiling figures, or match percentages should be treated as final without checking the live solicitation.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Eligibility audit returns CAUTION: TN-residency proof and SBIR/STTR track are unresolved gates\",\n  \"findings\": [\n    \"Entity status 'LLC - Pre-IPO For-Profit' with Headcount '3 FTE' clears both NSF SBIR small-business status and the <500 employee SBA ceiling — this gate PASSES.\",\n    \"Headquarters is listed only as '27 Pledger Pkwy' with no city, state, or duration-of-residency data, so the LaunchTN 24-month Tennessee-HQ matching-fund covenant cannot be verified from the supplied profile — this gate is CAUTION/[OPERATOR-VERIFY].\",\n    \"Target Program field names both 'NSF SBIR Phase I' and 'LaunchTN SBIR/STTR Matching Fund' while Academic Partner is 'None', which is consistent with the SBIR track but disqualifying for an STTR track (STTR requires a research-institution subrecipient) — track selection is ambiguous and needs operator confirmation.\",\n    \"Request of '275000 USD over 12 months' at TRL 6 is plausible for an NSF SBIR Phase I award but the award ceiling and period figures must be checked against the current live solicitation before use — flagged [OPERATOR-VERIFY], not asserted as current fact.\"\n  ],\n  \"recommendedActions\": [\n    \"Confirm and document the full Tennessee headquarters address plus continuous occupancy start date to close the LaunchTN residency gate.\",\n    \"Have the operator explicitly select SBIR (no academic partner needed) versus STTR (requires a signed research-institution partnership) before any Stage 2 drafting begins.\",\n    \"Pull the current NSF SBIR Phase I solicitation to verify the $275,000/12-month figures and any LaunchTN match-percentage requirements before they are cited in a draft.\",\n    \"Once the above are resolved, re-run this audit; if it returns PASS or a fully-scoped CAUTION, proceed to the five-section Stage 2 draft as a separate deliverable for operator sign-off.\"\n  ]\n}\n```",
+      "LatencyMs": 0,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9437500000000001
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "792a751bab11fdf59ad9dcfe8d66968014e0ba90e6215565b94d476e66073627",
+    "Status": "Warning",
+    "Headline": "Eligibility audit returns CAUTION: TN-residency proof and SBIR/STTR track are unresolved gates",
+    "Findings": [
+      "⚠ Entity status 'LLC - Pre-IPO For-Profit' with Headcount '3 FTE' clears both NSF SBIR small-business status and the <500 employee SBA ceiling — this gate PASSES.",
+      "⚠ Headquarters is listed only as '27 Pledger Pkwy' with no city, state, or duration-of-residency data, so the LaunchTN 24-month Tennessee-HQ matching-fund covenant cannot be verified from the supplied profile — this gate is CAUTION/[OPERATOR-VERIFY].  [PARTIALLY VERIFIED]",
+      "⚠ Target Program field names both 'NSF SBIR Phase I' and 'LaunchTN SBIR/STTR Matching Fund' while Academic Partner is 'None', which is consistent with the SBIR track but disqualifying for an STTR track (STTR requires a research-institution subrecipient) — track selection is ambiguous and needs operator confirmation.",
+      "⚠ Request of '275000 USD over 12 months' at TRL 6 is plausible for an NSF SBIR Phase I award but the award ceiling and period figures must be checked against the current live solicitation before use — flagged [OPERATOR-VERIFY], not asserted as current fact."
+    ],
+    "RecommendedActions": [
+      "Confirm and document the full Tennessee headquarters address plus continuous occupancy start date to close the LaunchTN residency gate.",
+      "Have the operator explicitly select SBIR (no academic partner needed) versus STTR (requires a signed research-institution partnership) before any Stage 2 drafting begins.",
+      "Pull the current NSF SBIR Phase I solicitation to verify the $275,000/12-month figures and any LaunchTN match-percentage requirements before they are cited in a draft.",
+      "Once the above are resolved, re-run this audit; if it returns PASS or a fully-scoped CAUTION, proceed to the five-section Stage 2 draft as a separate deliverable for operator sign-off."
+    ],
+    "Grounded": 2,
+    "PartiallyGrounded": 1,
+    "Unsupported": 0,
+    "Unattributed": 1,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

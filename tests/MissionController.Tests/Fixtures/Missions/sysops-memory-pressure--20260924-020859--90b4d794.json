@@ -1,0 +1,69 @@
+{
+  "Schema": 1,
+  "MissionId": "90b4d794-9ecc-44fb-aa54-26d0f379178b",
+  "RecordedAtUtc": "2026-09-24T02:08:59.2237541Z",
+  "RecordedBy": "export from the console database: the accepted answer, replayed as the first attempt",
+  "Note": "Exported from the console's own run of 2026-09-23T21:16:32.7317044Z. Parameters were not indexed; the template's defaults bind on replay.",
+  "TemplateId": "sysops-memory-pressure",
+  "TemplateName": "Memory Pressure & Handle Leak Analysis",
+  "TemplateSha256": "sha256:7fff461436a1a2bb16748dd284fe42edd1595ebd95ecb954bcd3e765f9fcd2aa",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "925064d183fc0dd0a6926058c483177733add86538e51d9dd9ce77ee750266f5",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "\r\n\r\nTotalVisibleMemorySize  : 16308380\r\nFreePhysicalMemory      : 3186932\r\nTotalVirtualMemorySize  : 25221276\r\nFreeVirtualMemory       : 4276592\r\nSizeStoredInPagingFiles : 8912896\r\nFreeSpaceInPagingFiles  : 8025860\r\n\r\n\r\n\r\n--- PAGEFILE ---\r\n\r\n\r\nName              : C:\\pagefile.sys\r\nAllocatedBaseSize : 8704\r\nCurrentUsage      : 866\r\nPeakUsage         : 1149\r\n\r\n\r\n\r\n--- TOP MEMORY CONSUMERS ---\r\n\r\nName                    Id WorkingSet64 PrivateMemorySize64 Handles Threads                        \r\n----                    -- ------------ ------------------- ------- -------                        \r\nMemory Compression    4068    698368000             4116480       0 {4072, 4088, 4092, 3232...}    \r\nclaude                6912    501104640           601038848     555 {28072, 26776, 29128, 7760...} \r\nMsMpEng               5820    439791616           502452224    1265 {5824, 6940, 6536, 15680...}   \r\nchrome               29240    414375936           341831680     518 {22720, 24804, 20844, 27140...}\r\nAntigravity IDE      11248    373874688           406908928     681 {13212, 4532, 3484, 18396...}  \r\nVBCSCompiler         28152    362831872           206397440     393 {16404, 7932, 21308, 14120...} \r\nAntigravity IDE      22220    346591232           410890240     587 {3004, 11868, 1252, 6060...}   \r\nAntigravity          14732    328744960           337387520     371 {14704, 6040, 12856, 2148...}  \r\nchrome               19704    324100096           184803328    2242 {25628, 17920, 5504, 6488...}  \r\nlanguage_server       9236    320253952           336048128     540 {14536, 15036, 1156, 5148...}  \r\nAntigravity IDE      18456    314241024           373075968     621 {3684, 2684, 12984, 16460...}  \r\nMissionController.UI  1860    304640000           235204608    1813 {25440, 8420, 28300, 22568...} \r\nclaude               18528    302493696           592461824     292 {23736, 2328, 15000, 29432...} \r\nexplorer             10312    281812992           361283584    5864 {10660, 10884, 12148, 12164...}\r\nAntigravity IDE      21776    274333696           245313536     510 {21208, 21292, 21972, 16448...}\r\n\r\n\r\n--- TOP HANDLE CONSUMERS ---\r\n\r\nName                    Id Handles\r\n----                    -- -------\r\nSystem                   4    6996\r\nexplorer             10312    5864\r\nLenovoVantageService  5568    3585\r\nchrome               19704    2242\r\nchrome                4400    2147\r\ndwm                   2056    2147\r\nlsass                 1728    1904\r\nMissionController.UI  1860    1818\r\nsvchost               2044    1748\r\nAntigravity IDE      19084    1598\r\nSystemSettings        4796    1574\r\nclaude               23076    1506\r\nclaude               20028    1438\r\nAntigravity          15376    1403\r\nsvchost               1864    1382\r\n\r\n\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_90b4d7949ecc44fbaa5426d0f379178b",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# Memory Analysis Report\n\n**Plain-English Summary:**\nThe system has 16.3 GB total RAM with 3.2 GB (19.5%) currently free, indicating moderate memory utilization. The pagefile shows minimal current usage (866 MB) well below its peak of 1,149 MB, meaning past memory pressure has cleared and is not an active issue. Several development tools (Antigravity IDE instances, VBCSCompiler, language_server) are consuming large amounts of RAM, and the `claude` process has a notable gap between working set and private memory (suggesting partial paging), but handle counts remain safe across all processes.\n\n**Detailed Findings:**\n\nThe top memory consumer is Memory Compression (698 MB working set), followed by the `claude` process (501 MB working set but 601 MB private memory—indicating ~100 MB is paged out). Development tooling dominates consumption: multiple Antigravity IDE instances collectively consume ~1.3 GB, VBCSCompiler uses 363 MB, and language_server uses 320 MB. The Windows Defender engine (MsMpEng) at 440 MB is normal for an active security product.\n\nHandle counts are healthy: even the peak (System at 6,996, explorer at 5,864, and LenovoVantageService at 3,585) remain well below the 10,000 threshold that signals a leak.\n\n```json\n{\n  \"status\": \"Healthy\",\n  \"headline\": \"Memory utilization is normal with adequate free capacity and resolved historical paging pressure.\",\n  \"findings\": [\n    \"Free physical memory is 3.19 GB out of 16.31 GB total (19.5% free), indicating moderate utilization.\",\n    \"Pagefile current usage is 866 MB, well below peak of 1,149 MB, showing that past memory pressure has cleared.\",\n    \"Top memory consumers are development tools (Antigravity IDE ~1.3 GB collective, VBCSCompiler 363 MB, language_server 320 MB) and expected system processes (Memory Compression 698 MB, Defender 440 MB).\",\n    \"Claude process shows PrivateMemorySize64 (601 MB) exceeding WorkingSet64 (501 MB) by ~100 MB, indicating some pages are swapped out but this is consistent with expected paging behavior rather than a leak.\",\n    \"Highest handle count is System at 6,996, well below the 10,000 threshold indicative of a handle leak.\"\n  ]\n}\n```",
+      "LatencyMs": 0,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.96
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "f0ba6b2b1d39abefcc30d131cb0de23a25fb000965662b9aba1d49ee18850ea2",
+    "Status": "Healthy",
+    "Headline": "Memory utilization is normal with adequate free capacity and resolved historical paging pressure.",
+    "Findings": [
+      "✓ Free physical memory is 3.19 GB out of 16.31 GB total (19.5% free), indicating moderate utilization.",
+      "✓ Pagefile current usage is 866 MB, well below peak of 1,149 MB, showing that past memory pressure has cleared.",
+      "✓ Top memory consumers are development tools (Antigravity IDE ~1.3 GB collective, VBCSCompiler 363 MB, language_server 320 MB) and expected system processes (Memory Compression 698 MB, Defender 440 MB).  [PARTIALLY VERIFIED]",
+      "✓ Claude process shows PrivateMemorySize64 (601 MB) exceeding WorkingSet64 (501 MB) by ~100 MB, indicating some pages are swapped out but this is consistent with expected paging behavior rather than a leak.",
+      "✓ Highest handle count is System at 6,996, well below the 10,000 threshold indicative of a handle leak."
+    ],
+    "RecommendedActions": [],
+    "Grounded": 4,
+    "PartiallyGrounded": 1,
+    "Unsupported": 0,
+    "Unattributed": 0,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}
