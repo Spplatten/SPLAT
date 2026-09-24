@@ -34,7 +34,24 @@ public record SingleToolDefinition(
     long MaxMemoryBytes = 256 * 1024 * 1024, // 256 MB default limit
     int MaxCpuPercent = 80,
     bool RequiresRestrictedToken = true,
-    ProcessIntegrityLevel IntegrityLevel = ProcessIntegrityLevel.Medium);
+    ProcessIntegrityLevel IntegrityLevel = ProcessIntegrityLevel.Medium,
+    // Where the tool runs. The default is the Windows sensor sandbox every template used until
+    // 2026-09-24; a template that names the Linux lease runs its tool inside the WSL2 guest under
+    // the BPF-LSM lease compiled from this template, and never on the Windows side.
+    ToolSubstrate Substrate = ToolSubstrate.Windows);
+
+/// <summary>
+/// The substrate a template's tool runs on. It decides which launcher, jail and job the mission
+/// engine provisions, and it is recorded in the run facts as the substrate the mission ran on.
+/// </summary>
+public enum ToolSubstrate
+{
+    /// <summary>The Windows sensor sandbox: job object, restricted token, ACL jail, and the AppContainer where the tool can take it.</summary>
+    Windows,
+
+    /// <summary>The Linux capability lease: the tool runs as nobody in the WSL2 guest, in a cgroup the kernel polices, under the lease compiled from the template.</summary>
+    LinuxLease,
+}
 
 public record TemplateParameterField(
     string Key,

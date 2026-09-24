@@ -120,7 +120,7 @@ Every Copilot tool execution—whether successful, denied by policy, or killed b
 ## Technical Proof of Validation
 
 The SPLAT Copilot Safety Primitive has been implemented and validated across our .NET 10 control plane:
-- **578 passing unit and integration tests (2026-09-18)**, including:
+- **The suite the README counts, all passing** (the count is held to the compiled assembly by a test), including:
   - Pre-execution CISO policy evaluation and regex heuristics
   - Win32 Job Object hardware limit clamping
   - Restricted Token creation and administrative privilege drops

@@ -217,15 +217,34 @@ referenced by `splat-mcp` and the tests. The console does not reference it.
   (`ITemplatePolicyCompiler`). Compiles a governed template into a `LeaseSpec`: an exec allow-list
   from a small Windows-to-Linux tool map plus the shells, a default protected set, a network lease
   **only** for `ToolProcess`-scoped egress, resolved to IPv4 /32s at compile time, clamps from the
-  tool definition, and copy-on-write requested off. `splat-mcp` constructs it and passes it to the
-  handler, which never calls it; today only the tests exercise it.
+  tool definition, and copy-on-write requested off. Since 2026-09-24 it is the lease's author for
+  every governed mission whose template names the Linux lease, through `LinuxLeaseSubstrate`
+  below; for such a template the allow-list is the one guest path the tool names, no shell added.
+  `run_command` still authors its own lease inline.
+- **[`LinuxLeaseSubstrate`](../src/MissionController.Infrastructure.Linux/LinuxLeaseSubstrate.cs)**
+  (`IMissionSubstrateSelector`). The route by which SPLAT's own specialists reach the lease. The
+  mission engine asks it for every template; one whose tool names `ToolSubstrate.LinuxLease` gets a
+  jail, a job and a launcher that are one lease: the workspace the daemon makes for the mission, the
+  cgroup it clamps, and one `EXECUTE_TOOL` compiled from the template. What the daemon reports in its
+  `LEASE` and `EXIT` frames - the cgroup and the clamps its controllers took, whether it is enforcing,
+  the jail, the workspace and its removal, the workload's uid - becomes the mission's applied controls
+  and kernel-held limits, read back rather than requested. Composed by the console and `splat-mcp`
+  alike, so the same engine runs a mission on either substrate.
 - **[`WslSubstrateHealthChecker`](../src/MissionController.Infrastructure.Linux/WslSubstrateHealthChecker.cs)**.
   A `.wslconfig` heuristic plus `HEALTH_CHECK`, asked inside a protocol 3 session, so an answer is believed only from something that proved it holds the token. Its `Enforcing` field is the one to trust.
 
 ## Who authors a lease today
 
-The only live route into the daemon is `splat-mcp`'s `run_command`, and `run_code`, which wraps it.
-The handler builds the `LeaseSpec` inline, in `McpServerHandler.ExecuteRunCommandAsync`
+Two routes reach the daemon. Since 2026-09-24 a **governed mission** whose template names the Linux
+lease is one: `LinuxLeaseSubstrate` has `TemplatePolicyCompiler` compile the template, so the lease
+is the template - its one guest executable as the whole exec allow-list, a network lease only for a
+`ToolProcess`-scoped destination resolved to IPv4 at compile time and nothing otherwise, the tool's
+clamps lowered to what the engine configured, the duration from the tool's timeout, and a workspace
+the daemon makes under its missions root and removes at the end. Nothing in that lease comes from a
+caller; the template is catalog code, and the ceiling in the guest still bounds all of it.
+
+The other route is `splat-mcp`'s `run_command`, and `run_code`, which wraps it. The handler builds
+the `LeaseSpec` inline, in `McpServerHandler.ExecuteRunCommandAsync`
 ([source](../src/splat-mcp/McpServerHandler.cs)):
 
 | Lease field | Comes from |

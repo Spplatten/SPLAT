@@ -84,7 +84,7 @@ while an unleased one was refused, egress was denied with networking off, and ev
 
 **The documentation cannot drift away from the evidence.** An automated test fails the build if the
 docs claim the substrate is pending while passing evidence exists, *and* fails if they drop the
-qualification when it does not — in both directions. 578 automated tests passed on 2026-09-18.
+qualification when it does not — in both directions. The README carries the suite's current count, held to the assembly by the same test.
 
 ---
 
@@ -92,8 +92,11 @@ qualification when it does not — in both directions. 578 automated tests passe
 
 - **~~The last hop.~~** Recorded on 2026-09-11: a `run_command` from an MCP client travelled the
   bridge into the daemon and the kernel refused an undeclared exec and an out-of-lease connect,
-  with the permitted command and endpoint as controls. What is still *not* demonstrated is a
-  **governed mission** on that path — the console never routes one through the daemon.
+  with the permitted command and endpoint as controls. Since 2026-09-24 a **governed mission**
+  travels the same path: four catalog templates run their tool under the lease from the console
+  and `splat-mcp` alike, with the lease compiled from the template. What is *not* yet recorded is
+  that run under root against the kernel program as it now ships — the mission path has been run
+  against the daemon in its openly non-enforcing mode, and the root probe is the operator's.
 - **The audit ledger is unkeyed by default.** Editing a historical row breaks the hash chain
   verifiably. Unkeyed, it does **not** stop anyone with write access from recomputing the chain.
   Since 2026-09-18 the operator can key it with a file they keep. Keyed, nobody without that file can

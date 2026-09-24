@@ -55,6 +55,9 @@
     <ProjectReference Include="..\MissionController.Infrastructure.Windows\MissionController.Infrastructure.Windows.csproj" />
     <ProjectReference Include="..\MissionController.Infrastructure.Network\MissionController.Infrastructure.Network.csproj" />
     <ProjectReference Include="..\MissionController.Infrastructure.Data\MissionController.Infrastructure.Data.csproj" />
+    <!-- Since 2026-09-24: a catalog template whose tool names the Linux lease runs through the WSL2
+         bridge from the console too, not only from splat-mcp. -->
+    <ProjectReference Include="..\MissionController.Infrastructure.Linux\MissionController.Infrastructure.Linux.csproj" />
   </ItemGroup>
 
   <Import Project="Effects\Win2D\MissionController.Win2D.targets" Condition="Exists('Effects\Win2D\MissionController.Win2D.targets')" />

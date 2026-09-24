@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using MissionController.Core;
+using MissionController.Core.Models;
 using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Windows.Jails;
 using MissionController.Infrastructure.Windows.JobObjects;
@@ -43,7 +44,12 @@ public class CatalogProducesEvidenceTests
     [Fact]
     public async Task EveryTemplate_IsRunOnceOutsideTheContainer_AndSaysWhetherItProducedEvidence()
     {
-        var all = GovernedTemplateCatalog.All.OrderBy(t => t.TemplateId, StringComparer.Ordinal).ToList();
+        // The Windows sensors. A template whose tool runs under the Linux lease produces its evidence in
+        // the guest, and LeasedMissionTests holds that path; nothing here could launch /bin/df.
+        var all = GovernedTemplateCatalog.All
+            .Where(t => t.Tool.Substrate == ToolSubstrate.Windows)
+            .OrderBy(t => t.TemplateId, StringComparer.Ordinal)
+            .ToList();
         var rows = new ConcurrentBag<(string Id, string Verdict, int Exit, int Chars, string Head)>();
         var jails = new NtAclJailManager();
         var launcher = new SuspendedProcessLauncher(new RestrictedTokenProvider());

@@ -70,6 +70,24 @@ public class LinuxSubstrateAndCompilerTests
     }
 
     [Fact]
+    public void PolicyCompiler_NamesOnlyTheDaemonsOwnGuardedPaths_ForATemplateUnderTheLease()
+    {
+        // The daemon refuses a lease naming a protected path it cannot resolve, and this side of the
+        // wire cannot know what the guest holds: the first leased catalog mission was refused on
+        // 2026-09-24 for /root/.gnupg, /var/run/docker.sock and /proc/kcore. A template that runs
+        // under the lease therefore names exactly what the daemon guards of its own accord, the way
+        // run_command does, and relies on the jail for the rest.
+        var template = CreateMockTemplate("/bin/df");
+        template = template with { Tool = template.Tool with { Substrate = ToolSubstrate.LinuxLease } };
+
+        var lease = _compiler.CompileTemplatePolicy(template, Guid.NewGuid(), "/var/lib/splat/missions/x");
+
+        Assert.Equal(new[] { "/etc/shadow", "/etc/sudoers" }, lease.ProtectedInodes.Select(i => i.SourcePath).ToArray());
+        Assert.True(lease.EphemeralWorkspace);
+        Assert.Equal(new[] { "/bin/df" }, lease.AllowedExecInodes.Select(i => i.SourcePath).ToArray());
+    }
+
+    [Fact]
     public void PolicyCompiler_AllowsCorrectLinuxExecutables()
     {
         var template = CreateMockTemplate("curl.exe");

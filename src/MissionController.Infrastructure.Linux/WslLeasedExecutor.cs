@@ -117,6 +117,11 @@ public class WslLeasedExecutor : ILeasedExecutor
         int exitCode = -1;
         bool timedOut = false;
         string? terminalReason = null;
+        // What the daemon said about the lease it installed, from its LEASE frame; the EXIT frame adds
+        // whether the workspace it made is gone. Null until a daemon says, so a daemon older than the
+        // frame reads back as nothing rather than as a lease it never described.
+        LeaseOutcome? outcome = null;
+        JobLimitsReadback? limitsReadBack = null;
 
         try
         {
@@ -171,6 +176,11 @@ public class WslLeasedExecutor : ILeasedExecutor
                 protectedPaths = lease.ProtectedInodes.Select(i => i.SourcePath).ToArray(),
                 allowedExecPaths = lease.AllowedExecInodes.Select(i => i.SourcePath).ToArray(),
                 leaseDurationSeconds = lease.LeaseDurationSeconds,
+                // The daemon makes and removes the working directory for a governed mission: only
+                // root in the guest can make one, and a directory that must already exist would send
+                // the tool to /tmp instead. Absent on a daemon that predates the field, which then
+                // runs the tool where the directory falls back to, and says so in its LEASE frame.
+                ephemeralWorkspace = lease.EphemeralWorkspace,
                 limits = new
                 {
                     maxMemoryBytes = lease.Limits.MaxMemoryBytes,
@@ -257,10 +267,52 @@ public class WslLeasedExecutor : ILeasedExecutor
                             stderr?.Report($"[KERNEL -EPERM BLOCK] [{comm} pid {pid}] {detailText}\n");
                             break;
 
+                        case "LEASE":
+                            // Read back from the guest, before the tool's first byte: what was installed,
+                            // and whether it is policed. The limits are the controllers' own values only
+                            // when the daemon says a real cgroup took them; on the non-enforcing path it
+                            // reports the request, which is not a readback and is not recorded as one.
+                            bool enforcing = root.TryGetProperty("enforcing", out var enfProp) && enfProp.ValueKind == JsonValueKind.True;
+                            bool limitsRead = root.TryGetProperty("limitsReadBack", out var lrProp) && lrProp.ValueKind == JsonValueKind.True;
+                            outcome = new LeaseOutcome(
+                                CgroupId: root.TryGetProperty("cgroupId", out var lcg) && lcg.TryGetUInt64(out ulong lcgId) ? lcgId : 0,
+                                CgroupPath: root.TryGetProperty("cgroupPath", out var cgp) ? cgp.GetString() : null,
+                                Enforcing: enforcing,
+                                Jailed: root.TryGetProperty("jailed", out var jp) && jp.ValueKind == JsonValueKind.True,
+                                ReadOnlyFs: root.TryGetProperty("readOnlyFs", out var rop) && rop.ValueKind == JsonValueKind.True,
+                                Workspace: root.TryGetProperty("workspace", out var wsp) ? wsp.GetString() : null,
+                                WorkspaceCreated: root.TryGetProperty("workspaceCreated", out var wcp) && wcp.ValueKind == JsonValueKind.True,
+                                WorkspaceRemoved: null,
+                                WorkloadUid: root.TryGetProperty("workloadUid", out var wup) && wup.TryGetUInt32(out uint wuid) ? wuid : null);
+                            if (limitsRead && root.TryGetProperty("limits", out var lim))
+                            {
+                                long? mem = lim.TryGetProperty("maxMemoryBytes", out var m) && m.TryGetInt64(out long memBytes) ? memBytes : null;
+                                int? cpu = lim.TryGetProperty("maxCpuPercent", out var c) && c.TryGetInt32(out int cpuPct) ? cpuPct : null;
+                                uint? pids = lim.TryGetProperty("maxPids", out var pp) && pp.TryGetUInt32(out uint pidCap) ? pidCap : null;
+                                // The cgroup's clamps are what the kernel holds over every process in the
+                                // lease, so both memory columns read the same figure; and the daemon kills
+                                // the cgroup when the lease ends, which is what kill-on-close means here.
+                                limitsReadBack = new JobLimitsReadback(mem, mem, cpu, pids, KillOnJobClose: true);
+                            }
+                            break;
+
                         case "EXIT":
                             if (root.TryGetProperty("exitCode", out var exitProp))
                             {
                                 exitCode = exitProp.GetInt32();
+                            }
+
+                            if (root.TryGetProperty("workspaceRemoved", out var wrProp)
+                                && wrProp.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                            {
+                                bool removed = wrProp.ValueKind == JsonValueKind.True;
+                                // A refusal after the workspace was made carries no LEASE frame - nothing
+                                // was installed - but the daemon still says what became of the directory,
+                                // and that is the one fact the caller's teardown record needs from it.
+                                outcome = outcome is not null
+                                    ? outcome with { WorkspaceRemoved = removed }
+                                    : new LeaseOutcome(0, null, false, false, false, lease.WorkingDirectory,
+                                        WorkspaceCreated: true, WorkspaceRemoved: removed, WorkloadUid: null, Installed: false);
                             }
 
                             // Refusals the kernel made but had no room to record while this lease ran.
@@ -288,7 +340,9 @@ public class WslLeasedExecutor : ILeasedExecutor
                                 // ledger as evidence. Report the absence instead; when the daemon
                                 // starts reporting cgroup counters, populate these from the frame.
                                 FinalMetrics: JobResourceMetrics.Unavailable,
-                                TerminalReason: "ExplicitExit");
+                                TerminalReason: "ExplicitExit",
+                                LimitsReadBack: limitsReadBack,
+                                Lease: outcome);
                     }
                 }
                 catch (JsonException)
@@ -334,9 +388,12 @@ public class WslLeasedExecutor : ILeasedExecutor
             StandardError: stderrBuilder.ToString(),
             TimedOut: timedOut,
             // Timeout / transport-failure path: the run was cut short, so there is even less to
-            // report than on the EXIT path. Nothing measured, nothing claimed.
+            // report than on the EXIT path. Nothing measured, nothing claimed - except what the
+            // LEASE frame said before the cut, which is still what was installed.
             FinalMetrics: JobResourceMetrics.Unavailable,
-            TerminalReason: terminalReason);
+            TerminalReason: terminalReason,
+            LimitsReadBack: limitsReadBack,
+            Lease: outcome);
     }
 
     /// <summary>

@@ -59,7 +59,35 @@ public record ProcessExecutionResult(
     string? TerminalReason = null,
     // What confined the process, read back from the suspended process itself before it ran: its job
     // membership and its token. Null when the launcher reads nothing back.
-    IReadOnlyList<string>? AppliedControls = null);
+    IReadOnlyList<string>? AppliedControls = null,
+    // The ceilings the kernel held over the tool, read back by whoever ran it, when the launcher
+    // learns them only by running: the Linux lease reports what its cgroup controllers took. Null
+    // when the launcher has nothing to add to what the job object already read back before launch.
+    JobLimitsReadback? LimitsReadBack = null,
+    // The lease the guest daemon installed, when the tool ran under one.
+    LeaseOutcome? Lease = null);
+
+/// <summary>
+/// The three things a mission needs from the host it runs on - a jail, a job and a launcher - chosen for
+/// one template. The engine holds one set for the Windows sensor sandbox and asks a selector for any other;
+/// the selector answers null for a template it does not serve, and the engine's own set runs it.
+/// </summary>
+public sealed record MissionSubstrate(
+    string Name,
+    IJailManager Jails,
+    Func<string, IJobSandbox> Jobs,
+    IProcessLauncher Launcher);
+
+/// <summary>
+/// Chooses the substrate a template's tool runs on. Composed by each host: the console and splat-mcp
+/// hand the engine a selector that serves <see cref="ToolSubstrate.LinuxLease"/> templates through the
+/// WSL2 bridge, so the same engine, scrub, judge and ledger run a mission on either substrate.
+/// </summary>
+public interface IMissionSubstrateSelector
+{
+    /// <summary>The substrate for this mission, or null to run it on the engine's default.</summary>
+    MissionSubstrate? For(SingleToolTemplate template, Guid missionId);
+}
 
 public interface IJailManager
 {
@@ -72,6 +100,13 @@ public interface IJailManager
     /// null when the manager cannot read it.
     /// </summary>
     string? DescribeJail(string jailPath) => null;
+
+    /// <summary>
+    /// Whether the jail is gone after <see cref="DrainAndCleanupJailAsync"/>, asked of the manager that
+    /// knows where it lived: a Windows jail is a directory this process can look for, a Linux one is
+    /// in the guest and only the daemon's word says. Null when nothing can say.
+    /// </summary>
+    bool? IsJailRemoved(string jailPath) => !System.IO.Directory.Exists(jailPath);
 }
 
 public interface IRestrictedTokenProvider
@@ -390,7 +425,31 @@ public record LeaseSpec(
     // EnvironmentVariables was declared here and read by nothing - not the bridge, not the
     // envelope, not the daemon. A tool's environment is a real policy dimension and it will need
     // to come back with a hook behind it; as a field nobody consumed it only suggested one existed.
-    OverlayFsSpec? OverlayFs = null);
+    OverlayFsSpec? OverlayFs = null,
+    // The daemon creates the working directory for this lease under its missions root, owned by
+    // the workload, and removes it when the lease ends: a governed mission's jail, on the substrate
+    // where only root in the guest can make one. False for a caller that names a directory it owns.
+    bool EphemeralWorkspace = false);
+
+/// <summary>
+/// What the daemon reported about the lease it installed, from its <c>LEASE</c> and <c>EXIT</c> frames:
+/// read back from the guest, never repeated from the request. Null on a daemon that predates the frame.
+/// </summary>
+public record LeaseOutcome(
+    ulong CgroupId,
+    string? CgroupPath,
+    // The daemon holds live BPF map handles and a real cgroup: the lease is policed. False on the
+    // openly non-enforcing path, where the workload still runs as nobody and nothing else holds.
+    bool Enforcing,
+    bool Jailed,
+    bool ReadOnlyFs,
+    string? Workspace,
+    bool WorkspaceCreated,
+    bool? WorkspaceRemoved,
+    uint? WorkloadUid,
+    // False when the daemon refused after making the workspace and before installing anything: the
+    // outcome then carries only what became of the directory, and no control may be claimed from it.
+    bool Installed = true);
 
 /// <summary>
 /// Executes a tool command inside a hardware-isolated WSL2 guest VM under an in-kernel BPF-LSM capability lease.

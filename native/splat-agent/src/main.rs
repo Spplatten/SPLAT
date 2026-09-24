@@ -24,6 +24,7 @@ mod cow;
 mod jail;
 mod lease;
 mod violation;
+mod workspace;
 
 /// The protocol this daemon speaks: its handshake, and the EXECUTE_TOOL envelope inside it.
 ///
@@ -162,7 +163,16 @@ struct Args {
     /// untrustworthy, the daemon refuses to start.
     #[arg(long, default_value = ceiling::DEFAULT_PATH)]
     policy_file: String,
+
+    /// Where a governed mission's workspace is made when its lease asks for one (`ephemeralWorkspace`):
+    /// the working directory must lie directly under this root, is created owned by the workload
+    /// before the lease runs, and is removed when it ends. Nothing outside this root is ever created.
+    #[arg(long, default_value = DEFAULT_MISSIONS_ROOT)]
+    missions_root: String,
 }
+
+/// See `Args::missions_root`. The bridge's `LinuxLeaseSubstrate` names the same default.
+const DEFAULT_MISSIONS_ROOT: &str = "/var/lib/splat/missions";
 
 /// What the daemon can actually observe about its own substrate.
 ///
@@ -427,6 +437,12 @@ async fn main() -> Result<()> {
     }
 
     let workload_ids = WorkloadIdentity { uid: args.workload_uid, gid: args.workload_gid };
+    // Compared against the absolute working directory of every lease that asks for a workspace, so a
+    // relative root would match nothing and every such lease would be refused with a misleading reason.
+    if !Path::new(&args.missions_root).is_absolute() {
+        bail!("--missions-root must be an absolute path; got {:?}", args.missions_root);
+    }
+    let missions_root: Arc<str> = Arc::from(args.missions_root.trim_end_matches('/'));
 
     // A daemon that stopped - crashed, or stopped by systemd - took its maps and hooks with it and
     // left any workload still running under splat_leases with nothing policing it. None can be
@@ -522,8 +538,9 @@ async fn main() -> Result<()> {
                 let viol_tx_clone = viol_tx.clone();
                 let auth = peer_auth.clone();
                 let ceiling_for_client = lease_ceiling.clone();
+                let missions_root_for_client = missions_root.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids, ceiling_for_client).await {
+                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids, ceiling_for_client, missions_root_for_client).await {
                         error!("Client session error: {e:#}");
                     }
                 });
@@ -787,6 +804,7 @@ async fn handle_client(
     peer_auth: Arc<PeerAuth>,
     workload: WorkloadIdentity,
     lease_ceiling: Option<Arc<Ceiling>>,
+    missions_root: Arc<str>,
 ) -> Result<()> {
     let (reader, mut writer) = socket.into_split();
     let mut buf_reader = BufReader::new(reader);
@@ -919,6 +937,7 @@ async fn handle_client(
                 };
                 let work_dir = parsed.get("workingDirectory").and_then(|v| v.as_str()).unwrap_or("/tmp");
                 let duration_sec = parsed.get("leaseDurationSeconds").and_then(|v| v.as_u64()).unwrap_or(30) as u32;
+                let ephemeral_workspace = parsed.get("ephemeralWorkspace").and_then(|v| v.as_bool()).unwrap_or(false);
 
                 info!("Executing tool for mission {mission_id}: {command} {argv:?}");
 
@@ -947,6 +966,16 @@ async fn handle_client(
                 // would name something else.
                 if !mission_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.') {
                     unsupported.push("missionId: only letters, digits, '-', '_' and '.' can name a lease");
+                }
+
+                // A workspace this daemon makes is made only directly under its missions root, and
+                // its name is one safe path component: a lease that asks for one anywhere else asks
+                // this daemon to create a directory it did not decide to, and is refused.
+                if ephemeral_workspace && !workspace::is_mission_workspace(&missions_root, work_dir) {
+                    unsupported.push(
+                        "ephemeralWorkspace: a workspace is made only directly under this daemon's \
+                         missions root, named by one path component",
+                    );
                 }
 
                 if parsed
@@ -1053,6 +1082,30 @@ async fn handle_client(
                 }
                 let duration_sec = lease_ceiling.as_ref().map_or(duration_sec, |c| c.clamp_duration(duration_sec));
 
+                // 0.47 The mission's workspace, made here where root can make one and the workload
+                // cannot: owned by the workload, mode 0700, removed when the lease ends. Made after the
+                // ceiling admitted the lease and before the cgroup exists, so a refused lease leaves
+                // no directory and a made directory always has a lease to be removed with.
+                let workspace_created = if ephemeral_workspace {
+                    match workspace::create(Path::new(work_dir), workload.uid, workload.gid) {
+                        Ok(created) => created,
+                        Err(e) => {
+                            error!("Refusing to execute for mission {mission_id}: the workspace could not be made: {e:#}");
+                            let err_chunk = serde_json::json!({
+                                "type": "STDERR",
+                                "data": format!("SPLAT refused to execute: the mission's workspace could not be made ({e}).\n")
+                            });
+                            out.send(&err_chunk).await?;
+                            let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                            out.send(&exit_chunk).await?;
+                            line.clear();
+                            continue;
+                        }
+                    }
+                } else {
+                    false
+                };
+
                 // 0.5 Resolve the clamps.
                 //
                 // The cgroup used to be provisioned from three constants here while the request's
@@ -1097,12 +1150,19 @@ async fn handle_client(
                     Ok(c) => (c, true),
                     Err(e) if lease_mgr.is_enforcing() => {
                         error!("Refusing to execute for mission {mission_id}: cgroup creation failed: {e}");
+                        // A workspace made for a mission that never ran is removed with the refusal,
+                        // and the EXIT frame says so: the caller's teardown reads it, not the daemon's
+                        // log. Three refused missions left theirs behind on 2026-09-24.
+                        let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
                         let err_chunk = serde_json::json!({
                             "type": "STDERR",
                             "data": format!("SPLAT refused to execute: no lease could be provisioned ({e}).\n")
                         });
                         out.send(&err_chunk).await?;
-                        let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                        let mut exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                        if workspace_created {
+                            exit_chunk["workspaceRemoved"] = serde_json::json!(workspace_removed);
+                        }
                         out.send(&exit_chunk).await?;
                         line.clear();
                         continue;
@@ -1178,13 +1238,17 @@ async fn handle_client(
                 // "Operation not permitted" as a daemon fault. Say so here instead.
                 if !lease_cfg.allowed_exec_paths.iter().any(|p| p == command) {
                     error!("Refusing to execute for mission {mission_id}: '{command}' is not in this lease's allowedExecPaths");
+                    let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
                     let err_chunk = serde_json::json!({
                         "type": "STDERR",
                         "data": format!(
                             "SPLAT refused to execute: '{command}' is not in this lease's allowedExecPaths.\n")
                     });
                     out.send(&err_chunk).await?;
-                    let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                    let mut exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                    if workspace_created {
+                        exit_chunk["workspaceRemoved"] = serde_json::json!(workspace_removed);
+                    }
                     out.send(&exit_chunk).await?;
                     line.clear();
                     continue;
@@ -1195,12 +1259,16 @@ async fn handle_client(
                 // which the cgroup is policed while some of its protections are missing.
                 if let Err(e) = lease_mgr.register_lease(cg.cgroup_id, cg.path.clone(), &lease_cfg) {
                     error!("Refusing to execute for mission {mission_id}: {e:#}");
+                    let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
                     let err_chunk = serde_json::json!({
                         "type": "STDERR",
                         "data": format!("SPLAT refused to execute: the capability lease could not be installed ({e}).\n")
                     });
                     out.send(&err_chunk).await?;
-                    let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                    let mut exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                    if workspace_created {
+                        exit_chunk["workspaceRemoved"] = serde_json::json!(workspace_removed);
+                    }
                     out.send(&exit_chunk).await?;
                     line.clear();
                     continue;
@@ -1225,12 +1293,16 @@ async fn handle_client(
                         Err(e) => {
                             error!("Refusing to execute for mission {mission_id}: the jail root could not be prepared: {e:#}");
                             lease_mgr.revoke_lease(cg.cgroup_id);
+                            let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
                             let err_chunk = serde_json::json!({
                                 "type": "STDERR",
                                 "data": format!("SPLAT refused to execute: the workload's root could not be prepared ({e}).\n")
                             });
                             out.send(&err_chunk).await?;
-                            let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                            let mut exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                            if workspace_created {
+                                exit_chunk["workspaceRemoved"] = serde_json::json!(workspace_removed);
+                            }
                             out.send(&exit_chunk).await?;
                             line.clear();
                             continue;
@@ -1239,6 +1311,30 @@ async fn handle_client(
                 } else {
                     None
                 };
+
+                // What was installed, read back and told to the caller before the tool's first byte:
+                // the cgroup and the clamps its controllers took, whether the lease is policed at
+                // all, the jail, the workspace, and the uid the tool will run as. The bridge writes
+                // these into the mission's record as what the guest held, not what was asked.
+                let lease_frame = serde_json::json!({
+                    "type": "LEASE",
+                    "missionId": mission_id,
+                    "cgroupId": cg.cgroup_id,
+                    "cgroupPath": cg.path.display().to_string(),
+                    "enforcing": cgroup_is_real && lease_mgr.is_enforcing(),
+                    "limitsReadBack": cgroup_is_real,
+                    "limits": {
+                        "maxMemoryBytes": cg.effective.max_memory_bytes,
+                        "maxCpuPercent": cg.effective.max_cpu_percent,
+                        "maxPids": cg.effective.max_pids,
+                    },
+                    "jailed": jail_plan.is_some(),
+                    "readOnlyFs": read_only_fs && jail_plan.is_some(),
+                    "workspace": effective_work_dir,
+                    "workspaceCreated": workspace_created,
+                    "workloadUid": workload.uid,
+                });
+                out.send(&lease_frame).await?;
 
                 let mut cmd = Command::new(command);
                 cmd.args(&argv);
@@ -1298,12 +1394,17 @@ async fn handle_client(
                         },
                         Err(e) => {
                             error!("Refusing to execute for mission {mission_id}: cgroup path is not a valid C string: {e}");
+                            lease_mgr.revoke_lease(cg.cgroup_id);
+                            let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
                             let err_chunk = serde_json::json!({
                                 "type": "STDERR",
                                 "data": "SPLAT refused to execute: the lease cgroup path could not be used.\n"
                             });
                             out.send(&err_chunk).await?;
-                            let exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                            let mut exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                            if workspace_created {
+                                exit_chunk["workspaceRemoved"] = serde_json::json!(workspace_removed);
+                            }
                             out.send(&exit_chunk).await?;
                             line.clear();
                             continue;
@@ -1357,9 +1458,11 @@ async fn handle_client(
                         });
                         out.send(&err_chunk).await?;
 
+                        let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
                         let exit_chunk = serde_json::json!({
                             "type": "EXIT",
-                            "exitCode": -1
+                            "exitCode": -1,
+                            "workspaceRemoved": workspace_removed
                         });
                         out.send(&exit_chunk).await?;
                         line.clear();
@@ -1506,7 +1609,22 @@ async fn handle_client(
                 let status = waiter.await.context("join child reaper")??;
                 let exit_code = status.code().unwrap_or(-1);
 
-                let exit_chunk = serde_json::json!({
+                // The workspace goes before EXIT is written, so the frame can say it went. Anything
+                // the tool left running in its cgroup is killed first, so nothing is still writing
+                // into a directory being removed; revoking the lease below drains the same cgroup
+                // again, which is then a no-op.
+                let workspace_removed = if workspace_created {
+                    if cgroup_is_real {
+                        if let Err(e) = cg.kill_all() {
+                            warn!("Mission {mission_id}: the cgroup could not be drained before its workspace was removed: {e:#}");
+                        }
+                    }
+                    workspace::remove(Path::new(work_dir))
+                } else {
+                    false
+                };
+
+                let mut exit_chunk = serde_json::json!({
                     "type": "EXIT",
                     "exitCode": exit_code,
                     // Denials the kernel refused but could not record while this lease ran, across
@@ -1514,6 +1632,9 @@ async fn handle_client(
                     // VIOLATION frames above are incomplete, which the caller must be told.
                     "violationsDropped": lease_mgr.dropped_events().saturating_sub(dropped_before)
                 });
+                if workspace_created {
+                    exit_chunk["workspaceRemoved"] = serde_json::Value::Bool(workspace_removed);
+                }
                 out.send(&exit_chunk).await?;
 
                 // 3. Atomically revoke lease upon exit

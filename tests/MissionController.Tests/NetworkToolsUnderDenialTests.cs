@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using MissionController.Core;
+using MissionController.Core.Models;
 using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Windows.Jails;
 using MissionController.Infrastructure.Windows.JobObjects;
@@ -54,6 +55,9 @@ public class NetworkToolsUnderDenialTests
     public async Task EveryTemplateDeniedTheNetwork_AnswersTheSameInsideTheContainerAsOutsideIt()
     {
         var results = await CompareAsync(GovernedTemplateCatalog.All
+            // The AppContainer is a Windows question; a tool that runs under the Linux lease never
+            // launches here at all.
+            .Where(t => t.Tool.Substrate == ToolSubstrate.Windows)
             .Where(t => !t.EgressRule.ToolProcessNeedsNetwork)
             .OrderBy(t => t.TemplateId, StringComparer.Ordinal)
             .ToList());

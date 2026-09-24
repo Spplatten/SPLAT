@@ -30,6 +30,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
     private readonly IDiagnosticFindingsExtractor? _findingsExtractor;
     private readonly IIsolatedQualityIsland _qualityIsland;
     private readonly IMissionRecorder? _recorder;
+    private readonly IMissionSubstrateSelector? _substrates;
 
     // Recall tuning. topK stays small because the system prompt is the scarcest resource in a
     // mission - three verdict-led snippets ground the model without crowding out the template's own
@@ -53,10 +54,12 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         IIncidentRevocationManager? revocationManager = null,
         IDiagnosticFindingsExtractor? findingsExtractor = null,
         IIsolatedQualityIsland? qualityIsland = null,
-        IMissionRecorder? recorder = null)
+        IMissionRecorder? recorder = null,
+        IMissionSubstrateSelector? substrates = null)
     {
         _findingsExtractor = findingsExtractor;
         _recorder = recorder;
+        _substrates = substrates;
         _jailManager = jailManager;
         _processLauncher = processLauncher;
         _modelClient = modelClient;
@@ -88,6 +91,13 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         var fullOutput = new StringBuilder();
         var fullAiAnalysis = new StringBuilder();
 
+        // The host the tool runs on, chosen for this template before anything is provisioned: the
+        // engine's own Windows sensor sandbox unless a selector serves the template's substrate. The
+        // same scrub, judge, ledger and record then run whichever it is - that is the point of choosing
+        // here rather than in a second engine.
+        MissionSubstrate substrate = _substrates?.For(template, missionId)
+            ?? new MissionSubstrate("Windows", _jailManager, _jobSandboxFactory, _processLauncher);
+
         // What this mission is observed to do, filled in as it happens and sealed into the ledger when
         // it ends (SealRunFactsAsync). The run record is built from this, so every field is set at the
         // point the engine sees it, never reconstructed later.
@@ -100,13 +110,19 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             StartedAtUtc = DateTimeOffset.UtcNow,
             ExecutablePath = template.Tool.ExecutablePath,
             DeclaredEgress = $"{template.EgressRule.AllowedFqdn}:{template.EgressRule.AllowedPort} ({template.EgressRule.Scope})",
-            NetworkDenialRequested = !template.EgressRule.ToolProcessNeedsNetwork && !template.ToolNeedsLocalSubsystems,
+            // On Windows, denial is an AppContainer, asked for only where it does not also break the
+            // tool. Under the Linux lease the kernel holds egress by allow-list, so the network is
+            // off for every tool whose template declares no sensor destination, and nothing breaks.
+            NetworkDenialRequested = template.Tool.Substrate == ToolSubstrate.LinuxLease
+                ? !template.EgressRule.ToolProcessNeedsNetwork
+                : !template.EgressRule.ToolProcessNeedsNetwork && !template.ToolNeedsLocalSubsystems,
             PrivilegeDropRequested = template.Tool.RequiresRestrictedToken,
             RequestedMemoryBytes = template.Tool.MaxMemoryBytes,
             RequestedCpuPercent = template.Tool.MaxCpuPercent,
             TimeoutSeconds = template.Tool.TimeoutSeconds,
             OsDescription = RuntimeInformation.OSDescription,
-            AllowedExitCodes = template.Tool.AllowedExitCodes.ToList()
+            AllowedExitCodes = template.Tool.AllowedExitCodes.ToList(),
+            Substrate = substrate.Name
         };
 
         // 1.1 Revocation Circuit Breaker Check
@@ -247,9 +263,9 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             "Provisioning ACL-isolated jail directory...",
             DateTime.UtcNow);
 
-        jailPath = await _jailManager.ProvisionJailAsync(missionId, cancellationToken);
+        jailPath = await substrate.Jails.ProvisionJailAsync(missionId, cancellationToken);
         facts.WorkspacePath = jailPath;
-        if (_jailManager.DescribeJail(jailPath) is { } jailReadback)
+        if (substrate.Jails.DescribeJail(jailPath) is { } jailReadback)
         {
             facts.AppliedControls.Add(jailReadback);
         }
@@ -292,10 +308,15 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
 
             if (!jailDrained && !string.IsNullOrEmpty(jailPath))
             {
-                await _jailManager.DrainAndCleanupJailAsync(jailPath);
+                await substrate.Jails.DrainAndCleanupJailAsync(jailPath);
                 jailDrained = true;
-                facts.JailRemoved = !Directory.Exists(jailPath);
-                facts.TeardownOrder.Add(facts.JailRemoved == true ? "jail: drained and removed" : "jail: drained, but the directory remains");
+                facts.JailRemoved = substrate.Jails.IsJailRemoved(jailPath);
+                facts.TeardownOrder.Add(facts.JailRemoved switch
+                {
+                    true => "jail: drained and removed",
+                    false => "jail: drained, but the directory remains",
+                    null => "jail: drained; whether it remains is not recorded",
+                });
             }
         }
 
@@ -309,7 +330,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             DateTime.UtcNow);
 
         // 4. Create Win32 Job Object & Launch Process Suspended. Teardown closes it, on every path.
-        var job = _jobSandboxFactory($"MissionJob_{missionId:N}");
+        var job = substrate.Jobs($"MissionJob_{missionId:N}");
         jobSandbox = job;
         job.ConfigureExtendedLimits(template.Tool.MaxMemoryBytes, template.Tool.MaxCpuPercent);
         facts.JobName = job.JobName;
@@ -340,7 +361,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         Exception? launchFailure = null;
         try
         {
-            launchResult = await _processLauncher.LaunchSuspendedInJobAsync(
+            launchResult = await substrate.Launcher.LaunchSuspendedInJobAsync(
                 template.Tool.ExecutablePath,
                 resolvedArguments,
                 jailPath,
@@ -404,6 +425,14 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         if (execResult.AppliedControls is { } applied)
         {
             facts.AppliedControls.AddRange(applied);
+        }
+
+        // A launcher that learns the kernel's ceilings only by running - the Linux lease reads its
+        // cgroup controllers back inside the guest - reports them here, and they replace a pre-launch
+        // read that had nothing to read. The Windows job object was read before the launch and stays.
+        if (execResult.LimitsReadBack is { } heldByTheKernel)
+        {
+            facts.LimitsReadBack = heldByTheKernel;
         }
 
         // 5. Layer 4: credential and DLP sanitization, BEFORE a single byte of tool output is

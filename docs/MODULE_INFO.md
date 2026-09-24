@@ -175,13 +175,15 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 ## MissionController.Infrastructure.Linux
 
 - **Target:** `net10.0`. **References:** Core. **Packages:** none.
-- **Referenced by:** `splat-mcp` and the tests — not the console.
+- **Referenced by:** `splat-mcp`, the console (since 2026-09-24, for the leased missions) and the tests.
 - **Owns:** [`WslLeasedExecutor.cs`](../src/MissionController.Infrastructure.Linux/WslLeasedExecutor.cs),
   [`TemplatePolicyCompiler.cs`](../src/MissionController.Infrastructure.Linux/TemplatePolicyCompiler.cs),
+  [`LinuxLeaseSubstrate.cs`](../src/MissionController.Infrastructure.Linux/LinuxLeaseSubstrate.cs) — the
+  jail, job and launcher a governed mission gets when its template names the Linux lease, with the
+  lease compiled from the template —
   [`WslSubstrateHealthChecker.cs`](../src/MissionController.Infrastructure.Linux/WslSubstrateHealthChecker.cs).
-- **Not on a live path:** `TemplatePolicyCompiler` — constructed, never called.
 - **Tests:** `LinuxSubstrateAndCompilerTests`, `SubstrateHealthHonestyTests`,
-  `WslLeasedExecutorWireTests`.
+  `WslLeasedExecutorWireTests`, `LeasedMissionTests`.
 - **Detail:** [ARCHITECTURE-linux-substrate.md](ARCHITECTURE-linux-substrate.md#the-bridge-on-windows).
 
 ## MissionController.UI

@@ -168,6 +168,14 @@ public static class Program
             Console.Error.WriteLine($"splat-mcp: every mission's replay fixture is written to {recorder.DirectoryPath}");
         }
 
+        // 3.5 Linux / WSL2 Substrate, built before the engine because the engine runs missions on it:
+        // a catalog template whose tool names the Linux lease is handed to the daemon whole, with its
+        // lease compiled from the template by the compiler that used to be constructed and never called.
+        var leasedExecutor = new WslLeasedExecutor();
+        var policyCompiler = new TemplatePolicyCompiler();
+        var healthChecker = new WslSubstrateHealthChecker();
+        var leaseSubstrate = new LinuxLeaseSubstrate(leasedExecutor, policyCompiler);
+
         // 4. Core Cognitive Engine
         var missionEngine = new MissionExecutionEngine(
             jailManager,
@@ -180,7 +188,8 @@ public static class Program
             credSanitizer,
             revocationManager,
             findingsExtractor,
-            recorder: recorder);
+            recorder: recorder,
+            substrates: leaseSubstrate);
 
         var investigationLoop = new GovernedInvestigationLoop(
             missionEngine,
@@ -207,12 +216,7 @@ public static class Program
             findingsExtractor,
             modelRouter);
 
-        // 5. Linux / WSL2 Substrate
-        var leasedExecutor = new WslLeasedExecutor();
-        var policyCompiler = new TemplatePolicyCompiler();
-        var healthChecker = new WslSubstrateHealthChecker();
-
-        // 6. MCP Protocol Handler
+        // 5. MCP Protocol Handler
         var handler = new McpServerHandler(
             leasedExecutor,
             policyCompiler,
