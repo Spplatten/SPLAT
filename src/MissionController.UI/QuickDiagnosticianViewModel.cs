@@ -27,6 +27,7 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
     private readonly IRemediationEngine _remediationEngine;
     private readonly IDiagnosticFindingsExtractor _findingsExtractor;
     private readonly IAgentBrain? _agentBrain;
+    private readonly IGovernedInvestigationLoop? _investigationLoop;
     private readonly IOperatorIdentityProvider _identityProvider;
 
     /// <summary>
@@ -64,6 +65,24 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
     [ObservableProperty]
     private string _remediationStatusMessage = string.Empty;
 
+    /// <summary>
+    /// When set, a checkup runs as a bounded CHAIN instead of a single agent: the first agent runs,
+    /// the model reads what it found and picks a governed follow-up, and so on. The loop, not the
+    /// model, enforces the ceiling, refuses repeats, and restricts every choice to the catalog.
+    ///
+    /// Off by default because each step spawns a real sandboxed process and a real model call, and
+    /// because a single agent is the right answer to most questions the tiles ask.
+    /// </summary>
+    [ObservableProperty]
+    private bool _chainFollowUpAgents;
+
+    /// <summary>What the chain did, step by step, and why it stopped. Empty for a single-agent run.</summary>
+    [ObservableProperty]
+    private ObservableCollection<string> _investigationTrail = new();
+
+    /// <summary>Whether this console can chain at all. The chain controls hide when it cannot.</summary>
+    public bool CanChainFollowUpAgents => _investigationLoop != null;
+
     [ObservableProperty]
     private bool _isRemediating;
 
@@ -79,13 +98,15 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
         IRemediationEngine remediationEngine,
         IDiagnosticFindingsExtractor? findingsExtractor = null,
         IAgentBrain? agentBrain = null,
-        IOperatorIdentityProvider? identityProvider = null)
+        IOperatorIdentityProvider? identityProvider = null,
+        IGovernedInvestigationLoop? investigationLoop = null)
     {
         _engine = engine;
         _templateRegistry = templateRegistry;
         _remediationEngine = remediationEngine;
         _findingsExtractor = findingsExtractor ?? new JsonFindingsExtractor();
         _agentBrain = agentBrain;
+        _investigationLoop = investigationLoop;
         _identityProvider = identityProvider
             ?? new StaticOperatorIdentityProvider(OperatorIdentity.Unknown("winui-console"));
 
@@ -293,6 +314,7 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
         HasResult = false;
         ExecutiveFindings.Clear();
         AvailableFixes.Clear();
+        InvestigationTrail.Clear();
         RemediationStatusMessage = string.Empty;
         TechnicalRawLog = string.Empty;
 
@@ -318,6 +340,12 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
             if (!string.IsNullOrWhiteSpace(userDirective))
             {
                 parameters["UserInstruction"] = userDirective;
+            }
+
+            if (ChainFollowUpAgents && _investigationLoop != null)
+            {
+                await ExecuteGovernedChainAsync(template, parameters);
+                return;
             }
 
             var rawOutput = new System.Text.StringBuilder();
@@ -380,5 +408,66 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
         {
             IsRunning = false;
         }
+    }
+
+    /// <summary>
+    /// Runs a bounded chain of complete governed missions instead of one, and reports it as a trail:
+    /// which agent ran at each step, why the model chose it, what it found, and why the chain ended.
+    ///
+    /// Nothing here relaxes a mission's containment. Each step is a full 1:1:1 mission with its own
+    /// jail, job object, egress pin, DLP pass and ledger rows; the loop only answers "is there a
+    /// governed step worth running next", and it - not the model - owns the step ceiling, the
+    /// no-repeats rule and the restriction to the shipped catalog.
+    ///
+    /// The chain's verdict is the loop's own <see cref="InvestigationResult.OverallStatus"/>, which is
+    /// the worst any step reached. Taking the last step's verdict instead would report a host as
+    /// healthy because the final follow-up happened to find nothing.
+    /// </summary>
+    private async Task ExecuteGovernedChainAsync(
+        SingleToolTemplate startingTemplate,
+        Dictionary<string, string> parameters)
+    {
+        var streamed = new System.Text.StringBuilder();
+        var progress = new Progress<MissionChunk>(chunk =>
+        {
+            if (chunk.ChunkType is MissionChunkType.Stdout or MissionChunkType.AiToken)
+            {
+                streamed.Append(chunk.Content);
+            }
+        });
+
+        var result = await _investigationLoop!.InvestigateAsync(
+            startingTemplate,
+            parameters,
+            await ResolveActorAsync(),
+            progress: progress);
+
+        foreach (var step in result.Steps)
+        {
+            InvestigationTrail.Add(
+                $"Step {step.StepNumber}: {step.TemplateName} — {step.SelectionReason}");
+
+            foreach (var finding in step.Verdict.KeyFindings)
+            {
+                ExecutiveFindings.Add($"[{step.TemplateName}] {finding}");
+            }
+        }
+
+        InvestigationTrail.Add($"Stopped: {result.StopExplanation}");
+
+        ExecutiveStatusTitle = result.Steps.Count > 0
+            ? $"{result.Steps[^1].Verdict.StatusHeadline} ({result.Steps.Count} agents run)"
+            : "No agent could be run for this request";
+
+        ExecutiveStatusColor = result.OverallStatus switch
+        {
+            DiagnosticHealthStatus.Critical => "#E53935",
+            DiagnosticHealthStatus.Warning => "#FFB300",
+            DiagnosticHealthStatus.Unknown => "#FFB300",
+            _ => "#6CCB5F"
+        };
+
+        TechnicalRawLog = streamed.ToString();
+        HasResult = true;
     }
 }

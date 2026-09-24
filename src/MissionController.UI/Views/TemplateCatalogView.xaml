@@ -1,4 +1,4 @@
-﻿<Page
+<Page
     x:Class="MissionController.UI.Views.TemplateCatalogView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -22,9 +22,14 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Spacing="4">
-                <TextBlock Text="1:1:1 Governed Template Catalog" Style="{StaticResource SplatPageTitleStyle}" />
-                <TextBlock Text="Enterprise diagnostics with guided operator input fields &amp; 1:1:1 strict sandbox isolation" Style="{StaticResource SplatPageSubtitleStyle}" />
-                <Button Content="Build New Agent Template" HorizontalAlignment="Left" Margin="0,6,0,0" Click="CreateTemplate_Click" Style="{StaticResource LuminousAccentButtonStyle}" />
+                <TextBlock Text="All checkups" Style="{StaticResource SplatPageTitleStyle}" />
+                <TextBlock Text="Every checkup is locked to one command and one destination, decided before it runs. Pick one to see exactly what it will do." Style="{StaticResource SplatPageSubtitleStyle}" />
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                    <Button Content="Create a checkup" Click="CreateTemplate_Click" Style="{StaticResource LuminousAccentButtonStyle}" />
+                    <!-- Always visible rather than hidden for catalog checkups: a button that vanishes
+                         teaches nothing, and the handler explains why a shipped checkup cannot be edited. -->
+                    <Button Content="Edit this checkup" Click="EditTemplate_Click" Style="{StaticResource SplatSecondaryButtonStyle}" />
+                </StackPanel>
             </StackPanel>
             <ProgressRing
                 Grid.Column="1"
@@ -113,21 +118,21 @@
 
                             <Border Grid.Column="0" Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="1 TARGET MODEL" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                    <TextBlock Text="THINKS WITH" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                                     <TextBlock Text="{x:Bind ViewModel.SelectedTemplate.TargetModel, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource SplatVioletBrush}" />
                                 </StackPanel>
                             </Border>
 
                             <Border Grid.Column="1" Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="1 DEDICATED TOOL" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                    <TextBlock Text="RUNS" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                                     <TextBlock Text="{x:Bind ViewModel.SelectedTemplate.Tool.Name, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource SplatAccentBrush}" />
                                 </StackPanel>
                             </Border>
 
                             <Border Grid.Column="2" Style="{StaticResource SplatSubtleCardStyle}" Padding="10">
                                 <StackPanel Spacing="2">
-                                    <TextBlock Text="1 EGRESS FQDN" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                    <TextBlock Text="MAY CONTACT" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                                     <TextBlock Text="{x:Bind ViewModel.SelectedTemplate.EgressRule.AllowedFqdn, Mode=OneWay}" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource SplatSuccessBrush}" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                             </Border>
@@ -138,7 +143,7 @@
                             <StackPanel Spacing="14">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <FontIcon Glyph="&#xE70F;" FontSize="14" Foreground="{ThemeResource SplatAccentBrush}" />
-                                    <TextBlock Text="OPERATOR MISSION PARAMETERS &amp; DIRECTIVES" FontWeight="Bold" FontSize="12" />
+                                    <TextBlock Text="SETTINGS FOR THIS RUN" FontWeight="Bold" FontSize="12" />
                                 </StackPanel>
 
                                 <!-- List of Dynamic Input Fields -->
@@ -171,14 +176,14 @@
 
                         <!-- System Prompt Overview -->
                         <StackPanel Spacing="6">
-                            <TextBlock Text="GOVERNING SYSTEM PROMPT" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                            <TextBlock Text="WHAT THE AI IS TOLD TO DO" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                             <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="12">
                                 <TextBlock Text="{x:Bind ViewModel.SelectedTemplate.SystemPrompt, Mode=OneWay}" FontSize="12" TextWrapping="Wrap" />
                             </Border>
                         </StackPanel>
 
                         <!-- Launch Button -->
-                        <Button Content="Launch Governed Mission in Sandboxed Job Object" Style="{StaticResource AccentButtonStyle}" HorizontalAlignment="Left" Click="LaunchTemplate_Click" Margin="0,8,0,0" />
+                        <Button Content="Run this checkup" Style="{StaticResource AccentButtonStyle}" HorizontalAlignment="Left" Click="LaunchTemplate_Click" Margin="0,8,0,0" />
                     </StackPanel>
                 </ScrollViewer>
             </Border>

@@ -140,7 +140,8 @@ public partial class TemplateCatalogViewModel : ObservableObject
         string objective,
         IEnumerable<string> deliverables,
         IEnumerable<string> successCriteria,
-        SingleToolTemplate baseTemplate)
+        SingleToolTemplate baseTemplate,
+        bool replaceExisting = false)
     {
         if (baseTemplate == null)
             return (false, "Choose a governed base agent first.");
@@ -152,8 +153,19 @@ public partial class TemplateCatalogViewModel : ObservableObject
         if (normalizedId == "custom-")
             return (false, "The template ID must contain letters or numbers.");
 
-        if (await _registry.GetTemplateByIdAsync(normalizedId) != null)
-            return (false, $"Template ID '{normalizedId}' already exists.");
+        // An edit is a save over an id that already exists, and it is only ever allowed over an
+        // agent the operator authored. A catalog agent is re-seeded from source on every start, so
+        // writing over one would be undone at the next launch without ever saying so.
+        var existing = await _registry.GetTemplateByIdAsync(normalizedId);
+        if (existing != null)
+        {
+            if (!replaceExisting)
+                return (false, $"Template ID '{normalizedId}' already exists. Open it to edit it instead.");
+
+            if (!existing.IsUserCreated)
+                return (false, $"'{normalizedId}' is a governed catalog agent. It is re-seeded from source " +
+                               "on every launch, so an edit here would not survive a restart. Save it under a new ID instead.");
+        }
 
         var outputContract = new TemplateOutputContract(
             objective.Trim(),
@@ -184,7 +196,12 @@ public partial class TemplateCatalogViewModel : ObservableObject
             kind,
             outputContract,
             baseTemplate.TemplateId,
-            true);
+            true,
+            // Carried, not defaulted. This is a measurement about the base's tool - whether it still
+            // reports the same thing with no network stack - and the tool is the base's, unchanged.
+            // Left to its default, a copy of a network-denied agent silently got its network back,
+            // and DerivedTemplateGuard now refuses to store one that has.
+            baseTemplate.NetworkDenialMeasuredHarmless);
 
         try
         {
@@ -192,7 +209,9 @@ public partial class TemplateCatalogViewModel : ObservableObject
             await _registry.RegisterTemplateAsync(template);
             await LoadTemplatesAsync();
             SelectedTemplate = Templates.FirstOrDefault(item => item.TemplateId == normalizedId) ?? template;
-            return (true, $"Saved governed agent template '{template.Name}'.");
+            return (true, existing != null
+                ? $"Updated '{template.Name}'. It runs the same tool and destination as before."
+                : $"Saved '{template.Name}'. It runs {baseTemplate.Name}'s tool and destination.");
         }
         catch (System.Exception ex)
         {

@@ -33,13 +33,13 @@
                     <FontIcon Glyph="&#xE946;" FontSize="19" Foreground="{ThemeResource SplatAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                 </Border>
                 <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="Autonomous AI Agent Squad &amp; Fleet" Style="{StaticResource SplatPageTitleStyle}" />
-                    <TextBlock Text="Dispatch governed sandboxed AI agents, author new agent templates, or compose a higher-level project playbook." Style="{StaticResource SplatPageSubtitleStyle}" />
+                    <TextBlock Text="Check this computer" Style="{StaticResource SplatPageTitleStyle}" />
+                    <TextBlock Text="Pick a checkup below, or describe the problem in your own words. Each checkup runs one approved read-only command inside a locked sandbox, then explains what it found in plain English." Style="{StaticResource SplatPageSubtitleStyle}" />
                 </StackPanel>
                 <!-- Active Running Activity Indicator -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Visibility="{x:Bind ViewModel.IsRunning, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                     <ProgressRing IsActive="True" Width="18" Height="18" Foreground="{ThemeResource SplatAccentBrush}" />
-                    <TextBlock Text="Agent Reasoning &amp; Executing..." FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource SplatAccentBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="Running the checkup..." FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource SplatAccentBrush}" VerticalAlignment="Center" />
                 </StackPanel>
             </Grid>
 
@@ -81,7 +81,7 @@
 
                                 <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Bottom">
                                     <TextBlock Text="⚡" FontSize="10" Foreground="{ThemeResource SplatAccentBrush}" />
-                                    <TextBlock Text="Dispatch Agent" FontSize="10" FontWeight="SemiBold" Foreground="{ThemeResource SplatAccentBrush}" />
+                                    <TextBlock Text="Run checkup" FontSize="10" FontWeight="SemiBold" Foreground="{ThemeResource SplatAccentBrush}" />
                                 </StackPanel>
                             </Grid>
                         </Border>
@@ -96,7 +96,7 @@
                 <StackPanel Spacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <TextBlock Text="⚡" FontSize="15" FontWeight="Bold" Foreground="{ThemeResource SplatAccentBrush}" />
-                        <TextBlock Text="GIVE AN AGENT A CUSTOM DIRECTIVE:" FontWeight="Bold" FontSize="11" />
+                        <TextBlock Text="OR DESCRIBE THE PROBLEM IN YOUR OWN WORDS" FontWeight="Bold" FontSize="11" />
                     </StackPanel>
 
                     <Grid ColumnSpacing="10">
@@ -107,7 +107,7 @@
 
                         <TextBox
                             Grid.Column="0"
-                            PlaceholderText="e.g., 'Audit Active Directory Kerberos tickets', 'Check cloud login speed', 'Find missing Windows patches'"
+                            PlaceholderText="e.g. 'my internet keeps dropping during calls', 'is someone trying to log in?', 'what starts up with my PC?'"
                             Text="{x:Bind ViewModel.CustomAskText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                             Height="36"
                             VerticalAlignment="Center" />
@@ -134,11 +134,28 @@
                             effects:AuroraEnergyShader.IsEnabled="True">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <TextBlock Text="⚡" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
-                                <TextBlock Text="Dispatch Agent" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
+                                <TextBlock Text="Run" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
                         </Grid>
                     </Grid>
+
+                    <!-- The chain. Hidden entirely where no investigation loop was registered, so the
+                         option never appears in a console that cannot honour it. -->
+                    <StackPanel
+                        Spacing="2"
+                        Visibility="{x:Bind ViewModel.CanChainFollowUpAgents, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <CheckBox
+                            Content="Let the AI run follow-up checkups"
+                            IsChecked="{x:Bind ViewModel.ChainFollowUpAgents, Mode=TwoWay}"
+                            IsEnabled="{x:Bind ViewModel.IsRunning, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}" />
+                        <TextBlock
+                            Text="After the first checkup, the AI reads what it found and picks another from this same list, up to five. It can only choose checkups that already exist here, never a command of its own, and it cannot pick the same one twice."
+                            FontSize="11"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap"
+                            Margin="28,0,0,0" />
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </Grid>
@@ -164,7 +181,7 @@
                         <TextBlock Text="{x:Bind ViewModel.ActiveDiagnosticTitle, Mode=OneWay}" FontSize="13" FontWeight="Bold" Foreground="{ThemeResource SplatAccentBrush}" />
                     </Border>
                     <Border Background="{ThemeResource SplatSurfaceElevatedBrush}" BorderBrush="{ThemeResource SplatBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8,4">
-                        <TextBlock Text="AGENT VERIFIED" FontSize="11" FontWeight="Bold" Foreground="{ThemeResource SplatSuccessBrush}" />
+                        <TextBlock Text="EVIDENCE CHECKED" FontSize="11" FontWeight="Bold" Foreground="{ThemeResource SplatSuccessBrush}" />
                     </Border>
                 </StackPanel>
 
@@ -176,7 +193,7 @@
                     effects:ButtonPressShader.IsEnabled="True">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE72B;" FontSize="12" VerticalAlignment="Center" />
-                        <TextBlock Text="Back to Agent Squad" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
+                        <TextBlock Text="Back to checkups" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
             </Grid>
@@ -205,7 +222,25 @@
                         <!-- Plain English Findings -->
                         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                             <StackPanel Spacing="8">
-                                <TextBlock Text="AGENT FINDINGS &amp; RECOMMENDATIONS:" FontWeight="Bold" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <!-- Only a chained run fills this, and it is placed above the findings
+                                     because "which checkups ran, and why" is what makes a list of
+                                     findings from several agents readable at all. -->
+                                <ItemsControl
+                                    ItemsSource="{x:Bind ViewModel.InvestigationTrail, Mode=OneWay}"
+                                    Margin="0,0,0,10">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="x:String">
+                                            <TextBlock
+                                                Text="{x:Bind}"
+                                                FontSize="11"
+                                                Margin="0,1,0,1"
+                                                TextWrapping="Wrap"
+                                                Foreground="{ThemeResource SplatAccentBrush}" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <TextBlock Text="WHAT IT FOUND" FontWeight="Bold" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <ItemsControl ItemsSource="{x:Bind ViewModel.ExecutiveFindings, Mode=OneWay}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="x:String">
@@ -221,7 +256,7 @@
                             <StackPanel Spacing="8">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <TextBlock Text="⚡" FontSize="14" FontWeight="Bold" Foreground="{ThemeResource SplatAccentBrush}" />
-                                    <TextBlock Text="GOVERNED 1-CLICK ACTIONS:" FontWeight="Bold" FontSize="11" />
+                                    <TextBlock Text="FIXES YOU CAN APPLY" FontWeight="Bold" FontSize="11" />
                                 </StackPanel>
 
                                 <ItemsControl ItemsSource="{x:Bind ViewModel.AvailableFixes, Mode=OneWay}">
@@ -276,7 +311,7 @@
 
                         <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="6">
                             <FontIcon Glyph="&#xE756;" FontSize="13" Foreground="#4CC2FF" />
-                            <TextBlock Text="SANDBOXED TOOL &amp; AI TELEMETRY" FontWeight="SemiBold" FontSize="11" />
+                            <TextBlock Text="RAW OUTPUT FROM THE COMMAND" FontWeight="SemiBold" FontSize="11" />
                         </StackPanel>
 
                         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">

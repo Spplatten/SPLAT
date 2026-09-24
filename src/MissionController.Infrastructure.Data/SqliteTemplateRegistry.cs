@@ -46,17 +46,37 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
         command.CommandText = "SELECT TemplateJson FROM Templates ORDER BY Category, Name";
 
         var list = new List<SingleToolTemplate>();
+        var rejected = new List<string>();
         using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             var json = reader.GetString(0);
             var template = JsonSerializer.Deserialize<SingleToolTemplate>(json);
-            if (template != null)
-                list.Add(template);
+            if (template is null)
+                continue;
+
+            // A derived row whose containment no longer matches its base is withheld from the list
+            // rather than repaired, so it cannot be selected and launched. Withheld, not silently
+            // dropped: the reason is kept for the catalog page to show, because a template that
+            // vanishes with no explanation is indistinguishable from one the operator never saved.
+            if (DerivedTemplateGuard.Problem(template) is { } problem)
+            {
+                rejected.Add(problem);
+                continue;
+            }
+
+            list.Add(template);
         }
 
+        WithheldOnLastLoad = rejected;
         return list;
     }
+
+    /// <summary>
+    /// Why any stored template was withheld from the most recent <see cref="GetAllTemplatesAsync"/>.
+    /// Empty on a clean load, which is the normal case.
+    /// </summary>
+    public IReadOnlyList<string> WithheldOnLastLoad { get; private set; } = Array.Empty<string>();
 
     public async Task<SingleToolTemplate?> GetTemplateByIdAsync(string templateId, CancellationToken cancellationToken = default)
     {
@@ -70,7 +90,17 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
         if (await reader.ReadAsync(cancellationToken))
         {
             var json = reader.GetString(0);
-            return JsonSerializer.Deserialize<SingleToolTemplate>(json);
+            var template = JsonSerializer.Deserialize<SingleToolTemplate>(json);
+
+            // This is the read a mission launches from, so a drifted row throws here rather than
+            // being withheld: the caller asked for this exact agent by id and must not be handed
+            // null, which reads as "no such agent" and hides that one exists and was refused.
+            if (template is not null)
+            {
+                DerivedTemplateGuard.Validate(template);
+            }
+
+            return template;
         }
 
         return null;
@@ -79,6 +109,10 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
     public async Task RegisterTemplateAsync(SingleToolTemplate template, CancellationToken cancellationToken = default)
     {
         template.ValidateStrictRules();
+
+        // Refused at the door as well as on the way out. ValidateStrictRules asks only that a tool is
+        // bound; this asks whether a derived agent still runs its base's tool.
+        DerivedTemplateGuard.Validate(template);
 
         using var connection = _context.CreateConnection();
 
