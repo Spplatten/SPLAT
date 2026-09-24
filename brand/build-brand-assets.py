@@ -16,7 +16,7 @@ tiles all come off the same pass so they cannot drift apart.
 """
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 BRAND = Path(__file__).resolve().parent
 ASSETS = BRAND.parent / "src" / "MissionController.UI" / "Assets"
@@ -221,6 +221,85 @@ def on_glass(art, radius=9, opacity=0.62, passes=2):
     return canvas
 
 
+# ------------------------------------------------------------------------------------------------
+# The splash bitmap. Composed here rather than in XAML because the splash is no longer a XAML
+# window: a WinUI island composes onto an opaque surface, so a transparent root renders as a plate
+# (white under DWM glass, black without it). A layered Win32 window is the only thing on Windows
+# that composites per-pixel alpha against the desktop, and it draws one finished bitmap - which
+# means the type, the rules and the marks are all laid out here.
+# ------------------------------------------------------------------------------------------------
+SPLASH_W, SPLASH_H = 920, 784        # 2x the 460x392 the window asks for; scaled down at runtime
+FONT_REGULAR = Path("C:/Windows/Fonts/segoeui.ttf")
+FONT_BOLD = Path("C:/Windows/Fonts/segoeui" + "b.ttf")
+
+
+def tracked(draw, xy, text, font, fill, tracking):
+    """Draw letterspaced text centred on xy. PIL has no tracking, so the glyphs are placed by hand."""
+    widths = [draw.textlength(ch, font=font) for ch in text]
+    total = sum(widths) + (tracking * (len(text) - 1))
+    x = xy[0] - (total / 2)
+    for ch, width in zip(text, widths):
+        draw.text((x, xy[1]), ch, font=font, fill=fill, anchor="lt")
+        x += width + tracking
+    return total
+
+
+def splash_bitmap(lockup, emblem):
+    """The whole splash, transparent everywhere the artwork is not."""
+    canvas = Image.new("RGBA", (SPLASH_W, SPLASH_H), (0, 0, 0, 0))
+
+    mark = lockup.copy()
+    mark.thumbnail((SPLASH_W, 470), Image.LANCZOS)
+    canvas.alpha_composite(mark, ((SPLASH_W - mark.width) // 2, 44))
+
+    # Type and rules go on their own layer so one shadow pass covers all of them: every one of these
+    # is a light grey on whatever desktop is behind the window, and unshadowed they vanish on a
+    # light one exactly as the wordmark did.
+    ink = Image.new("RGBA", (SPLASH_W, SPLASH_H), (0, 0, 0, 0))
+    pen = ImageDraw.Draw(ink)
+    regular = ImageFont.truetype(str(FONT_REGULAR), 17)
+    small = ImageFont.truetype(str(FONT_REGULAR), 15)
+    semibold = ImageFont.truetype(str(FONT_BOLD), 17)
+    mid = SPLASH_W // 2
+
+    pen.rectangle([mid - 95, 556, mid + 95, 559], fill=(76, 194, 255, 255))      # the accent rule
+    tracked(pen, (mid, 590), "STARTING MISSION CONTROL", regular, (128, 147, 172, 255), 2.2)
+    pen.rectangle([mid - 240, 640, mid + 240, 641], fill=(100, 117, 142, 255))   # the divider
+
+    badge = emblem.copy()
+    badge.thumbnail((SPLASH_W, 74), Image.LANCZOS)
+    strap = "ENTERPRISE eBPF SECURITY"
+    strap_width = sum(pen.textlength(ch, font=semibold) for ch in strap) + (2.6 * (len(strap) - 1))
+    row = int(mid - ((badge.width + 18 + strap_width) / 2))
+    canvas.alpha_composite(badge, (row, 668))
+    tracked(pen, (int(row + badge.width + 18 + (strap_width / 2)), 695), strap,
+            semibold, (122, 140, 165, 255), 2.6)
+
+    tracked(pen, (mid, 736), "© PLATTEN INDUSTRIES 2026", small, (110, 128, 152, 255), 1.6)
+
+    canvas.alpha_composite(on_glass(ink, radius=5, opacity=0.75, passes=2)
+                           .crop((15, 15, 15 + SPLASH_W, 15 + SPLASH_H)))
+    return canvas
+
+
+def write_splash(rgba, path):
+    """Premultiplied BGRA, gzipped, with its size in the header.
+
+    Raw rather than PNG because the consumer is UpdateLayeredWindow, which wants exactly these
+    bytes: no decoder in the app, no WinRT async on the launch path, and nothing to get wrong
+    between the file and the DIB section. Gzip keeps it off disk at 2.9 MB.
+    """
+    import gzip
+    import struct
+
+    out = bytearray(struct.pack("<II", rgba.width, rgba.height))
+    for r, g, b, a in rgba.getdata():
+        out += bytes(((b * a) // 255, (g * a) // 255, (r * a) // 255, a))
+
+    with gzip.open(path, "wb", compresslevel=9) as handle:
+        handle.write(bytes(out))
+
+
 def centred(art, size, fill=0.94):
     """Fit art into a transparent canvas, longest side to `fill` of it, centred."""
     cw, ch = size
@@ -264,17 +343,22 @@ def main():
     p_lockup = cut(primary, 118, 652)
     save(p_emblem, "splat-emblem.png")
     save(p_lockup, "splat-lockup.png")
-    # The splash window is transparent, so its copies carry their own shadow. Kept as separate
-    # assets: the title-bar chip and the icons sit on solid surfaces and want the clean mark.
-    save(on_glass(p_lockup, opacity=0.68, passes=3), "splat-lockup-onglass.png")
 
     print("keying SPLAT-enterprise.jpg ...")
     enterprise = key(BRAND / "SPLAT-enterprise.jpg")
     # Bands here: hexagon 134-458, SPLAT 478-567, strapline 581-606, copyright 660-676.
     e_emblem = cut(enterprise, 126, 466)
     save(e_emblem, "splat-enterprise-emblem.png")
-    save(on_glass(e_emblem, radius=6), "splat-enterprise-emblem-onglass.png")
     save(cut(enterprise, 126, 614), "splat-enterprise-lockup.png")
+
+    # The shadowed marks are intermediates now, not assets: they exist only inside the splash
+    # bitmap, which is the one place anything is drawn on a transparent window.
+    print("splash bitmap ...")
+    splash = splash_bitmap(on_glass(p_lockup, opacity=0.68, passes=3), on_glass(e_emblem, radius=6))
+    write_splash(splash, ASSETS / "splat-splash.bgra.gz")
+    print(f"  {'splat-splash.bgra.gz':<32} {splash.width}x{splash.height}  "
+          f"{(ASSETS / 'splat-splash.bgra.gz').stat().st_size / 1024:6.1f} KB")
+    splash.save(BRAND / "splash-preview.png")
 
     print("icons ...")
     write_icon(p_emblem, ASSETS / "splat.ico")

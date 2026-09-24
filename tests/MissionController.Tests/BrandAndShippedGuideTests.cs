@@ -153,6 +153,27 @@ public sealed class BrandAndShippedGuideTests
             }
         }
 
+        // The code names assets too, and the two that matter most are named nowhere else: the
+        // window's icon, and the splash bitmap - which is not markup at all, because the splash is
+        // a layered Win32 window drawing one premultiplied BGRA image. Both spellings are read: a
+        // literal path, and the Path.Combine form.
+        foreach (string file in Directory.EnumerateFiles(UiProject(), "*.cs", SearchOption.AllDirectories)
+                     .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                              && !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")))
+        {
+            string text = File.ReadAllText(file);
+
+            foreach (Match m in Regex.Matches(text, @"Assets[\\/]([A-Za-z0-9._-]+\.[A-Za-z0-9.]+)"))
+            {
+                named.Add(m.Groups[1].Value);
+            }
+
+            foreach (Match m in Regex.Matches(text, @"""Assets""\s*,\s*""([A-Za-z0-9._-]+\.[A-Za-z0-9.]+)"""))
+            {
+                named.Add(m.Groups[1].Value);
+            }
+        }
+
         // Guards the guard: an empty match set would pass every assertion below it.
         Assert.True(named.Count >= 6, $"Only {named.Count} brand assets were found to be named.");
 

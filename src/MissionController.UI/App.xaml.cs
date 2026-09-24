@@ -294,23 +294,11 @@ public partial class App : Application
         // always-on-top window is not something an unattended run should have to reason about.
         _splash = SelfTest is null ? SplashWindow.TryShow() : null;
 
-        if (_splash is null)
-        {
-            StartMainWindow();
-            return;
-        }
-
-        // Both windows live on this one UI thread, and a thread building XAML is a thread not
-        // drawing: constructing MainWindow immediately left the splash on screen as an unpainted
-        // white rectangle for its whole life. Yielding first lets it render, and DWM then keeps
-        // that frame composited while the thread is busy.
-        var handoff = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260) };
-        handoff.Tick += (_, _) =>
-        {
-            handoff.Stop();
-            StartMainWindow();
-        };
-        handoff.Start();
+        // No yield before MainWindow any more. The splash was a XAML window once, on this same UI
+        // thread, and a thread building XAML is a thread not drawing - so it needed a moment to
+        // paint before that work started. A layered window is already composited by the time
+        // TryShow returns, and stays up while this thread is busy.
+        StartMainWindow();
     }
 
     private void StartMainWindow()
