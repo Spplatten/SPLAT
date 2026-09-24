@@ -176,7 +176,15 @@ public sealed record QualityIslandOptions(
     double SemanticThreshold = 0.75,
     int SpeculativeSampleSize = 3,
     int MaxEscalationAttempts = 1,
-    string? FrontierEscalationModel = "claude-sonnet-5",
+    /// <summary>
+    /// The model a rejected analysis is escalated TO, which must be a rung above the one that was
+    /// rejected or the escalation is a retry. This defaulted to claude-sonnet-5 - the model
+    /// GovernedTemplateCatalog.ModelPro already targets - so for most of the catalog the gate
+    /// rejected an analysis and asked the same weights again. Pinned to the same Opus snapshot
+    /// ClaudeStreamClient resolves the family to, for the reason stated there: the raw client has
+    /// no refusal-stop_reason handling, which a newer Opus wants.
+    /// </summary>
+    string? FrontierEscalationModel = "claude-opus-4-8",
     string? DynamicLanguage = "bash",
     IReadOnlyCollection<string>? AllowedTemplateIds = null,
     bool EarlyStreamAbortOnSyntaxError = false);

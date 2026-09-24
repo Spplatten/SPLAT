@@ -22,6 +22,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Enumerated at test time, so a case is added by dropping a file in. Copied rather than
+         embedded so the corpus stays readable as the telemetry it imitates. -->
+    <Content Include="Corpus\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\MissionController.Core\MissionController.Core.csproj" />
     <ProjectReference Include="..\..\src\MissionController.Infrastructure.Windows\MissionController.Infrastructure.Windows.csproj" />
     <ProjectReference Include="..\..\src\MissionController.Infrastructure.Network\MissionController.Infrastructure.Network.csproj" />

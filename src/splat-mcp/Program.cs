@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -180,7 +180,10 @@ public static class Program
             credSanitizer,
             revocationManager,
             findingsExtractor,
-            recorder: recorder);
+            // Two different records of one mission: the recorder writes a replay fixture, and the
+            // history store writes the Missions row the retention sweep erases.
+            recorder: recorder,
+            missionHistory: new SqliteMissionHistoryStore(storageContext));
 
         var investigationLoop = new GovernedInvestigationLoop(
             missionEngine,

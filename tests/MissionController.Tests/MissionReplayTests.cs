@@ -1,10 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using MissionController.Core;
 using MissionController.Core.Replay;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
@@ -130,7 +131,8 @@ public sealed class MissionReplayTests
                 fixture.TemplateSha256 = MissionController.Core.Models.MissionRunFacts.HashTemplate(replay.Template);
                 if (replay.ModelCalls.Count > 0)
                 {
-                    fixture.SystemPromptSha256 = MissionFixture.Sha256Hex(replay.ModelCalls[0].SystemPrompt);
+                    fixture.SystemPromptSha256 = MissionFixture.Sha256Hex(
+                        RecalledContext.NormalizeBoundaries(replay.ModelCalls[0].SystemPrompt));
                 }
 
                 await File.WriteAllTextAsync(file, fixture.Serialize(), new UTF8Encoding(false));
@@ -220,7 +222,11 @@ public sealed class MissionReplayTests
 
             Assert.Equal(live.Facts.MissionId, fixture.MissionId);
             Assert.Equal(MissionFixtureExporter.RecordedByLabel, fixture.RecordedBy);
-            Assert.Equal(live.Payload!.Replace("\r\n", "\n"), fixture.Sensor.Stdout.Replace("\r\n", "\n"));
+            // Undelimited on the left: what the model was handed carries the untrusted-sensor
+            // boundary, and what the exporter stores is the sensor text inside it.
+            Assert.Equal(
+                RecalledContext.Undelimit(live.Payload!).Replace("\r\n", "\n"),
+                fixture.Sensor.Stdout.Replace("\r\n", "\n"));
             Assert.DoesNotContain("Sup3rSecret", fixture.Serialize());
             Assert.Equal(live.Analysis, fixture.Attempts.Single().Response);
             Assert.Equal(liveRows, fixture.Expected.LedgerActions);

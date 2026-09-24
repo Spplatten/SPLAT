@@ -686,17 +686,21 @@ public class DocumentationDriftTests
     }
 
     /// <summary>
-    /// Guards the assumption <see cref="CountTestCases"/> rests on. xUnit expands
-    /// <c>[MemberData]</c> and <c>[ClassData]</c> at run time from sources reflection here does not
-    /// evaluate, so a test using one would be counted as zero cases and would silently deflate the
-    /// number the documents are held to - turning the count check into a rubber stamp.
+    /// Guards the assumption <see cref="CountTestCases"/> rests on. xUnit expands data attributes at
+    /// run time from sources reflection here does not necessarily evaluate, so a test using one it
+    /// cannot read would be counted as zero cases and would silently deflate the number the
+    /// documents are held to - turning the count check into a rubber stamp.
+    ///
+    /// <c>[MemberData]</c> over a static, argument-free member IS expanded, by
+    /// <see cref="MemberDataRowCount"/>. Everything else still has to fail here.
     /// </summary>
     [Fact]
     public void NoDataSourceEscapesTheTestCounter()
     {
         var unsupported = TestMethods()
             .Where(method => method.GetCustomAttributes()
-                .Any(attribute => attribute is MemberDataAttribute or ClassDataAttribute))
+                .Any(attribute => attribute is ClassDataAttribute
+                    || (attribute is MemberDataAttribute member && member.Parameters is { Length: > 0 })))
             .Select(method => $"{method.DeclaringType?.Name}.{method.Name}")
             .ToList();
 
@@ -866,8 +870,39 @@ public class DocumentationDriftTests
         // TheoryAttribute derives from FactAttribute, so theories are matched first - checking Fact
         // first would count a theory once instead of once per data row.
         method.GetCustomAttribute<TheoryAttribute>() is not null
-            ? method.GetCustomAttributes<InlineDataAttribute>().Count()
+            ? method.GetCustomAttributes<InlineDataAttribute>().Count() + MemberDataRowCount(method)
             : 1);
+
+    /// <summary>
+    /// Rows a <c>[MemberData]</c> source will yield, for the one shape this counter supports: a
+    /// static property or parameterless static method on the declaring type, taking no arguments.
+    /// The corpus theories need it - the whole point of enumerating a directory is that adding a
+    /// case touches no code, which [InlineData] would undo. Anything more exotic is caught by
+    /// <see cref="NoDataSourceEscapesTheTestCounter"/> rather than guessed at here: a count this
+    /// file cannot derive must fail loudly, never quietly become zero.
+    /// </summary>
+    private static int MemberDataRowCount(MethodInfo method)
+    {
+        int rows = 0;
+        foreach (var source in method.GetCustomAttributes<MemberDataAttribute>())
+        {
+            var owner = source.MemberType ?? method.DeclaringType!;
+            const BindingFlags Lookup = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+
+            object? value =
+                owner.GetProperty(source.MemberName, Lookup)?.GetValue(null)
+                ?? owner.GetMethod(source.MemberName, Lookup, Type.EmptyTypes)?.Invoke(null, null);
+
+            // Not silently zero. An unreadable source is exactly the deflation this guards against.
+            Assert.True(value is System.Collections.IEnumerable,
+                $"{method.DeclaringType?.Name}.{method.Name} takes [MemberData] from " +
+                $"'{source.MemberName}', which this counter could not read as a row set.");
+
+            rows += ((System.Collections.IEnumerable)value!).Cast<object>().Count();
+        }
+
+        return rows;
+    }
 
     private static IEnumerable<MethodInfo> TestMethods() =>
         typeof(DocumentationDriftTests).Assembly

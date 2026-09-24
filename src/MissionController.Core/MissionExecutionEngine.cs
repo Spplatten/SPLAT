@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -28,6 +28,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
     private readonly ICredentialSanitizer? _credentialSanitizer;
     private readonly IIncidentRevocationManager? _revocationManager;
     private readonly IDiagnosticFindingsExtractor? _findingsExtractor;
+    private readonly IMissionHistoryStore? _missionHistory;
     private readonly IIsolatedQualityIsland _qualityIsland;
     private readonly IMissionRecorder? _recorder;
 
@@ -53,8 +54,10 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         IIncidentRevocationManager? revocationManager = null,
         IDiagnosticFindingsExtractor? findingsExtractor = null,
         IIsolatedQualityIsland? qualityIsland = null,
-        IMissionRecorder? recorder = null)
+        IMissionRecorder? recorder = null,
+        IMissionHistoryStore? missionHistory = null)
     {
+        _missionHistory = missionHistory;
         _findingsExtractor = findingsExtractor;
         _recorder = recorder;
         _jailManager = jailManager;
@@ -662,6 +665,15 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             effectiveSystemPrompt = _credentialSanitizer.Sanitize(effectiveSystemPrompt).SanitizedText;
         }
 
+        // The sensor payload was the one block in this prompt with no label at all, and it is the
+        // block an attacker controls most cheaply: a filename, a service description or a registry
+        // value is whatever someone with write access to that host decided it should say. The
+        // boundary is drawn HERE, after sanitization, for the same reason the schema below is - a
+        // credential rule that matched the random hex would rewrite the opening marker and leave
+        // the closing one, which is worse than no boundary at all.
+        string sensorBoundary = RecalledContext.NewBoundary();
+        effectiveSystemPrompt += RecalledContext.SensorOutputRule(sensorBoundary);
+
         // Structured-output contract, appended LAST so it survives intact: the sanitizer rewrites
         // operator-supplied text, and a redaction landing inside the schema would hand the model a
         // corrupted format spec. Applied here (not per-client) so every provider is asked for the
@@ -710,9 +722,12 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             TemplateId: template.TemplateId,
             TargetModel: template.TargetModel,
             SystemPrompt: effectiveSystemPrompt,
-            UserPayload: sanitizedPayload,
+            UserPayload: RecalledContext.Delimit("SENSOR OUTPUT", sensorBoundary, sanitizedPayload),
             OperatorIdentity: operatorIdentity,
             RequiredSchema: SchemaContractType.StructuredDiagnosis,
+            // The haystack stays UNDELIMITED. Grounding asks whether a claim is supported by what
+            // the sensor actually said; handing it the wrapper would let a model earn its grounding
+            // score by quoting SPLAT's own banner back.
             ExpectedTelemetryHaystack: sanitizedPayload);
 
         var islandResult = await _qualityIsland.ExecuteIslandAsync(
@@ -842,6 +857,57 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             }
 
             await SealRunFactsAsync(facts);
+            await RecordHistoryAsync(facts, jailPath, parameters, fullOutput.ToString(), fullAiAnalysis.ToString());
+        }
+    }
+
+    /// <summary>
+    /// The Missions row, written beside the ledger seal so every terminal state gets one - refused,
+    /// cancelled, tool-failed and completed alike. Its three payload columns are what
+    /// DataRetentionService erases on a schedule; until this existed that sweep swept an empty table
+    /// and reported the zeroes as a clean result.
+    ///
+    /// Everything stored here has already been through the credential and DLP scrub: fullOutput is
+    /// appended only after sanitization, and the parameters go through the same Scrub the ledger's
+    /// own rows use. Nothing reaches this table that was withheld from the model.
+    /// </summary>
+    private async Task RecordHistoryAsync(
+        MissionRunFacts facts,
+        string jailPath,
+        IReadOnlyDictionary<string, string> parameters,
+        string sanitizedOutput,
+        string aiAnalysis)
+    {
+        if (_missionHistory is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _missionHistory.RecordAsync(
+                new MissionHistoryRecord(
+                    MissionId: facts.MissionId,
+                    TemplateId: facts.TemplateId,
+                    Status: facts.ExecutionState,
+                    CreatedAtUtc: facts.StartedAtUtc,
+                    StartedAtUtc: facts.StartedAtUtc,
+                    CompletedAtUtc: facts.EndedAtUtc,
+                    JailDirectory: jailPath,
+                    JobId: facts.JobName,
+                    InitiatedBy: facts.Principal,
+                    InputParametersJson: Scrub(JsonSerializer.Serialize(parameters)),
+                    RawOutput: sanitizedOutput,
+                    AiAnalysis: aiAnalysis,
+                    ExitCode: facts.ExitCode,
+                    ErrorMessage: facts.TerminalReason),
+                CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Same contract as the ledger seal above: called from a finally, so throwing here would
+            // replace the mission's own fault with a storage error. History is a record of the
+            // mission, never a gate on it.
         }
     }
 

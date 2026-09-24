@@ -160,12 +160,23 @@ public sealed class RunRecordHostTests : IDisposable
         Assert.Contains(MissionRunFacts.LedgerAction, refused.Result!.Value.GetRawText());
     }
 
+    /// <summary>
+    /// What is under test here is one line of the report - whether bundles would be signed - which is
+    /// a pure function of the key file. Left to their defaults the probes shell into the real WSL
+    /// distro and dial the real daemon, each on its own timeout, and the whole test then turns on
+    /// whether those answered while the rest of the suite had the CPU. It failed once in a full run
+    /// and passed alone, which is the signature. Both seams already exist for exactly this; port 1 is
+    /// reserved, so nothing listens there, and the token is supplied outright so no test reads the
+    /// host's real secret.
+    /// </summary>
     private async Task<string> DoctorReportAsync(string? keyPath)
     {
         var report = new StringWriter();
         await SubstrateDoctor.RunAsync(
             new McpServerCommand.Doctor(null, McpEgressPolicy.None, null, keyPath),
             report,
+            wsl: (_, _) => Task.FromResult((0, "6.6.0-stub\n---\nBOOT_IMAGE=/vmlinux lsm=bpf\n")),
+            health: new WslSubstrateHealthChecker("127.0.0.1", 1, new WslAgentToken(authToken: "0123456789abcdef")),
             ledgerPath: Path.Combine(_dir, "doctor-ledger.db"));
         return report.ToString();
     }
