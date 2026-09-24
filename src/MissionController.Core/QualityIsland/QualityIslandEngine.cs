@@ -224,11 +224,22 @@ public sealed class QualityIslandEngine : IIsolatedQualityIsland
         string initialFailReason = string.Join("; ", eval0.OracleResult.RejectionReasons.Concat(eval0.SemanticResult.QualityNotes));
         string escalationModel = options.FrontierEscalationModel ?? request.TargetModel;
 
+        // "Escalation" to the model that just failed is a RETRY, and a retry is a much weaker claim:
+        // same weights, same telemetry, only a sharper prompt. The two were indistinguishable in the
+        // ledger, and the default frontier model was the one most of the catalog already targets - so
+        // the line an operator reads to decide whether a second opinion was obtained said escalation
+        // when none happened. Configuration can still point both at one model; it can no longer do it
+        // silently.
+        bool sameModel = string.Equals(escalationModel, request.TargetModel, StringComparison.OrdinalIgnoreCase);
+        string secondAttempt = sameModel
+            ? $"RETRY on the same model '{escalationModel}' - no frontier model is configured above it, so this is a re-ask, not a second opinion"
+            : $"escalation to frontier model '{escalationModel}'";
+
         await _auditLedger.AppendLogAsync(
             request.MissionId,
             request.TemplateId,
             "CHECK_ESCALATE_ESCALATION_TRIGGERED",
-            $"First attempt landed in {eval0.Quadrant}. Triggering targeted escalation with model '{escalationModel}'. Failure: {initialFailReason}",
+            $"First attempt landed in {eval0.Quadrant}. Triggering targeted {secondAttempt}. Failure: {initialFailReason}",
             request.OperatorIdentity,
             cancellationToken);
 
@@ -279,7 +290,7 @@ public sealed class QualityIslandEngine : IIsolatedQualityIsland
                 request.MissionId,
                 request.TemplateId,
                 "CHECK_ESCALATE_ESCALATION_SUCCEEDED",
-                $"Targeted escalation succeeded with Quadrant I verified output. Model: {escalationModel}",
+                $"Targeted {secondAttempt} produced Quadrant I verified output.",
                 request.OperatorIdentity,
                 cancellationToken);
         }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -155,7 +155,8 @@ internal static class MissionFixtureExporter
 
                 if (replay.ModelCalls.Count > 0)
                 {
-                    fixture.SystemPromptSha256 = MissionFixture.Sha256Hex(replay.ModelCalls[0].SystemPrompt);
+                    fixture.SystemPromptSha256 = MissionFixture.Sha256Hex(
+                        RecalledContext.NormalizeBoundaries(replay.ModelCalls[0].SystemPrompt));
                 }
 
                 if (replay.Island is not null)

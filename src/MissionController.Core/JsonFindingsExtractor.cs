@@ -336,9 +336,13 @@ public sealed class JsonFindingsExtractor : IDiagnosticFindingsExtractor
                     continue;
                 }
 
+                // Screened HERE, at the single point every consumer reads them from - the UI list, the
+                // MCP report and the RESOLUTION lines written into semantic memory all come through
+                // this extractor, and a screen at any one of them would leave the other two bare.
                 var actions = ReadStringList(root, "recommendedActions", "recommendations", "actions")
                     .Where(value => !string.IsNullOrWhiteSpace(value))
                     .Select(CleanBulletText)
+                    .Select(RemediationScreen.Screen)
                     .ToList();
                 var headline = ReadString(root, "headline", "statusHeadline", "summary");
                 if (string.IsNullOrWhiteSpace(headline))
@@ -443,7 +447,10 @@ public sealed class JsonFindingsExtractor : IDiagnosticFindingsExtractor
 
             if (readingActions)
             {
-                actions.Add(clean);
+                // Same screen as the JSON path: this is the other place a model's own words become
+                // an action. The deterministic analyser below needs none - its actions are this
+                // file's literals, not text anything outside the process wrote.
+                actions.Add(RemediationScreen.Screen(clean));
             }
             else
             {

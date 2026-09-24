@@ -214,6 +214,10 @@ public partial class App : Application
         services.AddSingleton<ITemplateRegistry, SqliteTemplateRegistry>();
         services.AddSingleton<IProjectTemplateRegistry, SqliteProjectTemplateRegistry>();
         services.AddSingleton<ISemanticMemoryIndex, SqliteSemanticMemoryIndex>();
+        // The Missions row. Registered here rather than left to its default null, because the
+        // retention sweep this app exposes erases three of that table's columns and had nothing to
+        // erase: the sweep reported zeroes that read exactly like a clean result.
+        services.AddSingleton<IMissionHistoryStore, SqliteMissionHistoryStore>();
         services.AddSingleton<IMerkleProofEngine, MerkleTreeEngine>();
 
         // The operator's run record signing key, named the same way as the ledger key. Without it the

@@ -760,15 +760,26 @@ public class McpServerHandler
             violations: violationProgress,
             ct: ct);
 
-        var outputSb = new StringBuilder();
+        // What the leased process printed is the least trustworthy text this server produces, and it
+        // leaves here for another agent's context window. Two things follow from the boundary, and
+        // the second is not about the model at all: SPLAT's own lines below it can no longer be
+        // FORGED from inside the sandbox. A program that printed "[KERNEL VIOLATION CONTAINMENT
+        // REPORT]" on stdout used to land in this same flat block, indistinguishable from the
+        // report the daemon's violation events actually produced.
+        string commandBoundary = RecalledContext.NewBoundary();
+        var sandboxOutput = new StringBuilder();
         if (!string.IsNullOrEmpty(execResult.StandardOutput))
         {
-            outputSb.AppendLine(execResult.StandardOutput);
+            sandboxOutput.AppendLine(execResult.StandardOutput);
         }
         if (!string.IsNullOrEmpty(execResult.StandardError))
         {
-            outputSb.AppendLine(execResult.StandardError);
+            sandboxOutput.AppendLine(execResult.StandardError);
         }
+
+        var outputSb = new StringBuilder();
+        outputSb.AppendLine(RecalledContext.Delimit(
+            $"SANDBOXED PROCESS OUTPUT - '{command}'", commandBoundary, sandboxOutput.ToString()));
 
         if (violations.Count > 0)
         {
@@ -924,6 +935,11 @@ public class McpServerHandler
                 await ResolveActorAsync(ct),
                 ct);
 
+            // Deliberately NOT delimited, unlike run_command's output. fs_read's contract is the
+            // bytes: an agent round-trips a file through fs_write and fs_read to edit it, and a
+            // wrapper turns the file it writes back into the file plus a banner. The planted-text
+            // risk is real but it belongs to whoever put the file in the workspace, and paying for
+            // it by corrupting every read is the wrong trade at this layer.
             return new McpToolCallResult
             {
                 IsError = false,

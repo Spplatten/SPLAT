@@ -155,7 +155,8 @@ internal static class MissionReplayHarness
 
             if (ModelCalls.Count > 0)
             {
-                string promptNow = MissionFixture.Sha256Hex(ModelCalls[0].SystemPrompt);
+                string promptNow = MissionFixture.Sha256Hex(
+                    RecalledContext.NormalizeBoundaries(ModelCalls[0].SystemPrompt));
                 if (string.IsNullOrEmpty(Fixture.SystemPromptSha256))
                 {
                     notes.Add("the system prompt the model answered was not recorded, so the rebuilt prompt is unchecked");
@@ -173,6 +174,12 @@ internal static class MissionReplayHarness
         /// The one check on the sensor side: the model would be handed the bytes it was handed when this was
         /// recorded. Line endings are normalised because the engine joins stdout and stderr with the host's
         /// newline, and a fixture recorded on Windows replays on Linux too.
+        ///
+        /// The untrusted-sensor boundary is stripped before comparing. A fixture records what the SENSOR
+        /// produced; the delimiters around it are scaffolding this process draws afresh every assembly,
+        /// with a nonce that is deliberately different each time. Comparing the wrapper would pin that
+        /// nonce and turn a real check - did the scrub or the sensor change? - into one that can never
+        /// pass again.
         /// </summary>
         public string? PayloadMismatch()
         {
@@ -182,7 +189,7 @@ internal static class MissionReplayHarness
             }
 
             string expected = Fixture.SanitizedPayload().Replace("\r\n", "\n");
-            string actual = Payload.Replace("\r\n", "\n");
+            string actual = RecalledContext.Undelimit(Payload).Replace("\r\n", "\n");
             if (expected == actual)
             {
                 return null;

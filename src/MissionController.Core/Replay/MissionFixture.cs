@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -136,7 +136,9 @@ public sealed class MissionFixture
             TemplateSha256 = facts.TemplateSha256,
             Parameters = new Dictionary<string, string>(scrubbedParameters),
             Model = facts.Model ?? string.Empty,
-            SystemPromptSha256 = Sha256Hex(effectiveSystemPrompt),
+            // Nonce-free: the sensor boundary is redrawn every assembly, so hashing the prompt
+            // as-is would make a recorded prompt differ from a rebuilt one on every replay.
+            SystemPromptSha256 = Sha256Hex(RecalledContext.NormalizeBoundaries(effectiveSystemPrompt)),
             Sensor = new FixtureSensor
             {
                 ExitCode = exitCode,

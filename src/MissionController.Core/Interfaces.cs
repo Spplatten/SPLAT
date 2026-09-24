@@ -291,6 +291,38 @@ public interface ISemanticMemoryIndex
     Task<IReadOnlyList<SemanticSearchResult>> SearchSimilarMissionsAsync(string query, int topK = 5, double minScore = 0.1, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// One row per mission, already sanitized, in the three columns the retention sweep erases.
+/// </summary>
+public record MissionHistoryRecord(
+    Guid MissionId,
+    string TemplateId,
+    string Status,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? StartedAtUtc,
+    DateTimeOffset? CompletedAtUtc,
+    string JailDirectory,
+    string? JobId,
+    string InitiatedBy,
+    string InputParametersJson,
+    string RawOutput,
+    string AiAnalysis,
+    int? ExitCode,
+    string? ErrorMessage);
+
+/// <summary>
+/// Mission history, which the storage schema declared and nothing ever wrote.
+///
+/// The empty table was not merely unused: <c>DataRetentionService</c> scrubs three of its columns
+/// and reports how many rows it erased, so a sweep over nothing returned zeroes that read as "your
+/// retention policy ran and there was nothing left to erase". That is the same sentence a working
+/// sweep produces. The write is what makes those counts mean anything.
+/// </summary>
+public interface IMissionHistoryStore
+{
+    Task RecordAsync(MissionHistoryRecord record, CancellationToken cancellationToken = default);
+}
+
 public interface IRemediationEngine
 {
     Task<RemediationExecutionResult> ExecuteFixAsync(

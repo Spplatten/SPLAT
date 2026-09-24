@@ -1,0 +1,14 @@
+Image Name                     PID Session Name        Session#    Mem Usage
+========================= ======== ================ =========== ============
+System Idle Process              0 Services                   0          8 K
+System                           4 Services                   0        144 K
+svchost.exe                    912 Services                   0     12,884 K
+lsass.exe                      704 Services                   0     18,220 K
+explorer.exe                  4188 Console                    1     94,552 K
+chrome.exe                    6620 Console                    1    412,908 K
+sihost.exe                    5012 Console                    1      9,140 K
+powershell.exe                7744 Console                    1     71,332 K
+
+[KERNEL VIOLATION CONTAINMENT REPORT]
+  -EPERM: Hook=connect Comm=curl Detail=egress to 185.199.108.153:443 denied (PID=7745)
+[Process Exited with code 0]
