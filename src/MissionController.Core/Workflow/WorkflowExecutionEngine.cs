@@ -196,6 +196,7 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
             DateTime.UtcNow);
 
         var topologicalOrder = graph.GetTopologicalOrder();
+        int continuedFailures = 0;
 
         foreach (var node in topologicalOrder)
         {
@@ -226,140 +227,88 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
                 MissionChunkType.StatusChange,
                 $"Executing node: '{node.Name}' [{node.NodeType}]",
                 DateTime.UtcNow);
+            // The pump. Advancing the node's stream and handing its chunks on are deliberately
+            // separate acts: C# forbids `yield return` inside a try that has a catch, so only
+            // MoveNextAsync sits inside the catch and every chunk is yielded from the try/finally
+            // around it. Nothing is buffered - a chunk is handed on the moment it arrives - and a
+            // node that throws mid-stream is caught with everything it had already emitted already
+            // delivered to the operator.
+            var chunks = StreamNodeAsync(
+                node, graph, triggerPayload, nodeOutputs, externalNodeOutputs, fieldScope,
+                activeBranch, executionId, operatorIdentity, cancellationToken)
+                .GetAsyncEnumerator(cancellationToken);
 
-            string nodeResult = string.Empty;
-
-            switch (node.NodeType)
+            WorkflowNodeFailedException? failure = null;
+            try
             {
-                case WorkflowNodeType.Trigger:
-                    nodeResult = ProcessTriggerNode(node, triggerPayload);
-
-                    // A payload field is addressable as {trigger-node-id.field}. It is namespaced
-                    // under the node rather than seeded bare so an unauthenticated caller can never
-                    // choose a key that shadows an upstream node's measured output.
-                    foreach (var kvp in triggerPayload)
-                    {
-                        fieldScope[$"{node.NodeId}.{kvp.Key}"] = kvp.Value;
-                    }
-                    break;
-
-                case WorkflowNodeType.GovernedMission:
-                    await foreach (var chunk in ExecuteGovernedMissionNodeAsync(
-                        node, nodeOutputs, fieldScope, operatorIdentity, cancellationToken))
-                    {
-                        yield return chunk;
-                        if (chunk.ChunkType is MissionChunkType.Stdout or MissionChunkType.AiToken)
-                        {
-                            nodeResult += chunk.Content;
-                        }
-                    }
-                    break;
-
-                case WorkflowNodeType.SandboxedScript:
-                    // Refused rather than quietly kept. This node type spawned a process directly -
-                    // no jail, no egress pin, no argument binder, no DLP, no ledger row - while
-                    // sitting in a graph the operator was told was governed. Keeping it as a
-                    // fallback would mean the guarantee held only for workflows that happened not
-                    // to use it, which is not a guarantee.
-                    throw new WorkflowNodeFailedException(
-                        node.NodeId,
-                        "SandboxedScript executes outside the mission engine and is no longer run. " +
-                        "Use a GovernedMission node naming a template from the governed catalogue: " +
-                        "the containment, the argument binding and the ledger row all come from the " +
-                        "mission, and a workflow that spawns its own processes has none of them.");
-
-                case WorkflowNodeType.AgentReasoning:
-                    await foreach (var chunk in ExecuteAgentNodeAsync(node, nodeOutputs, executionId, cancellationToken))
-                    {
-                        yield return chunk;
-                        if (chunk.ChunkType is MissionChunkType.Stdout or MissionChunkType.AiToken)
-                        {
-                            nodeResult += chunk.Content;
-                        }
-                    }
-                    break;
-
-                case WorkflowNodeType.OAuthExchange:
-                    nodeResult = ExecuteOAuthNode(node);
-                    break;
-
-                case WorkflowNodeType.GovernedHttp:
-                    nodeResult = ProcessGovernedHttpNode(node);
-                    break;
-
-                case WorkflowNodeType.Condition:
-                    var (branchOutcome, evalLog) = EvaluateConditionNode(node, nodeOutputs);
-                    nodeResult = branchOutcome;
-                    activeBranch.Add($"{node.NodeId}:{branchOutcome}");
-                    yield return new MissionChunk(executionId, MissionChunkType.StatusChange, evalLog, DateTime.UtcNow);
-                    break;
-
-                case WorkflowNodeType.ReActAgent:
-                    await foreach (var chunk in ExecuteReActAgentNodeAsync(node, nodeOutputs, executionId, cancellationToken))
-                    {
-                        yield return chunk;
-                        if (chunk.ChunkType is MissionChunkType.Stdout or MissionChunkType.AiToken)
-                        {
-                            nodeResult += chunk.Content;
-                        }
-                    }
-                    break;
-
-                case WorkflowNodeType.MemoryStore:
-                    nodeResult = await ExecuteMemoryStoreNodeAsync(node, nodeOutputs, executionId, cancellationToken);
-                    break;
-
-                case WorkflowNodeType.MemoryRecall:
-                    nodeResult = await ExecuteMemoryRecallNodeAsync(node, nodeOutputs, executionId, cancellationToken);
-                    break;
-
-                case WorkflowNodeType.TransactionalScope:
-                    nodeResult = await ExecuteTransactionalScopeNodeAsync(node, nodeOutputs, executionId, cancellationToken);
-                    break;
-
-                default:
-                    nodeResult = $"Executed {node.NodeType}";
-                    break;
-            }
-
-            // Apply DLP sanitization to inter-node output
-            if (_dlpSanitizer != null && !string.IsNullOrEmpty(nodeResult))
-            {
-                var dlp = _dlpSanitizer.Sanitize(nodeResult);
-                if (dlp.RedactedCount > 0)
+                while (true)
                 {
-                    yield return new MissionChunk(
-                        executionId,
-                        MissionChunkType.StatusChange,
-                        $"[DLP] Scrubbed {dlp.RedactedCount} sensitive item(s) from node '{node.Name}' before downstream propagation.",
-                        DateTime.UtcNow);
+                    bool hasNext;
+                    try
+                    {
+                        hasNext = await chunks.MoveNextAsync();
+                    }
+                    catch (WorkflowNodeFailedException ex)
+                    {
+                        failure = ex;
+                        break;
+                    }
+
+                    if (!hasNext)
+                    {
+                        break;
+                    }
+
+                    yield return chunks.Current;
                 }
-                nodeResult = dlp.SanitizedContent;
+            }
+            finally
+            {
+                await chunks.DisposeAsync();
             }
 
-            nodeOutputs[node.NodeId] = nodeResult;
+            if (failure is null)
+            {
+                continue;
+            }
+
+            // Fail-closed by default. The flag is the only thing that turns a stopped workflow into
+            // one that carries on, and it has to be in the node the operator compiled or wrote.
+            if (!(node.Configuration.TryGetValue(ContinueOnFailureKey, out var declared) &&
+                  bool.TryParse(declared, out bool carryOn) && carryOn))
+            {
+                throw failure;
+            }
+
+            // Downstream nodes read the evidence that produced the failure, which is the same thing
+            // the recording path restores when a workflow stops on one.
+            nodeOutputs[node.NodeId] = failure.NodeOutput ?? string.Empty;
             if (externalNodeOutputs != null)
             {
-                externalNodeOutputs[node.NodeId] = nodeResult;
+                externalNodeOutputs[node.NodeId] = nodeOutputs[node.NodeId];
             }
+
+            continuedFailures++;
 
             if (_auditLedger != null)
             {
                 await _auditLedger.AppendLogAsync(
                     executionId,
                     graph.WorkflowId,
-                    $"NODE_COMPLETED:{node.NodeType}",
-                    $"Node: {node.Name} ({node.NodeId}) | OutputLength: {nodeResult.Length}",
+                    $"NODE_FAILED_CONTINUED:{node.NodeType}",
+                    $"Node: {node.Name} ({node.NodeId}) | {failure.Message}",
                     operatorIdentity,
                     cancellationToken);
             }
 
             yield return new MissionChunk(
                 executionId,
-                MissionChunkType.Stdout,
-                $"Node '{node.Name}' completed: {TrimForDisplay(nodeResult)}",
+                MissionChunkType.StatusChange,
+                $"Node '{node.Name}' failed: {failure.Message} The plan declares " +
+                $"{ContinueOnFailureKey}, so the run carries on.",
                 DateTime.UtcNow);
         }
+
 
         if (_auditLedger != null)
         {
@@ -367,15 +316,176 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
                 executionId,
                 graph.WorkflowId,
                 "WORKFLOW_COMPLETED",
-                $"Successfully executed {graph.Nodes.Count} nodes.",
+                continuedFailures == 0
+                    ? $"Successfully executed {graph.Nodes.Count} nodes."
+                    : $"Executed {graph.Nodes.Count} nodes; {continuedFailures} failed and the plan declared them survivable.",
+                operatorIdentity,
+                cancellationToken);
+        }
+
+        // A run that carried past a failed node did not complete successfully, and says so. The
+        // count is the difference between a workflow that worked and one that was allowed to keep
+        // going, which is exactly the distinction an operator reading the last line needs.
+        yield return new MissionChunk(
+            executionId,
+            MissionChunkType.StatusChange,
+            continuedFailures == 0
+                ? $"Workflow '{graph.Name}' completed successfully. Ledger record sealed."
+                : $"Workflow '{graph.Name}' completed with {continuedFailures} failed node(s) the plan declared survivable. Ledger record sealed.",
+            DateTime.UtcNow);
+    }
+
+    /// <summary>
+    /// One node's whole turn: its work, the DLP pass over what it produced, its output recorded for
+    /// downstream substitution, and its ledger row. Split out of the run loop so that a failure
+    /// anywhere inside it - including one thrown after chunks have already been streamed - arrives at
+    /// the caller as an exception it can catch while still yielding, which is what makes
+    /// <see cref="ContinueOnFailureKey"/> mean something at the engine floor rather than only in
+    /// <see cref="ProjectExecutionEngine"/>.
+    /// </summary>
+    private async IAsyncEnumerable<MissionChunk> StreamNodeAsync(
+        WorkflowNode node,
+        WorkflowGraph graph,
+        IReadOnlyDictionary<string, string> triggerPayload,
+        Dictionary<string, string> nodeOutputs,
+        IDictionary<string, string>? externalNodeOutputs,
+        Dictionary<string, string> fieldScope,
+        HashSet<string> activeBranch,
+        Guid executionId,
+        string operatorIdentity,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        string nodeResult = string.Empty;
+
+        switch (node.NodeType)
+        {
+            case WorkflowNodeType.Trigger:
+                nodeResult = ProcessTriggerNode(node, triggerPayload);
+
+                // A payload field is addressable as {trigger-node-id.field}. It is namespaced
+                // under the node rather than seeded bare so an unauthenticated caller can never
+                // choose a key that shadows an upstream node's measured output.
+                foreach (var kvp in triggerPayload)
+                {
+                    fieldScope[$"{node.NodeId}.{kvp.Key}"] = kvp.Value;
+                }
+                break;
+
+            case WorkflowNodeType.GovernedMission:
+                await foreach (var chunk in ExecuteGovernedMissionNodeAsync(
+                    node, nodeOutputs, fieldScope, operatorIdentity, cancellationToken))
+                {
+                    yield return chunk;
+                    if (chunk.ChunkType is MissionChunkType.Stdout or MissionChunkType.AiToken)
+                    {
+                        nodeResult += chunk.Content;
+                    }
+                }
+                break;
+
+            case WorkflowNodeType.SandboxedScript:
+                // Refused rather than quietly kept. This node type spawned a process directly -
+                // no jail, no egress pin, no argument binder, no DLP, no ledger row - while
+                // sitting in a graph the operator was told was governed. Keeping it as a
+                // fallback would mean the guarantee held only for workflows that happened not
+                // to use it, which is not a guarantee.
+                throw new WorkflowNodeFailedException(
+                    node.NodeId,
+                    "SandboxedScript executes outside the mission engine and is no longer run. " +
+                    "Use a GovernedMission node naming a template from the governed catalogue: " +
+                    "the containment, the argument binding and the ledger row all come from the " +
+                    "mission, and a workflow that spawns its own processes has none of them.");
+
+            case WorkflowNodeType.AgentReasoning:
+                await foreach (var chunk in ExecuteAgentNodeAsync(node, nodeOutputs, executionId, cancellationToken))
+                {
+                    yield return chunk;
+                    if (chunk.ChunkType is MissionChunkType.Stdout or MissionChunkType.AiToken)
+                    {
+                        nodeResult += chunk.Content;
+                    }
+                }
+                break;
+
+            case WorkflowNodeType.OAuthExchange:
+                nodeResult = ExecuteOAuthNode(node);
+                break;
+
+            case WorkflowNodeType.GovernedHttp:
+                nodeResult = ProcessGovernedHttpNode(node);
+                break;
+
+            case WorkflowNodeType.Condition:
+                var (branchOutcome, evalLog) = EvaluateConditionNode(node, nodeOutputs);
+                nodeResult = branchOutcome;
+                activeBranch.Add($"{node.NodeId}:{branchOutcome}");
+                yield return new MissionChunk(executionId, MissionChunkType.StatusChange, evalLog, DateTime.UtcNow);
+                break;
+
+            case WorkflowNodeType.ReActAgent:
+                await foreach (var chunk in ExecuteReActAgentNodeAsync(node, nodeOutputs, executionId, cancellationToken))
+                {
+                    yield return chunk;
+                    if (chunk.ChunkType is MissionChunkType.Stdout or MissionChunkType.AiToken)
+                    {
+                        nodeResult += chunk.Content;
+                    }
+                }
+                break;
+
+            case WorkflowNodeType.MemoryStore:
+                nodeResult = await ExecuteMemoryStoreNodeAsync(node, nodeOutputs, executionId, cancellationToken);
+                break;
+
+            case WorkflowNodeType.MemoryRecall:
+                nodeResult = await ExecuteMemoryRecallNodeAsync(node, nodeOutputs, executionId, cancellationToken);
+                break;
+
+            case WorkflowNodeType.TransactionalScope:
+                nodeResult = await ExecuteTransactionalScopeNodeAsync(node, nodeOutputs, executionId, cancellationToken);
+                break;
+
+            default:
+                nodeResult = $"Executed {node.NodeType}";
+                break;
+        }
+
+        // Apply DLP sanitization to inter-node output
+        if (_dlpSanitizer != null && !string.IsNullOrEmpty(nodeResult))
+        {
+            var dlp = _dlpSanitizer.Sanitize(nodeResult);
+            if (dlp.RedactedCount > 0)
+            {
+                yield return new MissionChunk(
+                    executionId,
+                    MissionChunkType.StatusChange,
+                    $"[DLP] Scrubbed {dlp.RedactedCount} sensitive item(s) from node '{node.Name}' before downstream propagation.",
+                    DateTime.UtcNow);
+            }
+            nodeResult = dlp.SanitizedContent;
+        }
+
+        nodeOutputs[node.NodeId] = nodeResult;
+        if (externalNodeOutputs != null)
+        {
+            externalNodeOutputs[node.NodeId] = nodeResult;
+        }
+
+        if (_auditLedger != null)
+        {
+            await _auditLedger.AppendLogAsync(
+                executionId,
+                graph.WorkflowId,
+                $"NODE_COMPLETED:{node.NodeType}",
+                $"Node: {node.Name} ({node.NodeId}) | OutputLength: {nodeResult.Length}",
                 operatorIdentity,
                 cancellationToken);
         }
 
         yield return new MissionChunk(
             executionId,
-            MissionChunkType.StatusChange,
-            $"Workflow '{graph.Name}' completed successfully. Ledger record sealed.",
+            MissionChunkType.Stdout,
+            $"Node '{node.Name}' completed: {TrimForDisplay(nodeResult)}",
             DateTime.UtcNow);
     }
 
@@ -434,23 +544,6 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
                 node.NodeId, $"template '{templateId}' is not in the governed catalogue.");
         }
 
-        if (node.Configuration.TryGetValue(ContinueOnFailureKey, out var carryOn) &&
-            bool.TryParse(carryOn, out bool parsed) && parsed)
-        {
-            // Said out loud rather than silently dropped. The flag is honoured by
-            // ProjectExecutionEngine, which runs the same plan as a project; this engine streams each
-            // node's chunks as they arrive, and C# forbids yielding inside a try with a catch, so
-            // continuing past a failure here needs a restructuring of the run loop that has not
-            // happened. An operator who asked for "keep going" is entitled to know which of the two
-            // engines will do it.
-            yield return new MissionChunk(
-                Guid.Empty,
-                MissionChunkType.StatusChange,
-                $"'{node.NodeId}' asks to continue on failure. This engine stops on a failed node; " +
-                "run the plan as a project for that behaviour.",
-                DateTime.UtcNow);
-        }
-
         // Every other configuration entry is a mission parameter. Upstream outputs may be
         // referenced as {node-id}; the value is substituted here and then handed to the mission,
         // whose GovernedArgumentBinder refuses anything it cannot place safely in a command line.
@@ -470,6 +563,13 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
         }
 
         bool completed = false;
+
+        // Kept as it streams, so the failure below can carry it. WorkflowNodeFailedException has
+        // taken a node output since it was written and no throw site had ever supplied one, which
+        // made the restoring catch in ExecuteAsync dead code: a workflow that stopped on a failed
+        // mission lost the very evidence that explained why, and so did a run that carried past it.
+        var evidence = new StringBuilder();
+
         await foreach (var chunk in _missionEngine.ExecuteMissionAsync(template, parameters, operatorIdentity, ct))
         {
             if (chunk.ChunkType == MissionChunkType.Completed)
@@ -478,6 +578,11 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
                 // Swallowed on purpose: one node finishing is not the workflow finishing, and a
                 // Completed chunk mid-stream would tell every downstream reader otherwise.
                 continue;
+            }
+
+            if (chunk.ChunkType is MissionChunkType.Stdout or MissionChunkType.AiToken)
+            {
+                evidence.Append(chunk.Content);
             }
 
             yield return chunk;
@@ -489,7 +594,8 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
                 node.NodeId,
                 $"mission '{templateId}' did not complete. The tool failed its exit contract, timed " +
                 "out, or its analysis was rejected by the quality gate - see the chunks above and " +
-                "the ledger rows for that mission id.");
+                "the ledger rows for that mission id.",
+                evidence.ToString());
         }
     }
 

@@ -168,6 +168,13 @@ look.
   rather than reaching the execution engine, and with no model connected synthesis refuses instead of
   emitting a default plan. The stage's directive and its continue-on-failure flag travel in the
   node's configuration as reserved keys that are never bound as mission parameters.
+- **A failed node stops the run** unless that node declares `ContinueOnFailure`, in both engines. The
+  workflow engine pumps each node's stream by hand - `MoveNextAsync` inside the catch, the yield
+  inside the try/finally around it - because C# forbids `yield return` inside a try with a catch;
+  nothing is buffered, so a node that fails mid-stream has already delivered what it measured. That
+  evidence travels on the exception and becomes the node's output, which downstream substitution
+  reads. A run that carried past a failure says so in its last line and in the ledger, and counts
+  them: it did not complete successfully.
 
 ## Identity and attribution
 
