@@ -10,6 +10,14 @@
 
 # Status gate and gap analysis — 2026-09-23
 
+> **Two rows in the dormant-code table have been overtaken, 2026-09-25.** `TemplatePolicyCompiler` is
+> called: a catalog template that names the Linux lease has its lease compiled by it, from both hosts
+> (`665d747`). The workflow synthesizer no longer holds a model client it never calls - it compiles
+> the operator's sentence, grounded in the catalog, and refuses a plan naming anything the catalog
+> lacks (`ffb4393`); `ContinueOnFailure` is honoured by the workflow engine as well as the project
+> engine (`8591dbf`). The rest of this record still says what was read out of the tree at `40caaa0`
+> on the day, and is not restated here.
+
 Two questions, answered against the tree rather than the documents: **where does each of the five
 functional layers stand**, and **what are the highest-yield changes from here to an alpha or beta**.
 The vocabulary is the repository's own: a boundary is enforced by a kernel object, a kernel LSM

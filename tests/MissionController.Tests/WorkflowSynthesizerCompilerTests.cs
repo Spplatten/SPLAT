@@ -224,6 +224,26 @@ public class WorkflowSynthesizerCompilerTests
         Assert.Contains(graph.Nodes, n => n.NodeType == WorkflowNodeType.OAuthExchange);
     }
 
+    /// <summary>
+    /// A project is an ordered list of governed missions, and three of the six recipes have none - a
+    /// ReAct agent, a memory pipeline, a transactional scope. Offering them here would have let the
+    /// model answer a project request with a workflow that leaves no stages, and the operator would
+    /// have read a validation error about stage counts instead of an answer.
+    /// </summary>
+    [Fact]
+    public async Task CompilingAProject_NeitherOffersARecipeNorAcceptsOne()
+    {
+        var offered = new ScriptedPlanner(Plan(FirstTemplateId()));
+        await new WorkflowSynthesizerEngine(offered, Catalog()).SynthesizeProjectAsync("check the disk");
+        Assert.DoesNotContain("recipeId", offered.LastSystemPrompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("flow-log-audit-alert", offered.LastSystemPrompt, StringComparison.Ordinal);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => new WorkflowSynthesizerEngine(ScriptedPlanner.ChoosingRecipe("flow-react-autonomous-investigation"), Catalog())
+                .SynthesizeProjectAsync("investigate the network"));
+        Assert.Contains("was not offered", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ARecipeThatDoesNotExist_IsRefused()
     {

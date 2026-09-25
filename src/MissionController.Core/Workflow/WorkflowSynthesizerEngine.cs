@@ -73,7 +73,7 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
         string prompt,
         CancellationToken cancellationToken = default)
     {
-        var plan = await CompileAsync(prompt, cancellationToken);
+        var plan = await CompileAsync(prompt, offerRecipes: true, cancellationToken);
         if (plan.RecipeId is not null)
         {
             return Recipes[plan.RecipeId].Build(prompt);
@@ -129,10 +129,14 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
         string prompt,
         CancellationToken cancellationToken = default)
     {
-        var plan = await CompileAsync(prompt, cancellationToken);
-        var stages = plan.RecipeId is null
-            ? plan.Stages.Select(s => new ProjectStage(s.StageId, s.Name, s.TemplateId, s.Directive, s.ContinueOnFailure)).ToList()
-            : StagesOfRecipe(Recipes[plan.RecipeId].Build(prompt));
+        // The recipes are not offered here. A project is an ordered list of governed missions, and
+        // three of the six recipes have none - a ReAct agent, a memory pipeline, a transactional
+        // scope - so a model that picked one would leave no stages and the operator would read a
+        // validation error about stage counts instead of an answer to what they asked.
+        var plan = await CompileAsync(prompt, offerRecipes: false, cancellationToken);
+        var stages = plan.Stages
+            .Select(s => new ProjectStage(s.StageId, s.Name, s.TemplateId, s.Directive, s.ContinueOnFailure))
+            .ToList();
 
         var project = new ProjectTemplate(
             ProjectId: plan.WorkflowId.StartsWith("flow-", StringComparison.Ordinal)
@@ -153,32 +157,11 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
     }
 
     /// <summary>
-    /// A recipe's mission nodes as project stages. Its other node types - OAuth exchange, memory
-    /// recall, a ReAct agent - have no <see cref="ProjectStage"/> to become, so they are dropped
-    /// rather than flattened into stages that would run something else entirely. A recipe whose
-    /// missions are all dropped leaves no project, which <see cref="ProjectTemplate.Validate"/>
-    /// refuses; that refusal is correct and is the reason a recipe is offered to the workflow page
-    /// rather than to this one.
-    /// </summary>
-    private static List<ProjectStage> StagesOfRecipe(WorkflowGraph graph) =>
-        graph.Nodes
-            .Where(n => n.NodeType == WorkflowNodeType.GovernedMission)
-            .Select((n, index) => new ProjectStage(
-                n.NodeId,
-                $"Stage {index + 1}: {n.Name}",
-                n.Configuration[WorkflowExecutionEngine.TemplateIdKey],
-                n.Configuration.TryGetValue(WorkflowExecutionEngine.DirectiveKey, out var directive)
-                    ? directive
-                    : $"Run {n.Name} and report only what the sensor observed.",
-                ContinueOnFailure: false))
-            .ToList();
-
-    /// <summary>
     /// One model call, one validation, both renderings. Nothing here trusts the answer: the JSON is
     /// parsed defensively, every id is resolved against the catalogue, and anything unresolvable
     /// throws with the reason an operator can act on.
     /// </summary>
-    private async Task<SynthesizedPlan> CompileAsync(string prompt, CancellationToken cancellationToken)
+    private async Task<SynthesizedPlan> CompileAsync(string prompt, bool offerRecipes, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(prompt))
         {
@@ -202,12 +185,12 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
 
         var response = new StringBuilder();
         await foreach (var token in _modelClient.StreamAnalysisAsync(
-            _modelId, SystemPrompt(_catalog), prompt, cancellationToken))
+            _modelId, SystemPrompt(_catalog, offerRecipes), prompt, cancellationToken))
         {
             response.Append(token);
         }
 
-        var plan = Parse(response.ToString(), prompt);
+        var plan = Parse(response.ToString(), prompt, offerRecipes);
         if (plan.RecipeId is null)
         {
             ValidateAgainstCatalog(plan.Stages);
@@ -216,7 +199,7 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
         return plan;
     }
 
-    private static string SystemPrompt(IReadOnlyList<SingleToolTemplate> catalog)
+    private static string SystemPrompt(IReadOnlyList<SingleToolTemplate> catalog, bool offerRecipes)
     {
         var templates = new StringBuilder();
         foreach (var template in catalog)
@@ -229,9 +212,20 @@ public sealed class WorkflowSynthesizerEngine : IWorkflowSynthesizer
         }
 
         var recipes = new StringBuilder();
-        foreach (var (id, recipe) in Recipes)
+        if (offerRecipes)
         {
-            recipes.Append("- ").Append(id).Append(" | ").Append(recipe.Description).Append('\n');
+            recipes.Append("\n[PREBUILT RECIPES - whole workflows that already exist, for requests that match one closely]\n");
+            foreach (var (id, recipe) in Recipes)
+            {
+                recipes.Append("- ").Append(id).Append(" | ").Append(recipe.Description).Append('\n');
+            }
+
+            recipes.Append("""
+
+To use a recipe, answer with it alone:
+{"recipeId": "flow-log-audit-alert"}
+
+""");
         }
 
         return $$"""
@@ -239,15 +233,8 @@ You compile an operator's request into a governed plan for SPLAT. You do not wri
 tools, or describe what a tool would find. You choose from what exists and put it in order.
 
 [GOVERNED TEMPLATES - the only things that can run. id | name | category | what it does]
-{{templates}}
-[PREBUILT RECIPES - whole workflows that already exist, for requests that match one closely]
-{{recipes}}
-Answer with one JSON object and nothing else.
-
-To use a recipe:
-{"recipeId": "flow-log-audit-alert"}
-
-Otherwise compile the request into ordered stages:
+{{templates}}{{recipes}}
+Answer with one JSON object and nothing else. Compile the request into ordered stages:
 {
   "workflowId": "flow-short-kebab-case-name",
   "name": "Short title an operator would recognise",
@@ -270,14 +257,14 @@ Rules, all enforced after you answer:
 - continueOnFailure is true only when the request says the plan should carry on past that stage
   failing - "keep going", "continue even if", "don't stop on". It is false by default.
 - directive describes what to report. It never contains a command, a script or a file path.
-- Choose a recipe only when the request is plainly one of them; otherwise compile stages.
+- Choose a recipe only when one is offered above and the request is plainly that recipe.
 """;
     }
 
     private static string Single(string text) =>
         string.Join(" ", text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
-    private static SynthesizedPlan Parse(string rawResponse, string prompt)
+    private static SynthesizedPlan Parse(string rawResponse, string prompt, bool offerRecipes)
     {
         var fenced = JsonFencedBlock.Match(rawResponse);
         string json = fenced.Success ? fenced.Groups[1].Value : rawResponse;
@@ -306,6 +293,13 @@ Rules, all enforced after you answer:
                 recipeProperty.ValueKind == JsonValueKind.String)
             {
                 string recipeId = recipeProperty.GetString()!.Trim();
+                if (!offerRecipes)
+                {
+                    throw new InvalidOperationException(
+                        $"The model answered with the recipe '{recipeId}', which it was not offered. " +
+                        "A project is an ordered list of governed missions; ask for stages.");
+                }
+
                 if (!Recipes.ContainsKey(recipeId))
                 {
                     throw new InvalidOperationException(
