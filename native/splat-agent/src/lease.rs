@@ -175,6 +175,22 @@ pub trait BpfMapSync: Send + Sync {
     fn dropped_events(&self) -> u64 {
         0
     }
+
+    /// How many denials the kernel counted for this cgroup, read from its own map rather than from
+    /// what the daemon managed to forward. `None` when there is no live program to ask: a mock or
+    /// unprivileged daemon contains nothing, so it has no count and must not report zero as though
+    /// it had one.
+    ///
+    /// This is the number a lease's receipt is measured against. Without it, "no VIOLATION frames
+    /// arrived" and "nothing was denied" are the same sentence - and on 2026-09-25 they were. The
+    /// kernel refused a datagram, the frame missed its session, and the run read as clean.
+    fn violations_for(&self, _cgroup_id: u64) -> Option<u64> {
+        None
+    }
+
+    /// Forgets a cgroup's denial count. Called when the lease is revoked, so the map holds only
+    /// live leases and a cgroup id the kernel reuses cannot inherit a number.
+    fn forget_violations(&self, _cgroup_id: u64) {}
 }
 
 #[derive(Clone)]
@@ -288,6 +304,9 @@ impl LeaseManager {
                 if let Err(e) = sync.remove_lease(&removed) {
                     tracing::warn!("Failed to remove BPF capability maps for lease {}: {e}", removed.mission_id);
                 }
+                // After remove_lease, never before: the count is read for the EXIT frame that is
+                // already written by now, and a cgroup id the kernel reuses must not inherit it.
+                sync.forget_violations(cgroup_id);
             }
             Some(removed)
         } else {
@@ -303,6 +322,12 @@ impl LeaseManager {
     /// See [`BpfMapSync::dropped_events`]. Zero when nothing reaches the kernel.
     pub fn dropped_events(&self) -> u64 {
         self.bpf_sync.as_ref().map_or(0, |sync| sync.dropped_events())
+    }
+
+    /// See [`BpfMapSync::violations_for`]. `None` without a live program, which is the honest
+    /// answer for a daemon that is not enforcing: it has denied nothing because it denies nothing.
+    pub fn violations_for(&self, cgroup_id: u64) -> Option<u64> {
+        self.bpf_sync.as_ref().and_then(|sync| sync.violations_for(cgroup_id))
     }
 
     /// Takes the expired leases out of the table WITHOUT touching the kernel.

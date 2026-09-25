@@ -318,10 +318,47 @@ public class WslLeasedExecutor : ILeasedExecutor
                             // Refusals the kernel made but had no room to record while this lease ran.
                             // The VIOLATION events above are then an undercount, and a result that looked
                             // complete would be the kind of evidence this product exists not to produce.
+                            ulong droppedCount = 0;
                             if (root.TryGetProperty("violationsDropped", out var droppedProp)
-                                && droppedProp.TryGetUInt64(out ulong droppedCount) && droppedCount > 0)
+                                && droppedProp.TryGetUInt64(out droppedCount) && droppedCount > 0)
                             {
                                 string note = $"[KERNEL_EVENTS_DROPPED] {droppedCount} kernel refusal record(s) were dropped by a full ring buffer while this lease ran; the refusals themselves still happened, and the violation list above is incomplete.";
+                                stderrBuilder.Note(note);
+                                stderr?.Report(note + "\n");
+                            }
+
+                            // The lease's denial count, from the kernel's own map, beside the number of
+                            // VIOLATION frames that actually reached this process. A daemon that predates
+                            // these fields sends neither and they stay null: unknown, never a confident zero.
+                            ulong? violationsCounted =
+                                root.TryGetProperty("violationsCounted", out var countedProp)
+                                && countedProp.TryGetUInt64(out ulong countedValue) ? countedValue : null;
+                            ulong? violationsReported =
+                                root.TryGetProperty("violationsReported", out var reportedProp)
+                                && reportedProp.TryGetUInt64(out ulong reportedValue) ? reportedValue : null;
+                            bool? violationsComplete =
+                                root.TryGetProperty("violationsComplete", out var completeProp)
+                                && completeProp.ValueKind is JsonValueKind.True or JsonValueKind.False
+                                    ? completeProp.ValueKind == JsonValueKind.True
+                                    : null;
+
+                            if (outcome is not null)
+                            {
+                                outcome = outcome with
+                                {
+                                    ViolationsCounted = violationsCounted,
+                                    ViolationsReported = violationsReported,
+                                    ViolationsComplete = violationsComplete,
+                                    ViolationsDropped = droppedCount,
+                                };
+                            }
+
+                            // Said on the error stream as well as carried in the outcome: a short receipt
+                            // that only a record reader can discover is one the operator watching the
+                            // mission run will not.
+                            if (violationsComplete == false)
+                            {
+                                string note = $"[KERNEL_EVENTS_INCOMPLETE] the kernel counted {(violationsCounted?.ToString() ?? "an unknown number of")} refusal(s) for this lease and {(violationsReported?.ToString() ?? "an unknown number")} reached this host; the violation list above is not the whole of what was refused.";
                                 stderrBuilder.Note(note);
                                 stderr?.Report(note + "\n");
                             }

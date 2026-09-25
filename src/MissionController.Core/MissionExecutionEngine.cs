@@ -438,6 +438,17 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             facts.LimitsReadBack = heldByTheKernel;
         }
 
+        // What the guest kernel refused while this mission ran, and whether the record holds all of
+        // it. Taken from the lease's EXIT frame, which carries the kernel's own count rather than a
+        // tally of the frames that happened to arrive - the difference between evidence of
+        // containment and a sample of it.
+        if (execResult.Lease is { } leaseOutcome)
+        {
+            facts.KernelRefusals = leaseOutcome.ViolationsCounted;
+            facts.KernelRefusalsReported = leaseOutcome.ViolationsReported;
+            facts.KernelRefusalEvidenceComplete = leaseOutcome.ViolationsComplete;
+        }
+
         // 5. Layer 4: credential and DLP sanitization, BEFORE a single byte of tool output is
         // yielded.
         //

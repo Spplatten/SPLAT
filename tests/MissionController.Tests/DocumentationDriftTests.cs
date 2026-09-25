@@ -705,7 +705,12 @@ public class DocumentationDriftTests
             "docs/SPLAT-Field-Guide.published no longer records which artifact version is live. " +
             "Record it with -RecordPublished -Version <n>.");
 
-        var handoff = Regex.Match(record, @"(?m)^handoff\s+(?<line>\S[^\r\n]*)$");
+        // `\s*$`, for the same reason the version check above carries it: git checks this file out
+        // CRLF on Windows, and `$` matches before `\n` but not before `\r`. Without it the assertion
+        // held only in the tree that last wrote the record - where the script's own LF endings
+        // survive - and failed in every fresh checkout, which is the one place a suite has to be
+        // trustworthy. Found on 2026-09-25 in a worktree made minutes earlier.
+        var handoff = Regex.Match(record, @"(?m)^handoff\s+(?<line>\S[^\r\n]*?)\s*$");
         Assert.True(
             handoff.Success && handoff.Groups["line"].Value.Trim().Length >= 20,
             "docs/SPLAT-Field-Guide.published no longer carries a handoff line saying what the live " +

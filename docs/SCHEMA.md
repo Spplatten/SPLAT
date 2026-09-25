@@ -209,15 +209,19 @@ dimension the caller did not declare.
 
 The answer is a stream, in this order: one `LEASE` (daemons since 2026-09-24; earlier ones send
 none), then zero or more `STDOUT`, `STDERR` and `VIOLATION` frames, then exactly one `EXIT`. Every
-`VIOLATION` belonging to the lease precedes `EXIT`; the daemon waits 250 ms after the child exits
-and flushes the ring buffer before it writes `EXIT`.
+`VIOLATION` belonging to the lease precedes `EXIT`, and since 2026-09-25 that is checked rather
+than timed: after the child exits the daemon drains the ring buffer until the number of frames it
+has sent for this cgroup reaches the kernel's own count for it, and only then writes `EXIT`. The
+old form waited a flat 250 ms and hoped, which on a loaded machine lost a datagram denial that the
+kernel had already made. A three-second deadline still bounds the wait, and `violationsComplete`
+says which of the two ended it.
 
 | Frame | Fields | Notes |
 | --- | --- | --- |
 | `LEASE` | `missionId`, `cgroupId`, `cgroupPath`, `enforcing`, `limitsReadBack`, `limits.{maxMemoryBytes,maxCpuPercent,maxPids}`, `jailed`, `readOnlyFs`, `workspace`, `workspaceCreated`, `workloadUid` | What was installed, before the tool's first byte. `enforcing` is a real cgroup under live BPF map handles; `limitsReadBack` says whether `limits` are the controllers' own values (a real cgroup) or the request as lowered (the non-enforcing path, which is not a readback). `workspace` is the working directory the tool runs in, `workspaceCreated` whether this lease made it |
 | `STDOUT` / `STDERR` | `data`: string | At most 64 KiB of text per frame. Not line-aligned: a longer line arrives as several frames, which the bridge concatenates. A multi-byte character is never split across frames |
 | `VIOLATION` | `cgroupId`, `pid`, `hook`, `detail` (u64 holding the record's u32), `detailText`, `comm`, `timestampMs`, `ktimeNs`, `seq` | Only events for **this** lease's cgroup. `timestampMs` is the daemon's clock, milliseconds since the Unix epoch, taken when the event was drained; `ktimeNs` and `seq` are the record's own. Daemons before 2026-09-20 omit all three |
-| `EXIT` | `exitCode`: int; `violationsDropped`: int; `workspaceRemoved`: bool | The child's exit status; `-1` when it died by signal, could not be spawned, or the request was refused. `violationsDropped` is how far the kernel's drop counter moved while this lease ran, across every lease on the host; anything but `0` means the `VIOLATION` frames above are incomplete. `workspaceRemoved` is present only when the lease made its workspace, and says whether it is gone - on a request refused after the workspace was made as well, where it follows the refusal's `STDERR` with no `LEASE` frame before it |
+| `EXIT` | `exitCode`: int; `violationsDropped`: int; `violationsCounted`: int; `violationsReported`: int; `violationsComplete`: bool; `workspaceRemoved`: bool | The child's exit status; `-1` when it died by signal, could not be spawned, or the request was refused. `violationsDropped` is how far the kernel's drop counter moved while this lease ran, across every lease on the host; anything but `0` means the `VIOLATION` frames above are incomplete. `violationsCounted` is what the kernel counted for THIS lease's cgroup, read out of the program's own map after the workload exited; `violationsReported` is how many `VIOLATION` frames this connection was actually sent; `violationsComplete` is true only when every counted refusal was reported and nothing was dropped. All three are absent from a daemon with no live program - it refused nothing because it refuses nothing, and a confident zero there would be the same lie in reverse. `workspaceRemoved` is present only when the lease made its workspace, and says whether it is gone - on a request refused after the workspace was made as well, where it follows the refusal's `STDERR` with no `LEASE` frame before it |
 
 A refused request (policy the daemon cannot enforce, an undeclared dimension, a command outside its
 own lease, a cgroup or map that could not be provisioned) is answered with a `STDERR` frame whose
@@ -273,7 +277,11 @@ by [`WslLeasedExecutor`](../src/MissionController.Infrastructure.Linux/WslLeased
 (`Exec = 1`, `Open = 2`, `Connect = 3`, `SendDatagram = 4`, `Unspecified = 0`), `TimestampUtc` is `timestampMs`
 when the daemon sent one, else the host's clock at receipt, and `Sequence` and `KernelTimeNs` are
 `seq` and `ktimeNs`, `0` from a daemon that predates them. A non-zero `violationsDropped` in
-`EXIT` is written into `StandardError` as a `[KERNEL_EVENTS_DROPPED]` line.
+`EXIT` is written into `StandardError` as a `[KERNEL_EVENTS_DROPPED]` line, and a `violationsComplete`
+of `false` as a `[KERNEL_EVENTS_INCOMPLETE]` one. `LeaseOutcome` carries all four numbers, and the
+mission's run record carries them as `KernelRefusals`, `KernelRefusalsReported` and
+`KernelRefusalEvidenceComplete`: a record that lists two refusals and cannot say whether there was a
+third is a sample of the containment, not evidence of it.
 
 `ProcessExecutionResult` after a lease:
 

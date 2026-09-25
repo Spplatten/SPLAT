@@ -685,6 +685,82 @@ public class WslLeasedExecutorWireTests
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1758300000000).UtcDateTime, violation.TimestampUtc);
     }
 
+    /// <summary>
+    /// A lease's receipt says whether it is the whole of what the kernel refused.
+    ///
+    /// The count comes from the kernel's own per-cgroup map rather than from the frames that
+    /// arrived, and EXIT carries both so they can be compared. Before this the bridge could only
+    /// report what it received, so a refusal whose frame was lost and a lease that was never denied
+    /// anything produced the same result - which is what the root probe of 2026-09-25 hit: it scored
+    /// its UDP check false while that same run's violation list held `socket_sendmsg: denied
+    /// outbound datagram to unapproved IPv4 1.1.1.1`. The wall held; the receipt did not say so.
+    ///
+    /// Asserted in both directions, because a field that is only ever true proves nothing.
+    /// </summary>
+    [Theory]
+    [InlineData(2, 2, true, false)]
+    [InlineData(2, 1, false, true)]
+    public async Task TheLeaseSays_WhetherItsRefusalListIsTheWholeOfWhatTheKernelRefused(
+        int counted, int reported, bool complete, bool expectTheNote)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var daemon = RunStandInDaemonAsync(
+            listener,
+            "{\"type\":\"LEASE\",\"cgroupId\":4021,\"enforcing\":true,\"workloadUid\":65534}",
+            "{\"type\":\"EXIT\",\"exitCode\":0,\"violationsDropped\":0," +
+            $"\"violationsCounted\":{counted},\"violationsReported\":{reported}," +
+            $"\"violationsComplete\":{(complete ? "true" : "false")}}}");
+
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
+        var result = await executor.ExecuteLeasedAsync(
+            SampleLease(), "/bin/sh", new[] { "-c", "ls" });
+
+        await daemon;
+        listener.Stop();
+
+        Assert.NotNull(result.Lease);
+        Assert.Equal((ulong)counted, result.Lease!.ViolationsCounted);
+        Assert.Equal((ulong)reported, result.Lease!.ViolationsReported);
+        Assert.Equal(complete, result.Lease!.ViolationsComplete);
+
+        // The operator watching the run is told too, not only a record reader afterwards.
+        Assert.Equal(
+            expectTheNote,
+            result.StandardError.Contains("[KERNEL_EVENTS_INCOMPLETE]", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A daemon that predates the count sends neither field, and the outcome reports unknown rather
+    /// than a confident zero - which would be the same defect wearing the other mask.
+    /// </summary>
+    [Fact]
+    public async Task ADaemonThatCannotCountRefusals_ReportsUnknown_NotNoneRefused()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var daemon = RunStandInDaemonAsync(
+            listener,
+            "{\"type\":\"LEASE\",\"cgroupId\":4022,\"enforcing\":true,\"workloadUid\":65534}",
+            "{\"type\":\"EXIT\",\"exitCode\":0,\"violationsDropped\":0}");
+
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
+        var result = await executor.ExecuteLeasedAsync(
+            SampleLease(), "/bin/sh", new[] { "-c", "ls" });
+
+        await daemon;
+        listener.Stop();
+
+        Assert.NotNull(result.Lease);
+        Assert.Null(result.Lease!.ViolationsCounted);
+        Assert.Null(result.Lease!.ViolationsComplete);
+        Assert.DoesNotContain("[KERNEL_EVENTS_INCOMPLETE]", result.StandardError, StringComparison.Ordinal);
+    }
+
     /// <summary>Counts what a streaming consumer received, on whatever thread it arrived.</summary>
     private sealed class CountingProgress : IProgress<string>
     {

@@ -44,6 +44,20 @@ public sealed class MissionRunFacts
     public List<string> AppliedControls { get; set; } = new();
     public string Admission { get; set; } = "Admitted";
 
+    // What the kernel refused during this mission, and whether the record holds all of it.
+    //
+    // KernelRefusals is the guest kernel's own count for this lease's cgroup; KernelRefusalsReported
+    // is how many of those reached this host as VIOLATION frames. Null on Windows, and on a daemon
+    // that predates the count: unknown, never a confident zero.
+    //
+    // KernelRefusalEvidenceComplete is the one a reader should look at. A record that lists two
+    // refusals and cannot say whether there was a third is not evidence of containment, it is a
+    // sample of it - and until 2026-09-25 every record of a leased mission was the second kind
+    // without saying so.
+    public ulong? KernelRefusals { get; set; }
+    public ulong? KernelRefusalsReported { get; set; }
+    public bool? KernelRefusalEvidenceComplete { get; set; }
+
     // Outcome.
     public string ExecutionState { get; set; } = "Faulted";
     public int? ExitCode { get; set; }
@@ -111,7 +125,13 @@ public record EnforcementStateEvidence(
     IReadOnlyList<string>? AttachedControls,
     string? CgroupOrJobId,
     JobLimitsReadback? EffectiveLimitsReadback,
-    string AdmissionVerdict);
+    string AdmissionVerdict,
+    // See MissionRunFacts: the kernel's own count of what it refused for this lease, how much of it
+    // reached the host, and whether this record is therefore the whole of it. Null on Windows and on
+    // a daemon that predates the fields.
+    ulong? KernelRefusals = null,
+    ulong? KernelRefusalsReported = null,
+    bool? KernelRefusalEvidenceComplete = null);
 
 /// <summary>
 /// Group 4: Outcome

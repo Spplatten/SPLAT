@@ -145,6 +145,25 @@ struct {
     __uint(max_entries, 1 << 20);
 } violations SEC(".maps");
 
+// cgroup id -> how many denials this lease has caused. The ring buffer is how a denial is
+// DESCRIBED; this is how many there were, and the two are not the same number once a record is
+// dropped or a frame arrives after the caller has stopped reading.
+//
+// Without it the daemon could only report what it managed to forward, so a lease whose evidence was
+// incomplete looked exactly like a lease that was never denied anything. On 2026-09-25 the root
+// probe scored `udp_outside_the_lease_blocked` false while that same run's violation list held the
+// denial: the kernel refused the datagram and the frame did not reach the session. The wall held
+// and the receipt did not, which for this product is the worse half to get wrong.
+//
+// Keyed by cgroup because that is what the hooks have in hand. The daemon deletes the entry when it
+// revokes the lease, so this map holds live leases only and cannot outgrow leased_cgroups.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 256);
+    __type(key, __u64);
+    __type(value, __u64);
+} violation_counts SEC(".maps");
+
 static __always_inline __u8 is_leased(__u64 cgid)
 {
     return bpf_map_lookup_elem(&leased_cgroups, &cgid) != NULL;
@@ -163,6 +182,24 @@ static __always_inline void report(__u64 cgid, __u32 hook, __u32 detail)
     // is visible to a consumer. Two CPUs may deliver neighbouring numbers out of order; a number
     // that never arrives at all was dropped, and `dropped` says how many.
     __u64 seq = __sync_fetch_and_add(next_seq, 1);
+
+    // Counted before the reservation too, and for this cgroup alone. This is the number the lease's
+    // receipt is checked against: a caller that received fewer frames than this was told less than
+    // the kernel did, and the EXIT frame says so rather than leaving the gap invisible.
+    __u64 *seen = bpf_map_lookup_elem(&violation_counts, &cgid);
+    if (seen) {
+        __sync_fetch_and_add(seen, 1);
+    } else {
+        __u64 one = 1;
+        // BPF_NOEXIST: two CPUs denying the first action of the same lease at once must not each
+        // install a 1 and lose the other's. The loser's update fails and its denial is added below.
+        if (bpf_map_update_elem(&violation_counts, &cgid, &one, BPF_NOEXIST) != 0) {
+            seen = bpf_map_lookup_elem(&violation_counts, &cgid);
+            if (seen) {
+                __sync_fetch_and_add(seen, 1);
+            }
+        }
+    }
 
     struct violation_event *e = bpf_ringbuf_reserve(&violations, sizeof(*e), 0);
     if (!e) {

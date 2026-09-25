@@ -641,6 +641,21 @@ workspace_removed_on_refusal = (
 # score the refusal True and prove only that nothing works.
 udp_blocked = had(udp_bad, "VIOLATION") and "SENT" not in text(udp_bad)
 udp_allowed = "SENT" in text(udp_ok) and not had(udp_ok, "VIOLATION")
+
+# The receipt, not the wall. A lease's EXIT carries the kernel's own count for its cgroup, how
+# many VIOLATION frames the caller was sent, and whether those agree. This exists because on
+# 2026-09-25 udp_blocked scored false while the run's violation list held the denial: the kernel
+# refused the datagram and the frame missed its session, and nothing in the result said so. A
+# short receipt that announces itself is recoverable; a silent one is not.
+def exit_frame(msgs):
+    return next((m for m in (msgs or []) if m.get("type") == "EXIT"), {})
+
+udp_bad_exit = exit_frame(udp_bad)
+refusal_receipt_counted = udp_bad_exit.get("violationsCounted", 0) >= 1
+refusal_receipt_complete = udp_bad_exit.get("violationsComplete") is True
+# The permitted half refused nothing, and its receipt must say zero rather than stay silent:
+# a field that only ever appears after a denial cannot be read as "nothing was denied".
+clean_receipt_counted_zero = exit_frame(udp_ok).get("violationsCounted") == 0
 print()
 print(f"  UDP outside the lease refused  : {udp_blocked}")
 print(f"  UDP inside the lease permitted : {udp_allowed}  (the control)")
@@ -723,6 +738,10 @@ evidence = {
         # judges it against the same allow-list.
         "udp_outside_the_lease_blocked": udp_blocked,
         "udp_inside_the_lease_allowed": udp_allowed,
+        # The lease says what the kernel counted for it, and whether the caller heard all of it.
+        "refusal_receipt_counts_the_denial": refusal_receipt_counted,
+        "refusal_receipt_says_it_is_complete": refusal_receipt_complete,
+        "a_clean_lease_reports_zero_refusals": clean_receipt_counted_zero,
         # P2: the workload's root is its own mount namespace, not the host's tree minus a deny-list.
         "jail_control_host_has_home_and_mnt": host_has_the_dirs,
         "jail_hides_home_and_mnt": jail_hides_host,
@@ -773,6 +792,9 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["daemon_frames_proven"]
     and evidence["results"]["udp_outside_the_lease_blocked"]
     and evidence["results"]["udp_inside_the_lease_allowed"]
+    and evidence["results"]["refusal_receipt_counts_the_denial"]
+    and evidence["results"]["refusal_receipt_says_it_is_complete"]
+    and evidence["results"]["a_clean_lease_reports_zero_refusals"]
     # The jail, with its control: hidden directories only count when the host has them to hide.
     and evidence["results"]["jail_control_host_has_home_and_mnt"]
     and evidence["results"]["jail_hides_home_and_mnt"]

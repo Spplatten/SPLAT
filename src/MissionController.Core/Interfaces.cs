@@ -481,7 +481,22 @@ public record LeaseOutcome(
     uint? WorkloadUid,
     // False when the daemon refused after making the workspace and before installing anything: the
     // outcome then carries only what became of the directory, and no control may be claimed from it.
-    bool Installed = true);
+    bool Installed = true,
+    // What the kernel refused during this lease, and whether the caller heard all of it.
+    //
+    // ViolationsCounted is the kernel's own tally for this cgroup, read out of a BPF map after the
+    // workload exited; ViolationsReported is how many VIOLATION frames actually arrived here. Null
+    // on a daemon with no live program, or one that predates the fields - unknown, not zero.
+    //
+    // ViolationsComplete is the field that matters to a record. Until 2026-09-25 a lease could only
+    // report the refusals it managed to deliver, so "the kernel refused nothing" and "a refusal did
+    // not reach us" were the same result. A root probe that day scored its UDP check false while
+    // the run's own violation list held the denial: the wall held, the receipt did not. A receipt
+    // that cannot say whether it is complete is not evidence, and this is the field that says.
+    ulong? ViolationsCounted = null,
+    ulong? ViolationsReported = null,
+    bool? ViolationsComplete = null,
+    ulong ViolationsDropped = 0);
 
 /// <summary>
 /// Executes a tool command inside a hardware-isolated WSL2 guest VM under an in-kernel BPF-LSM capability lease.

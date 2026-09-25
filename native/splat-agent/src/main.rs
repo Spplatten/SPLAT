@@ -3,6 +3,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -217,6 +218,9 @@ struct LiveBpfSync {
     allowed_connect_ipv4: MapHandle,
     /// The program's two counters: the next sequence number, and the denials it could not record.
     counters: MapHandle,
+    /// cgroup id -> denials the kernel counted for that lease. What an EXIT frame's claim of a
+    /// complete receipt is measured against.
+    violation_counts: MapHandle,
 }
 
 /// Index of the dropped-denials word in the `counters` map; mirrors `COUNTER_DROPPED` in the program.
@@ -285,6 +289,30 @@ impl BpfMapSync for LiveBpfSync {
             }
         }
     }
+
+    fn violations_for(&self, cgroup_id: u64) -> Option<u64> {
+        // A missing key is a lease the kernel has denied nothing to: zero, not unknown. A read that
+        // FAILS is unknown, and says so by returning None - the EXIT frame then reports that it
+        // could not check its own completeness rather than asserting it.
+        match self.violation_counts.lookup(&cgroup_id.to_ne_bytes(), MapFlags::ANY) {
+            Ok(Some(word)) if word.len() >= 8 => {
+                Some(u64::from_ne_bytes(word[..8].try_into().unwrap_or([0; 8])))
+            }
+            Ok(Some(_)) => None,
+            Ok(None) => Some(0),
+            Err(e) => {
+                warn!("Could not read the denial count for cgroup {cgroup_id}: {e}");
+                None
+            }
+        }
+    }
+
+    fn forget_violations(&self, cgroup_id: u64) {
+        // Best-effort, like every other teardown here: a key already gone is the end state wanted,
+        // and a revoke must not abort partway. Left behind, it would be inherited by whatever the
+        // kernel next gives that cgroup id.
+        let _ = self.violation_counts.delete(&cgroup_id.to_ne_bytes());
+    }
 }
 
 #[tokio::main]
@@ -352,14 +380,23 @@ async fn main() -> Result<()> {
                             MapHandle::try_from(&skel.maps.allowed_exec_inodes),
                             MapHandle::try_from(&skel.maps.allowed_connect_ipv4),
                             MapHandle::try_from(&skel.maps.counters),
+                            MapHandle::try_from(&skel.maps.violation_counts),
                         ) {
-                            (Ok(leased_cgroups), Ok(protected_inodes), Ok(allowed_exec_inodes), Ok(allowed_connect_ipv4), Ok(counters)) => {
+                            (
+                                Ok(leased_cgroups),
+                                Ok(protected_inodes),
+                                Ok(allowed_exec_inodes),
+                                Ok(allowed_connect_ipv4),
+                                Ok(counters),
+                                Ok(violation_counts),
+                            ) => {
                                 bpf_sync = Some(Arc::new(LiveBpfSync {
                                     leased_cgroups,
                                     protected_inodes,
                                     allowed_exec_inodes,
                                     allowed_connect_ipv4,
                                     counters,
+                                    violation_counts,
                                 }));
                                 info!("Lease maps bound; kernel enforcement is live.");
                             }
@@ -1511,29 +1548,59 @@ async fn handle_client(
                 // until the client gave up. Requests that produced no output looked like silence.
                 let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
                 let tx_viol = tx.clone();
+                // What the caller was actually told, counted as it is told. The EXIT frame compares
+                // this with the kernel's own tally for the same cgroup, so a receipt that is short
+                // says so instead of reading as a lease that was never denied anything.
+                let forwarded = Arc::new(AtomicU64::new(0));
+                let forwarded_in_task = forwarded.clone();
+                let lease_mgr_for_drain = lease_mgr.clone();
                 tokio::spawn(async move {
                     loop {
                         tokio::select! {
                             _ = &mut done_rx => {
-                                // The ringbuf is polled on a ~100ms tick, so a denial that killed
-                                // the child can still be in flight as it exits. Wait briefly, then
-                                // flush whatever queued, so the last violation is not lost.
-                                tokio::time::sleep(Duration::from_millis(250)).await;
+                                // The ringbuf is polled on a ~100ms tick, so a denial that killed the
+                                // child can still be in flight as it exits.
+                                //
+                                // This used to be a flat 250ms sleep and one drain, which is a guess
+                                // about someone else's scheduler: on 2026-09-25, on a machine also
+                                // running a cargo build, the guess lost and a datagram the kernel had
+                                // refused never reached its session. Now the wait has an answer to
+                                // wait FOR - the kernel's count for this cgroup - and ends the moment
+                                // the caller has been told that many. The deadline is the fallback,
+                                // not the mechanism, and a daemon with no live program (no count to
+                                // ask for) keeps the old behaviour of draining what is there.
+                                let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
                                 loop {
-                                    match viol_rx.try_recv() {
-                                        Ok(v) if v.cgroup_id == target_cgid => {
-                                            let _ = tx_viol.send(violation_frame(&v)).await;
+                                    loop {
+                                        match viol_rx.try_recv() {
+                                            Ok(v) if v.cgroup_id == target_cgid => {
+                                                forwarded_in_task.fetch_add(1, Ordering::Relaxed);
+                                                let _ = tx_viol.send(violation_frame(&v)).await;
+                                            }
+                                            Ok(_) => {}
+                                            Err(broadcast::error::TryRecvError::Lagged(_)) => {}
+                                            Err(_) => break,
                                         }
-                                        Ok(_) => {}
-                                        Err(broadcast::error::TryRecvError::Lagged(_)) => {}
-                                        Err(_) => break,
                                     }
+
+                                    let told = forwarded_in_task.load(Ordering::Relaxed);
+                                    match lease_mgr_for_drain.violations_for(target_cgid) {
+                                        Some(counted) if told >= counted => break,
+                                        None => break,
+                                        _ => {}
+                                    }
+
+                                    if tokio::time::Instant::now() >= deadline {
+                                        break;
+                                    }
+                                    tokio::time::sleep(Duration::from_millis(20)).await;
                                 }
                                 break;
                             }
                             recv = viol_rx.recv() => match recv {
                                 Ok(v) => {
                                     if v.cgroup_id == target_cgid {
+                                        forwarded_in_task.fetch_add(1, Ordering::Relaxed);
                                         let _ = tx_viol.send(violation_frame(&v)).await;
                                     }
                                 }
@@ -1624,14 +1691,44 @@ async fn handle_client(
                     false
                 };
 
+                // The lease's own denial count, read from the kernel after the forwarder has
+                // finished, and the number of frames the caller was actually sent. Read in this
+                // order so `counted` can never be lower than `reported` through timing alone.
+                let violations_reported = forwarded.load(Ordering::Relaxed);
+                let violations_counted = lease_mgr.violations_for(target_cgid);
+                let violations_dropped = lease_mgr.dropped_events().saturating_sub(dropped_before);
+
                 let mut exit_chunk = serde_json::json!({
                     "type": "EXIT",
                     "exitCode": exit_code,
                     // Denials the kernel refused but could not record while this lease ran, across
                     // every lease on the host. Zero is the normal case; anything else means the
                     // VIOLATION frames above are incomplete, which the caller must be told.
-                    "violationsDropped": lease_mgr.dropped_events().saturating_sub(dropped_before)
+                    "violationsDropped": violations_dropped,
+                    // How many VIOLATION frames this lease was sent.
+                    "violationsReported": violations_reported
                 });
+
+                // What the kernel counted for this cgroup, and whether the caller was told all of
+                // it. Absent on a daemon with no live program: it denied nothing because it denies
+                // nothing, and reporting a confident zero there would be the same lie in reverse.
+                //
+                // `violationsComplete` is the field a run record should carry. A receipt that says
+                // "two denials, and that is all of them" is evidence; one that says "two denials"
+                // and cannot say whether there was a third is not, and until now every receipt was
+                // the second kind without admitting it.
+                if let Some(counted) = violations_counted {
+                    exit_chunk["violationsCounted"] = serde_json::Value::from(counted);
+                    let complete = violations_reported >= counted && violations_dropped == 0;
+                    exit_chunk["violationsComplete"] = serde_json::Value::Bool(complete);
+                    if !complete {
+                        warn!(
+                            "Mission {mission_id}: the kernel counted {counted} denial(s) for cgroup \
+                             {target_cgid}, {violations_reported} reached the caller, and {violations_dropped} \
+                             were dropped by the ring buffer. The receipt for this lease is incomplete and says so."
+                        );
+                    }
+                }
                 if workspace_created {
                     exit_chunk["workspaceRemoved"] = serde_json::Value::Bool(workspace_removed);
                 }

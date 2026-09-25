@@ -112,7 +112,10 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
             AttachedControls: facts.AppliedControls.Count == 0 ? null : facts.AppliedControls,
             CgroupOrJobId: facts.JobName,
             EffectiveLimitsReadback: facts.LimitsReadBack,
-            AdmissionVerdict: facts.Admission);
+            AdmissionVerdict: facts.Admission,
+            KernelRefusals: facts.KernelRefusals,
+            KernelRefusalsReported: facts.KernelRefusalsReported,
+            KernelRefusalEvidenceComplete: facts.KernelRefusalEvidenceComplete);
 
         var outcome = new OutcomeEvidence(
             ExecutionState: facts.ExecutionState,
