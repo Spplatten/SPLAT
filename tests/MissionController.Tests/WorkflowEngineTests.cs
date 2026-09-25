@@ -13,6 +13,7 @@ using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 using MissionController.Core.Workflow;
 using MissionController.Infrastructure.Data;
+using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Data.Vector;
 using MissionController.Infrastructure.Network.Dlp;
 using MissionController.Infrastructure.Network.Triggers;
@@ -282,7 +283,11 @@ public class WorkflowEngineTests
     [Fact]
     public async Task WorkflowSynthesizer_CompilesTikTokOAuthRequest()
     {
-        var synthesizer = new WorkflowSynthesizerEngine();
+        // The model chooses the recipe by reading the request against its description; before
+        // 2026-09-25 this was `prompt.Contains("tiktok")` and the model client was never called.
+        var synthesizer = new WorkflowSynthesizerEngine(
+            ScriptedPlanner.ChoosingRecipe("flow-tiktok-oauth-ads"),
+            GovernedTemplateCatalog.All);
         var graph = await synthesizer.SynthesizeFromNaturalLanguageAsync("Set up a TikTok OAuth callback receiver and analyze ad video campaigns");
 
         Assert.NotNull(graph);
@@ -304,7 +309,9 @@ public class WorkflowEngineTests
     [Fact]
     public async Task WorkflowSynthesizer_CompilesLogScrapingRequest()
     {
-        var synthesizer = new WorkflowSynthesizerEngine();
+        var synthesizer = new WorkflowSynthesizerEngine(
+            ScriptedPlanner.ChoosingRecipe("flow-log-audit-alert"),
+            GovernedTemplateCatalog.All);
         var graph = await synthesizer.SynthesizeFromNaturalLanguageAsync("Scrape system logs for error spikes and alert SecOps");
 
         Assert.NotNull(graph);
@@ -319,7 +326,9 @@ public class WorkflowEngineTests
     [Fact]
     public async Task WorkflowSynthesizer_CompilesEmailParserRequest()
     {
-        var synthesizer = new WorkflowSynthesizerEngine();
+        var synthesizer = new WorkflowSynthesizerEngine(
+            ScriptedPlanner.ChoosingRecipe("flow-email-governed-parser"),
+            GovernedTemplateCatalog.All);
         var graph = await synthesizer.SynthesizeFromNaturalLanguageAsync("Ingest email invoice and parse total amount");
 
         Assert.NotNull(graph);
@@ -584,21 +593,27 @@ public class WorkflowEngineTests
     [Fact]
     public async Task WorkflowSynthesizer_CompilesAdvancedAgentAndMemoryPrompts()
     {
-        var synthesizer = new WorkflowSynthesizerEngine();
+        var catalogue = GovernedTemplateCatalog.All;
 
         // A. Autonomous ReAct Agent prompt
-        var reactGraph = await synthesizer.SynthesizeFromNaturalLanguageAsync("Run an autonomous agent to investigate network latency with react tools");
+        var reactGraph = await new WorkflowSynthesizerEngine(
+                ScriptedPlanner.ChoosingRecipe("flow-react-autonomous-investigation"), catalogue)
+            .SynthesizeFromNaturalLanguageAsync("Run an autonomous agent to investigate network latency with react tools");
         Assert.Equal("flow-react-autonomous-investigation", reactGraph.WorkflowId);
         Assert.Contains(reactGraph.Nodes, n => n.NodeType == WorkflowNodeType.ReActAgent);
 
         // B. Memory Correlation prompt
-        var memoryGraph = await synthesizer.SynthesizeFromNaturalLanguageAsync("Recall memory of past incidents and store new correlation knowledge");
+        var memoryGraph = await new WorkflowSynthesizerEngine(
+                ScriptedPlanner.ChoosingRecipe("flow-semantic-memory-correlation"), catalogue)
+            .SynthesizeFromNaturalLanguageAsync("Recall memory of past incidents and store new correlation knowledge");
         Assert.Equal("flow-semantic-memory-correlation", memoryGraph.WorkflowId);
         Assert.Contains(memoryGraph.Nodes, n => n.NodeType == WorkflowNodeType.MemoryRecall);
         Assert.Contains(memoryGraph.Nodes, n => n.NodeType == WorkflowNodeType.MemoryStore);
 
         // C. Transactional safe update prompt
-        var txGraph = await synthesizer.SynthesizeFromNaturalLanguageAsync("Perform safe update with transactional rollback if failed");
+        var txGraph = await new WorkflowSynthesizerEngine(
+                ScriptedPlanner.ChoosingRecipe("flow-transactional-safe-update"), catalogue)
+            .SynthesizeFromNaturalLanguageAsync("Perform safe update with transactional rollback if failed");
         Assert.Equal("flow-transactional-safe-update", txGraph.WorkflowId);
         Assert.Contains(txGraph.Nodes, n => n.NodeType == WorkflowNodeType.TransactionalScope);
     }

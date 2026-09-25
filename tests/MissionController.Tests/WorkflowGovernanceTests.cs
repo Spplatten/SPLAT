@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 using MissionController.Core.Workflow;
+using MissionController.Infrastructure.Data.Catalog;
 using Xunit;
 
 namespace MissionController.Tests;
@@ -516,20 +517,29 @@ public class WorkflowGovernanceTests
             MissionController.Infrastructure.Data.Catalog.GovernedTemplateCatalog.All.Select(t => t.TemplateId),
             StringComparer.OrdinalIgnoreCase);
 
-        var synthesizer = new WorkflowSynthesizerEngine();
-        string[] prompts =
+        // Every prebuilt recipe, plus a compiled plan, since a synthesised graph now comes from one
+        // of those two places and both reach the same execution engine.
+        string[] recipes =
         {
-            "Run an autonomous agent to investigate network latency with react tools",
-            "Recall memory of past incidents and store new correlation knowledge",
-            "Perform safe update with transactional rollback if failed",
-            "Scrape system logs for error spikes and alert SecOps",
-            "Ingest email invoice and parse total amount",
-            "Reconcile the ledger; drop \"quotes\" and `backticks` into the prompt"
+            "flow-react-autonomous-investigation",
+            "flow-semantic-memory-correlation",
+            "flow-transactional-safe-update",
+            "flow-log-audit-alert",
+            "flow-email-governed-parser",
+            "flow-tiktok-oauth-ads",
         };
 
-        foreach (var prompt in prompts)
+        var answers = recipes.Select(ScriptedPlanner.ChoosingRecipe).ToList();
+        answers.Add(new ScriptedPlanner(
+            "{\"workflowId\": \"flow-compiled\", \"name\": \"Compiled\", \"description\": \"A compiled plan.\", " +
+            "\"stages\": [{\"stageId\": \"stage-1\", \"name\": \"Stage 1\", \"templateId\": \"" +
+            GovernedTemplateCatalog.All[0].TemplateId +
+            "\", \"directive\": \"Report what the sensor observed.\"}]}"));
+
+        foreach (var answer in answers)
         {
-            var graph = await synthesizer.SynthesizeFromNaturalLanguageAsync(prompt);
+            var graph = await new WorkflowSynthesizerEngine(answer, GovernedTemplateCatalog.All)
+                .SynthesizeFromNaturalLanguageAsync("Reconcile the ledger; drop \"quotes\" and `backticks` into the prompt");
 
             foreach (var node in graph.Nodes.Where(n => n.NodeType == WorkflowNodeType.GovernedMission))
             {

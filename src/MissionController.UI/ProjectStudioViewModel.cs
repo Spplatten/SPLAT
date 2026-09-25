@@ -38,6 +38,7 @@ public partial class ProjectStudioViewModel : ObservableObject
 {
     private readonly ITemplateRegistry _templateRegistry;
     private readonly IProjectTemplateRegistry _projectRegistry;
+    private readonly IModelStreamClient? _modelClient;
 
     [ObservableProperty]
     private ObservableCollection<SingleToolTemplate> _agentTemplates = new();
@@ -104,10 +105,12 @@ public partial class ProjectStudioViewModel : ObservableObject
 
     public ProjectStudioViewModel(
         ITemplateRegistry templateRegistry,
-        IProjectTemplateRegistry projectRegistry)
+        IProjectTemplateRegistry projectRegistry,
+        IModelStreamClient? modelClient = null)
     {
         _templateRegistry = templateRegistry;
         _projectRegistry = projectRegistry;
+        _modelClient = modelClient;
     }
 
     partial void OnSelectedProjectChanged(ProjectTemplate? value)
@@ -152,52 +155,51 @@ public partial class ProjectStudioViewModel : ObservableObject
         }
 
         IsSynthesizing = true;
-        StatusMessage = "Synthesizing governed workflow with AI & vetted primitives...";
+        StatusMessage = "Compiling your request into governed stages...";
         try
         {
-            var synthesizer = new MissionController.Core.Workflow.WorkflowSynthesizerEngine();
-            var graph = await synthesizer.SynthesizeFromNaturalLanguageAsync(NaturalLanguagePrompt);
+            // The catalogue this page already loaded is the grounding context: the compiler may only
+            // name templates the operator can actually see in the picker beside it. It is handed the
+            // model client too - until 2026-09-25 the synthesiser took one and never called it, and
+            // matched keywords instead, so a request it did not recognise produced a plan about
+            // something else entirely and said "Successfully synthesized".
+            var synthesizer = new MissionController.Core.Workflow.WorkflowSynthesizerEngine(
+                _modelClient, AgentTemplates.ToList());
+            var project = await synthesizer.SynthesizeProjectAsync(NaturalLanguagePrompt);
 
-            ProjectId = $"project-custom-{graph.WorkflowId.Replace("flow-", "")}";
-            ProjectName = graph.Name;
-            ProjectDescription = graph.Description;
-            ProjectCategory = "Synthesized Workflows";
-            WebhookUrl = $"http://127.0.0.1:5678/webhook/{graph.WorkflowId}";
+            ProjectId = project.ProjectId;
+            ProjectName = project.Name;
+            ProjectDescription = project.Description;
+            ProjectCategory = project.Category;
+            WebhookUrl = $"http://127.0.0.1:5678/webhook/{project.ProjectId}";
 
             DraftStages.Clear();
-            int stageNum = 1;
-            foreach (var node in graph.Nodes.Where(n => n.NodeType != MissionController.Core.Workflow.WorkflowNodeType.Trigger))
+            foreach (var stage in project.Stages)
             {
-                var matchingTemplate = AgentTemplates.FirstOrDefault(t =>
-                    t.TargetModel.Contains("claude", StringComparison.OrdinalIgnoreCase)) ?? AgentTemplates.FirstOrDefault();
-
-                if (matchingTemplate != null)
+                // The compiler refuses a plan naming a template the catalogue lacks, so this lookup
+                // succeeds - but the draft is what the operator then runs, and a null here would put
+                // a stage on screen with no agent behind it.
+                var template = AgentTemplates.FirstOrDefault(t =>
+                    string.Equals(t.TemplateId, stage.TemplateId, StringComparison.OrdinalIgnoreCase));
+                if (template is null)
                 {
-                    string directive = node.NodeType switch
-                    {
-                        MissionController.Core.Workflow.WorkflowNodeType.OAuthExchange => $"[OAuth Exchange] Intercept and securely deposit token for {node.Configuration.GetValueOrDefault("Provider", "Provider")} into Windows DPAPI vault.",
-                        MissionController.Core.Workflow.WorkflowNodeType.SandboxedScript => $"[Sandboxed Script ({node.Configuration.GetValueOrDefault("Runtime", "PowerShell")})] {node.ScriptCommand}",
-                        MissionController.Core.Workflow.WorkflowNodeType.Condition => $"[Condition Gate] Evaluate trigger data for: {node.Configuration.GetValueOrDefault("Matches", "Pattern")}",
-                        MissionController.Core.Workflow.WorkflowNodeType.ReActAgent => $"[Governed ReAct Agent] Goal: {node.Configuration.GetValueOrDefault("Goal", "Investigate")} | Tools: {node.Configuration.GetValueOrDefault("AllowedTools", "DiagnosticSuite")} | MaxSteps: {node.Configuration.GetValueOrDefault("MaxSteps", "4")}",
-                        MissionController.Core.Workflow.WorkflowNodeType.MemoryRecall => $"[Semantic Memory Recall] Query: {node.Configuration.GetValueOrDefault("Query", "HistoricalIncidents")} | TopK: {node.Configuration.GetValueOrDefault("TopK", "3")}",
-                        MissionController.Core.Workflow.WorkflowNodeType.MemoryStore => $"[Semantic Memory Store] Key: {node.Configuration.GetValueOrDefault("Key", "KnowledgeEntry")}",
-                        MissionController.Core.Workflow.WorkflowNodeType.TransactionalScope => $"[Transactional Scope] Assertion: '{node.Configuration.GetValueOrDefault("Assertion", "SUCCESS")}' with automated rollback fallback.",
-                        _ => node.Configuration.GetValueOrDefault("Prompt", $"Execute governed {node.Name} task.")
-                    };
-
-                    DraftStages.Add(new ProjectStageDraftItem(
-                        $"stage-{stageNum}",
-                        $"Stage {stageNum}: {node.Name}",
-                        matchingTemplate,
-                        directive));
-                    stageNum++;
+                    throw new InvalidOperationException(
+                        $"Stage '{stage.StageId}' names template '{stage.TemplateId}', which this page has not loaded.");
                 }
+
+                DraftStages.Add(new ProjectStageDraftItem(stage.StageId, stage.Name, template, stage.Directive)
+                {
+                    ContinueOnFailure = stage.ContinueOnFailure,
+                });
             }
 
             SelectedStage = DraftStages.LastOrDefault();
-            DeliverablesText = $"1. Complete sandboxed execution of {graph.Name}\n2. Notarize execution in SHA-256 chained audit ledger";
-            SynthesizedWorkflowSummary = $"{graph.Name} ({graph.Nodes.Count} nodes, trigger: {graph.Trigger.Type})";
-            StatusMessage = $"Successfully synthesized governed workflow '{graph.Name}' ({graph.Nodes.Count} nodes).";
+            DeliverablesText = string.Join(Environment.NewLine, project.Deliverables);
+            int carryOn = project.Stages.Count(stage => stage.ContinueOnFailure);
+            SynthesizedWorkflowSummary = carryOn == 0
+                ? $"{project.Name} ({project.Stages.Count} stages)"
+                : $"{project.Name} ({project.Stages.Count} stages, {carryOn} set to continue on failure)";
+            StatusMessage = $"Compiled '{project.Name}' into {project.Stages.Count} governed stages. Review each directive before saving.";
         }
         catch (Exception ex)
         {

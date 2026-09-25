@@ -159,6 +159,15 @@ look.
   its own job object. `SandboxedScript` is refused. Simulated execution happens only when a caller
   asks for it by name. [`WorkflowSynthesizerEngine`](../src/MissionController.Core/Workflow/WorkflowSynthesizerEngine.cs)
   composes catalog templates rather than inventing script.
+- **Synthesis** compiles the operator's sentence with a model, grounded in the catalog and validated
+  against it. Until 2026-09-25 it did neither: it held an `IModelStreamClient` it never called and
+  matched keywords over five hardcoded graphs, so a request matching none of them - nearly every real
+  sentence - produced an Active Directory health check labelled *Successfully synthesized*. The model
+  now returns either a prebuilt recipe by id or a stage list naming exact template ids, with a
+  per-stage `continueOnFailure`; a template id the catalog does not have throws in the compiler
+  rather than reaching the execution engine, and with no model connected synthesis refuses instead of
+  emitting a default plan. The stage's directive and its continue-on-failure flag travel in the
+  node's configuration as reserved keys that are never bound as mission parameters.
 
 ## Identity and attribution
 

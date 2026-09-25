@@ -434,14 +434,35 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
                 node.NodeId, $"template '{templateId}' is not in the governed catalogue.");
         }
 
+        if (node.Configuration.TryGetValue(ContinueOnFailureKey, out var carryOn) &&
+            bool.TryParse(carryOn, out bool parsed) && parsed)
+        {
+            // Said out loud rather than silently dropped. The flag is honoured by
+            // ProjectExecutionEngine, which runs the same plan as a project; this engine streams each
+            // node's chunks as they arrive, and C# forbids yielding inside a try with a catch, so
+            // continuing past a failure here needs a restructuring of the run loop that has not
+            // happened. An operator who asked for "keep going" is entitled to know which of the two
+            // engines will do it.
+            yield return new MissionChunk(
+                Guid.Empty,
+                MissionChunkType.StatusChange,
+                $"'{node.NodeId}' asks to continue on failure. This engine stops on a failed node; " +
+                "run the plan as a project for that behaviour.",
+                DateTime.UtcNow);
+        }
+
         // Every other configuration entry is a mission parameter. Upstream outputs may be
         // referenced as {node-id}; the value is substituted here and then handed to the mission,
         // whose GovernedArgumentBinder refuses anything it cannot place safely in a command line.
         // That refusal is the boundary - this layer deliberately does not sanitise on its behalf.
+        //
+        // The reserved keys are skipped: they describe the plan, not the tool. Passing Directive or
+        // ContinueOnFailure through as parameters would hand the binder two names no template
+        // declares, and it would refuse the mission for carrying its own plan.
         var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var kvp in node.Configuration)
         {
-            if (kvp.Key.Equals(TemplateIdKey, StringComparison.OrdinalIgnoreCase))
+            if (ReservedConfigurationKeys.Contains(kvp.Key))
             {
                 continue;
             }
@@ -474,6 +495,28 @@ public sealed class WorkflowExecutionEngine : IWorkflowExecutionEngine
 
     /// <summary>Configuration key naming the governed template a mission node runs.</summary>
     public const string TemplateIdKey = "TemplateId";
+
+    /// <summary>
+    /// Configuration key carrying what the stage must report - the sentence an operator wrote, or a
+    /// compiler wrote for them. It travels with the node so a synthesised plan can be rendered as a
+    /// project without a second trip to the model.
+    /// </summary>
+    public const string DirectiveKey = "Directive";
+
+    /// <summary>
+    /// Configuration key saying the plan carries on when this stage fails. Honoured by
+    /// <see cref="ProjectExecutionEngine"/>; this engine reports it and stops anyway.
+    /// </summary>
+    public const string ContinueOnFailureKey = "ContinueOnFailure";
+
+    /// <summary>
+    /// Keys that describe the plan rather than the tool, and so are never bound as mission
+    /// parameters.
+    /// </summary>
+    public static readonly IReadOnlySet<string> ReservedConfigurationKeys =
+        new HashSet<string>(
+            new[] { TemplateIdKey, DirectiveKey, ContinueOnFailureKey },
+            StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Resolves a node's script command against upstream outputs and its own configuration.
