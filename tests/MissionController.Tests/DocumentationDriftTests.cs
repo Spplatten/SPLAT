@@ -762,12 +762,20 @@ public class DocumentationDriftTests
     /// enforced the count there. It was never read: it said 387 automated tests while its own copy
     /// said 459 and the suite ran 459. The runbook tells a human what to expect from the run they are
     /// about to do, so a stale number there is a verification step that fails for the wrong reason.
+    ///
+    /// The Field Guide is deliberately NOT in this list any more, and its prose no longer states a
+    /// count at all - it points the reader at the README for the number. Every other document here
+    /// is a file in this repository, so syncing one costs one edit. That one is also a page
+    /// published outside it, and <see cref="ThePublishedFieldGuide_IsTheSourceAsItStandsToday"/>
+    /// goes red the moment its source moves - so binding a number that changes on almost every
+    /// commit made almost every commit a manual republish of a page whose prose had not changed.
+    /// The census counts stay bound there: those move when the product moves, which is exactly when
+    /// the page does need republishing.
     /// </summary>
     private static readonly string[] DocumentsStatingTheTestCount =
     {
         "README.md",
         Path.Combine("docs", "TUTORIAL.md"),
-        Path.Combine("docs", "SPLAT-Field-Guide.html"),
         Path.Combine("docs", "RUNBOOK-human-steps.md"),
     };
 

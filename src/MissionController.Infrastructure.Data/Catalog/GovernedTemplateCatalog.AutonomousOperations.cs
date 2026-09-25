@@ -27,7 +27,7 @@ public static partial class GovernedTemplateCatalog
             "You are an Autonomous Site Reliability & DevOps Engineer. Analyze the build pipeline configuration, dependency tree, and deployment target. Verify: 1) Build command safety and output artifact completeness; 2) Zero secret leakage in bundle artifacts (.env, private keys); 3) Content Security Policy (CSP) and HTTPS strict transport routing headers; 4) Optimal caching and CDN edge distribution settings. Provide a structured release readiness assessment.",
             new Dictionary<string, string>
             {
-                { "RepoUrl", "https://github.com/Platten-Industries/SPLAT" },
+                { "RepoUrl", "https://github.com/Spplatten/SPLAT" },
                 { "Branch", "main" },
                 { "BuildCommand", "npm run build" },
                 { "OutputDir", "dist" },
@@ -58,7 +58,7 @@ public static partial class GovernedTemplateCatalog
                 { "CampaignTheme", "SPLAT: Kernel-Enforced AI Agent Containment" },
                 { "ThreadLength", "3" },
                 { "TargetAudience", "Enterprise SecOps, AI Engineers & DevOps" },
-                { "CallToAction", "https://github.com/Platten-Industries/SPLAT" },
+                { "CallToAction", "https://github.com/Spplatten/SPLAT" },
                 { "PublishMode", "DraftAndValidate" }
             }),
 

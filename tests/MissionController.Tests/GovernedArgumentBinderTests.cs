@@ -105,7 +105,7 @@ public class GovernedArgumentBinderTests
     [InlineData("corp.contoso.com")]
     [InlineData("time.windows.com")]
     [InlineData("250")]
-    [InlineData("https://github.com/Platten-Industries/SPLAT")]
+    [InlineData("https://github.com/Spplatten/SPLAT")]
     [InlineData(@"C:\Logs\output")]
     [InlineData("read:telemetry,write:leases")]
     public void BarePosition_StillAcceptsTheValuesTheProductActuallyUses(string legitimate)
