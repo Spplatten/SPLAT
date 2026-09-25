@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading.Tasks;
+using MissionController.Core;
 
 namespace MissionController.UI;
 
@@ -63,8 +64,7 @@ internal sealed class ConsoleSelfTest
 
     public string ReportPath { get; }
 
-    public static string DefaultReportPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SPLAT", "self-test.json");
+    public static string DefaultReportPath => SplatDataRoot.Layout.SelfTestReport;
 
     /// <summary>The self-test the command line asks for, or null for a normal start.</summary>
     public static ConsoleSelfTest? FromCommandLine(string[] args)

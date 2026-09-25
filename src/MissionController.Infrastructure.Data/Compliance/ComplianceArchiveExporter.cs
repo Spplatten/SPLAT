@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using MissionController.Core;
 using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
@@ -46,7 +47,7 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
     {
         if (string.IsNullOrWhiteSpace(outputDirectory))
         {
-            outputDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MissionController", "ComplianceExports");
+            outputDirectory = SplatDataRoot.Layout.ComplianceExports;
         }
 
         Directory.CreateDirectory(outputDirectory);
@@ -129,7 +130,7 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
 
         if (string.IsNullOrWhiteSpace(outputDirectory))
         {
-            outputDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MissionController", "MissionRunRecords");
+            outputDirectory = SplatDataRoot.Layout.MissionRunRecords;
         }
 
         Directory.CreateDirectory(outputDirectory);

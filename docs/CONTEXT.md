@@ -78,7 +78,7 @@ The code and the tests enforce most of these; review enforces the rest.
 | **Governed template**, **1:1:1** | `SingleToolTemplate`: one model, one native tool, one egress FQDN. "1:1:1" is what `ValidateStrictRules()` checks |
 | **Sensor** | The native tool a template runs — `ping`, `wevtutil`, a PowerShell pipeline |
 | **Egress scope** | Which process reaches a template's FQDN: `ModelGateway`, SPLAT's own model call and the default, or `ToolProcess`, the sensor itself |
-| **Jail** | A mission's working directory with a protected ACL, under `%LOCALAPPDATA%\MissionController\Jails` |
+| **Jail** | A mission's working directory with a protected ACL, under `<data root>\Jails` |
 | **Network denial** | Launching the sensor into SPLAT's zero-capability AppContainer, so it has no network stack |
 | **Argument binding** | `GovernedArgumentBinder`: parameters into a command line in one pass, refused rather than escaped |
 | **Credential shield**, **DLP** | The two scrubbers applied to tool output before it leaves the mission |
@@ -123,20 +123,21 @@ the HTML first, then the other two.
 
 **The app runs from `dist\App`,** a `dotnet publish` output that git ignores — nothing in git will
 restore it, and a stale copy can fail to start. A start that fails before its window opens shows a
-message box, writes the reason to `%LOCALAPPDATA%\SPLAT\crash.log` and exits;
+message box, writes the reason to `<data root>\crash.log` and exits;
 [the runbook](RUNBOOK-human-steps.md) has the checks for a launch that looks alive but is not.
 
 **Where state lives:**
 
 | What | Where |
 | --- | --- |
-| Console database — ledger, registries, memory | `%LOCALAPPDATA%\MissionController\Data\missioncontroller.db` |
-| `splat-mcp` database — a separate chain and memory | `%LOCALAPPDATA%\SPLAT\audit_ledger.db` |
-| Jails | `%LOCALAPPDATA%\MissionController\Jails\{missionId}` |
-| DPAPI vault | `%LOCALAPPDATA%\MissionController\Vault` |
-| Compliance packages | `%LOCALAPPDATA%\MissionController\ComplianceExports` |
-| MCP and Copilot workspaces | `%LOCALAPPDATA%\SPLAT\mcp-workspace`, `%LOCALAPPDATA%\SPLAT\copilot-workspace` |
-| Crash log | `%LOCALAPPDATA%\SPLAT\crash.log` |
+| **The data root** — everything below hangs off it | `SPLAT_DATA_DIR`, else `<exe dir>\data` when a `splat.portable` marker sits beside the executable or one directory above it, else `%LOCALAPPDATA%\SPLAT`. [`SplatDataRoot`](../src/MissionController.Core/SplatDataRoot.cs) is the only place that decides, and `splat-mcp doctor` prints which of the three chose it |
+| Console database — ledger, registries, memory | `<root>\Data\missioncontroller.db` |
+| `splat-mcp` database — a separate chain and memory | `<root>\audit_ledger.db` (`SPLAT_DB_PATH` overrides) |
+| Jails | `<root>\Jails\{missionId}` |
+| DPAPI vault | `<root>\Vault` |
+| Compliance packages and run records | `<root>\ComplianceExports`, `<root>\MissionRunRecords` |
+| MCP and Copilot workspaces | `<root>\mcp-workspace`, `<root>\copilot-workspace` |
+| Crash log and self-test report | `<root>\crash.log`, `<root>\self-test.json` |
 | In the WSL2 guest: daemon token, daemon log, lease cgroups | `/etc/splat/agent.token` (root, 0600), `journalctl -u splat-agent`, `/sys/fs/cgroup/splat_leases` |
 
 **The Linux side needs a person.** Loading BPF-LSM programs needs root, `sudo` prompts, and an agent

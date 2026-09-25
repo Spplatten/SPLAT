@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Security.AccessControl;
 using System.Threading.Tasks;
+using MissionController.Core;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MissionController.Core.Interfaces;
@@ -44,10 +45,10 @@ public partial class JailInspectorViewModel : ObservableObject
     public JailInspectorViewModel(IJailManager jailManager)
     {
         _jailManager = jailManager;
-        _jailsBasePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "MissionController",
-            "Jails");
+        // The same path the jail manager provisions into, read from the one place that computes it:
+        // these two were separate expressions of the same literal, and a move would have emptied this
+        // page without failing anything.
+        _jailsBasePath = SplatDataRoot.Layout.Jails;
     }
 
     [RelayCommand]

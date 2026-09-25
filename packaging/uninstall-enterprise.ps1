@@ -42,13 +42,17 @@ try {
         Remove-Item -Path $TargetDir -Recurse -Force
     }
 
-    # 3. Clean %LOCALAPPDATA%\MissionController (DPAPI secrets, SQLite DB, Jails)
+    # 3. Clean the data root (DPAPI secrets, SQLite DBs, Jails, workspaces, crash log).
+    #    Both are purged: since 2026-09-25 everything lives under %LOCALAPPDATA%\SPLAT, but a machine
+    #    that never started the new build still has the old root, and an uninstaller that cleans only
+    #    where the current build writes leaves an operator's DPAPI secrets on a decommissioned host.
     if ($PurgeUserData) {
-        $DataDir = "$env:LOCALAPPDATA\MissionController"
-        if (Test-Path $DataDir) {
-            Log-Message "Purging local data directory and DPAPI secrets: $DataDir..."
-            Remove-Item -Path $DataDir -Recurse -Force
-            Log-Message "Data directory purged."
+        foreach ($DataDir in @("$env:LOCALAPPDATA\SPLAT", "$env:LOCALAPPDATA\MissionController")) {
+            if (Test-Path $DataDir) {
+                Log-Message "Purging local data directory and DPAPI secrets: $DataDir..."
+                Remove-Item -Path $DataDir -Recurse -Force
+                Log-Message "Data directory purged: $DataDir"
+            }
         }
     }
 

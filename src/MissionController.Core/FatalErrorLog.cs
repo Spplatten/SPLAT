@@ -14,10 +14,7 @@ namespace MissionController.Core;
 public static class FatalErrorLog
 {
     /// <summary>Where the app writes startup and unhandled-exception detail by default.</summary>
-    public static string DefaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SPLAT",
-        "crash.log");
+    public static string DefaultPath => SplatDataRoot.Layout.CrashLog;
 
     /// <summary>
     /// Appends one fatal-error record. Returns whether it reached disk, so a caller that cares can

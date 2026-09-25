@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using MissionController.Core;
 using MissionController.Core.Interfaces;
 
 namespace MissionController.Infrastructure.Windows.Vault;
@@ -15,10 +16,7 @@ public sealed class DpapiCredentialVault : ICredentialVault
 
     public DpapiCredentialVault(string? vaultDirectory = null)
     {
-        _vaultDirectory = vaultDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "MissionController",
-            "Vault");
+        _vaultDirectory = vaultDirectory ?? SplatDataRoot.Layout.Vault;
         Directory.CreateDirectory(_vaultDirectory);
     }
 

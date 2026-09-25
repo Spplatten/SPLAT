@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using MissionController.Core;
 using Microsoft.Data.Sqlite;
 
 namespace MissionController.Infrastructure.Data;
@@ -19,11 +20,7 @@ public sealed class SqliteStorageContext
         Environment.GetEnvironmentVariable("SPLAT_DB_PATH") is { Length: > 0 } configured
         && !string.IsNullOrWhiteSpace(configured)
             ? configured
-            : Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "MissionController",
-                "Data",
-                "missioncontroller.db");
+            : SplatDataRoot.Layout.Database;
 
     public SqliteStorageContext(string? dbPath = null)
     {

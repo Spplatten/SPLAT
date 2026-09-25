@@ -46,6 +46,8 @@ public static class SubstrateDoctor
         string workspace = doctor.WorkspaceRoot ?? defaultWorkspace ?? McpServerHandler.DefaultWorkspaceRoot;
         bool exists = Directory.Exists(workspace);
         output.WriteLine("Windows control plane");
+        var (dataMark, dataDetail) = DataRootLine(SplatDataRoot.Current);
+        Line(output, dataMark, "data root", dataDetail);
         // The server creates the default folder when it first starts, so a host that has never served
         // has none - which a clean machine reported as FAIL above a verdict of enforcing (2026-09-18).
         // A --workspace is never created, and the parser refused a missing one, so absence there is real.
@@ -233,8 +235,41 @@ public static class SubstrateDoctor
         }
     }
 
-    private static string LedgerPath() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SPLAT", "audit_ledger.db");
+    /// <summary>
+    /// Where the ledger, the vault and the workspace live, and which of the three ways of saying so
+    /// chose it. Roadmap 4.1 asks doctor to name this, because a portable copy and an installed one
+    /// differ in nothing an operator can see until they go looking for the evidence afterwards.
+    ///
+    /// Reports without creating anything. Doctor is a question, not a command: a run of it must leave
+    /// a host exactly as it found it, so a root that does not exist yet is a fact to print rather than
+    /// a directory to make.
+    /// </summary>
+    private static (string Mark, string Detail) DataRootLine(SplatDataLocation location)
+    {
+        string detail = $"{location.Root} ({location.Kind.ToString().ToLowerInvariant()}: {location.Reason})";
+
+        if (!Directory.Exists(location.Root))
+        {
+            return ("--", $"{detail}; it does not exist yet - the first run of either host makes it");
+        }
+
+        string probe = Path.Combine(location.Root, $".doctor-probe-{Guid.NewGuid():N}");
+        try
+        {
+            File.WriteAllBytes(probe, Array.Empty<byte>());
+            File.Delete(probe);
+            return ("ok", detail);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ("FAIL", $"{detail} - it cannot be written: {ex.Message}");
+        }
+    }
+
+    private static string LedgerPath() =>
+        Environment.GetEnvironmentVariable("SPLAT_DB_PATH") is { Length: > 0 } configured
+            ? configured
+            : SplatDataRoot.Layout.LedgerDatabase;
 
     private static string Short(string text) =>
         text.Length <= 90 ? text.ReplaceLineEndings(" ") : text.ReplaceLineEndings(" ")[..90] + "...";

@@ -195,7 +195,7 @@ builds a tree over ledger rows and produces and verifies inclusion proofs — an
 a row is present, and says nothing about rows that are missing.
 [`ComplianceArchiveExporter`](../src/MissionController.Infrastructure.Data/Compliance/ComplianceArchiveExporter.cs)
 writes a framework-tagged package (SOC 2, HIPAA, CMMC, ISO 27001), by default under
-`%LOCALAPPDATA%\MissionController\ComplianceExports`. Both are reached from the console's Security
+`<data root>\ComplianceExports`. Both are reached from the console's Security
 Audit screen.
 
 **Retention.** [`DataRetentionService`](../src/MissionController.Infrastructure.Data/Retention/DataRetentionService.cs)

@@ -5,6 +5,7 @@ using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using MissionController.Core;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 
@@ -30,10 +31,7 @@ public sealed class SplatCopilotPlugin
         _substrate = substrate ?? throw new ArgumentNullException(nameof(substrate));
         _policy = policy ?? CopilotSafetyPolicy.CreateEnterpriseDefault();
         _operatorIdentity = operatorIdentity;
-        _workspaceRoot = Path.GetFullPath(workspaceRoot ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SPLAT",
-            "copilot-workspace"));
+        _workspaceRoot = Path.GetFullPath(workspaceRoot ?? SplatDataRoot.Layout.CopilotWorkspace);
         Directory.CreateDirectory(_workspaceRoot);
     }
 

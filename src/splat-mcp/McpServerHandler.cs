@@ -80,10 +80,7 @@ public class McpServerHandler
     /// help text and the startup note on stderr cannot describe a different folder from the one the
     /// guard actually uses.
     /// </summary>
-    public static string DefaultWorkspaceRoot { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SPLAT",
-        "mcp-workspace");
+    public static string DefaultWorkspaceRoot { get; } = SplatDataRoot.Layout.McpWorkspace;
 
     private readonly string _workspaceRoot;
 

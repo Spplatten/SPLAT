@@ -61,6 +61,15 @@ public partial class App : Application
         // every fatal path below has to know which kind of run this is.
         SelfTest = ConsoleSelfTest.FromCommandLine(Environment.GetCommandLineArgs());
 
+        // Before the container builds anything that opens a file: an installed copy from before
+        // 2026-09-25 kept its database and vault under %LOCALAPPDATA%\MissionController, and the one
+        // data root moved them. Written to the startup log rather than passing silently - an operator
+        // whose history looked as though it had vanished would have nothing else to read.
+        foreach (string adopted in SplatDataRoot.AdoptLegacyHostLayout(SplatDataRoot.Current))
+        {
+            FatalErrorLog.Write("data root", adopted);
+        }
+
         InitializeComponent();
         ConfigureServices();
     }

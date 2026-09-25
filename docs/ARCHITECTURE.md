@@ -108,7 +108,8 @@ them.
 | --- | --- | --- |
 | Construction | `Microsoft.Extensions.DependencyInjection` container | Hand-wired, in dependency order |
 | Runtime | `net10.0-windows10.0.19041.0`, Windows App SDK 2.5.1, self-contained | `net10.0-windows` |
-| Database | `%LOCALAPPDATA%\MissionController\Data\missioncontroller.db` | `%LOCALAPPDATA%\SPLAT\audit_ledger.db` |
+| Database | `<data root>\Data\missioncontroller.db` | `<data root>\audit_ledger.db` |
+| Data root | Both resolve it through [`SplatDataRoot`](../src/MissionController.Core/SplatDataRoot.cs): `SPLAT_DATA_DIR`, else a `splat.portable` marker beside the executable or one directory above, else `%LOCALAPPDATA%\SPLAT`. Both adopt an older installation's `%LOCALAPPDATA%\MissionController\{Data,Vault}` once, and record what they moved | Same, and `doctor` prints the root and which rule chose it |
 | Operator identity | `WindowsOperatorIdentityProvider("winui-console")` | `McpOperatorIdentityProvider` — the logon session, or a validated `SPLAT_MCP_CLIENT_CREDENTIAL` |
 | Revocation check before a mission | Wired | Wired since 2026-09-19 (F19): `Program.cs` passes the same `IncidentRevocationManager` the tool-call gate uses. This row said "constructed with `null`" until 2026-09-23 |
 | Remediation engine | Wired | Absent |

@@ -4,6 +4,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
+using MissionController.Core;
 using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Windows.Security;
 
@@ -15,10 +16,7 @@ public sealed class NtAclJailManager : IJailManager
 
     public NtAclJailManager(string? baseJailsDirectory = null)
     {
-        _baseJailsDirectory = baseJailsDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "MissionController",
-            "Jails");
+        _baseJailsDirectory = baseJailsDirectory ?? SplatDataRoot.Layout.Jails;
     }
 
     public async Task<string> ProvisionJailAsync(Guid missionId, CancellationToken cancellationToken = default)

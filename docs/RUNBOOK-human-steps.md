@@ -131,7 +131,7 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 739`, on a line ending `(net10.0)`. The `dotnet` on this
+**Expect:** `Passed! - Failed: 0, Passed: 754`, on a line ending `(net10.0)`. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
 
@@ -213,7 +213,9 @@ looks verified.
 The ledger is a hash chain: every entry commits to the one before it. `VerifyLedgerIntegrityAsync`
 recomputes the chain and fails on any edit. It is exercised by the suite above; to see it against
 your real database rather than a test fixture, open the app's **Security Audit** screen, which
-verifies the console's own chain in `%LOCALAPPDATA%\MissionController\Data\missioncontroller.db`.
+verifies the console's own chain in `%LOCALAPPDATA%\SPLAT\Data\missioncontroller.db` - the data root,
+which `splat-mcp doctor` prints. A copy installed before 2026-09-25 kept it under
+`%LOCALAPPDATA%\MissionController\Data`, and the first start of either host moves it there.
 `splat-mcp` keeps a separate chain in `%LOCALAPPDATA%\SPLAT\audit_ledger.db`, which that screen does
 not read.
 

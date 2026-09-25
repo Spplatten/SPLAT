@@ -84,8 +84,20 @@ public static class Program
             : $"splat-mcp: run_command and run_code may connect only to {serve.Egress}");
 
         // 1. Data & Storage Layer
+        //
+        // Adoption runs before the first open. This host shares the console's DPAPI vault, so a copy
+        // that started here before the console did would otherwise find an empty vault at the new root
+        // while the operator's key sat under the old one, and report a missing key rather than a moved
+        // one. Idempotent, so whichever host starts first does the move and the other sees nothing.
+        foreach (string adopted in SplatDataRoot.AdoptLegacyHostLayout(SplatDataRoot.Current))
+        {
+            Console.Error.WriteLine($"splat-mcp: data {adopted}");
+        }
+
+        Console.Error.WriteLine($"splat-mcp: data root {SplatDataRoot.Current}");
+
         string dbPath = Environment.GetEnvironmentVariable("SPLAT_DB_PATH")
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SPLAT", "audit_ledger.db");
+            ?? SplatDataRoot.Layout.LedgerDatabase;
         byte[]? ledgerKey;
         SqliteChainedAuditLedger.ChainState chain;
         try

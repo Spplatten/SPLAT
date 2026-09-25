@@ -41,7 +41,7 @@ two rules on anyone adding to that file:
 
 `MissionExecutionEngine` drives `SuspendedProcessLauncher.LaunchSuspendedInJobAsync`:
 
-1. **Jail.** `ProvisionJailAsync` creates `%LOCALAPPDATA%\MissionController\Jails\{missionId}`
+1. **Jail.** `ProvisionJailAsync` creates `<data root>\Jails\{missionId}`
    with a protected DACL — inheritance from the parent severed — granting full control to the
    operator and to SYSTEM, and `Modify` to SPLAT's AppContainer SID. It becomes the tool's working
    directory.
@@ -138,7 +138,7 @@ per-template verification is the durable fix.
   verdict is that measurement, never the exit code; a step that declares none is refused unrun.
   The shipped catalog defines no fixes yet.
 - [`DpapiCredentialVault`](../src/MissionController.Infrastructure.Windows/DpapiCredentialVault.cs)
-  keeps one file per secret under `%LOCALAPPDATA%\MissionController\Vault`, protected with DPAPI
+  keeps one file per secret under `<data root>\Vault`, protected with DPAPI
   `CurrentUser` scope and fixed application entropy. That protects against other accounts and
   offline copies; any process running as the operator can decrypt it.
 - [`WindowsOperatorIdentityProvider`](../src/MissionController.Infrastructure.Windows/WindowsOperatorIdentityProvider.cs)
