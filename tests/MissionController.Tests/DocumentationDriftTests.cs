@@ -686,6 +686,33 @@ public class DocumentationDriftTests
     }
 
     /// <summary>
+    /// The beginning read. Four lines in the record say what is on the live page and whether it is
+    /// still current - the version, the hash that binds it to a source already in the tree, and one
+    /// line saying what that version changed - so a session that needs to know does not open the
+    /// artifact to find out. That read costs about eighteen thousand tokens of context and answers
+    /// nothing these lines do not.
+    ///
+    /// Checked because a record that loses its handoff line loses it silently: the hash check would
+    /// still pass, and the next session would go and read the page.
+    /// </summary>
+    [Fact]
+    public void ThePublishedRecord_SaysWhichVersionIsLiveAndWhatItChanged()
+    {
+        string record = File.ReadAllText(Path.Combine(RepositoryRoot(), "docs", "SPLAT-Field-Guide.published"));
+
+        Assert.True(
+            Regex.IsMatch(record, @"(?m)^version\s+\d+\s*$"),
+            "docs/SPLAT-Field-Guide.published no longer records which artifact version is live. " +
+            "Record it with -RecordPublished -Version <n>.");
+
+        var handoff = Regex.Match(record, @"(?m)^handoff\s+(?<line>\S[^\r\n]*)$");
+        Assert.True(
+            handoff.Success && handoff.Groups["line"].Value.Trim().Length >= 20,
+            "docs/SPLAT-Field-Guide.published no longer carries a handoff line saying what the live " +
+            "version changed. Record it with -RecordPublished -Handoff \"<one line>\".");
+    }
+
+    /// <summary>
     /// Guards the assumption <see cref="CountTestCases"/> rests on. xUnit expands data attributes at
     /// run time from sources reflection here does not necessarily evaluate, so a test using one it
     /// cannot read would be counted as zero cases and would silently deflate the number the
@@ -770,12 +797,12 @@ public class DocumentationDriftTests
     /// goes red the moment its source moves - so binding a number that changes on almost every
     /// commit made almost every commit a manual republish of a page whose prose had not changed.
     /// The census counts stay bound there: those move when the product moves, which is exactly when
-    /// the page does need republishing.
+    /// the page does need republishing. TUTORIAL.md left for the same reason once it became a
+    /// rendering of that guide rather than a second copy of it - it states whatever the guide states.
     /// </summary>
     private static readonly string[] DocumentsStatingTheTestCount =
     {
         "README.md",
-        Path.Combine("docs", "TUTORIAL.md"),
         Path.Combine("docs", "RUNBOOK-human-steps.md"),
     };
 

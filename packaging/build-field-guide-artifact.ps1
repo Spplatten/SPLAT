@@ -18,7 +18,12 @@
     So the slice is done here, once, correctly. The two halves stay separate on purpose:
 
         .\build-field-guide-artifact.ps1                 # writes the body to publish, prints the hash
-        .\build-field-guide-artifact.ps1 -RecordPublished # writes that hash into the .published file
+        .\build-field-guide-artifact.ps1 -RecordPublished -Version 61 -Handoff 'what changed'
+
+    The second writes the hash, the artifact version and a one-line handoff into the .published file.
+    Those four lines are the next session's beginning read: they say what is live and whether it is
+    still current, so nobody has to open the page - a read that costs about eighteen thousand tokens
+    of context and answers a question this file already answers.
 
     Run the second only after the page is actually live. Recording without publishing is the one
     failure this design cannot detect, and splitting the switches is what makes it a deliberate act
@@ -30,6 +35,8 @@
 [CmdletBinding()]
 param(
     [switch]$RecordPublished,
+    [string]$Version,
+    [string]$Handoff,
     [string]$OutputPath
 )
 
@@ -103,6 +110,17 @@ try {
 
 if ($RecordPublished) {
     if (-not (Test-Path $record)) { Write-Error "No record file at $record"; exit 1 }
+    # Both are required. A record that says which hash is live but not which version, or not what that
+    # version changed, sends the next session to the page to find out - which is the cost this record
+    # exists to avoid.
+    if ($Version -notmatch '^\d+$') {
+        Write-Error 'Pass -Version <n>, the artifact version the publish returned (a number).'
+        exit 1
+    }
+    if ([string]::IsNullOrWhiteSpace($Handoff)) {
+        Write-Error 'Pass -Handoff "<one line>": what this version says that the one before it did not.'
+        exit 1
+    }
     $text = [System.IO.File]::ReadAllText($record)
     if ($text -notmatch '(?m)^sha256\s+[0-9a-f]{64}\s*$') {
         Write-Error 'The record file has no sha256 line in the form the test reads. Fix it by hand.'
@@ -116,13 +134,17 @@ if ($RecordPublished) {
     $today = (Get-Date).ToString('yyyy-MM-dd')
     $text = [regex]::Replace($text, '(?m)^(sha256[ \t]+)[0-9a-f]{64}', "`${1}$sha")
     $text = [regex]::Replace($text, '(?m)^(published[ \t]+)\d{4}-\d{2}-\d{2}', "`${1}$today")
+    # `.*` stops at the carriage return, so the line ending survives either checkout.
+    $text = [regex]::Replace($text, '(?m)^(version[ \t]+).*', "`${1}$Version")
+    $text = [regex]::Replace($text, '(?m)^(handoff[ \t]+).*', "`${1}$Handoff")
 
     if ($text -notmatch [regex]::Escape($sha)) {
         Write-Error 'The record file was not updated, so nothing was recorded. Fix this script rather than the file.'
         exit 1
     }
     [System.IO.File]::WriteAllText($record, $text, (New-Object System.Text.UTF8Encoding($false)))
-    Write-Host "Recorded sha256 $sha (published $today)."
+    Write-Host "Recorded sha256 $sha (published $today, version $Version)."
+    Write-Host "Handoff: $Handoff"
     Write-Host 'This asserts the live page matches the source. If it does not, you have just hidden that.'
     exit 0
 }
@@ -132,4 +154,5 @@ Write-Host "Source sha256   : $sha"
 Write-Host ''
 Write-Host 'Next: publish that file to'
 Write-Host '  https://claude.ai/code/artifact/18992308-da75-4782-87b8-20b6ba7b4311'
-Write-Host 'and only once it is live, run this script again with -RecordPublished.'
+Write-Host 'and only once it is live, run this script again with:'
+Write-Host '  -RecordPublished -Version <the version the publish returned> -Handoff "<one line>"'

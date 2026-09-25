@@ -2,33 +2,52 @@
 #
 #   https://claude.ai/code/artifact/18992308-da75-4782-87b8-20b6ba7b4311
 #
+# BEGINNING READ. The four lines at the bottom of this file answer "what is on the live page, and is
+# it still current?" without opening it. Opening the artifact costs about eighteen thousand tokens of
+# context and tells you nothing those lines do not: `published` and `version` say which version is
+# live, `sha256` binds it to a source you already have, and `handoff` says in one line what that
+# version says that the one before it did not.
+#
+# The comparison is made for you - DocumentationDriftTests.ThePublishedFieldGuide_IsTheSourceAsItStandsToday
+# recomputes the hash over docs/SPLAT-Field-Guide.html with line endings normalised and fails when the
+# source has moved ahead of the live copy. Read the page itself only to check something specific about
+# how it renders, never merely to find out whether it is up to date.
+#
+# HANDOFF. Whoever publishes writes the `handoff` line in the same act, because the next session's
+# beginning read is this file and nothing else. One line, what changed, no ceremony.
+#
 # The published page is a deterministic slice of docs/SPLAT-Field-Guide.html - that file minus the
 # doctype/html/head/body wrapper and the two metas the artifact host supplies - so binding the source
-# binds the page, and no network call is needed to check it.
+# binds the page, and no network call is needed to do it.
 #
-# DocumentationDriftTests.ThePublishedFieldGuide_IsTheSourceAsItStandsToday recomputes this hash over
-# the source with line endings normalised, and fails when the source has moved ahead of the live copy.
 # That drift is not hypothetical: the page sat at 511 tests, telling readers that on Windows the locks
 # "do not filter network sockets", for weeks after both repository copies had been corrected to say
 # that 33 of 49 templates launch with no network capability at all. Every other claim in that class is
 # checked against the code. That one was checked against nothing, because the only copy a non-engineer
 # actually reads lives outside this repository.
 #
-# WHEN THE TEST GOES RED, both halves, in this order:
+# The guide is republished after major changes - a census that moved, prose a reader would notice -
+# and not after every commit. It stopped stating the automated test count on 2026-09-25 for exactly
+# that reason: a number that changes on almost every commit was turning almost every commit into a
+# manual republish of a page whose prose had not changed. The README carries the count now.
+#
+# WHEN THE TEST GOES RED, all three, in this order:
 #
 #     packaging/build-field-guide-artifact.ps1                    # writes the body to publish
 #     ...publish that file to the URL above...
-#     packaging/build-field-guide-artifact.ps1 -RecordPublished   # rewrites the hash below
+#     packaging/build-field-guide-artifact.ps1 -RecordPublished -Version <n> -Handoff "<one line>"
 #
 # The switches are separate so that recording is a deliberate act. Updating the hash without
 # publishing silences the alarm and leaves the page wrong, which is worse than no check at all,
 # because the page then looks verified. That is the one failure this design cannot detect, and it is
-# why the second command prints what it is asserting on your behalf.
+# why the last command prints what it is asserting on your behalf.
 #
 # Do not hand-slice the wrapper any more. The script matches whole lines; a regex for `<head` also
 # matches `<header class="hero">`, and an earlier republish lost that opening tag, so the live page
 # rendered its title placard as bare text for months while every other copy looked right.
 
 published  2026-09-25
+version    60
 source     docs/SPLAT-Field-Guide.html
 sha256     7a830a9357d9a52dc9f7009bd48f7507c0417bb2304c98b68ae9d4e26c2a16e4
+handoff    the guide stopped stating the automated test count; the README is its one home now

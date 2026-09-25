@@ -122,11 +122,16 @@ public sealed class CapabilityManifestTests
         Assert.True(leasedRow.Success, "the roadmap no longer states how many templates run under the Linux lease in the form this test reads");
         Assert.Equal(census.Leased, int.Parse(leasedRow.Groups["leased"].Value));
 
-        // The Field Guide states the same census in prose, in both synced copies. That document is
-        // what a non-engineer reads to decide whether to trust this, and it spent weeks telling them
-        // Windows did not filter network sockets at all - which the census above disproves for 33 of
-        // the 49. Bound here so the correction cannot quietly rot back into the comfortable version.
-        foreach (string doc in new[] { "TUTORIAL.md", "SPLAT-Field-Guide.html" })
+        // The Field Guide states the same census in prose. That document is what a non-engineer reads
+        // to decide whether to trust this, and it spent weeks telling them Windows did not filter
+        // network sockets at all - which the census above disproves for 33 of the 49. Bound here so
+        // the correction cannot quietly rot back into the comfortable version.
+        //
+        // One document, not two. TUTORIAL.md used to be swept alongside it and had to be, because it
+        // was a hand-synced copy that could hold a different number; since FieldGuideTutorialTests
+        // generates it from this file, it states whatever this file states and a second sweep would
+        // only be checking the converter.
+        foreach (string doc in new[] { "SPLAT-Field-Guide.html" })
         {
             string text = File.ReadAllText(Path.Combine(RepositoryRoot(), "docs", doc));
             var prose = Regex.Match(text, @"of the (?<total>\d+) agents in the catalog, (?<denied>\d+) launch");

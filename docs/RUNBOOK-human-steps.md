@@ -131,7 +131,7 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 754`, on a line ending `(net10.0)`. The `dotnet` on this
+**Expect:** `Passed! - Failed: 0, Passed: 757`, on a line ending `(net10.0)`. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
 
@@ -182,13 +182,23 @@ doing its job — tell me.
 
 **Expect:** 1 passed.
 
-**Why it matters:** the Field Guide has three copies — `docs/SPLAT-Field-Guide.html` (the source),
-`docs/TUTORIAL.md`, and a published page at
+**Why it matters:** the Field Guide has one author and three renderings —
+`docs/SPLAT-Field-Guide.html` (the source), `docs/TUTORIAL.md` (generated from it since 2026-09-25;
+edit the HTML and re-derive with `SPLAT_SYNC_TUTORIAL=1`), and a published page at
 <https://claude.ai/code/artifact/18992308-da75-4782-87b8-20b6ba7b4311>. The first two are checked
 against the code by everything above. The third is the one a non-engineer actually reads, it lives
 outside the repository, and for weeks it told readers that Windows does not filter network sockets
 at all — after both repository copies had been corrected. This check records the source's hash, so
 editing the guide without republishing the page now fails the build.
+
+Republish after major changes, not after every commit: a census that moved, or prose a reader would
+notice. The guide no longer states the test count, so the count sync stops dragging it in.
+
+**Before you open the live page, don't.** The bottom four lines of
+`docs/SPLAT-Field-Guide.published` — `published`, `version`, `sha256`, `handoff` — say which
+version is live and what it changed, and the check above says whether it is still current. Reading
+the artifact itself costs about eighteen thousand tokens of context and answers nothing those lines
+do not.
 
 **When it goes red:** that is the check working. Two commands and a publish, in this order:
 
@@ -200,8 +210,12 @@ That writes `dist\field-guide-artifact.html` — the exact body to publish — a
 me to publish that file to the artifact URL. Once the page is live:
 
 ```powershell
-C:\C_AGENT_BUILDER\packaging\build-field-guide-artifact.ps1 -RecordPublished
+C:\C_AGENT_BUILDER\packaging\build-field-guide-artifact.ps1 -RecordPublished -Version 60 -Handoff "what this version changed"
 ```
+
+`-Version` is the number the publish returned, and `-Handoff` is one line for whoever reads this
+next. Both are required: a record that says what is live but not what changed sends the next session
+to the page to find out.
 
 **Do not run the second command first.** It is a separate switch precisely so that recording is a
 deliberate act: it asserts the live page matches the source, and if it does not, you have just
