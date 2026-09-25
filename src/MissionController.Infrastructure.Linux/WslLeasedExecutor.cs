@@ -342,6 +342,20 @@ public class WslLeasedExecutor : ILeasedExecutor
                                     ? completeProp.ValueKind == JsonValueKind.True
                                     : null;
 
+                            // The guest's signature over its own outcome (roadmap 2.5). Read as four
+                            // opaque strings and stored as they arrived: this host is the party the
+                            // signature exists to constrain, so it does not get to normalise,
+                            // re-encode or rebuild any of them.
+                            string? Text(string name) =>
+                                root.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.String
+                                    ? prop.GetString()
+                                    : null;
+
+                            string? signedOutcome = Text("outcomeCanonical");
+                            string? outcomeSignature = Text("outcomeSignature");
+                            string? outcomeKeyId = Text("outcomeKeyId");
+                            string? outcomePublicKey = Text("outcomePublicKey");
+
                             if (outcome is not null)
                             {
                                 outcome = outcome with
@@ -350,6 +364,10 @@ public class WslLeasedExecutor : ILeasedExecutor
                                     ViolationsReported = violationsReported,
                                     ViolationsComplete = violationsComplete,
                                     ViolationsDropped = droppedCount,
+                                    SignedOutcome = signedOutcome,
+                                    OutcomeSignature = outcomeSignature,
+                                    OutcomeKeyId = outcomeKeyId,
+                                    OutcomePublicKey = outcomePublicKey,
                                 };
                             }
 

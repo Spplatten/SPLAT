@@ -441,6 +441,38 @@ def pkcs1_sha256_verify(modulus, exponent, message, signature):
     expected = b'\x00\x01' + b'\xff' * (size - len(digest_info) - 3) + b'\x00' + digest_info
     return decrypted == expected
 
+def check_guest_outcome():
+    # The Linux guest signs what its lease did, with a key generated inside the guest that never
+    # leaves it. This checks that signature over the exact text the guest signed - carried verbatim
+    # in the record, not rebuilt here, because a rebuild is a second implementation of a canonical
+    # form and the place these things go wrong.
+    #
+    # What a pass means is narrow: the outcome text came from something holding that guest's private
+    # key, so nothing between the guest and this bundle altered it. It does not mean the guest told
+    # the truth - root in the guest can sign a lie, and no signature closes that.
+    record = load('mission_run_record.json')
+    state = record.get('EnforcementState') or {}
+    text = state.get('GuestSignedOutcome')
+    signature = state.get('GuestOutcomeSignature')
+    public_key = state.get('GuestOutcomePublicKey')
+
+    if not text and not signature:
+        return  # A Windows mission, or a guest with no key. The record says so; nothing to check.
+
+    if not (text and signature and public_key):
+        fail('the record carries part of a guest outcome signature but not all of it.')
+
+    der = base64.b64decode(public_key)
+    key_id = hashlib.sha256(der).hexdigest()
+    if state.get('GuestOutcomeKeyId') and state['GuestOutcomeKeyId'] != key_id:
+        fail('the guest outcome key id does not match the key the record carries.')
+
+    modulus, exponent = der_rsa_public_key(der)
+    if not pkcs1_sha256_verify(modulus, exponent, text.encode('utf-8'), base64.b64decode(signature)):
+        fail('the guest outcome signature does not verify: what the record says the lease did is not what the guest signed.')
+
+    print(f'[+] The guest signed this lease outcome (key {key_id[:16]}): {text}')
+
 def check_signature(mission_id):
     if not os.path.exists(os.path.join(HERE, 'signature.json')):
         print('[!] Unsigned: the files agree with each other, and nothing here says who produced them.')
@@ -514,6 +546,7 @@ def main():
     if unproven:
         fail(f'No proof for entries {unproven}.')
     print(f'[+] All {len(leaves)} entries in audit_chain.json are leaves under the root in {root_file}.')
+    check_guest_outcome()
     sys.exit(check_signature(mission_id))
 
 if __name__ == '__main__':
@@ -642,6 +675,51 @@ function Test-Signature($missionId) {
     exit 0
 }
 
+function Test-GuestOutcome {
+    # The Linux guest signs what its lease did, with a key made inside the guest that never leaves.
+    # Checked over the exact text the guest signed, carried verbatim in the record rather than
+    # rebuilt here - a rebuild is a second implementation of a canonical form, which is where these
+    # things go wrong. A pass means the text came from something holding that guest's key, so
+    # nothing between the guest and this bundle altered it. It does not mean the guest was honest.
+    $record = Read-Evidence 'mission_run_record.json'
+    $state = $record.EnforcementState
+    if (-not $state) { return }
+
+    $text = [string]$state.GuestSignedOutcome
+    $signature = [string]$state.GuestOutcomeSignature
+    $publicKey = [string]$state.GuestOutcomePublicKey
+
+    if ([string]::IsNullOrEmpty($text) -and [string]::IsNullOrEmpty($signature)) { return }
+    if ([string]::IsNullOrEmpty($text) -or [string]::IsNullOrEmpty($signature) -or [string]::IsNullOrEmpty($publicKey)) {
+        Stop-Verification 'the record carries part of a guest outcome signature but not all of it.'
+    }
+
+    $der = [Convert]::FromBase64String($publicKey)
+    $keyId = Get-Sha256HexOfBytes $der
+    if ($state.GuestOutcomeKeyId -and ([string]$state.GuestOutcomeKeyId) -ne $keyId) {
+        Stop-Verification 'the guest outcome key id does not match the key the record carries.'
+    }
+
+    $key = Read-RsaPublicKey $der
+    $parameters = New-Object System.Security.Cryptography.RSAParameters
+    $parameters.Modulus = $key.Modulus
+    $parameters.Exponent = $key.Exponent
+    $rsa = [System.Security.Cryptography.RSA]::Create()
+    try {
+        $rsa.ImportParameters($parameters)
+        $verified = $rsa.VerifyData(
+            [System.Text.Encoding]::UTF8.GetBytes($text),
+            [Convert]::FromBase64String($signature),
+            [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+            [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    } finally { $rsa.Dispose() }
+    if (-not $verified) {
+        Stop-Verification 'the guest outcome signature does not verify: what the record says the lease did is not what the guest signed.'
+    }
+
+    Write-Host ""[+] The guest signed this lease outcome (key $($keyId.Substring(0,16))): $text"" -ForegroundColor Green
+}
+
 $missionId = $null
 if (Test-Path (Join-Path $PSScriptRoot 'manifest.json')) {
     $rootFile = 'manifest.json'
@@ -683,6 +761,7 @@ foreach ($id in $leaves.Keys) {
 }
 
 Write-Host ""[+] All $($leaves.Count) entries in audit_chain.json are leaves under the root in $rootFile."" -ForegroundColor Green
+Test-GuestOutcome
 Test-Signature $missionId
 ";
     }

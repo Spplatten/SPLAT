@@ -58,6 +58,17 @@ public sealed class MissionRunFacts
     public ulong? KernelRefusalsReported { get; set; }
     public bool? KernelRefusalEvidenceComplete { get; set; }
 
+    // The guest's own signature over what the lease did (roadmap 2.5). Until 2026-09-25 the
+    // kernel-enforced path had the weakest receipt of anything here: a Windows mission sealed its
+    // facts into a chained ledger, while a Linux lease reported over a socket to a host that then
+    // wrote down whatever it liked. These four close the gap between the guest saying something
+    // and this record claiming it. Null on Windows and on a guest with no key, where the bundle
+    // says the outcome is unsigned rather than implying someone checked it.
+    public string? GuestSignedOutcome { get; set; }
+    public string? GuestOutcomeSignature { get; set; }
+    public string? GuestOutcomeKeyId { get; set; }
+    public string? GuestOutcomePublicKey { get; set; }
+
     // Outcome.
     public string ExecutionState { get; set; } = "Faulted";
     public int? ExitCode { get; set; }
@@ -131,7 +142,13 @@ public record EnforcementStateEvidence(
     // a daemon that predates the fields.
     ulong? KernelRefusals = null,
     ulong? KernelRefusalsReported = null,
-    bool? KernelRefusalEvidenceComplete = null);
+    bool? KernelRefusalEvidenceComplete = null,
+    // See MissionRunFacts: the guest's signature over its own outcome, carried verbatim so a
+    // verifier checks the bytes the guest signed rather than a rebuild of them.
+    string? GuestSignedOutcome = null,
+    string? GuestOutcomeSignature = null,
+    string? GuestOutcomeKeyId = null,
+    string? GuestOutcomePublicKey = null);
 
 /// <summary>
 /// Group 4: Outcome

@@ -761,6 +761,72 @@ public class WslLeasedExecutorWireTests
         Assert.DoesNotContain("[KERNEL_EVENTS_INCOMPLETE]", result.StandardError, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The guest's signature over its outcome reaches the host unaltered (roadmap 2.5).
+    ///
+    /// Carried as four opaque strings and stored exactly as they arrived. This host is the party the
+    /// signature exists to constrain, so it does not normalise, re-encode or rebuild any of them -
+    /// a host that "helpfully" canonicalised the signed text would break every verification and
+    /// look like tampering, which in a sense it would be.
+    /// </summary>
+    [Fact]
+    public async Task TheGuestsSignatureOverItsOutcome_ReachesTheHostVerbatim()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        const string canonical = "splat-lease-outcome/1|mission=m-1|cgroup=4021|enforcing=true|uid=65534|exit=0";
+        var daemon = RunStandInDaemonAsync(
+            listener,
+            "{\"type\":\"LEASE\",\"cgroupId\":4021,\"enforcing\":true,\"workloadUid\":65534}",
+            "{\"type\":\"EXIT\",\"exitCode\":0,\"violationsDropped\":0,\"violationsCounted\":0," +
+            "\"violationsReported\":0,\"violationsComplete\":true," +
+            $"\"outcomeCanonical\":\"{canonical}\"," +
+            "\"outcomeSignature\":\"c2lnbmF0dXJl\",\"outcomeKeyId\":\"abc123\",\"outcomePublicKey\":\"cHVibGlj\"}");
+
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
+        var result = await executor.ExecuteLeasedAsync(
+            SampleLease(), "/bin/sh", new[] { "-c", "ls" });
+
+        await daemon;
+        listener.Stop();
+
+        Assert.NotNull(result.Lease);
+        Assert.Equal(canonical, result.Lease!.SignedOutcome);
+        Assert.Equal("c2lnbmF0dXJl", result.Lease!.OutcomeSignature);
+        Assert.Equal("abc123", result.Lease!.OutcomeKeyId);
+        Assert.Equal("cHVibGlj", result.Lease!.OutcomePublicKey);
+    }
+
+    /// <summary>
+    /// A daemon with no key signs nothing, and the outcome says so rather than carrying an empty
+    /// signature a reader might mistake for one that was checked.
+    /// </summary>
+    [Fact]
+    public async Task ADaemonWithNoKey_LeavesTheOutcomeUnsigned()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var daemon = RunStandInDaemonAsync(
+            listener,
+            "{\"type\":\"LEASE\",\"cgroupId\":4023,\"enforcing\":true,\"workloadUid\":65534}",
+            "{\"type\":\"EXIT\",\"exitCode\":0,\"violationsDropped\":0}");
+
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
+        var result = await executor.ExecuteLeasedAsync(
+            SampleLease(), "/bin/sh", new[] { "-c", "ls" });
+
+        await daemon;
+        listener.Stop();
+
+        Assert.NotNull(result.Lease);
+        Assert.Null(result.Lease!.SignedOutcome);
+        Assert.Null(result.Lease!.OutcomeSignature);
+    }
+
     /// <summary>Counts what a streaming consumer received, on whatever thread it arrived.</summary>
     private sealed class CountingProgress : IProgress<string>
     {

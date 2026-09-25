@@ -11,10 +11,17 @@ clap = { version = "4.5", features = ["derive"] }
 hmac = "0.12"
 libc = "0.2"
 libbpf-rs = "0.24"
+# Roadmap 2.5: the guest signs what a lease did, so a record cannot claim more than the guest
+# reported. RSA rather than Ed25519 because every run-record bundle already ships a verifier
+# that checks PKCS#1 v1.5 with its standard library alone - see src/outcome.rs for the argument.
+rsa = "0.9"
+rand = "0.8"
 tokio = { version = "1.38", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sha2 = "0.10"
+# `oid` so rsa can build the PKCS#1 v1.5 DigestInfo prefix - the same nineteen bytes
+# verify_proofs.py writes out by hand as `3031300d060960864801650304020105000420`.
+sha2 = { version = "0.10", features = ["oid"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 

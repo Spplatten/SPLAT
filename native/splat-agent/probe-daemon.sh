@@ -656,6 +656,48 @@ refusal_receipt_complete = udp_bad_exit.get("violationsComplete") is True
 # The permitted half refused nothing, and its receipt must say zero rather than stay silent:
 # a field that only ever appears after a denial cannot be read as "nothing was denied".
 clean_receipt_counted_zero = exit_frame(udp_ok).get("violationsCounted") == 0
+
+# Roadmap 2.5: the guest signs what the lease did, so a record cannot claim more than the guest
+# said. Verified here the way a stranger's script verifies it - PKCS#1 v1.5 over the exact text the
+# daemon signed - and in both directions, because a signature nobody can forge proves nothing if an
+# edited outcome passes it too.
+signed_exit = exit_frame(allowed)
+signed_text = signed_exit.get("outcomeCanonical")
+signed_sig = signed_exit.get("outcomeSignature")
+signed_key = signed_exit.get("outcomePublicKey")
+
+def rsa_pkcs1_verifies(public_der_b64, message, signature_b64):
+    der = base64.b64decode(public_der_b64)
+    def length(at):
+        size = der[at]; at += 1
+        if size & 0x80:
+            count = size & 0x7F
+            size = int.from_bytes(der[at:at + count], 'big'); at += count
+        return size, at
+    if der[0] != 0x30:
+        return False
+    _, at = length(1)
+    numbers = []
+    for _ in range(2):
+        if der[at] != 0x02:
+            return False
+        size, at = length(at + 1)
+        numbers.append(int.from_bytes(der[at:at + size], 'big')); at += size
+    modulus, exponent = numbers
+    signature = base64.b64decode(signature_b64)
+    size = (modulus.bit_length() + 7) // 8
+    if len(signature) != size:
+        return False
+    decrypted = pow(int.from_bytes(signature, 'big'), exponent, modulus).to_bytes(size, 'big')
+    digest_info = bytes.fromhex('3031300d060960864801650304020105000420') + hashlib.sha256(message).digest()
+    padding = bytes([255]) * (size - len(digest_info) - 3)
+    expected = bytes([0, 1]) + padding + bytes([0]) + digest_info
+    return decrypted == expected
+
+outcome_signed = bool(signed_text and signed_sig and signed_key)
+outcome_verifies = outcome_signed and rsa_pkcs1_verifies(signed_key, signed_text.encode('utf-8'), signed_sig)
+outcome_edit_refused = outcome_signed and not rsa_pkcs1_verifies(
+    signed_key, signed_text.replace('exit=0', 'exit=1').encode('utf-8'), signed_sig)
 print()
 print(f"  UDP outside the lease refused  : {udp_blocked}")
 print(f"  UDP inside the lease permitted : {udp_allowed}  (the control)")
@@ -742,6 +784,10 @@ evidence = {
         "refusal_receipt_counts_the_denial": refusal_receipt_counted,
         "refusal_receipt_says_it_is_complete": refusal_receipt_complete,
         "a_clean_lease_reports_zero_refusals": clean_receipt_counted_zero,
+        # The guest's own signature over the outcome, and that an edited outcome fails it.
+        "lease_outcome_is_signed_by_the_guest": outcome_signed,
+        "lease_outcome_signature_verifies": outcome_verifies,
+        "an_edited_outcome_fails_the_signature": outcome_edit_refused,
         # P2: the workload's root is its own mount namespace, not the host's tree minus a deny-list.
         "jail_control_host_has_home_and_mnt": host_has_the_dirs,
         "jail_hides_home_and_mnt": jail_hides_host,
@@ -795,6 +841,9 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["refusal_receipt_counts_the_denial"]
     and evidence["results"]["refusal_receipt_says_it_is_complete"]
     and evidence["results"]["a_clean_lease_reports_zero_refusals"]
+    and evidence["results"]["lease_outcome_is_signed_by_the_guest"]
+    and evidence["results"]["lease_outcome_signature_verifies"]
+    and evidence["results"]["an_edited_outcome_fails_the_signature"]
     # The jail, with its control: hidden directories only count when the host has them to hide.
     and evidence["results"]["jail_control_host_has_home_and_mnt"]
     and evidence["results"]["jail_hides_home_and_mnt"]

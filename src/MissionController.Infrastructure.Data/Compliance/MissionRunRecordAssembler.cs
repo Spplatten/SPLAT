@@ -115,7 +115,11 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
             AdmissionVerdict: facts.Admission,
             KernelRefusals: facts.KernelRefusals,
             KernelRefusalsReported: facts.KernelRefusalsReported,
-            KernelRefusalEvidenceComplete: facts.KernelRefusalEvidenceComplete);
+            KernelRefusalEvidenceComplete: facts.KernelRefusalEvidenceComplete,
+            GuestSignedOutcome: facts.GuestSignedOutcome,
+            GuestOutcomeSignature: facts.GuestOutcomeSignature,
+            GuestOutcomeKeyId: facts.GuestOutcomeKeyId,
+            GuestOutcomePublicKey: facts.GuestOutcomePublicKey);
 
         var outcome = new OutcomeEvidence(
             ExecutionState: facts.ExecutionState,

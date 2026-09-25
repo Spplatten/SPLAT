@@ -496,7 +496,20 @@ public record LeaseOutcome(
     ulong? ViolationsCounted = null,
     ulong? ViolationsReported = null,
     bool? ViolationsComplete = null,
-    ulong ViolationsDropped = 0);
+    ulong ViolationsDropped = 0,
+    // Roadmap 2.5: the guest's own signature over what the lease did.
+    //
+    // SignedOutcome is the exact text the daemon signed, carried verbatim rather than rebuilt here:
+    // the daemon, this host and two verifier scripts all have to agree on the bytes, and rebuilding
+    // a canonical form in four places is where that agreement is lost. The signature proves the
+    // text came from a process holding this guest's private key - not that the guest is honest,
+    // which root in the guest could never be made to be, but that nothing between the guest and
+    // this record altered what it said. Null on a daemon with no key, and the record then says the
+    // outcome is unsigned rather than implying it was checked.
+    string? SignedOutcome = null,
+    string? OutcomeSignature = null,
+    string? OutcomeKeyId = null,
+    string? OutcomePublicKey = null);
 
 /// <summary>
 /// Executes a tool command inside a hardware-isolated WSL2 guest VM under an in-kernel BPF-LSM capability lease.

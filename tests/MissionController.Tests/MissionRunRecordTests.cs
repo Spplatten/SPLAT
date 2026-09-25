@@ -280,6 +280,74 @@ public class MissionRunRecordTests
         }
     }
 
+    /// <summary>
+    /// Roadmap 2.5: the guest signs what its lease did, and the bundle's own verifier checks it.
+    ///
+    /// The kernel-enforced path had the weakest receipt of anything this product makes. A Windows
+    /// mission sealed its facts into a chained ledger and exported a bundle a stranger could verify;
+    /// a Linux lease reported its outcome over a socket to a host that then wrote down whatever it
+    /// liked, with nothing binding the words to the guest that said them. This closes the span
+    /// between the guest speaking and the record claiming - not the guest's honesty, which root in
+    /// the guest could always undo and which no signature has ever fixed.
+    ///
+    /// The edit is one character inside the signed text, and the kind a host would make if it wanted
+    /// a cleaner story than it got: a failed exit reported as a clean one.
+    /// </summary>
+    [Fact]
+    public async Task AGuestSignedLeaseOutcome_Verifies_AndFailsOnceTheRecordSaysSomethingElse()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), $"GuestSigned_{Guid.NewGuid():N}.db");
+        string tempDir = Path.Combine(Path.GetTempPath(), "splat_test_guest_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var missionId = Guid.NewGuid();
+
+            // Stands in for the key the daemon generates inside the guest. The encodings are the ones
+            // outcome.rs emits: PKCS#1 public DER, PKCS#1 v1.5 over SHA-256, both base64.
+            using var guestKey = RSA.Create(2048);
+            byte[] publicDer = guestKey.ExportRSAPublicKey();
+            string canonical =
+                $"splat-lease-outcome/1|mission={missionId}|cgroup=4021|enforcing=true|uid=65534" +
+                "|exit=7|counted=2|reported=2|dropped=0|workspace=/var/lib/splat/missions/m|workspaceRemoved=true";
+
+            var facts = SampleFacts(missionId);
+            facts.Substrate = "LinuxLease";
+            facts.KernelRefusals = 2;
+            facts.KernelRefusalsReported = 2;
+            facts.KernelRefusalEvidenceComplete = true;
+            facts.GuestSignedOutcome = canonical;
+            facts.GuestOutcomeSignature = Convert.ToBase64String(guestKey.SignData(
+                Encoding.UTF8.GetBytes(canonical), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+            facts.GuestOutcomeKeyId = Convert.ToHexString(SHA256.HashData(publicDer)).ToLowerInvariant();
+            facts.GuestOutcomePublicKey = Convert.ToBase64String(publicDer);
+
+            var ledger = await LedgerWithMissionAsync(dbPath, facts);
+            string bundle = await ExtractBundleAsync(AssemblerFor(ledger), missionId, tempDir);
+
+            var (code, output) = await RunPowerShellVerifierAsync(bundle);
+            // 2, not 0: nothing signed the BUNDLE here. The guest's signature is a separate claim
+            // about a separate thing, and it verified.
+            Assert.True(code == 2, output);
+            Assert.Contains("The guest signed this lease outcome", output);
+            Assert.Contains("exit=7", output);
+
+            // Now the host tells a better story than the guest signed.
+            string recordPath = Path.Combine(bundle, "mission_run_record.json");
+            string edited = File.ReadAllText(recordPath).Replace("|exit=7|", "|exit=0|", StringComparison.Ordinal);
+            Assert.DoesNotContain("|exit=7|", edited, StringComparison.Ordinal);
+            File.WriteAllText(recordPath, edited);
+
+            var (tamperedCode, tamperedOutput) = await RunPowerShellVerifierAsync(bundle);
+            Assert.True(tamperedCode == 1, tamperedOutput);
+            Assert.Contains("not what the guest signed", tamperedOutput);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
+            DeleteDatabase(dbPath);
+        }
+    }
+
     [Fact]
     public async Task ASignedBundle_Verifies_AndFailsOnceAnyOfItIsEdited()
     {

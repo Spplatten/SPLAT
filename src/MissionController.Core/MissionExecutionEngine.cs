@@ -447,6 +447,10 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             facts.KernelRefusals = leaseOutcome.ViolationsCounted;
             facts.KernelRefusalsReported = leaseOutcome.ViolationsReported;
             facts.KernelRefusalEvidenceComplete = leaseOutcome.ViolationsComplete;
+            facts.GuestSignedOutcome = leaseOutcome.SignedOutcome;
+            facts.GuestOutcomeSignature = leaseOutcome.OutcomeSignature;
+            facts.GuestOutcomeKeyId = leaseOutcome.OutcomeKeyId;
+            facts.GuestOutcomePublicKey = leaseOutcome.OutcomePublicKey;
         }
 
         // 5. Layer 4: credential and DLP sanitization, BEFORE a single byte of tool output is

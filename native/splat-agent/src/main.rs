@@ -24,6 +24,7 @@ mod cgroup;
 mod cow;
 mod jail;
 mod lease;
+mod outcome;
 mod violation;
 mod workspace;
 
@@ -145,6 +146,15 @@ struct Args {
     /// commands as root while treating "opened a loopback socket" as authority is not a sandbox.
     #[arg(long, default_value = "/etc/splat/agent.token")]
     auth_token_file: String,
+
+    /// Root-owned 0600 RSA key the daemon signs each lease's outcome with (roadmap 2.5).
+    ///
+    /// Created on first run. Unlike the auth token, a key that cannot be established is not fatal:
+    /// the daemon goes on containing, its EXIT frames carry no signature, and the host records the
+    /// outcome as unsigned. Containment and attribution are different promises, and losing the
+    /// second is no reason to stop keeping the first.
+    #[arg(long, default_value = outcome::DEFAULT_KEY_PATH)]
+    outcome_key_file: String,
 
     /// The uid a leased tool runs as. Defaults to nobody.
     ///
@@ -439,6 +449,12 @@ async fn main() -> Result<()> {
         }
     };
 
+    // The key each lease's outcome is signed with. Best-effort on purpose - see outcome.rs - so a
+    // guest that cannot hold a key still contains, and says its outcomes are unsigned rather than
+    // refusing to run them.
+    let outcome_signer: Option<Arc<outcome::OutcomeSigner>> =
+        outcome::OutcomeSigner::load_or_create(Path::new(&args.outcome_key_file)).map(Arc::new);
+
     // The ceiling, before anything is served. Its absence is loud because it is the one thing
     // that makes a stolen token worth less than the daemon's whole authority.
     let lease_ceiling: Option<Arc<Ceiling>> = match Ceiling::load(Path::new(&args.policy_file)) {
@@ -576,8 +592,9 @@ async fn main() -> Result<()> {
                 let auth = peer_auth.clone();
                 let ceiling_for_client = lease_ceiling.clone();
                 let missions_root_for_client = missions_root.clone();
+                let signer_for_client = outcome_signer.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids, ceiling_for_client, missions_root_for_client).await {
+                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids, ceiling_for_client, missions_root_for_client, signer_for_client).await {
                         error!("Client session error: {e:#}");
                     }
                 });
@@ -842,6 +859,7 @@ async fn handle_client(
     workload: WorkloadIdentity,
     lease_ceiling: Option<Arc<Ceiling>>,
     missions_root: Arc<str>,
+    outcome_signer: Option<Arc<outcome::OutcomeSigner>>,
 ) -> Result<()> {
     let (reader, mut writer) = socket.into_split();
     let mut buf_reader = BufReader::new(reader);
@@ -1732,6 +1750,31 @@ async fn handle_client(
                 if workspace_created {
                     exit_chunk["workspaceRemoved"] = serde_json::Value::Bool(workspace_removed);
                 }
+
+                // Roadmap 2.5: the guest signs what it just reported, so the record cannot claim
+                // more than the guest said. The signed text travels verbatim rather than being
+                // rebuilt from the fields above - three implementations have to agree on the exact
+                // bytes, and "rebuild the canonical form" is where that agreement goes wrong. The
+                // public key rides along so a bundle verifies without a second call to this host.
+                if let Some(signer) = outcome_signer.as_ref() {
+                    let canonical = outcome::canonical_outcome(
+                        &mission_id,
+                        cg.cgroup_id,
+                        lease_mgr.is_enforcing(),
+                        workload.uid,
+                        exit_code,
+                        violations_counted,
+                        violations_reported,
+                        violations_dropped,
+                        if workspace_created { Some(work_dir) } else { None },
+                        if workspace_created { Some(workspace_removed) } else { None },
+                    );
+                    exit_chunk["outcomeCanonical"] = serde_json::Value::from(canonical.clone());
+                    exit_chunk["outcomeSignature"] = serde_json::Value::from(signer.sign(&canonical));
+                    exit_chunk["outcomeKeyId"] = serde_json::Value::from(signer.key_id());
+                    exit_chunk["outcomePublicKey"] = serde_json::Value::from(signer.public_key_base64());
+                }
+
                 out.send(&exit_chunk).await?;
 
                 // 3. Atomically revoke lease upon exit
