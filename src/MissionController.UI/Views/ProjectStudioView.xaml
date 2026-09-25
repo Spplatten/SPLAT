@@ -65,10 +65,14 @@
                         <!-- AI Workflow & Agent Synthesizer (n8n Alternative) -->
                         <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="14">
                             <StackPanel Spacing="8">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="⚡ NATURAL-LANGUAGE WORKFLOW SYNTHESIZER" Style="{StaticResource SplatPageSectionLabelStyle}" Foreground="{ThemeResource SplatAccentBrush}" />
-                                    <TextBlock Text="(n8n Alternative / Zero-Trust Flow Builder)" FontSize="11" Foreground="{ThemeResource SplatTextSecondaryBrush}" VerticalAlignment="Center" />
-                                </StackPanel>
+                                <!-- One wrapping block, not a horizontal StackPanel. A horizontal
+                                     StackPanel measures its children with unbounded width, so the
+                                     subtitle ran past the card and the operator read
+                                     "(n8n Alternative / Zero-Trust" with the rest cut off. -->
+                                <TextBlock Style="{StaticResource SplatPageSectionLabelStyle}" Foreground="{ThemeResource SplatAccentBrush}" TextWrapping="Wrap">
+                                    <Run Text="⚡ NATURAL-LANGUAGE WORKFLOW SYNTHESIZER" />
+                                    <Run Text="  (n8n Alternative / Zero-Trust Flow Builder)" FontSize="11" Foreground="{ThemeResource SplatTextSecondaryBrush}" />
+                                </TextBlock>
                                 <TextBlock Text="Describe your automation in plain English (e.g. 'Listen for TikTok OAuth callback and audit ad spend', or 'Scrape event logs for error spikes and alert SecOps'). SPLAT will compile it into sandboxed nodes." FontSize="11" Foreground="{ThemeResource SplatTextSecondaryBrush}" TextWrapping="Wrap" />
                                 <Grid ColumnSpacing="10">
                                     <Grid.ColumnDefinitions>
@@ -85,11 +89,22 @@
                         </Border>
 
                         <TextBlock Text="PROJECT DEFINITION" Style="{StaticResource SplatPageSectionLabelStyle}" />
+                        <!-- Three rows, declared. A Grid with no RowDefinitions has exactly one row,
+                             so Grid.Row="1" and Grid.Row="2" below both resolved to row 0 and the
+                             six fields were drawn on top of each other: "Description" over
+                             "Project ID", the operator goal over the name. Nothing failed - WinUI
+                             places a child in row 0 and says nothing - which is why XamlLayoutTests
+                             now reads every grid in the project. -->
                         <Grid ColumnSpacing="10" RowSpacing="10">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
                             <TextBox Grid.Column="0" Header="Project ID" Text="{x:Bind ViewModel.ProjectId, Mode=TwoWay}" />
                             <TextBox Grid.Column="1" Header="Name" Text="{x:Bind ViewModel.ProjectName, Mode=TwoWay}" />
                             <TextBox Grid.Row="1" Grid.ColumnSpan="2" Header="Description" Text="{x:Bind ViewModel.ProjectDescription, Mode=TwoWay}" AcceptsReturn="True" TextWrapping="Wrap" />
