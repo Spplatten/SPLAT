@@ -91,7 +91,7 @@ The **Action** column says what was changed in the same commit as this record, o
 
 A second AI session left uncommitted work in the shared tree on 2026-09-18. It was committed as it stood,
 then checked the same way as everything above. The rows marked "…" are from
-`docs/ARCHITECTURAL-BREAKTHROUGHS.md`.
+`docs/...ARCHITECTURAL-BREAKTHROUGHS.md`.
 
 | Claim | Verdict | Evidence | Action |
 | --- | --- | --- | --- |

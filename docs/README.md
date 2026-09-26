@@ -4,7 +4,19 @@
 
 # docs/ — what is in here, and which of it is still true
 
-Last reconciled **2026-09-23**, when the two governance templates and the status-gate record were added; the architecture, context and module reference dates from 2026-09-10.
+A filename beginning `...` is a document whose work is finished: a template that is only ever
+copied, a brief whose audience was superseded, a record of decisions already taken. It is kept,
+not deleted, because something still cites it — the row below says what — and the prefix sorts it
+out of the way of the documents that are still moving. The prefix changes nothing else:
+`DocumentationDriftTests` enumerates `*.*` and filters on extension, so a renamed file is still
+scanned for unmeasured claims and broken links exactly as before. It cannot be applied to
+`README.md`, `ROADMAP.md`, `RUNBOOK-human-steps.md`, `TUTORIAL.md`, `SPLAT-Field-Guide.html` or
+`SPLAT-Field-Guide.published`, which the tests read by literal name.
+
+Finished is not the same as removed. Five build plans were deleted outright on 2026-09-09 and are
+recorded at the bottom of this file; those had nothing left citing them.
+
+Last reconciled **2026-09-26**, when model-proposed parameter targeting landed in the ReAct loop ([ARCHITECTURE-control-plane.md](ARCHITECTURE-control-plane.md)) and the README's last-hop claim was restored against the kernel program that ships; the two governance templates and the status-gate record date from 2026-09-23, and the architecture, context and module reference from 2026-09-10.
 Read [the OEM subtraction plan](audits/2026-09-09-oem-subtraction-plan.md) first; everything else
 is either an input to it, an artifact it produces, or a record of how the project got here. To
 change the code rather than the plan, start with [CONTEXT.md](CONTEXT.md).
@@ -47,8 +59,8 @@ scanned by `DocumentationDriftTests` like every other file here.
 
 | Document | Audience | What it is |
 | --- | --- | --- |
-| [RFC_TEMPLATE.md](RFC_TEMPLATE.md) | Systems engineers, kernel programmers, core contributors | The technical design specification: continuum placement with a trade-off matrix, a memory and concurrency contract, kernel and host invariants, a byte-level interface and wire specification, and an evidence plan. Copy to `docs/rfcs/RFC-NNNN-<slug>.md`. |
-| [EXECUTIVE_STATUS_TEMPLATE.md](EXECUTIVE_STATUS_TEMPLATE.md) | Enterprise buyers, CISOs, compliance officers, executive sponsors | The readiness and governance report: an attested executive summary, the auditability and non-repudiation scorecard, reliability and SLA tracking, and the milestone and risk heatmap. Every cell carries an attestation level. Copy to `docs/status/<date>-executive-status.md`. |
+| [...RFC_TEMPLATE.md](...RFC_TEMPLATE.md) | Systems engineers, kernel programmers, core contributors | The technical design specification: continuum placement with a trade-off matrix, a memory and concurrency contract, kernel and host invariants, a byte-level interface and wire specification, and an evidence plan. Copy to `docs/rfcs/RFC-NNNN-<slug>.md`. |
+| [...EXECUTIVE_STATUS_TEMPLATE.md](...EXECUTIVE_STATUS_TEMPLATE.md) | Enterprise buyers, CISOs, compliance officers, executive sponsors | The readiness and governance report: an attested executive summary, the auditability and non-repudiation scorecard, reliability and SLA tracking, and the milestone and risk heatmap. Every cell carries an attestation level. Copy to `docs/status/<date>-executive-status.md`. |
 
 ## Coursework
 
@@ -67,8 +79,8 @@ exist. Write accordingly.
 | [BRIEF-technical-one-pager.md](BRIEF-technical-one-pager.md) | An engineer who will decide in thirty minutes | **Current.** The one to send. Its "what is NOT proven" section is the reason it works. |
 | [SPLAT-Field-Guide.html](SPLAT-Field-Guide.html) | Someone learning what SPLAT does, from zero | **Current, and the source of truth** for [TUTORIAL.md](TUTORIAL.md) and the published artifact. Change this one first, then re-sync the other two. |
 | [TUTORIAL.md](TUTORIAL.md) | Same reader, in the repo | Derived from the Field Guide. Do not edit independently. |
-| [SPLAT-Enterprise-Executive-Brief.md](SPLAT-Enterprise-Executive-Brief.md) | A direct enterprise buyer | **Audience superseded.** Kept as long-form positioning and as source material for an OEM licensee's own materials. |
-| [PITCH-Microsoft-CorpDev-Copilot-Safety.md](PITCH-Microsoft-CorpDev-Copilot-Safety.md) | Microsoft CorpDev | **Byproduct, not a path.** Becomes possible with a traction record; do not sequence work around it. |
+| [...SPLAT-Enterprise-Executive-Brief.md](...SPLAT-Enterprise-Executive-Brief.md) | A direct enterprise buyer | **Audience superseded.** Kept as long-form positioning and as source material for an OEM licensee's own materials. |
+| [...PITCH-Microsoft-CorpDev-Copilot-Safety.md](...PITCH-Microsoft-CorpDev-Copilot-Safety.md) | Microsoft CorpDev | **Byproduct, not a path.** Becomes possible with a traction record; do not sequence work around it. |
 
 ## Commercial
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
@@ -23,6 +23,12 @@ namespace MissionController.Core;
 ///  - no repeats, so a chain cannot oscillate between two templates until the budget drains;
 ///  - selection restricted to the governed catalog, enforced inside <see cref="ReActDecisionContract.Parse"/>.
 /// A healthy verdict also ends the chain: the cheapest investigation is the one that stops early.
+///
+/// The model may also propose VALUES for the parameters the selected template declares, so a chain
+/// can follow a lead instead of running every step on its defaults. It proposes; it does not decide.
+/// <see cref="GovernedArgumentBinder.ScreenProposedValues"/> drops anything undeclared, anything the
+/// operator already set, and anything that would not survive the binder - and every drop is written
+/// to the ledger, because a command line a model influenced must be readable after the fact.
 /// </summary>
 public sealed class GovernedInvestigationLoop : IGovernedInvestigationLoop
 {
@@ -69,6 +75,11 @@ public sealed class GovernedInvestigationLoop : IGovernedInvestigationLoop
         var current = startingTemplate;
         string selectionReason = "Operator-selected starting diagnostic.";
 
+        // Step 1 runs on exactly what the operator supplied. Later steps run on the operator's values
+        // PLUS whatever the model proposed and the binder accepted for that specific template; the
+        // operator's dictionary is never mutated, so their values remain the floor for every step.
+        IReadOnlyDictionary<string, string> stepParameters = parameters;
+
         string investigationGoal =
             parameters.TryGetValue("UserInstruction", out var instruction) && !string.IsNullOrWhiteSpace(instruction)
                 ? instruction
@@ -92,7 +103,7 @@ public sealed class GovernedInvestigationLoop : IGovernedInvestigationLoop
             visitedTemplateIds.Add(current.TemplateId);
 
             var (toolOutput, aiAnalysis, missionFailed) =
-                await RunStepAsync(current, parameters, operatorIdentity, progress, cancellationToken);
+                await RunStepAsync(current, stepParameters, operatorIdentity, progress, cancellationToken);
 
             var verdict = _findingsExtractor.ExtractFindings(aiAnalysis, toolOutput, current.Name);
             steps.Add(new InvestigationStep(stepNumber, current.TemplateId, current.Name, selectionReason, verdict));
@@ -130,7 +141,7 @@ public sealed class GovernedInvestigationLoop : IGovernedInvestigationLoop
             }
 
             var decision = await DecideNextStepAsync(
-                current, verdict, investigationGoal, candidates, visitedTemplateIds, cancellationToken);
+                current, stepParameters, verdict, investigationGoal, candidates, visitedTemplateIds, cancellationToken);
 
             if (!decision.ShouldContinue || decision.TemplateId is null)
             {
@@ -150,22 +161,50 @@ public sealed class GovernedInvestigationLoop : IGovernedInvestigationLoop
                 break;
             }
 
+            // Screening happens HERE, against the template the registry actually returned, and not
+            // in the parser: only now is it known which keys this template declares and where their
+            // placeholders sit. A proposal that fails is dropped, never repaired - the step then runs
+            // on its default, which is what it would have done before the model could propose at all.
+            var screening = GovernedArgumentBinder.ScreenProposedValues(next, decision.Proposals, parameters);
+            stepParameters = Merge(parameters, screening.Accepted);
+
             await _auditLedger.AppendLogAsync(
                 investigationId,
                 next.TemplateId,
                 "INVESTIGATION_STEP_SELECTED",
-                $"Step {stepNumber + 1}: {next.Name} | Reason: {decision.Reason}",
+                $"Step {stepNumber + 1}: {next.Name} | Reason: {decision.Reason}" +
+                $" | ModelParameters: {DescribeAccepted(screening.Accepted)}",
                 operatorIdentity,
                 cancellationToken);
+
+            // Refusals get their own row rather than a clause on the one above. A model that keeps
+            // reaching for a parameter it may not set is reporting something about itself, and that
+            // has to be findable in the ledger without reading every selection row.
+            if (screening.Rejections.Count > 0)
+            {
+                await _auditLedger.AppendLogAsync(
+                    investigationId,
+                    next.TemplateId,
+                    "INVESTIGATION_PARAMETER_REFUSED",
+                    $"Step {stepNumber + 1}: {next.Name} | " + string.Join(" | ", screening.Rejections),
+                    operatorIdentity,
+                    cancellationToken);
+            }
+
+            string targeting = screening.Accepted.Count > 0
+                ? $" (targeting {DescribeAccepted(screening.Accepted)})"
+                : string.Empty;
 
             progress?.Report(new MissionChunk(
                 investigationId,
                 MissionChunkType.StatusChange,
-                $"🔗 Investigation step {stepNumber + 1}: {next.Name} — {decision.Reason}",
+                $"🔗 Investigation step {stepNumber + 1}: {next.Name}{targeting} — {decision.Reason}",
                 DateTime.UtcNow));
 
             current = next;
-            selectionReason = decision.Reason;
+            selectionReason = screening.Accepted.Count > 0
+                ? $"{decision.Reason} [model-targeted: {DescribeAccepted(screening.Accepted)}]"
+                : decision.Reason;
         }
 
         var overall = DetermineOverallStatus(steps);
@@ -218,12 +257,12 @@ public sealed class GovernedInvestigationLoop : IGovernedInvestigationLoop
         return (toolOutput.ToString(), aiAnalysis.ToString(), !completed);
     }
 
-    private async Task<List<(string TemplateId, string Name, string Description)>> BuildCandidateListAsync(
+    private async Task<List<InvestigationCandidate>> BuildCandidateListAsync(
         IReadOnlyList<string> visitedTemplateIds,
         CancellationToken cancellationToken)
     {
         var all = await _templateRegistry.GetAllTemplatesAsync(cancellationToken);
-        var candidates = new List<(string, string, string)>();
+        var candidates = new List<InvestigationCandidate>();
 
         foreach (var template in all)
         {
@@ -239,7 +278,12 @@ public sealed class GovernedInvestigationLoop : IGovernedInvestigationLoop
 
             if (!alreadyRun)
             {
-                candidates.Add((template.TemplateId, template.Name, template.Description));
+                candidates.Add(new InvestigationCandidate(
+                    template.TemplateId,
+                    template.Name,
+                    template.Description,
+                    template.ParameterFields ?? Array.Empty<TemplateParameterField>(),
+                    template.GetEffectiveDefaults()));
             }
         }
 
@@ -248,9 +292,10 @@ public sealed class GovernedInvestigationLoop : IGovernedInvestigationLoop
 
     private async Task<NextStepDecision> DecideNextStepAsync(
         SingleToolTemplate completedTemplate,
+        IReadOnlyDictionary<string, string> completedParameters,
         ExecutiveDiagnosisResult verdict,
         string investigationGoal,
-        IReadOnlyList<(string TemplateId, string Name, string Description)> candidates,
+        IReadOnlyList<InvestigationCandidate> candidates,
         IReadOnlyList<string> visitedTemplateIds,
         CancellationToken cancellationToken)
     {
@@ -259,6 +304,16 @@ public sealed class GovernedInvestigationLoop : IGovernedInvestigationLoop
 
         var observation = new StringBuilder();
         observation.AppendLine($"[COMPLETED STEP]: {completedTemplate.Name}");
+
+        // What the finished step actually ran against. Without this the model can target step N+1 and
+        // then lose that target at step N+2, because each decision otherwise sees only a verdict and
+        // has no way to know which host or account the chain is already following.
+        string ranAgainst = DescribeStepParameters(completedTemplate, completedParameters);
+        if (ranAgainst.Length > 0)
+        {
+            observation.AppendLine($"[RAN AGAINST]: {ranAgainst}");
+        }
+
         observation.AppendLine($"[VERDICT]: {verdict.OverallStatus} — {verdict.StatusHeadline}");
         foreach (var finding in verdict.KeyFindings)
         {
@@ -301,6 +356,100 @@ public sealed class GovernedInvestigationLoop : IGovernedInvestigationLoop
             return new NextStepDecision(false, null,
                 $"Could not obtain a follow-up decision from the model ({ex.Message}); investigation stopped.");
         }
+    }
+
+    /// <summary>
+    /// The operator's parameters with the accepted model proposals laid over them.
+    ///
+    /// Returns the caller's own dictionary when nothing was accepted, so the common case allocates
+    /// nothing and the object identity of an unmodified parameter set is preserved. The operator's
+    /// dictionary is never mutated: each step composes its own, so one step's targeting cannot leak
+    /// into the next - which is the bug this method exists to make impossible rather than unlikely.
+    /// </summary>
+    /// <summary>
+    /// The values a finished step was actually bound with, restricted to that template's own declared
+    /// fields. Restricting it matters: the operator's dictionary also carries UserInstruction and
+    /// whatever keys the STARTING template needed, and echoing those into a later decision prompt
+    /// would invite the model to propose them for a template that never declared them.
+    /// </summary>
+    private static string DescribeStepParameters(
+        SingleToolTemplate template,
+        IReadOnlyDictionary<string, string> parameters)
+    {
+        var fields = template.ParameterFields;
+        if (fields is null || fields.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var defaults = template.GetEffectiveDefaults();
+        var parts = new List<string>();
+
+        foreach (var field in fields)
+        {
+            if (string.IsNullOrWhiteSpace(field.Key) || field.ValueType == TemplateParameterType.Multiline)
+            {
+                continue;
+            }
+
+            string? value =
+                parameters.TryGetValue(field.Key, out var supplied) && !string.IsNullOrWhiteSpace(supplied)
+                    ? supplied
+                    : defaults.TryGetValue(field.Key, out var fallback) ? fallback : null;
+
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                parts.Add($"{field.Key}={value}");
+            }
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    private static IReadOnlyDictionary<string, string> Merge(
+        IReadOnlyDictionary<string, string> operatorSupplied,
+        IReadOnlyDictionary<string, string> accepted)
+    {
+        if (accepted.Count == 0)
+        {
+            return operatorSupplied;
+        }
+
+        var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in operatorSupplied)
+        {
+            merged[pair.Key] = pair.Value;
+        }
+
+        // Screening already refused every key the operator supplied, so this cannot overwrite one.
+        foreach (var pair in accepted)
+        {
+            merged[pair.Key] = pair.Value;
+        }
+
+        return merged;
+    }
+
+    /// <summary>
+    /// Renders accepted proposals for the ledger and the operator's status line. Values are printed
+    /// in full and never truncated: this row is the record of what the model changed about a command
+    /// line, and an elided value makes it useless for exactly the audit it exists to serve. The
+    /// binder's own length limits keep it bounded.
+    /// </summary>
+    private static string DescribeAccepted(IReadOnlyDictionary<string, string> accepted)
+    {
+        if (accepted.Count == 0)
+        {
+            return "none";
+        }
+
+        var parts = new List<string>(accepted.Count);
+        foreach (var pair in accepted)
+        {
+            parts.Add($"{pair.Key}={pair.Value}");
+        }
+
+        return string.Join(", ", parts);
     }
 
     private static DiagnosticHealthStatus DetermineOverallStatus(IReadOnlyList<InvestigationStep> steps)
