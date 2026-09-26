@@ -247,6 +247,7 @@ public sealed class SplatDataLayout
         CopilotWorkspace = Path.Combine(root, "copilot-workspace");
         ComplianceExports = Path.Combine(root, "ComplianceExports");
         MissionRunRecords = Path.Combine(root, "MissionRunRecords");
+        MountManifest = Path.Combine(root, "mount-manifest.json");
     }
 
     public string Root { get; }
@@ -272,4 +273,13 @@ public sealed class SplatDataLayout
     public string ComplianceExports { get; }
 
     public string MissionRunRecords { get; }
+
+    /// <summary>
+    /// Every change a mount made to this host, written by `splat-mcp provision --apply` and played
+    /// backwards by `splat-mcp unmount`. It lives under the data root rather than in the guest
+    /// because the guest is most of what unmounting takes apart - and in portable mode that root is
+    /// the drive, which is where the design wants it: the drive becomes the record of every machine
+    /// it was mounted on.
+    /// </summary>
+    public string MountManifest { get; }
 }

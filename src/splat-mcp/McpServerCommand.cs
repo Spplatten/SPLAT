@@ -25,6 +25,7 @@ public abstract record McpServerCommand
         Usage: splat-mcp [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>] [--run-record-key <file>]
                splat-mcp doctor [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>] [--run-record-key <file>]
                splat-mcp provision [--apply] [--egress <a.b.c.d:port,...>]
+               splat-mcp unmount [--apply] [--manifest <file>]
                splat-mcp new-run-record-key <file>
 
         Serves SPLAT's governed tools to an MCP client: JSON-RPC, one message per line, on stdin
@@ -37,7 +38,14 @@ public abstract record McpServerCommand
           provision           Do what doctor reports missing: build and install the lease
                               daemon in the guest and start it under systemd, so it is there
                               after a restart. Reports only, until --apply.
-          --apply             With provision, make the changes rather than listing them.
+          unmount             Take out what a mount put in, by playing its manifest backwards:
+                              the unit, the daemon, the lease ceiling, the token, and only the
+                              config lines the mount appended. Reports only, until --apply. It
+                              refuses without a manifest rather than deleting whatever looks
+                              like SPLAT, and names anything it could not restore.
+          --manifest <file>   With unmount, the manifest to play backwards. Without it, the one
+                              the mount wrote under the data root.
+          --apply             With provision or unmount, make the changes rather than listing them.
                               `wsl --install` and `wsl --shutdown` stay yours: one needs
                               administrator rights, the other ends every WSL session you have.
           --workspace <dir>   The one directory fs_read and fs_write may touch. It must already
@@ -87,6 +95,7 @@ public abstract record McpServerCommand
         // must never be able to turn into one.
         bool doctor = args.Count > 0 && args[0] == "doctor";
         bool provision = args.Count > 0 && args[0] == "provision";
+        bool unmount = args.Count > 0 && args[0] == "unmount";
         if (args.Count > 0 && args[0] == "new-run-record-key")
         {
             if (args.Count != 2 || args[1].StartsWith('-'))
@@ -104,7 +113,7 @@ public abstract record McpServerCommand
             }
         }
 
-        IReadOnlyList<string> options = doctor || provision ? args.Skip(1).ToArray() : args;
+        IReadOnlyList<string> options = doctor || provision || unmount ? args.Skip(1).ToArray() : args;
 
         var given = new Dictionary<string, string>(StringComparer.Ordinal);
         for (int i = 0; i < options.Count; i++)
@@ -124,9 +133,9 @@ public abstract record McpServerCommand
                     return new UsageError("--apply takes no value.");
                 }
 
-                if (!provision)
+                if (!provision && !unmount)
                 {
-                    return new UsageError("--apply is only for `splat-mcp provision`.");
+                    return new UsageError("--apply is only for `splat-mcp provision` and `splat-mcp unmount`.");
                 }
 
                 if (!given.TryAdd("--apply", string.Empty))
@@ -137,7 +146,12 @@ public abstract record McpServerCommand
                 continue;
             }
 
-            if (option is not ("--workspace" or "--egress" or "--ledger-key" or "--run-record-key"))
+            if (option == "--manifest" && !unmount)
+            {
+                return new UsageError("--manifest is only for `splat-mcp unmount`.");
+            }
+
+            if (option is not ("--workspace" or "--egress" or "--ledger-key" or "--run-record-key" or "--manifest"))
             {
                 return arg.StartsWith('-')
                     ? new UsageError($"unknown option '{arg}'.")
@@ -184,6 +198,32 @@ public abstract record McpServerCommand
                 // refusals it cannot explain, and the operator who wrote the list would hear nothing.
                 return new UsageError($"--egress: {ex.Message}");
             }
+        }
+
+        if (unmount)
+        {
+            // Nothing else belongs to unmounting: it removes what a manifest records, and no option
+            // here can widen or narrow that without making the record and the act disagree.
+            string? extra = given.Keys.FirstOrDefault(key => key is "--workspace" or "--egress" or "--ledger-key" or "--run-record-key");
+            if (extra is not null)
+            {
+                return new UsageError($"`unmount` takes only --apply and --manifest; {extra} belongs to the server or to `doctor`.");
+            }
+
+            string? manifest = null;
+            if (given.TryGetValue("--manifest", out string? manifestPath))
+            {
+                try
+                {
+                    manifest = Path.GetFullPath(manifestPath);
+                }
+                catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+                {
+                    return new UsageError($"--manifest '{manifestPath}' is not a usable path: {ex.Message}");
+                }
+            }
+
+            return new Unmount(given.ContainsKey("--apply"), manifest);
         }
 
         if (provision)
@@ -347,6 +387,14 @@ public abstract record McpServerCommand
     {
         public McpEgressPolicy CeilingEgress => Egress ?? McpEgressPolicy.None;
     }
+
+    /// <summary>
+    /// Undo a mount. <see cref="Apply"/> is false by default, for the same reason provisioning's is:
+    /// the steps remove a root daemon and rewrite files in /etc, and an unqualified invocation should
+    /// say what it would do. <see cref="ManifestPath"/> is null for the manifest the mount wrote
+    /// under the data root.
+    /// </summary>
+    public sealed record Unmount(bool Apply, string? ManifestPath = null) : McpServerCommand;
 
     public sealed record ShowHelp : McpServerCommand;
 

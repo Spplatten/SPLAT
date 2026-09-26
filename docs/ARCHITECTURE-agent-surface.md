@@ -32,7 +32,14 @@ written without the UTF-8 byte order mark it carried until 2026-09-11. `splat-mc
 token the daemon actually accepted, not merely one present on disk — and exits 0 only when a lease
 would reach the kernel; its summary of a lease is copied
 from [`SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md) and bound to it by a
-test. `splat-mcp provision` does what `doctor` reports missing — installs the lease daemon it carries at `/opt/splat/splat-agent` and starts it under a systemd unit, so it survives a restart — and changes nothing without `--apply`; `wsl --install` and `wsl --shutdown` stay the user's. It ships as one self-contained executable from
+test. `splat-mcp provision` does what `doctor` reports missing — installs the lease daemon it carries at `/opt/splat/splat-agent` and starts it under a systemd unit, so it survives a restart — and
+records every change it made in a mount manifest under the data root. `splat-mcp unmount` plays that
+manifest backwards: it stops and removes the unit before the binary it ran, takes out only the
+`wsl.conf` lines the mount appended, removes a directory only when it is empty, and names anything it
+could not restore — a binary it overwrote, a stanza edited since — exiting non-zero and keeping the
+manifest when there is any, because the manifest is then the only record of what is still on the
+host. Without a manifest it refuses: removing what a mount *usually* adds would delete a daemon, a
+unit or a config stanza that was there first. Both report only, until `--apply`. And changes nothing without `--apply`; `wsl --install` and `wsl --shutdown` stay the user's. It ships as one self-contained executable from
 [`packaging/publish-splat-mcp.ps1`](../packaging/publish-splat-mcp.ps1), which refuses to report
 success on a non-zero publish, a missing output, a stray file beside the executable, or a result
 that cannot print its usage. There is no `dotnet tool` package: `PackAsTool` rejects the platform

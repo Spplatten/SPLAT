@@ -138,6 +138,7 @@ message box, writes the reason to `<data root>\crash.log` and exits;
 | Compliance packages and run records | `<root>\ComplianceExports`, `<root>\MissionRunRecords` |
 | MCP and Copilot workspaces | `<root>\mcp-workspace`, `<root>\copilot-workspace` |
 | Crash log and self-test report | `<root>\crash.log`, `<root>\self-test.json` |
+| Mount manifest — every change `provision --apply` made, played backwards by `unmount` | `<root>\mount-manifest.json` |
 | In the WSL2 guest: daemon token, daemon log, lease cgroups | `/etc/splat/agent.token` (root, 0600), `journalctl -u splat-agent`, `/sys/fs/cgroup/splat_leases` |
 
 **The Linux side needs a person.** Loading BPF-LSM programs needs root, `sudo` prompts, and an agent

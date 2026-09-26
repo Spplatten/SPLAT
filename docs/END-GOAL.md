@@ -123,7 +123,7 @@ restart it needs, remain the one change a mount makes to the whole machine.
 | Runs from any folder | `splat-mcp` ran from a user folder on the second machine; not yet tried from removable media | 4.4 |
 | Keyed ledger | **Exists** since 2026-09-18 | 3.2 |
 | Data beside the executable (portable mode) | **Exists** since 2026-09-25. One root for both hosts, chosen by `SPLAT_DATA_DIR` or a `splat.portable` marker beside the executable, and named by `doctor`. What is not yet proven is a run from removable media | 4.1 |
-| Unmount, from a manifest | Missing. `provision` has no inverse | 4.2 |
+| Unmount, from a manifest | **Exists** since 2026-09-26. `provision --apply` writes the manifest; `splat-mcp unmount` plays it backwards and names what it could not restore. Not yet run against a real guest | 4.2 |
 | A console that needs nothing installed | Partly. The Windows App SDK is already inside it, but .NET is not | 4.3 |
 | The drive, its launcher, its name and icon | Missing; the logo comes later | 4.4 |
 | MCP client entries written at mount, removed at unmount | Missing | 4.5 |

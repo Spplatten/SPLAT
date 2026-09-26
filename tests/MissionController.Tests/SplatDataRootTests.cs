@@ -140,7 +140,7 @@ public class SplatDataRootTests
         {
             layout.Database, layout.LedgerDatabase, layout.Vault, layout.Jails, layout.CrashLog,
             layout.SelfTestReport, layout.McpWorkspace, layout.CopilotWorkspace,
-            layout.ComplianceExports, layout.MissionRunRecords,
+            layout.ComplianceExports, layout.MissionRunRecords, layout.MountManifest,
         };
 
         Assert.All(paths, path => Assert.StartsWith(root + Path.DirectorySeparatorChar, path, StringComparison.Ordinal));

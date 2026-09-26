@@ -55,6 +55,7 @@ public static class SubstrateProvisioner
         WslSubstrateHealthChecker? health = null,
         string? wslConfigPath = null,
         string? agentBinaryPath = null,
+        string? manifestPath = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(provision);
@@ -62,6 +63,15 @@ public static class SubstrateProvisioner
         wsl ??= SubstrateDoctor.RunWslAsync;
         health ??= new WslSubstrateHealthChecker();
         bool apply = provision.Apply;
+
+        // Every change this run makes to the host, in the order it makes them, so that
+        // `splat-mcp unmount` can play them backwards. A mount is honest only if it can be undone,
+        // and "undone" cannot mean a second list of steps maintained by hand beside this one.
+        var changes = new List<MountChange>();
+        string distro = string.Empty;
+
+        try
+        {
 
         output.WriteLine(apply
             ? "SPLAT provision - making this host enforce"
@@ -78,8 +88,9 @@ public static class SubstrateProvisioner
             return Verdict(output, false, apply);
         }
 
-        var (_, distro) = await wsl(new[] { "-e", "sh", "-c", ". /etc/os-release; echo $PRETTY_NAME" }, ct);
-        Line(output, "ok", "WSL", distro.Trim());
+        var (_, distroName) = await wsl(new[] { "-e", "sh", "-c", ". /etc/os-release; echo $PRETTY_NAME" }, ct);
+        distro = distroName.Trim();
+        Line(output, "ok", "WSL", distro);
 
         // 2. systemd, because the daemon has to come back after a restart without anyone typing.
         var (_, pid1) = await wsl(new[] { "-e", "ps", "-p", "1", "-o", "comm=" }, ct);
@@ -88,6 +99,13 @@ public static class SubstrateProvisioner
             if (apply)
             {
                 var (confExit, confOut) = await wsl(Root("printf '[boot]\\nsystemd=true\\n' >> /etc/wsl.conf"), ct);
+                if (confExit == 0)
+                {
+                    changes.Add(new MountChange(
+                        MountChange.Lines, MountChange.Guest, "/etc/wsl.conf",
+                        Appended: "[boot]\nsystemd=true\n"));
+                }
+
                 Line(output, confExit == 0 ? "todo" : "FAIL", "systemd",
                     confExit == 0
                         ? "wrote [boot] systemd=true to /etc/wsl.conf. `wsl --shutdown` is yours - it ends every WSL session you have open - then re-run this."
@@ -126,7 +144,10 @@ public static class SubstrateProvisioner
         //     same door for anything outside a jail, and it was a runbook line every operator had to
         //     remember. It is measured, as the mode of /mnt/c, rather than read from the config,
         //     because the config takes effect only on a restart that is the user's to take.
-        await WindowsDrivesStepAsync(output, wsl, apply, ct);
+        if (await WindowsDrivesStepAsync(output, wsl, apply, ct) is MountChange automount)
+        {
+            changes.Add(automount);
+        }
 
         // 4. The daemon binary, at a path that survives a restart. /tmp does not: it is tmpfs, and the
         //    distro stops seconds after its last process exits, taking the build with it.
@@ -136,9 +157,10 @@ public static class SubstrateProvisioner
         (string Path, string Sha256)? extracted = agentBinaryPath is null ? ExtractShippedAgent() : null;
         (string Path, string Sha256)? shipped = agentBinaryPath is null ? extracted : (agentBinaryPath, Sha256Of(agentBinaryPath));
         AgentStep agent;
+        string? replacedAgentSha = null;
         try
         {
-            agent = await AgentStepAsync(output, wsl, apply, shipped, ct);
+            (agent, replacedAgentSha) = await AgentStepAsync(output, wsl, apply, shipped, ct);
         }
         finally
         {
@@ -154,10 +176,24 @@ public static class SubstrateProvisioner
         }
 
         bool reinstalled = agent == AgentStep.Installed;
+        if (reinstalled)
+        {
+            changes.Add(new MountChange(
+                MountChange.File, MountChange.Guest, AgentPath, PreviousSha256: replacedAgentSha,
+                Note: replacedAgentSha is null ? null : "this mount replaced an existing daemon binary"));
+            changes.Add(new MountChange(MountChange.Directory, MountChange.Guest, "/opt/splat"));
+        }
 
         // 4b. The lease ceiling: what any lease may name on this host, written where a stolen token
         //     cannot reach around it. The daemon reads it at startup, so a change restarts the unit.
-        bool ceilingChanged = await CeilingStepAsync(output, wsl, apply, provision.CeilingEgress, ct);
+        var (ceilingChanged, replacedCeilingSha) = await CeilingStepAsync(output, wsl, apply, provision.CeilingEgress, ct);
+        if (ceilingChanged)
+        {
+            changes.Add(new MountChange(
+                MountChange.File, MountChange.Guest, CeilingPath, PreviousSha256: replacedCeilingSha,
+                Note: replacedCeilingSha is null ? null : "this mount replaced an existing lease ceiling"));
+            changes.Add(new MountChange(MountChange.Directory, MountChange.Guest, "/etc/splat"));
+        }
 
         // 5. The unit, rewritten on every --apply: a stale ExecStart pointing at a path that no longer
         //    exists fails at boot, quietly, and nobody reads a unit they did not write today.
@@ -170,6 +206,11 @@ public static class SubstrateProvisioner
 
         if (apply)
         {
+            // Asked before the unit starts: the daemon writes its own token at first start, so a token
+            // that is already there belonged to an earlier mount and is not this one's to claim.
+            var (tokenExit, _) = await wsl(Root($"test -f {WslAgentToken.DefaultPath}"), ct);
+            bool tokenExisted = tokenExit == 0;
+
             var (writeExit, writeOut) = await wsl(Root(
                 $"install -d /opt/splat && printf '%s' \"$SPLAT_UNIT\" > {UnitPath} && "
                 + "systemctl daemon-reload && " + StartCommand(reinstalled || ceilingChanged), ("SPLAT_UNIT", UnitFile)), ct);
@@ -177,6 +218,16 @@ public static class SubstrateProvisioner
             {
                 Line(output, "FAIL", "service", $"could not install the unit: {Short(writeOut)}");
                 return Verdict(output, false, apply);
+            }
+
+            changes.Add(new MountChange(MountChange.Unit, MountChange.Guest, UnitPath));
+            changes.Add(new MountChange(MountChange.Directory, MountChange.Guest, "/opt/splat"));
+
+            if (!tokenExisted)
+            {
+                changes.Add(new MountChange(
+                    MountChange.File, MountChange.Guest, WslAgentToken.DefaultPath,
+                    Note: "written by the daemon at its first start"));
             }
         }
 
@@ -203,6 +254,35 @@ public static class SubstrateProvisioner
                 : "not live: the daemon holds no BPF maps, so nothing it runs is contained");
 
         return Verdict(output, status.Enforcing, apply);
+
+        }
+        finally
+        {
+            // Written whatever the outcome, and only when something was actually changed. A run that
+            // installed the binary and then failed to install the unit has still changed this host,
+            // and an unmount that could not see the binary would leave a root-owned daemon behind.
+            if (apply && changes.Count > 0)
+            {
+                string path = manifestPath ?? MissionController.Core.SplatDataRoot.Layout.MountManifest;
+                try
+                {
+                    var existing = File.Exists(path) ? MountManifest.Read(path).Changes : Array.Empty<MountChange>();
+                    var merged = existing
+                        .Concat(changes.Where(c => !existing.Any(e => e.Kind == c.Kind && e.Path == c.Path)))
+                        .ToList();
+                    MountManifest.Create(distro, merged).Write(path);
+                    output.WriteLine();
+                    output.WriteLine($"Mount manifest: {path} ({merged.Count} change(s)). `splat-mcp unmount` plays it backwards.");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+                {
+                    output.WriteLine();
+                    output.WriteLine(
+                        $"This host was changed but the mount manifest could not be written to {path}: {ex.Message} " +
+                        "Unmounting will have to be done by hand, from the steps above.");
+                }
+            }
+        }
     }
 
     private const string ShippedAgentResource = "splat-agent";
@@ -215,9 +295,10 @@ public static class SubstrateProvisioner
         Stop,
     }
 
-    private static async Task<AgentStep> AgentStepAsync(
+    private static async Task<(AgentStep Step, string? ReplacedSha256)> AgentStepAsync(
         TextWriter output, SubstrateDoctor.WslRunner wsl, bool apply, (string Path, string Sha256)? shipped, CancellationToken ct)
     {
+        string? replaced = null;
         var (agentExit, _) = await wsl(Root($"test -x {AgentPath}"), ct);
         bool installed = agentExit == 0;
 
@@ -226,18 +307,24 @@ public static class SubstrateProvisioner
             if (shipped is null)
             {
                 Line(output, "ok", "daemon binary", AgentPath);
-                return AgentStep.InPlace;
+                return (AgentStep.InPlace, null);
             }
 
             // Kept only when it is byte-for-byte the daemon this executable carries. A newer splat-mcp.exe
             // over an older daemon is two halves of a wire protocol from different builds. A checksum
             // that cannot be read counts as different, and the replacement is verified before it lands.
             var (_, sums) = await wsl(Root($"sha256sum {AgentPath}"), ct);
-            if (sums.Trim().Split(' ', 2)[0].Equals(shipped.Value.Sha256, StringComparison.OrdinalIgnoreCase))
+            string existing = sums.Trim().Split(' ', 2)[0];
+            if (existing.Equals(shipped.Value.Sha256, StringComparison.OrdinalIgnoreCase))
             {
                 Line(output, "ok", "daemon binary", $"{AgentPath}, byte-for-byte the daemon built into this executable");
-                return AgentStep.InPlace;
+                return (AgentStep.InPlace, null);
             }
+
+            // Recorded before it is overwritten. Nothing keeps a copy of the binary, so unmount can
+            // only name what was there - which is the difference between an operator who knows a file
+            // is gone and one who finds out later.
+            replaced = existing.Length == 64 ? existing : null;
         }
 
         if (!apply)
@@ -248,13 +335,13 @@ public static class SubstrateProvisioner
                     : installed
                         ? $"{AgentPath} is not the daemon built into this executable. --apply replaces it and restarts the service."
                         : $"{AgentPath} is not there. --apply installs the daemon built into this executable - no Rust toolchain needed.");
-            return AgentStep.Stop;
+            return (AgentStep.Stop, null);
         }
 
         bool done = shipped is null
             ? await InstallAgentAsync(output, wsl, ct)
             : await InstallShippedAgentAsync(output, wsl, shipped.Value, ct);
-        return done ? AgentStep.Installed : AgentStep.Stop;
+        return (done ? AgentStep.Installed : AgentStep.Stop, done ? replaced : null);
     }
 
     /// <summary>
@@ -449,7 +536,7 @@ public static class SubstrateProvisioner
     }
 
     /// <summary>Writes the ceiling when it differs from what the guest holds. Returns whether it was written.</summary>
-    private static async Task<bool> CeilingStepAsync(
+    private static async Task<(bool Changed, string? ReplacedSha256)> CeilingStepAsync(
         TextWriter output, SubstrateDoctor.WslRunner wsl, bool apply, McpEgressPolicy egress, CancellationToken ct)
     {
         string wanted = CeilingDocument(egress);
@@ -461,7 +548,7 @@ public static class SubstrateProvisioner
         if (readExit == 0 && current.ReplaceLineEndings("\n").Trim() == wanted.ReplaceLineEndings("\n").Trim())
         {
             Line(output, "ok", "lease ceiling", $"{CeilingPath} bounds every lease; {egressNote}");
-            return false;
+            return (false, null);
         }
 
         if (!apply)
@@ -470,7 +557,17 @@ public static class SubstrateProvisioner
                 readExit == 0
                     ? $"{CeilingPath} differs from what this command would write. --apply rewrites it and restarts the daemon; {egressNote}"
                     : $"{CeilingPath} is not there, so the token alone authorizes what a lease may name. --apply writes it; {egressNote}");
-            return false;
+            return (false, null);
+        }
+
+        // Asked of the guest rather than computed here: a hash of the text this side read back would
+        // not be the hash `sha256sum` prints, and a receipt nobody can reproduce is not a receipt.
+        string? replaced = null;
+        if (readExit == 0)
+        {
+            var (sumExit, sum) = await wsl(Root($"sha256sum {CeilingPath}"), ct);
+            string digest = sumExit == 0 ? sum.Trim().Split(' ', 2)[0] : string.Empty;
+            replaced = digest.Length == 64 ? digest : null;
         }
 
         // Staged and renamed, so the daemon never reads a half-written file; 0644 root, which is what
@@ -484,11 +581,11 @@ public static class SubstrateProvisioner
         if (writeExit != 0)
         {
             Line(output, "FAIL", "lease ceiling", $"could not write {CeilingPath}: {Short(writeOut)}");
-            return false;
+            return (false, null);
         }
 
         Line(output, "ok", "lease ceiling", $"wrote {CeilingPath}; {egressNote}");
-        return true;
+        return (true, replaced);
     }
 
     /// <summary>
@@ -497,21 +594,21 @@ public static class SubstrateProvisioner
     /// operator's, and an edit inside it is theirs to make. The line never changes the verdict: it is
     /// about what a leased command can read, not whether a lease reaches the kernel.
     /// </summary>
-    private static async Task WindowsDrivesStepAsync(TextWriter output, SubstrateDoctor.WslRunner wsl, bool apply, CancellationToken ct)
+    private static async Task<MountChange?> WindowsDrivesStepAsync(TextWriter output, SubstrateDoctor.WslRunner wsl, bool apply, CancellationToken ct)
     {
         var (modeExit, mode) = await wsl(new[] { "-e", "stat", "-c", "%a", "/mnt/c" }, ct);
         string bits = mode.Trim();
         if (modeExit != 0 || bits.Length == 0)
         {
             Line(output, "ok", "Windows drives", "no /mnt/c in the guest, so nothing there for a leased command to read");
-            return;
+            return null;
         }
 
         // 700 or 000: whatever the owner keeps, the other bits are closed.
         if (bits.EndsWith("00", StringComparison.Ordinal))
         {
             Line(output, "ok", "Windows drives", $"/mnt/c is mode {bits}: closed to a leased command's uid");
-            return;
+            return null;
         }
 
         var (_, conf) = await wsl(new[] { "-e", "sh", "-c", "cat /etc/wsl.conf 2>/dev/null" }, ct);
@@ -529,7 +626,7 @@ public static class SubstrateProvisioner
             Line(output, "todo", "Windows drives",
                 $"/mnt/c is mode {bits}, and /etc/wsl.conf already asks for umask=077. `wsl --shutdown` is yours - it "
                 + "ends every WSL session you have open - and then it takes effect.");
-            return;
+            return null;
         }
 
         if (section >= 0)
@@ -537,7 +634,7 @@ public static class SubstrateProvisioner
             Line(output, "todo", "Windows drives",
                 $"/mnt/c is mode {bits}. /etc/wsl.conf has an [automount] section without umask=077: add "
                 + "`options = \"umask=077\"` under it yourself, then `wsl --shutdown`.");
-            return;
+            return null;
         }
 
         if (!apply)
@@ -545,7 +642,7 @@ public static class SubstrateProvisioner
             Line(output, "todo", "Windows drives",
                 $"/mnt/c is mode {bits}, so a leased command running as nobody can read your Windows profile through it. "
                 + "--apply appends [automount] options = \"umask=077\" to /etc/wsl.conf; `wsl --shutdown` then applies it.");
-            return;
+            return null;
         }
 
         var (writeExit, writeOut) = await wsl(Root("printf '\\n[automount]\\noptions = \"umask=077\"\\n' >> /etc/wsl.conf"), ct);
@@ -554,6 +651,12 @@ public static class SubstrateProvisioner
                 ? "wrote [automount] umask=077 to /etc/wsl.conf. `wsl --shutdown` is yours - it ends every WSL session you "
                   + "have open - and then /mnt/c closes to a leased command."
                 : $"could not write /etc/wsl.conf: {Short(writeOut)}");
+
+        return writeExit == 0
+            ? new MountChange(
+                MountChange.Lines, MountChange.Guest, "/etc/wsl.conf",
+                Appended: "\n[automount]\noptions = \"umask=077\"\n")
+            : null;
     }
 
     /// <summary>

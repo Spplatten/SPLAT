@@ -16,6 +16,28 @@ public sealed class SubstrateProvisionerTests
 
     private static WslAgentToken HermeticToken => new(authToken: "0123456789abcdef");
 
+    /// <summary>
+    /// Every run gets its own manifest path. Provisioning writes one under the data root when it
+    /// changes anything, and the suite found that out the honest way: a run of these tests left a
+    /// manifest in the operator's own %LOCALAPPDATA%\SPLAT describing a mount that had only ever
+    /// happened to a scripted guest, which `splat-mcp unmount` would then have tried to undo.
+    /// </summary>
+    private static string LastManifestPath = string.Empty;
+
+    private static Task<int> Provision(
+        McpServerCommand.Provision provision,
+        TextWriter output,
+        SubstrateDoctor.WslRunner wsl,
+        WslSubstrateHealthChecker health,
+        string? wslConfigPath = null,
+        string? agentBinaryPath = null)
+    {
+        LastManifestPath = Path.Combine(
+            Path.GetTempPath(), "splat-provision-tests", Guid.NewGuid().ToString("N"), "mount-manifest.json");
+        return SubstrateProvisioner.RunAsync(
+            provision, output, wsl, health, wslConfigPath, agentBinaryPath, LastManifestPath);
+    }
+
     private const string EnforcingAnswer =
         "{\"type\":\"HEALTH_RESPONSE\",\"bpfLsmActive\":true,\"cgroupV2Active\":true," +
         "\"overlayFsSupported\":false,\"kernelVersion\":\"6.18.33.2\",\"enforcing\":true,\"activeLeaseCount\":0}";
@@ -26,6 +48,9 @@ public sealed class SubstrateProvisionerTests
         public List<string> Commands { get; } = new();
 
         public bool HasAgent { get; init; } = true;
+
+        /// <summary>Whether the daemon has already written its token here.</summary>
+        public bool HasAgentToken { get; init; }
 
         public bool HasSystemd { get; init; } = true;
 
@@ -63,6 +88,10 @@ public sealed class SubstrateProvisionerTests
                 _ when line.Contains("/proc/cmdline", StringComparison.Ordinal) => (0, BpfOnBootLine ? "initrd=\\initrd.img lsm=landlock,yama,bpf" : "initrd=\\initrd.img lsm=landlock,yama"),
                 _ when line.Contains("test -x /opt/splat/splat-agent", StringComparison.Ordinal) => (HasAgent ? 0 : 1, string.Empty),
                 _ when line.Contains("test -f /etc/systemd/system/splat-agent.service", StringComparison.Ordinal) => (HasAgent ? 0 : 1, string.Empty),
+                // A guest the daemon has never run on has no token: it writes its own at first start.
+                // The default matters - answering "it is already there" would hide the one change no
+                // step here makes and no unmount would then know to take out.
+                _ when line.Contains("test -f /etc/splat/agent.token", StringComparison.Ordinal) => (HasAgentToken ? 0 : 1, string.Empty),
                 _ when line.Contains("systemctl is-active", StringComparison.Ordinal) => (0, "active\nenabled"),
                 _ when line.EndsWith("sha256sum /opt/splat/splat-agent", StringComparison.Ordinal) => (0, $"{InstalledAgentSha256 ?? new string('0', 64)}  /opt/splat/splat-agent"),
                 _ when line.Contains("wslpath -a", StringComparison.Ordinal) => (0, "/mnt/c/shipped/splat-agent"),
@@ -114,7 +143,7 @@ public sealed class SubstrateProvisionerTests
         var guest = new ScriptedGuest { HasAgent = false };
         var report = new StringWriter();
 
-        int exit = await SubstrateProvisioner.RunAsync(
+        int exit = await Provision(
             new McpServerCommand.Provision(Apply: false), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
 
@@ -129,7 +158,7 @@ public sealed class SubstrateProvisionerTests
     {
         var report = new StringWriter();
 
-        int exit = await SubstrateProvisioner.RunAsync(
+        int exit = await Provision(
             new McpServerCommand.Provision(Apply: true), report,
             (_, _) => Task.FromResult((-1, "wsl.exe not found")),
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
@@ -144,7 +173,7 @@ public sealed class SubstrateProvisionerTests
         var guest = new ScriptedGuest { HasSystemd = false };
         var report = new StringWriter();
 
-        int exit = await SubstrateProvisioner.RunAsync(
+        int exit = await Provision(
             new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
 
@@ -167,13 +196,48 @@ public sealed class SubstrateProvisionerTests
         var guest = new ScriptedGuest { WindowsDriveMode = "777" };
         var report = new StringWriter();
 
-        await SubstrateProvisioner.RunAsync(
+        await Provision(
             new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
 
         Assert.Contains(guest.Commands, command => command.Contains("umask=077", StringComparison.Ordinal) && command.Contains(">> /etc/wsl.conf", StringComparison.Ordinal));
         Assert.Contains("Windows drives", report.ToString());
         Assert.Contains("`wsl --shutdown` is yours", report.ToString());
+    }
+
+    /// <summary>
+    /// A mount is honest only if it can be undone, and undoing it means knowing what it did. Every
+    /// change goes into a manifest as it is made - the appended stanza with its exact text, so
+    /// unmount takes out those lines and not a stanza that looks like them; the daemon, the ceiling
+    /// and the unit; and the token the daemon writes at first start, which no step here creates and
+    /// which would otherwise be left behind as a root-owned secret nobody recorded.
+    /// </summary>
+    [Fact]
+    public async Task EveryChangeAnApplyMakes_IsRecordedInAMountManifest()
+    {
+        using var daemon = new SubstrateDoctorTests.StandInDaemon(EnforcingAnswer);
+        var guest = new ScriptedGuest { WindowsDriveMode = "777", InstalledAgentSha256 = new string('b', 64) };
+        using var shipped = new ShippedAgent();
+
+        await Provision(
+            new McpServerCommand.Provision(Apply: true), new StringWriter(), guest.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget),
+            agentBinaryPath: shipped.Path);
+
+        var manifest = MountManifest.Read(LastManifestPath);
+        Assert.Equal(MountManifest.CurrentVersion, manifest.Version);
+
+        var wslConf = Assert.Single(manifest.Changes, c => c.Kind == MountChange.Lines && c.Path == "/etc/wsl.conf");
+        Assert.Equal("\n[automount]\noptions = \"umask=077\"\n", wslConf.Appended);
+
+        Assert.Contains(manifest.Changes, c => c.Kind == MountChange.Unit && c.Path.EndsWith("splat-agent.service", StringComparison.Ordinal));
+        Assert.Contains(manifest.Changes, c => c.Kind == MountChange.File && c.Path == "/opt/splat/splat-agent");
+        Assert.Contains(manifest.Changes, c => c.Kind == MountChange.File && c.Path == "/etc/splat/agent.token");
+
+        // The daemon it replaced is named, because nothing kept a copy of it.
+        var binary = Assert.Single(manifest.Changes, c => c.Path == "/opt/splat/splat-agent");
+        Assert.True(binary.Replaced);
+        Assert.Equal(new string('b', 64), binary.PreviousSha256);
     }
 
     /// <summary>
@@ -189,7 +253,7 @@ public sealed class SubstrateProvisionerTests
         var guest = new ScriptedGuest();
         var report = new StringWriter();
 
-        await SubstrateProvisioner.RunAsync(
+        await Provision(
             new McpServerCommand.Provision(Apply: true, egress), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
 
@@ -202,7 +266,7 @@ public sealed class SubstrateProvisionerTests
 
         // The same document already in place: nothing written, nothing restarted.
         var settled = new ScriptedGuest { CeilingFile = SubstrateProvisioner.CeilingDocument(egress) };
-        await SubstrateProvisioner.RunAsync(
+        await Provision(
             new McpServerCommand.Provision(Apply: true, egress), new StringWriter(), settled.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
         Assert.DoesNotContain(settled.Commands, command => command.Contains("> /etc/splat/policy.json", StringComparison.Ordinal));
@@ -217,7 +281,7 @@ public sealed class SubstrateProvisionerTests
         var guest = new ScriptedGuest { WindowsDriveMode = "777", WslConf = "[automount]\noptions = \"metadata\"\n" };
         var report = new StringWriter();
 
-        await SubstrateProvisioner.RunAsync(
+        await Provision(
             new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
 
@@ -232,7 +296,7 @@ public sealed class SubstrateProvisionerTests
         var guest = new ScriptedGuest();
         var report = new StringWriter();
 
-        int exit = await SubstrateProvisioner.RunAsync(
+        int exit = await Provision(
             new McpServerCommand.Provision(Apply: false), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
 
@@ -259,7 +323,7 @@ public sealed class SubstrateProvisionerTests
             }
 
             var report = new StringWriter();
-            int exit = await SubstrateProvisioner.RunAsync(
+            int exit = await Provision(
                 new McpServerCommand.Provision(Apply: apply), report, new ScriptedGuest { BpfOnBootLine = false }.RunAsync,
                 new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), path);
 
@@ -331,7 +395,7 @@ public sealed class SubstrateProvisionerTests
         var guest = new ScriptedGuest { HasAgent = false };
         var report = new StringWriter();
 
-        await SubstrateProvisioner.RunAsync(
+        await Provision(
             new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
@@ -353,7 +417,7 @@ public sealed class SubstrateProvisionerTests
         };
         var report = new StringWriter();
 
-        int exit = await SubstrateProvisioner.RunAsync(
+        int exit = await Provision(
             new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
@@ -371,7 +435,7 @@ public sealed class SubstrateProvisionerTests
         var guest = new ScriptedGuest { InstalledAgentSha256 = new string('a', 64) };
         var report = new StringWriter();
 
-        await SubstrateProvisioner.RunAsync(
+        await Provision(
             new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
@@ -393,7 +457,7 @@ public sealed class SubstrateProvisionerTests
         };
         var report = new StringWriter();
 
-        await SubstrateProvisioner.RunAsync(
+        await Provision(
             new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
@@ -411,7 +475,7 @@ public sealed class SubstrateProvisionerTests
         var guest = new ScriptedGuest { HasAgent = false };
         var report = new StringWriter();
 
-        int exit = await SubstrateProvisioner.RunAsync(
+        int exit = await Provision(
             new McpServerCommand.Provision(Apply: false), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
@@ -431,13 +495,13 @@ public sealed class SubstrateProvisionerTests
     public async Task NeitherWayOfInstallingTheDaemon_GoesThroughTheGuestsTmp()
     {
         var building = new ScriptedGuest { HasAgent = false, HasCargo = true };
-        await SubstrateProvisioner.RunAsync(
+        await Provision(
             new McpServerCommand.Provision(Apply: true), new StringWriter(), building.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
 
         using var shipped = new ShippedAgent();
         var carrying = new ScriptedGuest { HasAgent = false };
-        await SubstrateProvisioner.RunAsync(
+        await Provision(
             new McpServerCommand.Provision(Apply: true), new StringWriter(), carrying.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
@@ -460,7 +524,7 @@ public sealed class SubstrateProvisionerTests
         var guest = new ScriptedGuest { HasAgent = false, ShippedAgentAlteredInTransit = true };
         var report = new StringWriter();
 
-        int exit = await SubstrateProvisioner.RunAsync(
+        int exit = await Provision(
             new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 

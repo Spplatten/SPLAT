@@ -64,6 +64,11 @@ public static class Program
             return await SubstrateProvisioner.RunAsync(provision, Console.Out);
         }
 
+        if (command is McpServerCommand.Unmount unmount)
+        {
+            return await SubstrateUnmounter.RunAsync(unmount, Console.Out);
+        }
+
         if (command is McpServerCommand.NewRunRecordKey newKey)
         {
             return MakeRunRecordKey(newKey.Path, Console.Out, Console.Error);
