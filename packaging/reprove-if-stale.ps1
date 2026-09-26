@@ -92,17 +92,18 @@ if ($inFlight.Count -gt 0) {
 }
 
 # ------------------------------------------------------------------------------------------------
-# The checkout is made to be what ships, every time. A dirty proof tree is a defect in the proof,
-# not a local variation to preserve, so anything in it is discarded rather than worked around.
+# Fetch, but do NOT touch the working tree yet.
+#
+# This used to reset hard here, before deciding anything - including under -CheckOnly, which is
+# advertised as read-only. On 2026-09-25 the operator ran the full proof by hand, it re-recorded a
+# passing last-hop against the shipping source, and a -CheckOnly run seconds later reset that
+# evidence away before it had been committed. A question is not allowed to destroy an answer.
+#
+# The reset still happens, but only on the path that is about to write fresh evidence over the old,
+# and only once the tree has been checked for evidence nobody has saved yet.
 # ------------------------------------------------------------------------------------------------
 & git -C $Tree fetch --quiet origin
 if ($LASTEXITCODE -ne 0) { Fail 'git fetch origin failed; the proof would run against an unknown revision.' }
-
-& git -C $Tree checkout --quiet --detach origin/main
-if ($LASTEXITCODE -ne 0) { Fail 'could not check out origin/main in the proof tree.' }
-
-& git -C $Tree reset --quiet --hard origin/main
-& git -C $Tree clean -qfd -e 'target' -e '*.INCOMPLETE.json'
 
 $revision = (& git -C $Tree rev-parse --short HEAD).Trim()
 
@@ -136,11 +137,28 @@ $verdict = "expired  {0}  tree bpf {1}  evidence bpf {2} ({3})" -f
     $recordedAt
 
 if ($CheckOnly) {
-    Write-Line "$verdict - CheckOnly, so nothing was built, stopped or proven."
+    Write-Line "$verdict - CheckOnly, so nothing was built, stopped, proven or reset."
     exit 2
 }
 
-Write-Line "$verdict - re-proving."
+# Only now, on the path that is about to write fresh evidence: refuse first if the tree holds
+# evidence nobody has committed. A run that passed and was never landed is exactly what a hard reset
+# throws away, and losing it costs the operator another root run rather than a few seconds.
+$unsaved = @(& git -C $Tree status --porcelain -- 'native/splat-agent/evidence' |
+    Where-Object { $_ -and $_ -notmatch 'INCOMPLETE\.json$' })
+if ($unsaved.Count -gt 0) {
+    Write-Line "refused  $revision - the proof tree holds evidence that is not committed:"
+    $unsaved | ForEach-Object { Write-Line "           $_" }
+    Fail 'commit or discard that evidence first; re-proving would reset it away.'
+}
+
+& git -C $Tree checkout --quiet --detach origin/main
+if ($LASTEXITCODE -ne 0) { Fail 'could not check out origin/main in the proof tree.' }
+& git -C $Tree reset --quiet --hard origin/main
+& git -C $Tree clean -qfd -e 'target' -e '*.INCOMPLETE.json'
+$revision = (& git -C $Tree rev-parse --short HEAD).Trim()
+
+Write-Line "$verdict - re-proving at $revision."
 
 & powershell -ExecutionPolicy Bypass -File $script
 $code = $LASTEXITCODE

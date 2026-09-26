@@ -29,7 +29,7 @@ fi
 [ -n "$TOKEN" ] || echo "  WARNING: no token read from $TOKEN_FILE - every EXECUTE_TOOL will be refused."
 
 python3 - "$HOST" "$PORT" "$TOKEN" <<'PY'
-import hashlib, hmac, json, os, socket, sys, threading, time
+import base64, hashlib, hmac, json, os, socket, sys, threading, time
 
 host, port = sys.argv[1], int(sys.argv[2])
 token = sys.argv[3] if len(sys.argv) > 3 else ""
