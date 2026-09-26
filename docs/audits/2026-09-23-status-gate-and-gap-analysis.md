@@ -5,8 +5,8 @@
      (61 passed, 0 failed); and a wiring sweep (`git grep -lw <Type> -- src`). The xUnit suite needs
      a Windows host and was NOT run here; its count is the README's, which
      TheAdvertisedTestCount_MatchesTheSuite binds to the compiled assembly. Part 2 of the brief that
-     asked for this record - the two governance templates - lives in ../RFC_TEMPLATE.md and
-     ../EXECUTIVE_STATUS_TEMPLATE.md. -->
+     asked for this record - the two governance templates - lives in ../...RFC_TEMPLATE.md and
+     ../...EXECUTIVE_STATUS_TEMPLATE.md. -->
 
 # Status gate and gap analysis — 2026-09-23
 
@@ -242,8 +242,8 @@ two decisions (the distro, the certificate).
 
 ## What this record changed in the tree
 
-- Added [`RFC_TEMPLATE.md`](../RFC_TEMPLATE.md) and
-  [`EXECUTIVE_STATUS_TEMPLATE.md`](../EXECUTIVE_STATUS_TEMPLATE.md), indexed in
+- Added [`...RFC_TEMPLATE.md`](../...RFC_TEMPLATE.md) and
+  [`...EXECUTIVE_STATUS_TEMPLATE.md`](../...EXECUTIVE_STATUS_TEMPLATE.md), indexed in
   [`docs/README.md`](../README.md).
 - Corrected four sentences that said the revocation check was console-only, in
   [`ARCHITECTURE.md`](../ARCHITECTURE.md), [`ARCHITECTURE-control-plane.md`](../ARCHITECTURE-control-plane.md)

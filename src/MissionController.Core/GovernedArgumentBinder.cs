@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using MissionController.Core.Enums;
@@ -149,6 +149,166 @@ public static class GovernedArgumentBinder
             Validate(key, value, insideQuotedLiteral, field);
             return value;
         });
+    }
+
+    /// <summary>
+    /// The outcome of screening values a MODEL proposed for a template's parameters.
+    /// </summary>
+    /// <param name="Accepted">
+    /// The proposals that may be bound. Every one was validated against the same policy
+    /// <see cref="Bind"/> applies, in the quoting context its placeholder actually sits in.
+    /// </param>
+    /// <param name="Rejections">
+    /// One operator-readable line per discarded proposal, in the order they were screened. These are
+    /// recorded in the audit ledger rather than swallowed: a model repeatedly reaching for a value it
+    /// is not allowed to set is a signal about the model, not noise about the parameter.
+    /// </param>
+    public sealed record ProposedParameterScreening(
+        IReadOnlyDictionary<string, string> Accepted,
+        IReadOnlyList<string> Rejections);
+
+    /// <summary>
+    /// Upper bound on proposals considered in one screening pass. The declared-field filter already
+    /// bounds the useful count to a template's own field list; this stops a runaway or adversarial
+    /// answer from turning one decision into thousands of regex evaluations.
+    /// </summary>
+    private const int MaxProposalsScreened = 32;
+
+    /// <summary>
+    /// Screens model-proposed parameter values for <paramref name="template"/>, returning only those
+    /// that may be bound.
+    ///
+    /// This exists so a chained investigation can TARGET its next step - "check Kerberos on DC02",
+    /// not "run the default" - without the model ever composing a command. Three gates, in order,
+    /// and a value must clear all three:
+    ///
+    ///  1. DECLARED. The key must be one of the template author's own
+    ///     <see cref="SingleToolTemplate.ParameterFields"/>. A proposal for anything else is dropped;
+    ///     the model cannot invent a parameter any more than it can invent a template id.
+    ///
+    ///  2. NOT ALREADY THE OPERATOR'S. <paramref name="operatorSupplied"/> wins outright. The binder
+    ///     makes a value SAFE to place in argv; it says nothing about whether the operator meant to
+    ///     point this mission at that target. So a value a person typed is never overridden by a
+    ///     model reading sensor output that an attacker may have written - which is exactly how a
+    ///     prompt injection would otherwise redirect a scan at a host of its choosing.
+    ///
+    ///  3. SAFE IN POSITION. The value runs <see cref="Validate"/> against the field's declared type
+    ///     and the real quoting context of its placeholder in the author's original argument string.
+    ///     A refusal DROPS THE PROPOSAL rather than failing the mission: the step then runs on its
+    ///     template default, which is the behaviour before this method existed. Refusing the whole
+    ///     investigation because a model guessed a bad hostname would trade a bounded loss of
+    ///     precision for an unbounded loss of the investigation.
+    ///
+    /// A declared key with no placeholder in the argument string is accepted here and simply never
+    /// reaches argv; it may still be read by callers that surface parameters elsewhere, and gating it
+    /// on argv presence would make this method lie about what it screened.
+    /// </summary>
+    public static ProposedParameterScreening ScreenProposedValues(
+        SingleToolTemplate template,
+        IReadOnlyDictionary<string, string>? proposed,
+        IReadOnlyDictionary<string, string>? operatorSupplied)
+    {
+        ArgumentNullException.ThrowIfNull(template);
+
+        var accepted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var rejections = new List<string>();
+
+        if (proposed is null || proposed.Count == 0)
+        {
+            return new ProposedParameterScreening(accepted, rejections);
+        }
+
+        var declaredFields = BuildFieldLookup(template);
+        string argumentsTemplate = template.Tool.ArgumentsTemplate ?? string.Empty;
+        bool isPowerShell = IsPowerShell(template.Tool.ExecutablePath);
+        var placeholderOffsets = MapPlaceholderOffsets(argumentsTemplate);
+
+        int screened = 0;
+        foreach (var pair in proposed)
+        {
+            if (screened >= MaxProposalsScreened)
+            {
+                rejections.Add(
+                    $"'{pair.Key}': more than {MaxProposalsScreened} values were proposed for one step; the rest were not screened.");
+                break;
+            }
+
+            screened++;
+            string key = pair.Key ?? string.Empty;
+            string? value = pair.Value;
+
+            if (!declaredFields.TryGetValue(key, out var field))
+            {
+                rejections.Add($"'{key}': not a parameter this template declares.");
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                rejections.Add($"'{key}': proposed value was empty, so the template default stands.");
+                continue;
+            }
+
+            if (operatorSupplied is not null &&
+                operatorSupplied.TryGetValue(key, out var operatorValue) &&
+                !string.IsNullOrWhiteSpace(operatorValue))
+            {
+                rejections.Add($"'{key}': the operator supplied this value, which a model may not change.");
+                continue;
+            }
+
+            // The quoting context is read at the placeholder's offset in the AUTHOR's original
+            // string, never at an offset into partially substituted text, so it cannot be moved by
+            // any value screened earlier in this loop.
+            bool insideQuotedLiteral = isPowerShell &&
+                placeholderOffsets.TryGetValue(key, out int offset) &&
+                IsInsideSingleQuotedLiteral(argumentsTemplate, offset);
+
+            try
+            {
+                Validate(key, value, insideQuotedLiteral, field);
+            }
+            catch (TemplateParameterRejectedException ex)
+            {
+                rejections.Add($"'{key}': {ex.Message}");
+                continue;
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                rejections.Add($"'{key}': a check did not finish within its time limit, so the value was not accepted.");
+                continue;
+            }
+
+            accepted[key] = value;
+        }
+
+        return new ProposedParameterScreening(accepted, rejections);
+    }
+
+    /// <summary>
+    /// First offset of each placeholder in the author's argument string. A key repeated in the
+    /// template is screened against its FIRST position; <see cref="Bind"/> then validates every
+    /// occurrence in its own context and refuses there if a later one is stricter, so a value that
+    /// passes screening but cannot be placed everywhere still fails closed at bind time.
+    /// </summary>
+    private static Dictionary<string, int> MapPlaceholderOffsets(string argumentsTemplate)
+    {
+        var offsets = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (argumentsTemplate.Length == 0)
+        {
+            return offsets;
+        }
+
+        foreach (Match match in PlaceholderPattern.Matches(argumentsTemplate))
+        {
+            string key = match.Groups["key"].Value;
+            if (!offsets.ContainsKey(key))
+            {
+                offsets[key] = match.Index;
+            }
+        }
+
+        return offsets;
     }
 
     /// <summary>

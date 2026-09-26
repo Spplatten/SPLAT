@@ -65,6 +65,19 @@ for instance, must open with an alphanumeric and carry no spaces or shell metach
 that does not fit is refused, never escaped: quoting correctly for `cmd.exe` is close to
 impossible.
 
+The binder has two entry points, and which one a caller uses decides what a bad value costs.
+`Bind` is for values a person supplied: a refusal throws, and the mission is abandoned rather
+than run with a repaired command. `ScreenProposedValues` is for values a MODEL proposed: it
+returns the ones that may be bound and a readable line for each one it dropped, so a bad
+proposal costs precision — the step falls back to its template default — instead of costing the
+investigation. Screening applies three gates in order: the key must be one the template author
+declared, it must not be one the operator already supplied, and the value must survive the same
+policy `Bind` applies in the quoting context that placeholder actually sits in. The second gate
+is a scope rule rather than a safety one, and it is the one that matters against a prompt
+injection: the binder decides whether a value is safe to place, but only the operator decides
+what this mission was aimed at. `ProposedParameterScreeningTests` holds the invariant the two
+entry points depend on — anything screening accepts, `Bind` must place without throwing.
+
 ## The mission pipeline
 
 [`MissionExecutionEngine.ExecuteMissionAsync`](../src/MissionController.Core/MissionExecutionEngine.cs),
@@ -136,10 +149,20 @@ not left to the model — a model asked to police its own budget eventually deci
 look.
 
 - **[`GovernedInvestigationLoop`](../src/MissionController.Core/GovernedInvestigationLoop.cs)** —
-  after each mission, asks a model whether another governed step is warranted and which template it
-  uses. A hard ceiling (`AbsoluteMaxSteps`) caps whatever the caller requests, a template never
-  repeats, selection is restricted to the catalog inside `ReActDecisionContract.Parse`, and a
-  healthy verdict ends the chain.
+  after each mission, asks a model whether another governed step is warranted, which template it
+  uses, and what that template should be pointed at. A hard ceiling (`AbsoluteMaxSteps`) caps
+  whatever the caller requests, a template never repeats, selection is restricted to the catalog
+  inside `ReActDecisionContract.Parse`, and a healthy verdict ends the chain. The decision prompt
+  lists each candidate's declared parameters with their type and current default, and the answer
+  may carry proposed values for them; those run through `ScreenProposedValues` against the
+  template the registry returned, never against the id the model named. Accepted values are
+  recorded in the `INVESTIGATION_STEP_SELECTED` row and refusals in their own
+  `INVESTIGATION_PARAMETER_REFUSED` row, because a command line a model influenced has to be
+  readable afterwards, and a model that keeps reaching for a parameter it may not set is
+  reporting something about itself. Targeting is composed per step from the operator's values
+  rather than inherited, so one step's target cannot leak into the next; what carries forward is
+  the `[RAN AGAINST]` line in the next decision's observation, which is what lets a chain keep
+  following the host it identified instead of forgetting it between steps.
 - **[`ProjectExecutionEngine`](../src/MissionController.Core/ProjectExecutionEngine.cs)** — one to
   six ordered stages, each a mission; the evidence handed forward is capped
   (`MaxContextCharacters`) and fenced as context. A stage can be marked `ContinueOnFailure`.
