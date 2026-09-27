@@ -351,10 +351,17 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         return !(anyEntry && _explicitHmacKey is not null && !keyedSeen);
     }
 
+    /// <param name="apply">
+    /// False counts the entries the redaction would rewrite and writes nothing. The count is taken
+    /// from the same predicate the UPDATE carries, because this erasure is irreversible by design -
+    /// the payload goes and only the chain's commitment to it survives - so an operator has to be able
+    /// to see the number first, and must not be shown one that a separately written query invented.
+    /// </param>
     public async Task<LedgerRedactionResult> RedactDetailsOlderThanAsync(
         DateTime olderThanUtc,
         string redactionMarker = "[REDACTED — retention policy]",
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool apply = true)
     {
         await using var conn = _context.CreateConnection();
 
@@ -368,16 +375,25 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
             legacySkipped = Convert.ToInt32(await countCmd.ExecuteScalarAsync(cancellationToken));
         }
 
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-            UPDATE AuditLedger
-            SET Details = $marker, DetailsSalt = NULL, RedactedAtUtc = $now
-            WHERE TimestampUtc < $cutoff AND COALESCE(HashVersion, 1) >= 2 AND RedactedAtUtc IS NULL;";
-        cmd.Parameters.AddWithValue("$marker", redactionMarker);
-        cmd.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
-        cmd.Parameters.AddWithValue("$cutoff", olderThanUtc.ToString("O"));
+        const string redactable =
+            "WHERE TimestampUtc < $cutoff AND COALESCE(HashVersion, 1) >= 2 AND RedactedAtUtc IS NULL";
 
-        int redacted = await cmd.ExecuteNonQueryAsync(cancellationToken);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = apply
+            ? $@"UPDATE AuditLedger
+                 SET Details = $marker, DetailsSalt = NULL, RedactedAtUtc = $now
+                 {redactable};"
+            : $"SELECT COUNT(*) FROM AuditLedger {redactable};";
+        cmd.Parameters.AddWithValue("$cutoff", olderThanUtc.ToString("O"));
+        if (apply)
+        {
+            cmd.Parameters.AddWithValue("$marker", redactionMarker);
+            cmd.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+        }
+
+        int redacted = apply
+            ? await cmd.ExecuteNonQueryAsync(cancellationToken)
+            : Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken));
         return new LedgerRedactionResult(redacted, legacySkipped);
     }
 

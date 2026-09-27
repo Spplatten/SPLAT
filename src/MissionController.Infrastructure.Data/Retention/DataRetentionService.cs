@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
@@ -52,35 +53,55 @@ public sealed class DataRetentionService
         _purgeExpiredSecrets = purgeExpiredSecrets;
     }
 
+    /// <param name="apply">
+    /// False reports what a sweep would erase and changes nothing: no row is written, the WAL is not
+    /// checkpointed and the file is not vacuumed. Every count comes from the sweep's own predicates,
+    /// so a preview cannot describe a sweep this class no longer performs. Default true, because a
+    /// caller that says nothing is asking for the sweep it always got.
+    /// </param>
     public async Task<RetentionSweepResult> SweepAsync(
         RetentionPolicy policy,
         DateTime? nowUtc = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool apply = true)
     {
         var now = nowUtc ?? DateTime.UtcNow;
 
         await using var conn = _context.CreateConnection();
 
         int rawScrubbed = await ScrubColumnAsync(
-            conn, "RawOutput", Cutoff(now, policy.RawOutputRetention), cancellationToken);
+            conn, "RawOutput", Cutoff(now, policy.RawOutputRetention), apply, cancellationToken);
 
         int paramsScrubbed = await ScrubColumnAsync(
-            conn, "InputParametersJson", Cutoff(now, policy.InputParameterRetention), cancellationToken);
+            conn, "InputParametersJson", Cutoff(now, policy.InputParameterRetention), apply, cancellationToken);
 
         int analysisScrubbed = await ScrubColumnAsync(
-            conn, "AiAnalysis", Cutoff(now, policy.AiAnalysisRetention), cancellationToken);
+            conn, "AiAnalysis", Cutoff(now, policy.AiAnalysisRetention), apply, cancellationToken);
 
         int semanticDeleted = await DeleteSemanticRowsAsync(
-            conn, Cutoff(now, policy.SemanticIndexRetention), cancellationToken);
+            conn, Cutoff(now, policy.SemanticIndexRetention), apply, cancellationToken);
 
         var redaction = policy.AuditDetailRetention == TimeSpan.MaxValue
             ? new LedgerRedactionResult(0, 0)
             : await _ledger.RedactDetailsOlderThanAsync(
-                now - policy.AuditDetailRetention, cancellationToken: cancellationToken);
+                now - policy.AuditDetailRetention, cancellationToken: cancellationToken, apply: apply);
 
-        int secretsPurged = policy.PurgeExpiredVaultSecrets && _purgeExpiredSecrets is not null
+        // The vault purge is a caller's delegate, and this class cannot ask it what it would do
+        // without letting it do it. A preview therefore leaves it alone and reports zero; the command
+        // that prints the result says so, rather than letting a zero read as "nothing has expired".
+        int secretsPurged = apply && policy.PurgeExpiredVaultSecrets && _purgeExpiredSecrets is not null
             ? await _purgeExpiredSecrets(cancellationToken)
             : 0;
+
+        if (!apply)
+        {
+            // No checkpoint and no vacuum: both rewrite the file, and a preview that touches the
+            // database is not one. WalTruncated is reported false because nothing was truncated.
+            return new RetentionSweepResult(
+                rawScrubbed, paramsScrubbed, analysisScrubbed, semanticDeleted,
+                redaction.EntriesRedacted, redaction.LegacyEntriesSkipped, secretsPurged,
+                Vacuumed: false, WalTruncated: false);
+        }
 
         // Checkpoint before vacuum: the -wal sidecar still holds pre-purge page images, and a
         // vacuum that runs ahead of the checkpoint leaves them readable on disk.
@@ -118,11 +139,17 @@ public sealed class DataRetentionService
     /// <summary>
     /// Overwrites one payload column on completed missions past its window. Rows already scrubbed
     /// are excluded so a repeated sweep does not inflate its own counts.
+    ///
+    /// With <paramref name="apply"/> false it counts the rows the UPDATE would have hit, using the
+    /// SAME predicate rather than a second one written to match. Erasure here is irreversible, so an
+    /// operator has to be able to see what a sweep would take - and a preview built from its own copy
+    /// of the WHERE clause is one edit away from describing a sweep that no longer exists.
     /// </summary>
     private static async Task<int> ScrubColumnAsync(
         SqliteConnection conn,
         string column,
         DateTime cutoffUtc,
+        bool apply,
         CancellationToken cancellationToken)
     {
         if (cutoffUtc == DateTime.MinValue)
@@ -133,18 +160,22 @@ public sealed class DataRetentionService
         await using var cmd = conn.CreateCommand();
 
         // Column name is not user input - it is one of three compile-time literals from SweepAsync.
-        cmd.CommandText = $@"
-            UPDATE Missions
-            SET {column} = ''
-            WHERE CreatedAtUtc < $cutoff AND {column} <> '';";
+        const string predicate = "WHERE CreatedAtUtc < $cutoff AND {0} <> ''";
+        string where = string.Format(CultureInfo.InvariantCulture, predicate, column);
+        cmd.CommandText = apply
+            ? $"UPDATE Missions SET {column} = '' {where};"
+            : $"SELECT COUNT(*) FROM Missions {where};";
         cmd.Parameters.AddWithValue("$cutoff", cutoffUtc.ToString("O"));
 
-        return await cmd.ExecuteNonQueryAsync(cancellationToken);
+        return apply
+            ? await cmd.ExecuteNonQueryAsync(cancellationToken)
+            : Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
 
     private static async Task<int> DeleteSemanticRowsAsync(
         SqliteConnection conn,
         DateTime cutoffUtc,
+        bool apply,
         CancellationToken cancellationToken)
     {
         if (cutoffUtc == DateTime.MinValue)
@@ -153,12 +184,17 @@ public sealed class DataRetentionService
         }
 
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM MissionSemanticIndex WHERE TimestampUtc < $cutoff;";
+        const string where = "WHERE TimestampUtc < $cutoff";
+        cmd.CommandText = apply
+            ? $"DELETE FROM MissionSemanticIndex {where};"
+            : $"SELECT COUNT(*) FROM MissionSemanticIndex {where};";
         cmd.Parameters.AddWithValue("$cutoff", cutoffUtc.ToString("O"));
 
         try
         {
-            return await cmd.ExecuteNonQueryAsync(cancellationToken);
+            return apply
+                ? await cmd.ExecuteNonQueryAsync(cancellationToken)
+                : Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
         }
         catch (SqliteException)
         {

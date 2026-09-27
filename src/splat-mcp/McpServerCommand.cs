@@ -43,9 +43,15 @@ public abstract record McpServerCommand
                               config lines the mount appended. Reports only, until --apply. It
                               refuses without a manifest rather than deleting whatever looks
                               like SPLAT, and names anything it could not restore.
+          retain              Apply the retention policy to the two databases: overwrite mission
+                              payload columns past their window, drop semantic index rows whole,
+                              and cryptographically erase audit detail while the chain's
+                              commitment to it survives. Reports only, until --apply. There is no
+                              undo - the counts it reports without --apply come from the sweep's
+                              own predicates, not from a second query written to match them.
           --manifest <file>   With unmount, the manifest to play backwards. Without it, the one
                               the mount wrote under the data root.
-          --apply             With provision or unmount, make the changes rather than listing them.
+          --apply             With provision, unmount or retain, make the changes rather than listing them.
                               `wsl --install` and `wsl --shutdown` stay yours: one needs
                               administrator rights, the other ends every WSL session you have.
           --workspace <dir>   The one directory fs_read and fs_write may touch. It must already
@@ -96,6 +102,7 @@ public abstract record McpServerCommand
         bool doctor = args.Count > 0 && args[0] == "doctor";
         bool provision = args.Count > 0 && args[0] == "provision";
         bool unmount = args.Count > 0 && args[0] == "unmount";
+        bool retain = args.Count > 0 && args[0] == "retain";
         if (args.Count > 0 && args[0] == "new-run-record-key")
         {
             if (args.Count != 2 || args[1].StartsWith('-'))
@@ -113,7 +120,7 @@ public abstract record McpServerCommand
             }
         }
 
-        IReadOnlyList<string> options = doctor || provision || unmount ? args.Skip(1).ToArray() : args;
+        IReadOnlyList<string> options = doctor || provision || unmount || retain ? args.Skip(1).ToArray() : args;
 
         var given = new Dictionary<string, string>(StringComparer.Ordinal);
         for (int i = 0; i < options.Count; i++)
@@ -133,9 +140,10 @@ public abstract record McpServerCommand
                     return new UsageError("--apply takes no value.");
                 }
 
-                if (!provision && !unmount)
+                if (!provision && !unmount && !retain)
                 {
-                    return new UsageError("--apply is only for `splat-mcp provision` and `splat-mcp unmount`.");
+                    return new UsageError(
+                        "--apply is only for `splat-mcp provision`, `splat-mcp unmount` and `splat-mcp retain`.");
                 }
 
                 if (!given.TryAdd("--apply", string.Empty))
@@ -224,6 +232,21 @@ public abstract record McpServerCommand
             }
 
             return new Unmount(given.ContainsKey("--apply"), manifest);
+        }
+
+        if (retain)
+        {
+            // A sweep reads the retention windows and the two databases, and nothing else. --egress and
+            // --workspace confine a served tool; naming them here would suggest the sweep is bounded by
+            // them, which it is not. --ledger-key IS taken: the audit chain's redaction runs against the
+            // ledger this host would otherwise open with that key.
+            string? foreign = given.Keys.FirstOrDefault(key => key is "--workspace" or "--egress" or "--manifest" or "--run-record-key");
+            if (foreign is not null)
+            {
+                return new UsageError($"`retain` takes only --apply and --ledger-key; {foreign} belongs to the server or to another subcommand.");
+            }
+
+            return new Retain(given.ContainsKey("--apply"), given.GetValueOrDefault("--ledger-key"));
         }
 
         if (provision)
@@ -395,6 +418,15 @@ public abstract record McpServerCommand
     /// under the data root.
     /// </summary>
     public sealed record Unmount(bool Apply, string? ManifestPath = null) : McpServerCommand;
+
+    /// <summary>
+    /// Run the retention sweep. <see cref="Apply"/> is false by default for a stronger reason than
+    /// provisioning's: this erases. Mission payload columns are overwritten and audit detail is
+    /// cryptographically erased, which leaves the chain's commitment and takes the text - so there is
+    /// nothing to restore afterwards and no undo to write. An unqualified invocation reports what the
+    /// sweep would take, counted by the sweep's own predicates.
+    /// </summary>
+    public sealed record Retain(bool Apply, string? LedgerKeyPath = null) : McpServerCommand;
 
     public sealed record ShowHelp : McpServerCommand;
 

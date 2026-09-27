@@ -79,6 +79,11 @@ public static class Program
             return await SubstrateDoctor.RunAsync(doctor, Console.Out);
         }
 
+        if (command is McpServerCommand.Retain retain)
+        {
+            return await RetentionSweep.RunAsync(retain, Console.Out);
+        }
+
         var serve = (McpServerCommand.Serve)command;
         string? workspaceRoot = serve.WorkspaceRoot;
         Console.Error.WriteLine(workspaceRoot is null
