@@ -28,3 +28,44 @@ src/MissionController.UI/Effects/Win2D/*.bin
 # Python bytecode from the splat-langgraph package
 __pycache__/
 *.pyc
+
+# --- Public-facing hygiene -----------------------------------------------------------------
+# Nothing here has ever been committed (checked against the whole history on 2026-09-27). These
+# rules exist so it stays that way once the repository is readable by strangers: a secret removed
+# in a later commit is still in the history, and history is the part you cannot take back.
+
+# Operator secrets and keys. The vault is DPAPI-sealed under %LOCALAPPDATA%, the ledger and run
+# record keys live wherever the operator put them, and none of them belong in a tree.
+.env
+.env.*
+!.env.example
+!**/*.env.example
+*.key
+*.pem
+*.p12
+secrets.json
+appsettings.*.Local.json
+
+# Private run state: ledgers, evidence databases and exported bundles carry command lines,
+# hostnames and scrubbed-but-real output. Evidence that is meant to be public is committed
+# deliberately under native/*/evidence, never swept in by a glob.
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.db-wal
+*.db-shm
+mount-manifest.json
+**/.local/
+
+# Scratch a session leaves behind. These were loose in the working tree, and each one is a file
+# somebody would eventually commit by reflex with `git add -A`.
+stdout.txt
+stderr.txt
+splat-proof.txt
+*.log
+.agents/
+
+# Dependencies and OS noise
+node_modules/
+.DS_Store
+Thumbs.db

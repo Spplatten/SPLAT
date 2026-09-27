@@ -7,6 +7,7 @@
 [![WinUI 3](https://img.shields.io/badge/UI-WinUI%203%20%2F%20Windows%20App%20SDK-0078D6?logo=windows&logoColor=white)](src/MissionController.UI/)
 [![Tests](https://img.shields.io/badge/Tests-855%2F855%20passing-success)](tests/MissionController.Tests/)
 [![Build](https://img.shields.io/badge/Build-0%20errors-success)](src/)
+[![License](https://img.shields.io/badge/License-AGPL--3.0-blue)](LICENSE)
 
 **New here, or allergic to jargon?** Start with **[The SPLAT Field Guide](docs/TUTORIAL.md)** — the whole system explained in plain English.
 
@@ -241,7 +242,22 @@ plans. In order:
 
 ## License
 
-**Proprietary — © Platten Industries. All rights reserved.** Published for technical evaluation. Third-party components (.NET Runtime, Windows App SDK, Win2D, Microsoft.Data.Sqlite, CommunityToolkit, SQLite, the libbpf ecosystem) remain under their respective licenses.
+**[GNU AGPL-3.0](LICENSE)** — © 2026 Platten Industries.
+
+Run it, read it, change it, ship it. The obligation attaches in one place: convey a modified
+version, or let anyone use a modified version **over a network**, and those users are owed your
+source under the same terms. Running SPLAT to contain your own agents, on your own machines, asks
+nothing of you, and nothing a governed mission produces — run records, ledgers, evidence bundles —
+carries a licence claim from this project.
+
+That network clause is the point rather than an accident. The commercial shape of a containment
+substrate is somebody else's platform running it for their customers, and the AGPL says that is fine
+as long as it stays open. **If it cannot stay open, [COMMERCIAL.md](COMMERCIAL.md) is the other
+door** — the same code, on terms that do not propagate, for embedding SPLAT in a product you ship
+closed or offer as a service.
+
+Third-party components (.NET Runtime, Windows App SDK, Win2D, Microsoft.Data.Sqlite,
+CommunityToolkit, SQLite, the libbpf ecosystem) remain under their own licences.
 
 ---
 
