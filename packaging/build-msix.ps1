@@ -20,6 +20,14 @@ $DotNetExe = "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe"
 if (-not (Test-Path $DotNetExe)) {
     $DotNetExe = (Get-Command dotnet -ErrorAction SilentlyContinue).Source
 }
+# With neither present this was $null, and `& $null publish` throws a message about an empty pipeline
+# element that says nothing about a missing SDK. The user-local path is first because the dotnet on
+# PATH here is SDK 9, which cannot build this net10 tree.
+if (-not $DotNetExe) {
+    Write-Error ("No dotnet executable found. Looked for " +
+        "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe and then PATH.")
+    exit 1
+}
 
 Write-Host "===============================================================================" -ForegroundColor Cyan
 Write-Host "  ENTERPRISE MSIX PACKAGING PIPELINE (MISSION CONTROLLER)" -ForegroundColor Cyan
@@ -91,16 +99,75 @@ $MsixPath = "$OutputDir\Enterprise.MissionController.msix"
 $MakeAppx = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter "makeappx.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
 $SignTool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
 
+# What this run actually produced, decided by what actually happened rather than by which branch was
+# entered. The banner at the bottom reads these, because a pipeline whose last line is an
+# unconditional "COMPLETED SUCCESSFULLY" tells you the script reached the end, not that it worked.
+$Artifact = $null
+$ArtifactKind = "nothing"
+$Signed = $false
+
 if ($MakeAppx -and (Test-Path $MakeAppx)) {
+    # $ErrorActionPreference = "Stop" does NOT apply to a native executable's exit code: makeappx and
+    # signtool report failure the only way a console program can, and until 2026-09-27 neither was
+    # read. A manifest naming an asset that is not in the layout fails the pack, and the script went
+    # on to announce a signed enterprise package.
     & $MakeAppx pack /d $PackageLayout /p $MsixPath /o
-    if ($SignTool -and (Test-Path $SignTool)) {
-        & $SignTool sign /fd SHA256 /a /sha1 $Cert.Thumbprint $MsixPath
-        Write-Host "Generated Signed MSIX Package: $MsixPath" -ForegroundColor Green
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "makeappx pack failed with exit code $LASTEXITCODE. No package was produced."
+        exit 1
     }
+    if (-not (Test-Path $MsixPath)) {
+        Write-Error "makeappx pack reported success but $MsixPath does not exist."
+        exit 1
+    }
+    $Artifact = $MsixPath
+    $ArtifactKind = "MSIX"
+
+    # A missing signtool is a REFUSAL, not a skip. The one thing this script exists to hand someone
+    # is a signed package; producing an unsigned .msix and calling the run a success is how an
+    # unsigned build reaches a machine that was told to trust it.
+    if (-not ($SignTool -and (Test-Path $SignTool))) {
+        Write-Error ("signtool.exe was not found under the Windows 10 SDK, so $MsixPath cannot be " +
+            "signed. Install the SDK's signing tools, or package without MSIX by removing makeappx " +
+            "from PATH to take the archive path deliberately. An unsigned MSIX is not shipped.")
+        exit 1
+    }
+
+    & $SignTool sign /fd SHA256 /a /sha1 $Cert.Thumbprint $MsixPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "signtool sign failed with exit code $LASTEXITCODE. $MsixPath is NOT signed."
+        exit 1
+    }
+
+    # signtool exits 0 having signed; ask the certificate store rather than trust the exit code,
+    # because this is the claim the package is distributed on.
+    $Signature = Get-AuthenticodeSignature -FilePath $MsixPath
+    if ($Signature.Status -ne "Valid" -and $Signature.Status -ne "UnknownError") {
+        # UnknownError is what a self-signed chain reads as until the .cer is trusted, which is
+        # exactly what install-enterprise.ps1 does on the target. An absent signature is not that.
+        Write-Error "After signing, $MsixPath reports signature status '$($Signature.Status)'."
+        exit 1
+    }
+    if ($Signature.SignerCertificate -eq $null) {
+        Write-Error "After signing, $MsixPath carries no signer certificate."
+        exit 1
+    }
+    $Signed = $true
+    Write-Host "Generated Signed MSIX Package: $MsixPath" -ForegroundColor Green
 } else {
-    # Fallback to standard enterprise zip bundle for IntuneWin wrapper if SDK MakeAppx is omitted on host
-    Compress-Archive -Path "$PackageLayout\*" -DestinationPath "$OutputDir\Enterprise.MissionController.zip" -Force
-    Write-Host "Created Enterprise Distribution Archive: $OutputDir\Enterprise.MissionController.zip" -ForegroundColor Green
+    # Fallback to standard enterprise zip bundle for IntuneWin wrapper if SDK MakeAppx is omitted on
+    # host. This path produces an UNSIGNED archive, and the banner says so rather than inheriting the
+    # word "signing" from the MSIX path.
+    $ZipPath = "$OutputDir\Enterprise.MissionController.zip"
+    Compress-Archive -Path "$PackageLayout\*" -DestinationPath $ZipPath -Force
+    if (-not (Test-Path $ZipPath)) {
+        Write-Error "Compress-Archive reported success but $ZipPath does not exist."
+        exit 1
+    }
+    $Artifact = $ZipPath
+    $ArtifactKind = "ZIP"
+    Write-Host "Created Enterprise Distribution Archive: $ZipPath" -ForegroundColor Yellow
+    Write-Warning "makeappx.exe was not found, so this is an UNSIGNED archive and not an MSIX."
 }
 
 # Copy deployment scripts to dist/
@@ -111,7 +178,13 @@ Copy-Item "$ScriptRoot\uninstall-enterprise.ps1" "$OutputDir\uninstall-enterpris
 # produced it, and this is a self-contained page - no server, no install, just open it.
 Copy-Item "$ProjectRoot\docs\SPLAT-Field-Guide.html" "$OutputDir\SPLAT-Field-Guide.html" -Force
 
-Write-Host "`n===============================================================================" -ForegroundColor Green
-Write-Host "  MSIX BUILD & ENTERPRISE SIGNING COMPLETED SUCCESSFULLY!" -ForegroundColor Green
-Write-Host "  Output Directory: $OutputDir" -ForegroundColor Green
-Write-Host "===============================================================================" -ForegroundColor Green
+# The banner names what was produced and whether it is signed, read from what the steps above
+# recorded. It used to say "MSIX BUILD & ENTERPRISE SIGNING COMPLETED SUCCESSFULLY" whatever
+# happened, including when makeappx was absent and the output was a zip, and including when signing
+# never ran at all.
+$Colour = if ($Signed) { "Green" } else { "Yellow" }
+Write-Host "`n===============================================================================" -ForegroundColor $Colour
+Write-Host "  BUILD COMPLETE - $ArtifactKind$(if ($Signed) { ', SIGNED' } else { ', UNSIGNED' })" -ForegroundColor $Colour
+Write-Host "  Artifact: $Artifact" -ForegroundColor $Colour
+Write-Host "  Output Directory: $OutputDir" -ForegroundColor $Colour
+Write-Host "===============================================================================" -ForegroundColor $Colour

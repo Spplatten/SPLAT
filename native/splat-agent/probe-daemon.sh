@@ -37,10 +37,44 @@ token = sys.argv[3] if len(sys.argv) > 3 else ""
 # One entry per session: its label, and whether the daemon proved it holds the token. Kept out of the
 # messages, which the checks below read as the daemon's own words.
 handshakes = []
+
 # One entry per session that asked for proven frames: its label, and whether the daemon agreed; and
 # every frame that then failed to prove itself for its place. Since 2026-09-23 (roadmap 2.6).
 frame_sessions = []
 frame_failures = []
+
+# ------------------------------------------------------------------------------------------------
+# REPLAY: the scoring below, run against recorded frames instead of a live daemon.
+#
+# The two defects the 2026-09-26 root run exposed were both in the scoring, not the kernel: the
+# datagram claim read a lost frame instead of the kernel's own counter, and a five-part AND recorded
+# nothing but its False. Finding those cost a root run each - a stopped service, a rebuild, two probe
+# runs and an operator's attention - to learn that this script could not read evidence it already had.
+#
+# A fixture naming what the daemon said, per session label, makes that class of defect reachable from
+# the test suite. Everything downstream runs unchanged: the same `call` contract, the same `show`, the
+# same forty checks, the same verdict. It is the shipping scoring code that gets tested, not a copy of
+# it - the distinction that mattered when a base64 NameError passed a test whose namespace supplied
+# what the script lacked, then died on the operator's run.
+#
+# What a replay CANNOT establish: anything read from this machine rather than from a frame. The
+# handshake list stays empty unless the fixture supplies it, `/home` and `/mnt` are the host's, and a
+# workspace path either exists here or does not. Those checks are the live daemon's to answer, and a
+# replay verdict is therefore never evidence about a kernel. SPLAT_EVIDENCE_DIR should point somewhere
+# disposable, and the run announces itself so no reader mistakes its output for a proof.
+# ------------------------------------------------------------------------------------------------
+replay = None
+replay_path = os.environ.get("SPLAT_PROBE_REPLAY")
+if replay_path:
+    with open(replay_path) as f:
+        fixture = json.load(f)
+    replay = fixture.get("sessions", {})
+    handshakes.extend((label, bool(proven)) for label, proven in fixture.get("handshakes", []))
+    frame_sessions.extend((label, bool(agreed)) for label, agreed in fixture.get("frameSessions", []))
+    frame_failures.extend(fixture.get("frameFailures", []))
+    print(f"== REPLAY: scoring {len(replay)} recorded session(s) from {replay_path} ==")
+    print("   No daemon is contacted. This output is a test of the checks, never evidence about a kernel.")
+    print()
 
 def read_line(s, buf):
     """One frame from the socket, and whatever arrived after it."""
@@ -62,7 +96,16 @@ def call(req, label, settle=2.0, forge=None, clear=False):
     and nothing is sent to a daemon that cannot - and the request carries a proof back. `forge`
     makes that proof under another key, as a caller without the token would; `clear` sends the request with
     the token in it instead, as a protocol 2 caller did.
+
+    Under a replay fixture this returns what the daemon said in a recorded run and opens no socket. The
+    hook sits here, at the one funnel every scoring input passes through, so a fixture reaches all
+    forty checks without a single call site knowing about it. A label the fixture does not name returns
+    None, which is the same thing a real failure to connect returns - so a fixture missing a session
+    scores as "no daemon", never as "a daemon that said nothing".
     """
+    if replay is not None:
+        return replay.get(label)
+
     # Injected here rather than at the call sites, so no future probe can forget it.
     if req.get("type") == "EXECUTE_TOOL":
         req = dict(req, protocolVersion=3)
@@ -617,11 +660,19 @@ lease_reports_enforcing = bool(lease_frame(allowed)) and lease_frame(allowed).ge
 # after it (EXIT says so and the host agrees), and refused anywhere but under the missions root.
 ws_frame = lease_frame(workspace) or {}
 ws_exit = next((m for m in (workspace or []) if m.get("type") == "EXIT"), {})
+# Five separate measurements rather than one conjunction. The 2026-09-26 run scored this False and
+# the evidence recorded nothing but the False, so the next root run - which costs the operator a
+# service stop and two probe runs - would have had to be spent finding out which half was wrong.
+# A composite that cannot say where it broke turns one expensive run into two.
+workspace_frame_says_created = ws_frame.get("workspaceCreated") is True
+workspace_path_announced = mission_ws in text(workspace)
+workspace_tool_wrote_in_it = "WROTE_WORKSPACE" in text(workspace)
+workspace_exit_says_removed = ws_exit.get("workspaceRemoved") is True
 workspace_made_and_removed = (
-    ws_frame.get("workspaceCreated") is True
-    and mission_ws in text(workspace)
-    and "WROTE_WORKSPACE" in text(workspace)
-    and ws_exit.get("workspaceRemoved") is True
+    workspace_frame_says_created
+    and workspace_path_announced
+    and workspace_tool_wrote_in_it
+    and workspace_exit_says_removed
     and workspace_gone_after
 )
 workspace_elsewhere_refused = (
@@ -639,7 +690,7 @@ workspace_removed_on_refusal = (
 )
 # The datagram hook. The permitted half is the control: a lease that refused every datagram would
 # score the refusal True and prove only that nothing works.
-udp_blocked = had(udp_bad, "VIOLATION") and "SENT" not in text(udp_bad)
+udp_frame_reached_the_session = had(udp_bad, "VIOLATION")
 udp_allowed = "SENT" in text(udp_ok) and not had(udp_ok, "VIOLATION")
 
 # The receipt, not the wall. A lease's EXIT carries the kernel's own count for its cgroup, how
@@ -656,6 +707,24 @@ refusal_receipt_complete = udp_bad_exit.get("violationsComplete") is True
 # The permitted half refused nothing, and its receipt must say zero rather than stay silent:
 # a field that only ever appears after a denial cannot be read as "nothing was denied".
 clean_receipt_counted_zero = exit_frame(udp_ok).get("violationsCounted") == 0
+
+# The datagram claim, assembled from BOTH signals now that the receipt exists.
+#
+# On 2026-09-25 and again on 2026-09-26 this scored False while the kernel had refused the
+# datagram: the VIOLATION frame missed its session, and frame delivery was the only thing being
+# read. A proof harness that reports a working denial as broken is worse than one that reports
+# nothing, because the repair gets aimed at the kernel instead of at the messenger.
+#
+# So the claim is scored from the receipt - the per-cgroup counter read out of the BPF map, which
+# `violationsComplete` asserts is a complete count - OR from a delivered frame, and in either case
+# only when the datagram did not go out. The "SENT" guard is what keeps this from being a weaker
+# test: a counted violation from something unrelated cannot stand in for a send that succeeded.
+#
+# Frame delivery stays recorded on its own below. Folding it into the claim would have hidden the
+# race rather than measured it, and the race is a real defect in the return path.
+udp_blocked = (
+    (refusal_receipt_counted and refusal_receipt_complete) or udp_frame_reached_the_session
+) and "SENT" not in text(udp_bad)
 
 # Roadmap 2.5: the guest signs what the lease did, so a record cannot claim more than the guest
 # said. Verified here the way a stranger's script verifies it - PKCS#1 v1.5 over the exact text the
@@ -700,6 +769,8 @@ outcome_edit_refused = outcome_signed and not rsa_pkcs1_verifies(
     signed_key, signed_text.replace('exit=0', 'exit=1').encode('utf-8'), signed_sig)
 print()
 print(f"  UDP outside the lease refused  : {udp_blocked}")
+print(f"  ... its VIOLATION frame arrived : {udp_frame_reached_the_session}  "
+      f"(False = the kernel refused it but the caller was not told in-session)")
 print(f"  UDP inside the lease permitted : {udp_allowed}  (the control)")
 
 print()
@@ -732,7 +803,11 @@ evidence = {
     "bpf_source_sha256": bpf_sha,
     # The kernel the daemon enforced under, as the canary and the last-hop probe already record:
     # a claim about "a stock kernel" needs the record to say which one.
-    "kernel_release": os.uname().release,
+    # A real run is always in the guest, where uname exists; the fallback is only reachable under a
+    # replay on a host that has none, and a replay's verdict is REPLAY rather than a kernel claim
+    # anyway. Guarded rather than branched on `replay`, so the recorded field never depends on which
+    # mode wrote it.
+    "kernel_release": os.uname().release if hasattr(os, "uname") else "unavailable-no-uname",
     "protocol_version": 3,
     "recorded_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
@@ -779,6 +854,10 @@ evidence = {
         # A datagram that names its own destination never reaches socket_connect; socket_sendmsg
         # judges it against the same allow-list.
         "udp_outside_the_lease_blocked": udp_blocked,
+        # Recorded, not gated: a refusal the kernel made and the caller never heard about is a
+        # defect in the return path, and it must stay visible now that the claim no longer rests
+        # on it. See the note above udp_blocked.
+        "udp_violation_frame_reached_the_session": udp_frame_reached_the_session,
         "udp_inside_the_lease_allowed": udp_allowed,
         # The lease says what the kernel counted for it, and whether the caller heard all of it.
         "refusal_receipt_counts_the_denial": refusal_receipt_counted,
@@ -798,6 +877,14 @@ evidence = {
         # workspace under its missions root only.
         "lease_frame_reports_enforcing": lease_reports_enforcing,
         "mission_workspace_made_and_removed": workspace_made_and_removed,
+        # The conjuncts behind it, so a False names its own cause. The daemon's word and the host's
+        # are kept apart on purpose: "EXIT said removed" and "the path is gone" failing separately
+        # is the difference between a daemon that lied and a daemon that could not finish.
+        "mission_workspace_frame_says_created": workspace_frame_says_created,
+        "mission_workspace_path_announced": workspace_path_announced,
+        "mission_workspace_tool_wrote_in_it": workspace_tool_wrote_in_it,
+        "mission_workspace_exit_says_removed": workspace_exit_says_removed,
+        "mission_workspace_gone_from_the_host": workspace_gone_after,
         "mission_workspace_elsewhere_refused": workspace_elsewhere_refused,
         "mission_workspace_removed_on_refusal": workspace_removed_on_refusal,
     },
@@ -855,6 +942,14 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["mission_workspace_elsewhere_refused"]
     and evidence["results"]["mission_workspace_removed_on_refusal"]
 ) else "INCOMPLETE"
+
+if replay is not None:
+    # A replay contacted no daemon, so its verdict describes the checks and not a kernel. It is marked
+    # rather than suppressed, because a test needs to read the same structure a real run produces - and
+    # a file that says REPLAY can never be mistaken for a proof, whereas a file that merely says
+    # INCOMPLETE could be read as a run that tried and fell short.
+    evidence["verdict"] = "REPLAY"
+    evidence["replay_fixture"] = replay_path
 
 out_dir = os.environ.get("SPLAT_EVIDENCE_DIR", "/mnt/c/C_AGENT_BUILDER/native/splat-agent/evidence")
 try:
