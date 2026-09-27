@@ -300,7 +300,13 @@ public class SensorNetworkContainmentTests
             .Where(t => t.EgressRule.ToolProcessNeedsNetwork)
             .ToList();
 
-        Assert.All(reaching, t => Assert.Equal("api.grants.gov", t.EgressRule.AllowedFqdn));
+        // Five destinations, each declared by a template whose script names it literally. The
+        // assertion is the set rather than a count: a template that acquires a network stack
+        // without appearing here is the regression, and it would otherwise look like a bigger number.
+        var destinations = reaching.Select(t => t.EgressRule.AllowedFqdn).Distinct().OrderBy(f => f, StringComparer.Ordinal);
+        Assert.Equal(
+            new[] { "api.bls.gov", "api.eia.gov", "api.grants.gov", "rareresources.net", "wikimedia.org" },
+            destinations.ToArray());
 
         // Every other template in the catalogue is launched with no network stack whatsoever.
         var contained = GovernedTemplateCatalog.All.Except(reaching).ToList();

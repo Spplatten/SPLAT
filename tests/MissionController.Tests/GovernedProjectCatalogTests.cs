@@ -95,14 +95,26 @@ public class GovernedProjectCatalogTests
     /// come here and say so.
     /// </summary>
     [Fact]
-    public void OnlyTheIngestionTemplate_DeclaresANonGatewayEgress()
+    public void EveryNonGatewayEgress_IsOneThisCatalogDeclares()
     {
         var offGateway = GovernedTemplateCatalog.All
             .Where(template => !template.EgressRule.AllowedFqdn.Equals("api.anthropic.com", StringComparison.OrdinalIgnoreCase))
             .Select(template => $"{template.TemplateId} -> {template.EgressRule.AllowedFqdn}")
             .ToList();
 
-        Assert.Equal(new[] { "grants-opportunity-ingestion -> api.grants.gov" }, offGateway);
+        // The whole set, named. A template that reaches a host nobody listed here is the change
+        // this test exists to stop being silent: the catalog's network surface is five destinations,
+        // and adding a sixth is a decision, not an edit.
+        Assert.Equal(
+            new[]
+            {
+                "grants-opportunity-ingestion -> api.grants.gov",
+                "source-credential-gate-probe -> api.eia.gov",
+                "source-price-index-probe -> api.bls.gov",
+                "source-public-interest-probe -> wikimedia.org",
+                "source-published-artifact-check -> rareresources.net",
+            },
+            offGateway.OrderBy(entry => entry, StringComparer.Ordinal).ToArray());
     }
 
     /// <summary>
@@ -120,5 +132,38 @@ public class GovernedProjectCatalogTests
         Assert.DoesNotContain(
             ingestion.GetEffectiveDefaults(),
             entry => entry.Value.Contains("://", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The same rule, swept over every template that reaches a host, because the danger scales with
+    /// the count: one bindable destination is an SSRF primitive, and five would be a fetcher.
+    ///
+    /// The script must name its own scheme and host literally, and no default may carry a URL - a
+    /// parameter that can hold "://" is a parameter that can propose a destination, whatever the
+    /// binder does with it afterwards.
+    /// </summary>
+    [Fact]
+    public void EveryTemplateThatReachesAHost_WritesThatHostIntoItsOwnScript()
+    {
+        var reaching = GovernedTemplateCatalog.All
+            .Where(template => !template.EgressRule.AllowedFqdn.Equals("api.anthropic.com", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.NotEmpty(reaching);
+        foreach (var template in reaching)
+        {
+            Assert.Contains(
+                $"https://{template.EgressRule.AllowedFqdn}/",
+                template.Tool.ArgumentsTemplate,
+                StringComparison.Ordinal);
+
+            Assert.DoesNotContain(
+                template.GetEffectiveDefaults(),
+                entry => entry.Value.Contains("://", StringComparison.Ordinal));
+
+            // A placeholder standing where the scheme or host goes would let a bound value choose
+            // the destination while the declared FQDN went on saying otherwise.
+            Assert.DoesNotContain("{", template.Tool.ArgumentsTemplate.Split("https://")[1][..template.EgressRule.AllowedFqdn.Length], StringComparison.Ordinal);
+        }
     }
 }
