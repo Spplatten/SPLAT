@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,11 +18,33 @@ using Xunit.Abstractions;
 namespace MissionController.Tests;
 
 /// <summary>
+/// Runs alone. This is the only collection in the suite marked
+/// <see cref="CollectionDefinitionAttribute.DisableParallelization"/>, so no other collection runs
+/// beside it.
+///
+/// It is here because the test below spawns every catalog template as a real sandboxed process, and
+/// xUnit otherwise runs it alongside every other class - including others that spawn processes. Under
+/// that contention individual launches exceed their template's own TimeoutSeconds and the test
+/// reports that a tool produced no evidence, which is indistinguishable from a catalog defect and is
+/// not one. On 2026-09-26 it went red, green, then red again on identical code, and passed alone in
+/// 2m22s each time; a task was filed to investigate a catalog that was never broken.
+///
+/// The cost is real and deliberate: a full-suite run grows by roughly the time this test takes,
+/// because it no longer overlaps anything. A flaky proof is worth less than a slow one.
+/// </summary>
+[CollectionDefinition(SerialProcessSpawning.Name, DisableParallelization = true)]
+public sealed class SerialProcessSpawning
+{
+    public const string Name = "serial process spawning";
+}
+
+/// <summary>
 /// The question the suite never asked: does a template's tool produce evidence at all? Every other
 /// test here checks what the tool is contained by. This one runs each of the 49 with its own default
 /// parameters, outside the container, with the restricted token and jail a mission gives it, and
 /// looks at what comes back.
 /// </summary>
+[Collection(SerialProcessSpawning.Name)]
 public class CatalogProducesEvidenceTests
 {
     private readonly ITestOutputHelper _out;
