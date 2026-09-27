@@ -1,0 +1,29 @@
+{
+  "_comment": [
+    "The 2026-09-26 workspace failure, in the shape the evidence could not express.",
+    "",
+    "mission_workspace_made_and_removed scored False and the record held nothing but that False. Five",
+    "things have to be true for it, and the run said which of them was wrong: none. Diagnosing it would",
+    "have cost another root run - a stopped service, a rebuild, two probe runs.",
+    "",
+    "Here the workspace was made and the tool wrote in it, and the daemon's EXIT reports it could NOT be",
+    "removed. The composite must be false AND the conjuncts must name that cause: created true, written",
+    "true, exit-says-removed false. A daemon that could not finish is a different defect from a daemon",
+    "that claimed it removed a directory which then survived, and those two used to be one boolean."
+  ],
+  "sessions": {
+    "allowed": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534, "jailed": true },
+      { "type": "STDOUT", "data": "uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)\n" },
+      { "type": "EXIT", "exitCode": 0, "violationsCounted": 0, "violationsReported": 0, "violationsDropped": 0, "violationsComplete": true }
+    ],
+    "workspace": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534, "workspace": "/var/lib/splat/missions/probe-workspace", "workspaceCreated": true },
+      { "type": "STDOUT", "data": "/var/lib/splat/missions/probe-workspace\nWROTE_WORKSPACE\ndrwx------ 2 nobody nogroup 60 .\n" },
+      { "type": "EXIT", "exitCode": 0, "violationsCounted": 0, "violationsComplete": true, "workspaceRemoved": false }
+    ]
+  },
+  "handshakes": [],
+  "frameSessions": [],
+  "frameFailures": []
+}

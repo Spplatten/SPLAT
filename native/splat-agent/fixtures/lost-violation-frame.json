@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "The 2026-09-26 root run, reduced to the session that misscored.",
+    "",
+    "The kernel refused a datagram to 1.1.1.1:53 - the run's own violations list held",
+    "'socket_sendmsg: denied outbound datagram to unapproved IPv4 1.1.1.1' - but the VIOLATION frame",
+    "never reached the udp-outside session, so a check that read frame delivery alone scored the",
+    "denial as absent. The EXIT receipt carried the kernel's own per-cgroup count and said the count",
+    "was whole.",
+    "",
+    "This fixture is that shape: an EXIT whose violationsCounted is 1 and violationsComplete is true,",
+    "with NO VIOLATION frame in the session. udp_outside_the_lease_blocked must be true and",
+    "udp_violation_frame_reached_the_session must be false - the denial proven, the lost frame still",
+    "visible. Before 2026-09-27 the first of those was false and the second did not exist."
+  ],
+  "sessions": {
+    "allowed": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534, "jailed": true },
+      { "type": "STDOUT", "data": "uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)\n" },
+      { "type": "EXIT", "exitCode": 0, "violationsCounted": 0, "violationsReported": 0, "violationsDropped": 0, "violationsComplete": true }
+    ],
+    "udp-outside": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534 },
+      { "type": "EXIT", "exitCode": 1, "violationsCounted": 1, "violationsReported": 0, "violationsDropped": 0, "violationsComplete": true }
+    ],
+    "udp-inside": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534 },
+      { "type": "STDOUT", "data": "SENT\n" },
+      { "type": "EXIT", "exitCode": 0, "violationsCounted": 0, "violationsReported": 0, "violationsDropped": 0, "violationsComplete": true }
+    ]
+  },
+  "handshakes": [],
+  "frameSessions": [],
+  "frameFailures": []
+}

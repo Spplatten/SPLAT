@@ -37,10 +37,44 @@ token = sys.argv[3] if len(sys.argv) > 3 else ""
 # One entry per session: its label, and whether the daemon proved it holds the token. Kept out of the
 # messages, which the checks below read as the daemon's own words.
 handshakes = []
+
 # One entry per session that asked for proven frames: its label, and whether the daemon agreed; and
 # every frame that then failed to prove itself for its place. Since 2026-09-23 (roadmap 2.6).
 frame_sessions = []
 frame_failures = []
+
+# ------------------------------------------------------------------------------------------------
+# REPLAY: the scoring below, run against recorded frames instead of a live daemon.
+#
+# The two defects the 2026-09-26 root run exposed were both in the scoring, not the kernel: the
+# datagram claim read a lost frame instead of the kernel's own counter, and a five-part AND recorded
+# nothing but its False. Finding those cost a root run each - a stopped service, a rebuild, two probe
+# runs and an operator's attention - to learn that this script could not read evidence it already had.
+#
+# A fixture naming what the daemon said, per session label, makes that class of defect reachable from
+# the test suite. Everything downstream runs unchanged: the same `call` contract, the same `show`, the
+# same forty checks, the same verdict. It is the shipping scoring code that gets tested, not a copy of
+# it - the distinction that mattered when a base64 NameError passed a test whose namespace supplied
+# what the script lacked, then died on the operator's run.
+#
+# What a replay CANNOT establish: anything read from this machine rather than from a frame. The
+# handshake list stays empty unless the fixture supplies it, `/home` and `/mnt` are the host's, and a
+# workspace path either exists here or does not. Those checks are the live daemon's to answer, and a
+# replay verdict is therefore never evidence about a kernel. SPLAT_EVIDENCE_DIR should point somewhere
+# disposable, and the run announces itself so no reader mistakes its output for a proof.
+# ------------------------------------------------------------------------------------------------
+replay = None
+replay_path = os.environ.get("SPLAT_PROBE_REPLAY")
+if replay_path:
+    with open(replay_path) as f:
+        fixture = json.load(f)
+    replay = fixture.get("sessions", {})
+    handshakes.extend((label, bool(proven)) for label, proven in fixture.get("handshakes", []))
+    frame_sessions.extend((label, bool(agreed)) for label, agreed in fixture.get("frameSessions", []))
+    frame_failures.extend(fixture.get("frameFailures", []))
+    print(f"== REPLAY: scoring {len(replay)} recorded session(s) from {replay_path} ==")
+    print("   No daemon is contacted. This output is a test of the checks, never evidence about a kernel.")
+    print()
 
 def read_line(s, buf):
     """One frame from the socket, and whatever arrived after it."""
@@ -62,7 +96,16 @@ def call(req, label, settle=2.0, forge=None, clear=False):
     and nothing is sent to a daemon that cannot - and the request carries a proof back. `forge`
     makes that proof under another key, as a caller without the token would; `clear` sends the request with
     the token in it instead, as a protocol 2 caller did.
+
+    Under a replay fixture this returns what the daemon said in a recorded run and opens no socket. The
+    hook sits here, at the one funnel every scoring input passes through, so a fixture reaches all
+    forty checks without a single call site knowing about it. A label the fixture does not name returns
+    None, which is the same thing a real failure to connect returns - so a fixture missing a session
+    scores as "no daemon", never as "a daemon that said nothing".
     """
+    if replay is not None:
+        return replay.get(label)
+
     # Injected here rather than at the call sites, so no future probe can forget it.
     if req.get("type") == "EXECUTE_TOOL":
         req = dict(req, protocolVersion=3)
@@ -760,7 +803,11 @@ evidence = {
     "bpf_source_sha256": bpf_sha,
     # The kernel the daemon enforced under, as the canary and the last-hop probe already record:
     # a claim about "a stock kernel" needs the record to say which one.
-    "kernel_release": os.uname().release,
+    # A real run is always in the guest, where uname exists; the fallback is only reachable under a
+    # replay on a host that has none, and a replay's verdict is REPLAY rather than a kernel claim
+    # anyway. Guarded rather than branched on `replay`, so the recorded field never depends on which
+    # mode wrote it.
+    "kernel_release": os.uname().release if hasattr(os, "uname") else "unavailable-no-uname",
     "protocol_version": 3,
     "recorded_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
@@ -895,6 +942,14 @@ evidence["verdict"] = "PASS" if (
     and evidence["results"]["mission_workspace_elsewhere_refused"]
     and evidence["results"]["mission_workspace_removed_on_refusal"]
 ) else "INCOMPLETE"
+
+if replay is not None:
+    # A replay contacted no daemon, so its verdict describes the checks and not a kernel. It is marked
+    # rather than suppressed, because a test needs to read the same structure a real run produces - and
+    # a file that says REPLAY can never be mistaken for a proof, whereas a file that merely says
+    # INCOMPLETE could be read as a run that tried and fell short.
+    evidence["verdict"] = "REPLAY"
+    evidence["replay_fixture"] = replay_path
 
 out_dir = os.environ.get("SPLAT_EVIDENCE_DIR", "/mnt/c/C_AGENT_BUILDER/native/splat-agent/evidence")
 try:

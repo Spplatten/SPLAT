@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "The guard against the datagram fix becoming a weaker test.",
+    "",
+    "Reading the kernel's violation count proves a refusal happened somewhere in the lease. It does",
+    "NOT prove that THIS datagram was the thing refused. Here the workload printed SENT - the send",
+    "succeeded - while the receipt still counts a violation, as it would if an unrelated exec or open",
+    "had been denied in the same lease.",
+    "",
+    "udp_outside_the_lease_blocked must be false. If it is ever true for this fixture, the check has",
+    "stopped testing whether the datagram was refused and started testing whether anything was."
+  ],
+  "sessions": {
+    "allowed": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534, "jailed": true },
+      { "type": "STDOUT", "data": "uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)\n" },
+      { "type": "EXIT", "exitCode": 0, "violationsCounted": 0, "violationsReported": 0, "violationsDropped": 0, "violationsComplete": true }
+    ],
+    "udp-outside": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534 },
+      { "type": "STDOUT", "data": "SENT\n" },
+      { "type": "EXIT", "exitCode": 0, "violationsCounted": 1, "violationsReported": 1, "violationsDropped": 0, "violationsComplete": true }
+    ],
+    "udp-inside": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534 },
+      { "type": "STDOUT", "data": "SENT\n" },
+      { "type": "EXIT", "exitCode": 0, "violationsCounted": 0, "violationsReported": 0, "violationsDropped": 0, "violationsComplete": true }
+    ]
+  },
+  "handshakes": [],
+  "frameSessions": [],
+  "frameFailures": []
+}
