@@ -275,9 +275,11 @@ public class McpServerTests
         Assert.Equal(new uint[] { 443 }, executor.LastLease.AllowedEgressPorts);
         Assert.Equal(45u, executor.LastLease.LeaseDurationSeconds);
 
-        Assert.Single(ledger.Logs);
+        // Two rows: the flight-recorder line, then the facts the run record is assembled from.
+        Assert.Equal(2, ledger.Logs.Count);
         Assert.Equal("mcp-tool-run_command", ledger.Logs[0].templateId);
         Assert.Equal("EXECUTED_LEASABLE_COMMAND", ledger.Logs[0].action);
+        Assert.Equal(MissionRunFacts.LedgerAction, ledger.Logs[1].action);
     }
 
     [Fact]

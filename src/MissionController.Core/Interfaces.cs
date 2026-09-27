@@ -512,6 +512,59 @@ public record LeaseOutcome(
     string? OutcomePublicKey = null);
 
 /// <summary>
+/// What the daemon reported about a lease, in the vocabulary the run record reads. Every line is read
+/// back from the guest's LEASE and EXIT frames; a lease that reported none leaves this empty rather
+/// than assumed.
+///
+/// One function, because there are two authors and one reader. The mission engine's Linux substrate
+/// and the MCP lease tools both describe a lease here, and MissionRunRecordAssembler decides whether
+/// egress was enforced by looking for the exact string "lease:enforcing". A second copy of this
+/// vocabulary does not read as wrong - it reads as "not recorded", which is worse.
+/// </summary>
+public static class LeaseControls
+{
+    public static IReadOnlyList<string>? Describe(LeaseOutcome? lease, IReadOnlyList<string>? existing = null)
+    {
+        if (lease is null)
+        {
+            return existing;
+        }
+
+        if (!lease.Installed)
+        {
+            // Refused after the workspace was made and before anything was installed: the only
+            // fact the daemon has for the record is what became of the directory. No control is
+            // claimed from a lease that never existed.
+            return new List<string>(existing ?? Array.Empty<string>())
+            {
+                lease.WorkspaceRemoved == true
+                    ? $"workspace:{lease.Workspace} (created by the daemon, removed with the refusal)"
+                    : $"workspace:{lease.Workspace} (created by the daemon, NOT removed with the refusal)",
+            };
+        }
+
+        var controls = new List<string>(existing ?? Array.Empty<string>())
+        {
+            lease.Enforcing ? "lease:enforcing" : "lease:NOT-enforcing",
+            $"cgroup:{lease.CgroupPath ?? lease.CgroupId.ToString()}",
+            lease.Jailed ? (lease.ReadOnlyFs ? "jail:mount-namespace,read-only-workdir" : "jail:mount-namespace") : "jail:none",
+        };
+
+        if (lease.WorkloadUid is { } uid)
+        {
+            controls.Add($"workload:uid={uid}");
+        }
+
+        if (lease.Workspace is { } workspace)
+        {
+            controls.Add(lease.WorkspaceCreated ? $"workspace:{workspace} (created by the daemon)" : $"workspace:{workspace}");
+        }
+
+        return controls;
+    }
+}
+
+/// <summary>
 /// Executes a tool command inside a hardware-isolated WSL2 guest VM under an in-kernel BPF-LSM capability lease.
 /// Do NOT overload IProcessLauncher (which is intrinsically Win32 job-object shaped).
 /// </summary>
