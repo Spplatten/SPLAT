@@ -20,9 +20,40 @@ namespace MissionController.Tests;
 /// </summary>
 public class SourceDiscoveryTemplateTests
 {
-    private static IReadOnlyList<SingleToolTemplate> Probes() => GovernedTemplateCatalog.All
+    /// <summary>Everything in the category: the four probes and the brief the figures feed.</summary>
+    private static IReadOnlyList<SingleToolTemplate> Reaching() => GovernedTemplateCatalog.All
         .Where(template => template.Category == "Source Discovery & Feeds")
         .ToList();
+
+    /// <summary>The probes alone. The composer reads what a probe already published, so it shares a
+    /// destination rather than owning one.</summary>
+    private static IReadOnlyList<SingleToolTemplate> Probes() => Reaching()
+        .Where(template => template.TemplateId.StartsWith("source-", StringComparison.Ordinal))
+        .ToList();
+
+    /// <summary>
+    /// The brief is the one template here that writes rather than reports, so it carries the rule
+    /// that decides whether what it writes can be published: cite by name, and an uncited figure
+    /// costs the whole brief. The page enforces it; this is the instruction that matches.
+    /// </summary>
+    [Fact]
+    public void TheBriefComposer_MustCiteEveryFigureItUses_AndWriteNothingWhenThereAreNone()
+    {
+        var composer = Assert.Single(GovernedTemplateCatalog.All, t => t.TemplateId == "trends-brief-composer");
+
+        Assert.Contains("grounded_in", composer.SystemPrompt, StringComparison.Ordinal);
+        Assert.Contains("drops any brief whose citations are not all present", composer.SystemPrompt, StringComparison.Ordinal);
+
+        // The refusals a trends page needs most, because an invented one would be believed there.
+        foreach (string refusal in new[] { "No revenue", "no forecast", "is not one causing the other" })
+        {
+            Assert.Contains(refusal, composer.SystemPrompt, StringComparison.Ordinal);
+        }
+
+        // Nothing measured means no brief, not a shorter one.
+        Assert.Contains("NO_FIGURES", composer.Tool.ArgumentsTemplate, StringComparison.Ordinal);
+        Assert.Contains("write no brief", composer.SystemPrompt, StringComparison.Ordinal);
+    }
 
     [Fact]
     public void TheCatalogShipsTheFourProbes_EachWithItsOwnDestination()
@@ -48,7 +79,7 @@ public class SourceDiscoveryTemplateTests
     [Fact]
     public void NoProbeLetsABoundValueChooseWhereItGoes()
     {
-        foreach (var probe in Probes())
+        foreach (var probe in Reaching())
         {
             string script = probe.Tool.ArgumentsTemplate;
             string prefix = $"https://{probe.EgressRule.AllowedFqdn}/";
@@ -79,7 +110,7 @@ public class SourceDiscoveryTemplateTests
     {
         string[] forbidden = { "-Credential", "Authorization", "api_key=", "apikey=", "Bearer ", "-Token" };
 
-        foreach (var probe in Probes())
+        foreach (var probe in Reaching())
         {
             foreach (string needle in forbidden)
             {
@@ -102,7 +133,7 @@ public class SourceDiscoveryTemplateTests
     [Fact]
     public void EveryProbeStatesItsOwnFailure_AndItsPromptRefusesToReadOneAsAMeasurement()
     {
-        foreach (var probe in Probes())
+        foreach (var probe in Reaching())
         {
             Assert.Contains("PROBE_FAILED", probe.Tool.ArgumentsTemplate, StringComparison.Ordinal);
             Assert.Contains(0, probe.Tool.AllowedExitCodes);
@@ -122,7 +153,7 @@ public class SourceDiscoveryTemplateTests
     {
         string[] mutating = { "Invoke-WebRequest -Method Post", "-Method Put", "-Method Delete", "Out-File", "Set-Content", "Remove-Item", "New-Item" };
 
-        foreach (var probe in Probes())
+        foreach (var probe in Reaching())
         {
             foreach (string needle in mutating)
             {

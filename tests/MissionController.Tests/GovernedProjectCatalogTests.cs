@@ -113,6 +113,7 @@ public class GovernedProjectCatalogTests
                 "source-price-index-probe -> api.bls.gov",
                 "source-public-interest-probe -> wikimedia.org",
                 "source-published-artifact-check -> rareresources.net",
+                "trends-brief-composer -> rareresources.net",
             },
             offGateway.OrderBy(entry => entry, StringComparer.Ordinal).ToArray());
     }
