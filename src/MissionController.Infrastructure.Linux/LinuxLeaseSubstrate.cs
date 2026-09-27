@@ -175,48 +175,12 @@ public sealed class LinuxLeaseSubstrate : IMissionSubstrateSelector
         }
 
         /// <summary>
-        /// What the daemon reported, in the vocabulary the run record reads. Every line is read back from
-        /// the guest's LEASE and EXIT frames; a daemon that sent none leaves this empty rather than assumed.
+        /// What the daemon reported, in the vocabulary the run record reads. The vocabulary itself lives
+        /// in <see cref="LeaseControls"/>, shared with the MCP lease tools, because the assembler matches
+        /// these strings exactly and two copies of them drift apart silently.
         /// </summary>
-        private static IReadOnlyList<string>? AppliedControls(ProcessExecutionResult result)
-        {
-            if (result.Lease is not { } lease)
-            {
-                return result.AppliedControls;
-            }
-
-            if (!lease.Installed)
-            {
-                // Refused after the workspace was made and before anything was installed: the only
-                // fact the daemon has for the record is what became of the directory. No control is
-                // claimed from a lease that never existed.
-                return new List<string>(result.AppliedControls ?? Array.Empty<string>())
-                {
-                    lease.WorkspaceRemoved == true
-                        ? $"workspace:{lease.Workspace} (created by the daemon, removed with the refusal)"
-                        : $"workspace:{lease.Workspace} (created by the daemon, NOT removed with the refusal)",
-                };
-            }
-
-            var controls = new List<string>(result.AppliedControls ?? Array.Empty<string>())
-            {
-                lease.Enforcing ? "lease:enforcing" : "lease:NOT-enforcing",
-                $"cgroup:{lease.CgroupPath ?? lease.CgroupId.ToString()}",
-                lease.Jailed ? (lease.ReadOnlyFs ? "jail:mount-namespace,read-only-workdir" : "jail:mount-namespace") : "jail:none",
-            };
-
-            if (lease.WorkloadUid is { } uid)
-            {
-                controls.Add($"workload:uid={uid}");
-            }
-
-            if (lease.Workspace is { } workspace)
-            {
-                controls.Add(lease.WorkspaceCreated ? $"workspace:{workspace} (created by the daemon)" : $"workspace:{workspace}");
-            }
-
-            return controls;
-        }
+        private static IReadOnlyList<string>? AppliedControls(ProcessExecutionResult result) =>
+            LeaseControls.Describe(result.Lease, result.AppliedControls);
     }
 
     /// <summary>

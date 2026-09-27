@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text.Json;
+using MissionController.Core.Interfaces;
 
 namespace MissionController.Core.Models;
 
@@ -92,6 +93,16 @@ public sealed class MissionRunFacts
     /// </summary>
     public static string HashTemplate(SingleToolTemplate template) =>
         "sha256:" + Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(template))).ToLowerInvariant();
+
+    /// <summary>
+    /// The policy for a call that has no template. A lease tool's envelope IS its policy - the command
+    /// it may exec, the addresses it may reach, the clamps it runs under - so the record names it by
+    /// its content, as a mission names its template. Hashing the request rather than restating it
+    /// means the record cannot be read as an authorization: it says which envelope was in force, and
+    /// the envelope is in the bundle's own permission group beside it.
+    /// </summary>
+    public static string HashLease(LeaseSpec lease) =>
+        "sha256:" + Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(lease))).ToLowerInvariant();
 }
 
 // In the six groups below a null field means NOT RECORDED: nothing that ran the mission observed it.

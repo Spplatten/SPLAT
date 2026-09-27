@@ -227,8 +227,11 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
                 "declared only: the tool kept a network stack, and Windows does not hold it to the declared destination",
             null when facts.ExitCode is null =>
                 "not applicable: no tool ran",
+            // Substrate-neutral on purpose: a lease tool reaches here too, when the daemon reported
+            // no lease at all. "the tool's token was not read back" is a Windows sentence, and it
+            // read as a statement about a token that never existed on the other substrate.
             null =>
-                "not recorded: the tool's token was not read back",
+                "not recorded: nothing read back what held the tool's sockets",
             _ => $"partly: {container["token:appcontainer=".Length..]} granted to the tool's AppContainer"
         };
     }
@@ -240,7 +243,17 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
             return true; // nothing was provisioned, so nothing can have been left
         }
 
-        bool jobClosed = facts.JobName is null || facts.TeardownOrder.Any(s => s.StartsWith("job: closed", StringComparison.Ordinal));
+        // An empty teardown order is not a job left open, it is a teardown nobody watched. The
+        // Windows engine writes a line for every step, so "no line" used to be impossible and false
+        // was read as "the job stayed open"; a lease tool's cgroup is torn down inside the guest and
+        // the daemon's frames say nothing about it, which made every one of those records claim a
+        // leak that was never observed.
+        bool? jobClosed = facts.JobName is null
+            ? true
+            : facts.TeardownOrder.Count == 0
+                ? null
+                : facts.TeardownOrder.Any(s => s.StartsWith("job: closed", StringComparison.Ordinal));
+
         return facts.JailRemoved switch
         {
             true => jobClosed,

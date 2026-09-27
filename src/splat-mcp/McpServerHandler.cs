@@ -597,8 +597,14 @@ public class McpServerHandler
         return defaultValue;
     }
 
-    private async Task<McpToolCallResult> ExecuteRunCommandAsync(JsonElement args, CancellationToken ct)
+    /// <param name="toolName">
+    /// The tool the caller named. run_code wraps its script and delegates here, and its rows used to
+    /// land under run_command's name - a record that described a call nobody made.
+    /// </param>
+    private async Task<McpToolCallResult> ExecuteRunCommandAsync(JsonElement args, CancellationToken ct, string toolName = "run_command")
     {
+        string ledgerTool = $"mcp-tool-{toolName}";
+        var startedAtUtc = DateTimeOffset.UtcNow;
         string command = args.TryGetProperty("command", out var cmdProp) ? cmdProp.GetString() ?? "" : "";
         if (string.IsNullOrWhiteSpace(command))
         {
@@ -692,13 +698,28 @@ public class McpServerHandler
 
         if (egressRefusal is not null)
         {
+            string refusedActor = await ResolveActorAsync(ct);
             await _auditLedger.AppendLogAsync(
                 missionId,
-                "mcp-tool-run_command",
+                ledgerTool,
                 "EGRESS_REQUEST_REFUSED",
                 $"Command='{command}' RequestedEgress='{string.Join(",", egressIps)}' | {egressRefusal}",
-                await ResolveActorAsync(ct),
+                refusedActor,
                 ct);
+
+            // A refusal is a run with a record, exactly as it is for a mission the engine refuses.
+            // The bundle for it says nothing ran and why, which is the answer an auditor asking
+            // "what did this agent do at 14:02" needs to be able to get.
+            var refusedFacts = NewLeaseFacts(missionId, ledgerTool, refusedActor, startedAtUtc, command, argumentsForLog, workDir, timeoutSec);
+            refusedFacts.TemplateSha256 = "none: the call was refused before a lease was authored";
+            // The caller named a working directory; nothing was provisioned at it, and the bundle's
+            // cleanup group has to say that rather than report on a boundary that never existed.
+            refusedFacts.WorkspacePath = null;
+            refusedFacts.DeclaredEgress = $"requested {string.Join(",", egressIps)}, refused by the operator's egress policy";
+            refusedFacts.Admission = $"Refused: {egressRefusal}";
+            refusedFacts.ExecutionState = "Refused";
+            refusedFacts.TerminalReason = egressRefusal;
+            await SealLeaseFactsAsync(refusedFacts);
 
             return new McpToolCallResult
             {
@@ -708,8 +729,9 @@ public class McpServerHandler
                     new()
                     {
                         Type = "text",
-                        Text = $"[SPLAT POLICY] run_command was refused before any lease was requested: {egressRefusal} " +
-                               "This is a check in the MCP host, not a kernel denial."
+                        Text = $"[SPLAT POLICY] {toolName} was refused before any lease was requested: {egressRefusal} " +
+                               "This is a check in the MCP host, not a kernel denial.\n" +
+                               $"[SPLAT RUN RECORD] mission {missionId:D} — export it with the export_run_record tool."
                     }
                 }
             };
@@ -790,13 +812,74 @@ public class McpServerHandler
         outputSb.AppendLine($"[Process Exited with code {execResult.ExitCode}]");
 
         // Record flight recorder log in audit ledger
+        string actor = await ResolveActorAsync(ct);
         await _auditLedger.AppendLogAsync(
             missionId,
-            "mcp-tool-run_command",
+            ledgerTool,
             "EXECUTED_LEASABLE_COMMAND",
             $"Command='{command}' Args='{argumentsForLog}' ExitCode={execResult.ExitCode} Violations={violations.Count}",
-            await ResolveActorAsync(ct),
+            actor,
             ct);
+
+        var facts = NewLeaseFacts(missionId, ledgerTool, actor, startedAtUtc, command, argumentsForLog, workDir, timeoutSec);
+        facts.TemplateSha256 = MissionRunFacts.HashLease(lease);
+        facts.DeclaredEgress = allowNetwork
+            ? $"{string.Join(",", leaseAddresses)}:{string.Join(",", leasePorts)} (the operator's egress policy, as far as the caller asked for it)"
+            : "none: the caller asked for no network";
+        facts.NetworkDenialRequested = !allowNetwork;
+        facts.RequestedMemoryBytes = (long)Math.Min(lease.Limits.MaxMemoryBytes, (ulong)long.MaxValue);
+        facts.RequestedCpuPercent = (int)Math.Min(lease.Limits.MaxCpuPercent, (uint)int.MaxValue);
+        facts.ExitCode = execResult.ExitCode;
+        facts.TimedOut = execResult.TimedOut;
+        facts.TerminalReason = execResult.TerminalReason
+            ?? (execResult.TimedOut ? $"killed at the lease's {timeoutSec}s budget" : "the command exited");
+
+        // The contract this tool told its caller it was holding to. isError below is exit 0 and no
+        // timeout, so that is what the record has to say the contract was - a record that disagrees
+        // with the answer the agent already acted on is worse than no record.
+        facts.AllowedExitCodes.Add(0);
+        facts.ExitContractMet = execResult.ExitCode == 0 && !execResult.TimedOut;
+        facts.ExecutionState = execResult.TimedOut ? "ToolFailed" : (execResult.ExitCode == 0 ? "Completed" : "ToolFailed");
+
+        // Read back from the guest, never repeated from the request, and in the one vocabulary the
+        // assembler matches on. A lease the daemon never reported leaves these unset: the bundle
+        // then says the controls were not recorded rather than naming controls nobody observed.
+        if (LeaseControls.Describe(execResult.Lease, execResult.AppliedControls) is { } applied)
+        {
+            facts.AppliedControls.AddRange(applied);
+        }
+
+        facts.LimitsReadBack = execResult.LimitsReadBack;
+
+        if (execResult.Lease is { } leaseOutcome)
+        {
+            facts.KernelRefusals = leaseOutcome.ViolationsCounted;
+            facts.KernelRefusalsReported = leaseOutcome.ViolationsReported;
+            facts.KernelRefusalEvidenceComplete = leaseOutcome.ViolationsComplete;
+            facts.GuestSignedOutcome = leaseOutcome.SignedOutcome;
+            facts.GuestOutcomeSignature = leaseOutcome.OutcomeSignature;
+            facts.GuestOutcomeKeyId = leaseOutcome.OutcomeKeyId;
+            facts.GuestOutcomePublicKey = leaseOutcome.OutcomePublicKey;
+
+            // The daemon's word on its own teardown. It creates the workspace only for a lease that
+            // asked for an ephemeral one, so a caller's own directory is left alone and the record
+            // says nothing was provisioned rather than that nothing was cleaned up.
+            facts.WorkspacePath = leaseOutcome.Workspace ?? workDir;
+            // Only a directory the daemon made is a directory the daemon can say it removed. For one
+            // the caller owns this stays null, and the bundle says the disposition is not recorded
+            // rather than reporting on a cleanup nobody performed.
+            facts.JailRemoved = leaseOutcome.WorkspaceCreated ? leaseOutcome.WorkspaceRemoved : null;
+            facts.JobName = leaseOutcome.CgroupPath ?? (leaseOutcome.Installed ? leaseOutcome.CgroupId.ToString() : null);
+            // The daemon's EXIT frame count, not a measurement from here: nothing on this side can
+            // see into the guest's cgroup. Null when the lease ended without one.
+            facts.ProcessesLeftAtTeardown = execResult.FinalMetrics.ActiveProcessCount;
+        }
+
+        await SealLeaseFactsAsync(facts);
+
+        // Outside the delimited block, so it is SPLAT's line and not the sandbox's. An agent that
+        // gets this can ask for the bundle; without it the evidence exists and nothing points at it.
+        outputSb.AppendLine($"[SPLAT RUN RECORD] mission {missionId:D} — export it with the export_run_record tool.");
 
         return new McpToolCallResult
         {
@@ -806,6 +889,71 @@ public class McpServerHandler
                 new() { Type = "text", Text = outputSb.ToString() }
             }
         };
+    }
+
+    /// <summary>
+    /// The fields every lease-tool call has before anything runs. The rest is filled in where the
+    /// handler observes it, never reconstructed afterwards - the same discipline the mission engine
+    /// keeps, because the same assembler reads both.
+    /// </summary>
+    private static MissionRunFacts NewLeaseFacts(
+        Guid missionId,
+        string ledgerTool,
+        string actor,
+        DateTimeOffset startedAtUtc,
+        string command,
+        string argumentsForLog,
+        string workDir,
+        uint timeoutSec) => new()
+        {
+            MissionId = missionId,
+            TemplateId = ledgerTool,
+            Principal = actor,
+            StartedAtUtc = startedAtUtc,
+            ExecutablePath = command,
+            CommandLine = argumentsForLog,
+            WorkspacePath = workDir,
+            TimeoutSeconds = (int)timeoutSec,
+            // The guest's kernel, not this process's: the host is Windows and the tool is not on it.
+            // The lease's own frames name the cgroup and the controls; the release string is not
+            // among them, so nothing here claims to know it.
+            Substrate = LinuxLeaseSubstrate.SubstrateName,
+            OsDescription = "not recorded: the tool ran in the WSL2 guest, whose release the lease frames do not carry",
+            // Nothing in a lease tool's request asks for a privilege drop. The daemon runs the
+            // workload as a non-root uid regardless, and that lands in AppliedControls as the
+            // workload:uid= line the daemon actually reported.
+            PrivilegeDropRequested = false,
+        };
+
+    /// <summary>
+    /// Seals what a lease tool did as the call's MISSION_RUN_FACTS row - the same row, the same
+    /// schema and the same reader as a mission the engine ran.
+    ///
+    /// Until this existed run_command left two lines of prose in the ledger and no record could be
+    /// assembled for it at all: the one tool an external agent actually calls was the one path with
+    /// no evidence, while the product's claim is that the evidence is the point. Written with
+    /// CancellationToken.None for the reason the engine does it: a call cancelled mid-flight is
+    /// exactly the one whose record matters.
+    /// </summary>
+    private async Task SealLeaseFactsAsync(MissionRunFacts facts)
+    {
+        facts.EndedAtUtc ??= DateTimeOffset.UtcNow;
+        try
+        {
+            await _auditLedger.AppendLogAsync(
+                facts.MissionId,
+                facts.TemplateId,
+                MissionRunFacts.LedgerAction,
+                JsonSerializer.Serialize(facts),
+                facts.Principal,
+                CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // A ledger that refuses this row refused the call's other rows too, so there is no
+            // record this could still complete - and failing the tool call here would turn a
+            // storage fault into a sandbox escape report.
+        }
     }
 
     private async Task<McpToolCallResult> ExecuteRunCodeAsync(JsonElement args, CancellationToken ct)
@@ -828,13 +976,29 @@ public class McpServerHandler
         var astResult = DynamicCodeAstValidator.Validate(code, language);
         if (!astResult.IsSafe)
         {
+            var blockedMission = Guid.NewGuid();
+            string blockedActor = await ResolveActorAsync(ct);
+            string rejection = astResult.RejectionReason ?? "Forbidden script primitive detected";
             await _auditLedger.AppendLogAsync(
-                Guid.NewGuid(),
+                blockedMission,
                 "mcp-tool-run_code",
                 "DYNAMIC_CODE_AST_BLOCKED",
-                astResult.RejectionReason ?? "Forbidden script primitive detected",
-                await ResolveActorAsync(ct),
+                rejection,
+                blockedActor,
                 ct);
+
+            // Sealed like any other refusal: the record is what proves the block happened, and a
+            // block with no record is indistinguishable afterwards from a call nobody made.
+            var blockedFacts = NewLeaseFacts(
+                blockedMission, "mcp-tool-run_code", blockedActor, DateTimeOffset.UtcNow,
+                $"{language} (script)", string.Empty, "none: nothing was provisioned", 0);
+            blockedFacts.WorkspacePath = null;
+            blockedFacts.TemplateSha256 = "none: the script was refused before a lease was authored";
+            blockedFacts.DeclaredEgress = "none: nothing ran";
+            blockedFacts.Admission = $"Refused: {rejection}";
+            blockedFacts.ExecutionState = "Refused";
+            blockedFacts.TerminalReason = rejection;
+            await SealLeaseFactsAsync(blockedFacts);
 
             return new McpToolCallResult
             {
@@ -884,7 +1048,7 @@ public class McpServerHandler
             timeoutSeconds = timeoutSec
         }));
 
-        return await ExecuteRunCommandAsync(wrappedArgs, ct);
+        return await ExecuteRunCommandAsync(wrappedArgs, ct, "run_code");
     }
 
     private async Task<McpToolCallResult> ExecuteFsReadAsync(JsonElement args, CancellationToken ct)
