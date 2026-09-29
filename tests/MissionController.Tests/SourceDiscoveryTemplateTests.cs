@@ -56,18 +56,23 @@ public class SourceDiscoveryTemplateTests
     }
 
     [Fact]
-    public void TheCatalogShipsTheFourProbes_EachWithItsOwnDestination()
+    public void EveryProbeReachesOneDeclaredDestination_AndEveryDestinationHasAProbe()
     {
         var probes = Probes();
+        var destinations = probes.Select(p => p.EgressRule.AllowedFqdn).Distinct()
+            .OrderBy(f => f, StringComparer.Ordinal).ToArray();
 
-        Assert.Equal(4, probes.Count);
-        Assert.Equal(
-            new[] { "api.bls.gov", "api.eia.gov", "rareresources.net", "wikimedia.org" },
-            probes.Select(p => p.EgressRule.AllowedFqdn).OrderBy(f => f, StringComparer.Ordinal).ToArray());
+        Assert.Equal(6, probes.Count);
 
-        // One host each. Two probes sharing a destination would mean one of them is not the reason
-        // that destination is declared, and the declaration is what an auditor reads.
-        Assert.Equal(probes.Count, probes.Select(p => p.EgressRule.AllowedFqdn).Distinct().Count());
+        // Not one host each. That rule held while every probe read a different publisher, and the
+        // average-price probe is what showed it was the wrong rule: BLS serves an index family and a
+        // price family from the same host, and two probes sharing a destination is a publisher with
+        // two datasets rather than a redundant declaration. What has to hold is the other direction -
+        // no destination is declared that nothing reaches, since an unused declaration is a hole an
+        // auditor would read as an intended reach.
+        Assert.Equal(new[] { "api.bls.gov", "api.census.gov", "api.eia.gov", "rareresources.net", "wikimedia.org" }, destinations);
+        Assert.All(destinations, fqdn => Assert.Contains(probes, p => p.EgressRule.AllowedFqdn == fqdn));
+
         Assert.All(probes, p => Assert.Equal(EgressScope.ToolProcess, p.EgressRule.Scope));
         Assert.All(probes, p => Assert.True(p.EgressRule.ToolProcessNeedsNetwork));
     }

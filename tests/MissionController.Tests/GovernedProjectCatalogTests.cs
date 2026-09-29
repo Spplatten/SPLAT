@@ -109,7 +109,9 @@ public class GovernedProjectCatalogTests
             new[]
             {
                 "grants-opportunity-ingestion -> api.grants.gov",
+                "source-average-price-probe -> api.bls.gov",
                 "source-credential-gate-probe -> api.eia.gov",
+                "source-dataset-catalog-search -> api.census.gov",
                 "source-price-index-probe -> api.bls.gov",
                 "source-public-interest-probe -> wikimedia.org",
                 "source-published-artifact-check -> rareresources.net",

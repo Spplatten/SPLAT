@@ -305,7 +305,7 @@ public class SensorNetworkContainmentTests
         // without appearing here is the regression, and it would otherwise look like a bigger number.
         var destinations = reaching.Select(t => t.EgressRule.AllowedFqdn).Distinct().OrderBy(f => f, StringComparer.Ordinal);
         Assert.Equal(
-            new[] { "api.bls.gov", "api.eia.gov", "api.grants.gov", "rareresources.net", "wikimedia.org" },
+            new[] { "api.bls.gov", "api.census.gov", "api.eia.gov", "api.grants.gov", "rareresources.net", "wikimedia.org" },
             destinations.ToArray());
 
         // Every other template in the catalogue is launched with no network stack whatsoever.
