@@ -20,7 +20,7 @@ namespace MissionController.Tests;
 /// </summary>
 public class SourceDiscoveryTemplateTests
 {
-    /// <summary>Everything in the category: the four probes and the brief the figures feed.</summary>
+    /// <summary>The five source sensors and the brief the figures feed.</summary>
     private static IReadOnlyList<SingleToolTemplate> Reaching() => GovernedTemplateCatalog.All
         .Where(template => template.Category == "Source Discovery & Feeds")
         .ToList();
@@ -56,13 +56,13 @@ public class SourceDiscoveryTemplateTests
     }
 
     [Fact]
-    public void TheCatalogShipsTheFourProbes_EachWithItsOwnDestination()
+    public void TheCatalogShipsTheFiveProbes_EachWithItsOwnDestination()
     {
         var probes = Probes();
 
-        Assert.Equal(4, probes.Count);
+        Assert.Equal(5, probes.Count);
         Assert.Equal(
-            new[] { "api.bls.gov", "api.eia.gov", "rareresources.net", "wikimedia.org" },
+            new[] { "api.bls.gov", "api.eia.gov", "itunes.apple.com", "rareresources.net", "wikimedia.org" },
             probes.Select(p => p.EgressRule.AllowedFqdn).OrderBy(f => f, StringComparer.Ordinal).ToArray());
 
         // One host each. Two probes sharing a destination would mean one of them is not the reason

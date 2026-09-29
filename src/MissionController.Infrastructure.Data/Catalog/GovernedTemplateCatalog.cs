@@ -21,7 +21,7 @@ public static partial class GovernedTemplateCatalog
     /// Bumped whenever the seeded set changes. The registry stores this so startup can skip a
     /// redundant full-catalog upsert when the on-disk set already matches the shipped build.
     /// </summary>
-    public const string CatalogVersion = "2.4.0";
+    public const string CatalogVersion = "2.5.0";
 
     // --- Model governance -----------------------------------------------------------------
     // Pro is reserved for templates whose output requires correlation or adversarial reasoning
@@ -246,6 +246,7 @@ public static partial class GovernedTemplateCatalog
         all.AddRange(AutonomousOperationsTemplates());
         all.AddRange(LinuxLeaseTemplates());
         all.AddRange(SourceDiscoveryTemplates());
+        all.AddRange(ConsumerCatalogTemplates());
 
         for (int i = 0; i < all.Count; i++)
         {
