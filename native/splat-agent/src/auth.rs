@@ -17,9 +17,16 @@
 //     that already outranks the thing protecting it, and pretending otherwise would be the same
 //     class of claim this daemon has spent several commits retiring.
 //   * On the Windows side the bridge reads the token through `wsl.exe -u root`, so any Windows
-//     process running as that user can obtain it. Closing that requires a transport that carries
-//     peer identity (AF_VSOCK with a guest-side allow-list, or SO_PEERCRED over AF_UNIX); it is
-//     the wire-contract work, not this.
+//     process running as that user can obtain it. This note used to say that closing it was
+//     wire-contract work - AF_VSOCK with a guest-side allow-list, or SO_PEERCRED over AF_UNIX.
+//     Measured on 2026-09-29, it is not, and neither would work. AF_VSOCK addresses a virtual
+//     machine: every Windows process on the host presents the same CID. SO_PEERCRED reports a peer
+//     IN THE GUEST, and the bridge is not in the guest - the credentials would belong to whatever
+//     relay carried the bytes in, which any Windows process can spawn. Underneath both, an
+//     unelevated `wsl.exe -u root -e /usr/bin/id` answers uid=0: the Windows user who owns the
+//     distro is root in it, so that caller never needed the token and no transport can exclude it.
+//     It is the same class of claim as the root case above, and the boundary is not on this wire.
+//     See "Who may drive the lease daemon" in docs/THREAT-MODEL.md.
 //   * The frames this daemon sends after the handshake prove themselves too, when the caller asked
 //     for it in its HELLO (2026-09-23; roadmap 2.6). Each travels in a PROVEN wrapper whose proof
 //     covers both nonces, the frame's number on the connection and its exact bytes - the request

@@ -75,10 +75,14 @@ CURRENT IDENTITY ARCHITECTURE (GATED BY SHARED SECRET):
 +-----------------------------------------------------------------------------+
 ```
 
-### The Roadmap: Hyper-V Sockets (AF_VSOCK) & Peer Credentials
-To establish true cryptographic peer identity, future iterations will transition from loopback TCP to **Hyper-V Sockets (`AF_HYPERV` / `AF_VSOCK`)**:
-- In the Linux guest, `AF_VSOCK` provides kernel-level VM addressing via Context IDs (CID) and ports.
-- Combined with `SO_PEERCRED` or Windows Security Descriptors on the Hyper-V socket endpoint, the Linux daemon can cryptographically verify the exact Windows SID of the calling process before granting a lease.
+### The Roadmap: measured, and the obvious answer was wrong
+This section used to promise that moving from loopback TCP to **Hyper-V Sockets (`AF_HYPERV` / `AF_VSOCK`)** would let the daemon establish which Windows process was calling it, down to the account. That was measured on 2026-09-29, and it does not:
+
+- `AF_VSOCK` addresses a **virtual machine** by Context ID, not a process. Every Windows process on the host presents the same CID, so a vsock allow-list excludes guest-local callers and not one of the callers this limitation is about.
+- `SO_PEERCRED` over AF_UNIX reports the credentials of a peer **in the guest**. The bridge is not in the guest; its bytes arrive through a relay, and the credentials belong to the relay — which any Windows process can spawn.
+- Underneath both: from an unelevated shell, `wsl.exe -u root -e /usr/bin/id` answers `uid=0(root)`. The Windows user who owns a WSL2 distro is root inside it, by WSL's design. Such a process never needed the token, so no wire contract can exclude it — it can stop the daemon, load its own BPF programs, or skip the daemon entirely.
+
+The boundary is therefore not on the wire. What moves it is owning the distro under a Windows identity that is not the operator's, which relocates caller identity to the MCP layer. See *Who may drive the lease daemon* in [THREAT-MODEL.md](../THREAT-MODEL.md).
 
 ---
 

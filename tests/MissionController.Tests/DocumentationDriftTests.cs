@@ -327,6 +327,55 @@ public class DocumentationDriftTests
     /// prospect-facing document is covered the day it is added rather than the day someone
     /// remembers to list it.
     /// </summary>
+    /// <summary>
+    /// Roadmap 2.4 gates the bridge's caller-identity work on a written threat model, and the gate is
+    /// only worth something while the analysis is still there to read. This holds three things: the
+    /// section exists, the roadmap points at it, and nothing in the tree has gone back to promising
+    /// that a different socket would identify the caller.
+    ///
+    /// The last part is the one that rots. AF_VSOCK addressing a VM rather than a process is exactly
+    /// the kind of fact that reads as a detail and gets written back out as a plan - it was in the
+    /// textbook as a roadmap item for weeks, and the measurement that retired it took ten seconds.
+    /// </summary>
+    [Fact]
+    public void TheCallerIdentityThreatModel_IsWrittenDown_AndNothingPromisesASocketWillCloseIt()
+    {
+        string threatModel = File.ReadAllText(Path.Combine(RepositoryRoot(), "docs", "THREAT-MODEL.md"));
+        Assert.Contains("## Who may drive the lease daemon", threatModel, StringComparison.Ordinal);
+
+        // The measurement the section turns on. Without it the section is an opinion.
+        Assert.Contains("uid=0(root)", threatModel, StringComparison.Ordinal);
+
+        string roadmap = File.ReadAllText(Path.Combine(RepositoryRoot(), "docs", "ROADMAP.md"));
+        Assert.Contains("Who may drive the lease daemon", roadmap, StringComparison.Ordinal);
+
+        // Phrases that can only appear in an assertion, never in the retraction of one.
+        string[] retired =
+        [
+            "true cryptographic peer identity",
+            "verify the exact Windows SID",
+            "cryptographically verify the exact Windows SID"
+        ];
+
+        var offenders = new List<string>();
+        foreach (string file in Directory.EnumerateFiles(RepositoryRoot(), "*.md", SearchOption.AllDirectories)
+                     .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                              && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                              && !f.Contains($"{Path.DirectorySeparatorChar}target{Path.DirectorySeparatorChar}")))
+        {
+            string text = File.ReadAllText(file);
+            foreach (string phrase in retired)
+            {
+                if (text.Contains(phrase, StringComparison.OrdinalIgnoreCase))
+                {
+                    offenders.Add($"{Path.GetRelativePath(RepositoryRoot(), file)}: '{phrase}'");
+                }
+            }
+        }
+
+        Assert.Empty(offenders);
+    }
+
     private static IEnumerable<string> DocumentationFiles()
     {
         yield return Path.Combine(RepositoryRoot(), "README.md");

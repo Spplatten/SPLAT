@@ -83,6 +83,81 @@ files nothing.
 
 ---
 
+## Who may drive the lease daemon
+
+Roadmap 2.4 gates the code on this page: the threat model is written down first — which callers each
+option actually excludes — and the daemon enforces what it says. This section is that, written
+2026-09-29.
+
+**The capability at stake.** `EXECUTE_TOOL` runs a command as the workload uid inside a lease the
+caller writes, bounded by the operator's ceiling in `policy.json` and by the daemon's own limits.
+Driving the daemon directly bypasses everything SPLAT layers above it: the MCP server's egress
+policy, the workspace guard, the ledger row, the run record. What is lost is not root — the workload
+still runs as `nobody` under the kernel's hooks — it is **ungoverned and unrecorded use of the
+sandbox**. An auditor asking what ran at 14:02 gets nothing, because nothing wrote a row.
+
+**Who is excluded today.** Protocol 3's shared secret, measured against the code and the machine:
+
+- **A non-root process in the guest — excluded.** The token is a root-owned `0600` file, and since
+  protocol 3 it never crosses the wire: the daemon answers a caller's nonce instead, and every
+  request proves possession over both nonces, its place on the connection and its own bytes.
+- **A process that takes the port while the daemon is down — excluded.** It is sent one nonce and
+  nothing else, and any proof it later observes is good for one request on one connection.
+- **Anything off this machine — excluded.** The daemon binds `127.0.0.1:50051`. WSL2 localhost
+  forwarding reaches that from the Windows host and nothing reaches it from the LAN.
+- **A Windows process running as the operator — not excluded, and no wire contract can exclude it.**
+  Measured 2026-09-29 from an unelevated shell: `wsl.exe -u root -e /usr/bin/id` answers
+  `uid=0(root) gid=0(root)`. The Windows user who owns a WSL2 distro is root inside it, by WSL's
+  design rather than by anything configured here. That process does not need the token. It can read
+  the file, stop the daemon, load its own BPF programs, or skip the daemon entirely and run the
+  command itself.
+
+That last line is the finding, and it is larger than the row that asked for it. The gap was written
+down as "a shared secret identifies no caller". The measurement says the secret is beside the point:
+**the guest is not a boundary against the Windows user who owns it.**
+
+**What each candidate transport would change.** Both candidates the code's own notes name:
+
+| Option | Excludes | Does not exclude |
+| :--- | :--- | :--- |
+| Shared secret, protocol 3 (today) | non-root guest processes; a port squatter; anything off the machine | any Windows process running as the operator; guest root |
+| AF_VSOCK with a guest-side allow-list | guest-local callers, by transport rather than by secret | any Windows process running as the operator — every one of them presents the same host CID. AF_VSOCK identifies a virtual machine |
+| `SO_PEERCRED` over AF_UNIX in the guest | guest processes not running as the allowed uid | any Windows process running as the operator — the bridge is not in the guest, so the credentials belong to whatever relay carried the bytes in, and every Windows process can spawn the same relay |
+
+They fail the requirement the same way, and it is not that they identify the wrong thing. It is that
+the caller they are meant to exclude sits on the far side of a wire neither of them can see across,
+and outranks the process that would be doing the excluding.
+
+**What would change the answer.** Three, and only the first excludes the stated caller:
+
+1. **Move the principal.** Run the bridge, and own the distro, under a Windows identity that is not
+   the operator's — a service or virtual account. A process running as the operator is then excluded
+   by the same mechanism that excludes it from any other account's files, and the token becomes
+   unreadable to it because `wsl.exe -u root` no longer reaches that distro. The cost is real: a
+   service, a distro registered to that account, and the MCP server must then authenticate *its*
+   callers, which moves the identity problem up a layer to where `McpOperatorIdentityProvider`
+   already lives. That is the right layer for it.
+2. **Make the stolen capability worth less.** Refuse any lease not accompanied by a per-mission
+   authorization signed by a key the operator holds and the bridge does not. A token taken from the
+   guest then buys nothing. This is the run record's signing, pointed the other way, and it
+   complements 1 rather than replacing it.
+3. **Accept it and record it.** Keep the shared secret and make every lease attributable, which is
+   what the run record now does for the MCP path. The threat becomes detectable rather than
+   prevented. This is the status quo, stated honestly, and it is a defensible position on a
+   single-operator workstation. It is not one on the OEM shape, where the host runs unattended.
+
+**What the daemon enforces, and what it must not claim.** Today the daemon enforces possession of
+the token, the protocol version, and the operator's ceiling over every lease it is asked to install.
+It does not enforce, and must not report, anything about *who* asked. Until one of the three above
+ships, no part of SPLAT may describe the bridge's authentication as identifying a caller: it
+establishes that the peer holds a secret every process running as the operator can obtain.
+
+**The decision is the operator's**, and it is really a decision about the product shape. On a
+workstation the operator already outranks everything here, and 3 is honest. On the OEM shape the
+daemon runs where no human is watching, and 3 is not.
+
+---
+
 ## What SPLAT does not defend against
 
 Stating these is the point of the page.
