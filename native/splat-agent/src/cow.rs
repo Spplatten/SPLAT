@@ -1,99 +1,89 @@
-﻿// Ephemeral OverlayFS copy-on-write workspace: merged view over lowerdir plus transient
-// upper/work dirs, discarded on teardown.
-//
-// NOT WIRED, AND NOT YET A BOUNDARY. Two separate facts, and the second is why the first has not
-// been fixed by simply calling it:
-//
-//   * `mount()` here happens in the DAEMON's mount namespace, so the overlay is visible to every
-//     process on the host rather than only to the leased tool.
-//   * A merged directory handed to a child as its working directory is a starting point, not a
-//     jail. The tool can `cd /` out of it in one syscall.
-//
-// Making this a filesystem boundary needs `unshare(CLONE_NEWNS)` in the child followed by
-// pivot_root, done inside the same pre_exec closure that already performs the cgroup join and the
-// privilege drop - and that closure is async-signal-safe code in a forked child of a multithreaded
-// process, so it is real work with real failure modes rather than a call site that was forgotten.
-//
-// Until that lands the daemon REFUSES `overlayFs.enableCow`, so the gap is a refusal rather than a
-// silently ignored field. The mount code stays because it is correct as far as it goes and is the
-// half that will be reused; it is parked, not abandoned.
-#![allow(dead_code)]
+// Parent-only scratch preparation. Only jail::enter mounts it, after unshare in the child.
 
 use std::fs;
 use std::path::PathBuf;
 use std::ffi::CString;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+use std::path::Path;
 use anyhow::{bail, Context, Result};
 
+pub const SCRATCH_BASE: &str = "/run/splat/cow";
+
+pub fn validate_policy(lower: &Path, protected: &[String], executable: &[String]) -> Result<()> {
+    let lower = fs::canonicalize(lower).context("resolve overlay workingDirectory")?;
+    for path in protected.iter().chain(executable) {
+        let resolved = fs::canonicalize(path).with_context(|| format!("resolve overlay policy path {path}"))?;
+        // Overlay inodes do not retain the host (dev, ino). A deny-list miss would allow access;
+        // an exec allow-list miss would deny it. Neither is the policy the caller requested.
+        if resolved.starts_with(&lower) {
+            bail!("overlayFs.enableCow: inode policy path {path} overlaps workingDirectory");
+        }
+    }
+    Ok(())
+}
+
+// Called only after every orphan cgroup has drained; no surviving namespace may use this upperdir.
+pub fn reap_leftovers(base: &Path) -> Result<()> {
+    if !base.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(base)? {
+        let entry = entry?;
+        if entry.file_name().as_bytes().starts_with(b"mission_") && entry.file_type()?.is_dir() {
+            fs::remove_dir_all(entry.path()).context("remove orphan overlay scratch")?;
+        }
+    }
+    Ok(())
+}
+
 pub struct OverlayWorkspace {
-    pub lower_dir: PathBuf,
     pub scratch_dir: PathBuf,
-    pub upper_dir: PathBuf,
-    pub work_dir: PathBuf,
-    pub merged_dir: PathBuf,
-    pub is_mounted: bool,
+    pub options: CString,
 }
 
 impl OverlayWorkspace {
-    pub fn setup(lower_dir: &str, scratch_dir: &str) -> Result<Self> {
-        let lower = PathBuf::from(lower_dir);
-        let scratch = PathBuf::from(scratch_dir);
+    pub fn setup(lower_dir: &Path, scratch_dir: &Path) -> Result<Self> {
+        let lower = fs::canonicalize(lower_dir).context("resolve overlay lowerdir")?;
+        let scratch = scratch_dir.to_path_buf();
         let upper = scratch.join("upper");
         let work = scratch.join("work");
-        let merged = scratch.join("merged");
-
-        if !lower.exists() {
-            fs::create_dir_all(&lower).context("create lowerdir")?;
+        // Separators or escapes must not turn a path into different mount options.
+        for path in [&lower, &upper, &work] {
+            if path.as_os_str().as_bytes().iter().any(|b| matches!(b, 0 | b',' | b':' | b'\\')) {
+                bail!("overlay path {} contains a mount-option separator", path.display());
+            }
         }
-        fs::create_dir_all(&upper).context("create upperdir")?;
-        fs::create_dir_all(&work).context("create workdir")?;
-        fs::create_dir_all(&merged).context("create mergeddir")?;
-
-        let options = format!(
-            "lowerdir={},upperdir={},workdir={}",
-            lower.display(),
-            upper.display(),
-            work.display()
-        );
-
-        let c_src = CString::new("overlay")?;
-        let c_tgt = CString::new(merged.to_string_lossy().as_bytes())?;
-        let c_type = CString::new("overlay")?;
-        let c_opts = CString::new(options.as_bytes())?;
-
-        let res = unsafe {
-            libc::mount(
-                c_src.as_ptr(),
-                c_tgt.as_ptr(),
-                c_type.as_ptr(),
-                0,
-                c_opts.as_ptr() as *const libc::c_void,
-            )
-        };
-
-        if res != 0 {
-            bail!("failed to mount overlayfs at {}: errno {}", merged.display(), unsafe { *libc::__errno_location() });
+        let parent = scratch.parent().context("overlay scratch needs a parent")?;
+        fs::DirBuilder::new().recursive(true).mode(0o700).create(parent)?;
+        if fs::canonicalize(parent)?.starts_with(&lower) {
+            bail!("overlay scratch must be outside its lowerdir");
         }
+        fs::DirBuilder::new().mode(0o700).create(&scratch).context("create private overlay scratch")?;
+        // A collision must never delete another lease's scratch; ownership starts after create.
+        let mut workspace = Self { scratch_dir: scratch, options: CString::default() };
+        fs::create_dir(&upper).context("create upperdir")?;
+        fs::create_dir(&work).context("create workdir")?;
+        let md = fs::metadata(&lower)?;
+        let upper_c = CString::new(upper.as_os_str().as_bytes())?;
+        if unsafe { libc::chown(upper_c.as_ptr(), md.uid(), md.gid()) } != 0 {
+            return Err(std::io::Error::last_os_error()).context("preserve overlay root ownership");
+        }
+        fs::set_permissions(&upper, md.permissions())?;
 
-        Ok(Self {
-            lower_dir: lower,
-            scratch_dir: scratch,
-            upper_dir: upper,
-            work_dir: work,
-            merged_dir: merged,
-            is_mounted: true,
-        })
+        let mut options = b"lowerdir=".to_vec();
+        options.extend_from_slice(lower.as_os_str().as_bytes());
+        options.extend_from_slice(b",upperdir=");
+        options.extend_from_slice(upper.as_os_str().as_bytes());
+        options.extend_from_slice(b",workdir=");
+        options.extend_from_slice(work.as_os_str().as_bytes());
+        workspace.options = CString::new(options)?;
+        Ok(workspace)
     }
 
     pub fn teardown(&mut self) -> Result<()> {
-        if self.is_mounted {
-            let c_tgt = CString::new(self.merged_dir.to_string_lossy().as_bytes())?;
-            let res = unsafe { libc::umount2(c_tgt.as_ptr(), libc::MNT_DETACH) };
-            if res == 0 {
-                self.is_mounted = false;
-            }
-        }
         if self.scratch_dir.exists() {
-            let _ = fs::remove_dir_all(&self.scratch_dir);
+            fs::remove_dir_all(&self.scratch_dir).context("remove overlay scratch")?;
         }
         Ok(())
     }
@@ -101,6 +91,8 @@ impl OverlayWorkspace {
 
 impl Drop for OverlayWorkspace {
     fn drop(&mut self) {
-        let _ = self.teardown();
+        if let Err(e) = self.teardown() {
+            tracing::warn!("Left overlay scratch {} behind: {e:#}", self.scratch_dir.display());
+        }
     }
 }

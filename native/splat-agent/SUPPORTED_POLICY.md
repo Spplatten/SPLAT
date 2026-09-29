@@ -27,12 +27,21 @@ Protocol version 3. Anything else is refused; see `main.rs`, and `docs/SCHEMA.md
 Policy is keyed per lease. Two concurrent missions do not see each other's permissions, and
 revoking one does not remove an entry another still holds.
 
+Hook persistence is **built, unproven**: all seven maps and four links are pinned under
+`/sys/fs/bpf/splat/<SHA-256 of src/bpf/lease_lsm.bpf.c>`. Restart reuses only that complete set,
+checks map schemas and each hook's program tag, attachment and map IDs, then drains orphan
+workloads before clearing stale policy. A different hash, incomplete set or foreign map refuses
+startup; existing pins remain attached. An operator must drain old workloads before retiring an
+incompatible set. Pins preserve policy during an outage; the userspace expiry timer cannot run
+while the daemon is dead.
+
 ## Enforced by the daemon, not the kernel
 
 | Dimension | Where | What is checked |
 | --- | --- | --- |
 | The workload's root | mount namespace and `pivot_root`, in `pre_exec` | A root holding `/usr`, `/bin`, `/sbin`, `/lib*` and `/etc` read-only, the working directory, a fresh `/tmp`, `/proc` and six device nodes. `/home`, `/root`, `/mnt`, `/var`, `/opt` and `/sys` are absent, not hidden. **Built 2026-09-20, pending the root probe** - see the note below. |
 | `readOnlyFs` | the same | The working directory bound read-only as well. Refused only by a daemon that is not enforcing, which jails nothing. |
+| `overlayFs.enableCow` | child mount namespace, before the workdir bind | **built, unproven**. The parent prepares private `upper/` and `work/`; the child mounts an overlay on its working-directory target. Writes are discarded after the cgroup drains. `readOnlyFs` still makes the merged view read-only. A mock daemon, missing lowerdir, mount-option separators and inode policy paths overlapping the lowerdir are refused. Executing newly created scratch inodes is not authorized by this feature. |
 | Memory, CPU, PID ceilings | cgroup v2 | Written to `memory.max`, `cpu.max`, `pids.max`, then **read back**; a controller that did not take the clamp fails the request. |
 | Lease lifetime | expiry reaper | On expiry the cgroup is killed and drained *before* its policy is withdrawn. |
 | Caller identity | protocol 3 handshake | A root-owned 0600 shared secret that never crosses the wire. Every connection opens with `HELLO`, and the daemon answers with an HMAC-SHA256 over the caller's nonce and its own, which the caller checks before it sends anything more. Every request then travels in an `AUTHENTICATED` frame whose proof covers both nonces, its place on the connection and its exact bytes, checked in fixed time before the request is parsed. Required on **every** request, `HEALTH_CHECK` included since 2026-09-11: that answer carries `enforcing`, the kernel version and the live lease count, so leaving it open told an unauthenticated caller exactly when this daemon would run work it cannot contain. Since 2026-09-23 the answers prove themselves too: a caller that asks in its `HELLO` receives every later frame in a `PROVEN` wrapper whose proof covers both nonces, the frame's number on the connection and its exact bytes, and the `CHALLENGE` that agreed to it is proven under a label of its own, so the agreement cannot be stripped off in transit. A caller that does not ask is answered unwrapped, as before. |
@@ -46,7 +55,6 @@ revoking one does not remove an entry another still holds.
 
 | Field | Why |
 | --- | --- |
-| `overlayFs.enableCow: true` | The overlay is not yet mounted inside the workload's namespace. `cow.rs` holds the mount code and `jail.rs` now holds the namespace; joining them, so the merged directory is the working directory the jail binds, is the next step. |
 | `protocolVersion` ≠ 3 | A version 1 envelope carried arguments as a pre-quoted string that the daemon then split on whitespace. There is no correct way to reconstruct it here. |
 | A first frame that is not a `HELLO`, or a request outside an `AUTHENTICATED` frame | Protocol 2 put the token itself in every request, so a caller handed it to whatever answered on the port — and while the daemon was down, any process in the guest could answer. Refused even with the right token, so capturing one is worth nothing, and the connection is closed. |
 | Any `argv` that is not an array | Same reason. |
@@ -67,10 +75,20 @@ These are reachable by a leased process. They are listed so nobody has to discov
 
 ## What has been proven, and where
 
-Everything in the two "enforced" tables above is proven against a root daemon on kernel
-6.18.33.2, in one run, recorded in `evidence/daemon-probe.json`. That file carries the SHA-256 of
+The historical kernel checks were recorded against a root daemon on kernel
+6.18.33.2 in `evidence/daemon-probe.json`; that run does not prove CoW or persistent hooks.
+Both additions are **built, unproven** until a fresh root run records PASS for their new checks.
+That file carries the SHA-256 of
 the BPF source it exercised, and `DocumentationDriftTests` fails the build if the README claims
 enforcement while the hash does not match what ships — so the proof cannot outlive the program.
+
+For the new lifecycle checks, stop the service/manual daemon, build the current binary, then run
+`sudo env SPLAT_PROBE_DAEMON=/absolute/path/to/splat-agent bash probe-daemon.sh` from this directory.
+The probe requires `bpftool`, starts its own daemon, kills only that process, checks both permitted
+and denied operations during the outage, verifies identical pin IDs after restart, and checks
+refusal of a wrong hash, an incomplete set and a substituted map. It restores the valid pins and
+stops its daemon on exit. Ordinary client runs leave persistence checks unproven; replay records
+always say REPLAY.
 
 > **Pending since 2026-09-20.** The program changed that day — each denial record gained the
 > kernel's clock, a sequence number and a drop counter, and the connect hook refuses an AF_INET

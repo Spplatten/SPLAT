@@ -1,0 +1,152 @@
+{
+  "schema": 4,
+  "bpf_source_sha256": "496cc634e06ee05f0c9382598f382beb19df1d9749989ebbb5feba4ba4dffea6",
+  "kernel_release": "6.18.33.2-microsoft-standard-WSL2",
+  "protocol_version": 3,
+  "recorded_utc": "2026-09-29T23:47:58Z",
+  "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
+  "root_feature_observations": {
+    "errors": [],
+    "lifecycle_requested": false
+  },
+  "results": {
+    "cow_overlay_in_child": true,
+    "cow_host_unchanged": true,
+    "cow_no_host_mount": true,
+    "cow_concurrent_isolation": true,
+    "cow_scratch_removed": true,
+    "cow_read_only_honored": true,
+    "cow_bad_options_refused": true,
+    "cow_inode_overlap_refused": true,
+    "pins_survive_sigkill": false,
+    "pins_exec_denied_during_outage": false,
+    "pins_file_denied_during_outage": false,
+    "pins_allowed_exec_during_outage": false,
+    "pins_no_daemon_during_measurement": false,
+    "pins_same_ids_after_restart": false,
+    "pins_restart_enforces": false,
+    "pins_orphans_drained": false,
+    "pins_wrong_hash_refused": false,
+    "pins_partial_set_refused": false,
+    "pins_foreign_map_refused": false,
+    "permitted_tool_ran": true,
+    "protected_inode_control_could_read_it": true,
+    "protected_inode_leaked": false,
+    "protected_inode_violation": true,
+    "unleased_second_exec_blocked": true,
+    "egress_permitted_destination_allowed": true,
+    "egress_unleased_destination_blocked": true,
+    "egress_denied_when_network_off": true,
+    "every_request_completed": true,
+    "workload_not_root": true,
+    "workload_uid_reported": "65534",
+    "concurrent_lease_isolation_held": true,
+    "unapproved_port_refused": true,
+    "ipv6_refused": true,
+    "expiry_killed_the_workload": true,
+    "expiry_elapsed_seconds": 5.7,
+    "undeclared_egress_refused": true,
+    "undeclared_exec_list_refused": true,
+    "health_check_answers_a_token_holder": true,
+    "unauthenticated_health_check_refused": true,
+    "daemon_proved_it_holds_the_token": true,
+    "protocol_2_token_in_the_clear_refused": true,
+    "daemon_frames_proven": true,
+    "udp_outside_the_lease_blocked": false,
+    "udp_violation_frame_reached_the_session": true,
+    "udp_inside_the_lease_allowed": true,
+    "refusal_receipt_counts_the_denial": true,
+    "refusal_receipt_says_it_is_complete": true,
+    "a_clean_lease_reports_zero_refusals": true,
+    "lease_outcome_is_signed_by_the_guest": true,
+    "lease_outcome_signature_verifies": true,
+    "an_edited_outcome_fails_the_signature": true,
+    "jail_control_host_has_home_and_mnt": true,
+    "jail_hides_home_and_mnt": true,
+    "jail_system_dirs_read_only": true,
+    "jail_workdir_and_tmp_writable": true,
+    "read_only_fs_makes_workdir_read_only": true,
+    "lease_frame_reports_enforcing": true,
+    "mission_workspace_made_and_removed": false,
+    "mission_workspace_frame_says_created": true,
+    "mission_workspace_path_announced": true,
+    "mission_workspace_tool_wrote_in_it": false,
+    "mission_workspace_exit_says_removed": true,
+    "mission_workspace_gone_from_the_host": true,
+    "mission_workspace_elsewhere_refused": true,
+    "mission_workspace_removed_on_refusal": true
+  },
+  "violations": [
+    {
+      "hook": 2,
+      "pid": 7518,
+      "detail": 742,
+      "detailText": "file_open: denied access to protected sensitive file (inode 742)",
+      "comm": "cat"
+    },
+    {
+      "hook": 1,
+      "pid": 7520,
+      "detail": 1633,
+      "detailText": "bprm_check_security: denied execution of unleased binary (inode 1633)",
+      "comm": "sh"
+    },
+    {
+      "hook": 1,
+      "pid": 7520,
+      "detail": 1633,
+      "detailText": "bprm_check_security: denied execution of unleased binary (inode 1633)",
+      "comm": "sh"
+    },
+    {
+      "hook": 3,
+      "pid": 7524,
+      "detail": 16843009,
+      "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 1.1.1.1",
+      "comm": "curl"
+    },
+    {
+      "hook": 3,
+      "pid": 7525,
+      "detail": 16777343,
+      "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 127.0.0.1",
+      "comm": "curl"
+    },
+    {
+      "hook": 1,
+      "pid": 7531,
+      "detail": 1585,
+      "detailText": "bprm_check_security: denied execution of unleased binary (inode 1585)",
+      "comm": "sh"
+    },
+    {
+      "hook": 1,
+      "pid": 7531,
+      "detail": 1585,
+      "detailText": "bprm_check_security: denied execution of unleased binary (inode 1585)",
+      "comm": "sh"
+    },
+    {
+      "hook": 3,
+      "pid": 7541,
+      "detail": 16777343,
+      "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 127.0.0.1",
+      "comm": "curl"
+    },
+    {
+      "hook": 3,
+      "pid": 7543,
+      "detail": 0,
+      "detailText": "socket_connect: denied outbound network connection (IPv6 destination, or IPv4 0.0.0.0)",
+      "comm": "curl"
+    },
+    {
+      "hook": 4,
+      "pid": 7550,
+      "detail": 16843009,
+      "detailText": "socket_sendmsg: denied outbound datagram to unapproved IPv4 1.1.1.1",
+      "comm": "python3"
+    }
+  ],
+  "verdict": "INCOMPLETE"
+}

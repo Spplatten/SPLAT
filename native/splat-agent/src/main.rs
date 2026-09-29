@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use libbpf_rs::skel::{OpenSkel, Skel, SkelBuilder};
 use libbpf_rs::{MapCore, MapFlags, MapHandle, RingBufferBuilder};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -25,6 +24,7 @@ mod cow;
 mod jail;
 mod lease;
 mod outcome;
+mod pinning;
 mod violation;
 mod workspace;
 
@@ -50,7 +50,6 @@ const MAX_PIDS_CEILING: u32 = 100;
 mod lease_lsm {
     include!(concat!(env!("OUT_DIR"), "/lease_lsm.skel.rs"));
 }
-use lease_lsm::*;
 
 use auth::PeerAuth;
 use ceiling::Ceiling;
@@ -336,101 +335,93 @@ async fn main() -> Result<()> {
     let mut bpf_sync: Option<Arc<dyn BpfMapSync>> = None;
 
     let is_root = unsafe { libc::geteuid() } == 0;
+    let _instance_lock = if is_root { Some(pinning::lock_instance()?) } else { None };
     if !is_root {
         warn!("Running unprivileged. In-kernel BPF-LSM hooks require CAP_BPF / CAP_SYS_ADMIN.");
     } else if !args.mock_bpf {
         info!("Initializing in-kernel BPF-LSM capability lease skeleton...");
         let open_object = Box::leak(Box::new(MaybeUninit::uninit()));
-        let skel_builder = LeaseLsmSkelBuilder::default();
-        match skel_builder.open(open_object) {
-            Ok(open_skel) => match open_skel.load() {
-                Ok(mut skel) => match skel.attach() {
-                    Ok(_) => {
-                        info!("BPF-LSM programs attached successfully.");
-                        let skel = Box::leak(Box::new(skel));
+        match pinning::load(open_object) {
+            Ok(skel) => {
+                info!("BPF-LSM programs attached successfully.");
+                let skel = Box::leak(Box::new(skel));
 
-                        // Spawn background ringbuffer drain thread
-                        let ringbuf_viol_tx = viol_tx.clone();
-                        let violations_map = &skel.maps.violations;
-                        let mut rb = RingBufferBuilder::new();
-                        if let Ok(_) = rb.add(violations_map, move |data: &[u8]| {
-                            if data.len() >= std::mem::size_of::<RawViolationEvent>() {
-                                let raw = unsafe { &*(data.as_ptr() as *const RawViolationEvent) };
-                                let event = ViolationEvent::from_raw(raw);
-                                info!("Kernel -EPERM violation: {}", event.detail_text);
-                                let _ = ringbuf_viol_tx.send(event);
-                            }
-                            0
-                        }) {
-                            if let Ok(built_rb) = rb.build() {
-                                // The drain must outlive every lease. This loop used to end on the
-                                // first poll error, so one EINTR - one signal - silently stopped
-                                // every VIOLATION frame for the rest of the daemon's life while the
-                                // hooks went on denying: enforcement intact, evidence gone.
-                                std::thread::spawn(move || loop {
-                                    match built_rb.poll(Duration::from_millis(100)) {
-                                        Ok(()) => {}
-                                        Err(e) if e.kind() == libbpf_rs::ErrorKind::Interrupted => {}
-                                        Err(e) => {
-                                            error!("Ring buffer poll failed: {e}; violations are delayed until it recovers.");
-                                            std::thread::sleep(Duration::from_millis(100));
-                                        }
-                                    }
-                                });
-                                info!("BPF ringbuffer violation monitor active.");
-                            }
-                        }
-
-                        // Dup each map fd out of the skeleton. Any failure here means the daemon
-                        // cannot enforce leases, so it must not silently fall through to a state
-                        // where missions run believing they are contained.
-                        match (
-                            MapHandle::try_from(&skel.maps.leased_cgroups),
-                            MapHandle::try_from(&skel.maps.protected_inodes),
-                            MapHandle::try_from(&skel.maps.allowed_exec_inodes),
-                            MapHandle::try_from(&skel.maps.allowed_connect_ipv4),
-                            MapHandle::try_from(&skel.maps.counters),
-                            MapHandle::try_from(&skel.maps.violation_counts),
-                        ) {
-                            (
-                                Ok(leased_cgroups),
-                                Ok(protected_inodes),
-                                Ok(allowed_exec_inodes),
-                                Ok(allowed_connect_ipv4),
-                                Ok(counters),
-                                Ok(violation_counts),
-                            ) => {
-                                bpf_sync = Some(Arc::new(LiveBpfSync {
-                                    leased_cgroups,
-                                    protected_inodes,
-                                    allowed_exec_inodes,
-                                    allowed_connect_ipv4,
-                                    counters,
-                                    violation_counts,
-                                }));
-                                info!("Lease maps bound; kernel enforcement is live.");
-                            }
-                            _ => error!(
-                                "Could not duplicate the BPF lease map descriptors. Leases will NOT \
-                                 be enforced in-kernel; refusing to report containment."
-                            ),
-                        }
+                // Spawn background ringbuffer drain thread
+                let ringbuf_viol_tx = viol_tx.clone();
+                let violations_map = &skel.maps.violations;
+                let mut rb = RingBufferBuilder::new();
+                if let Ok(_) = rb.add(violations_map, move |data: &[u8]| {
+                    if data.len() >= std::mem::size_of::<RawViolationEvent>() {
+                        let raw = unsafe { &*(data.as_ptr() as *const RawViolationEvent) };
+                        let event = ViolationEvent::from_raw(raw);
+                        info!("Kernel -EPERM violation: {}", event.detail_text);
+                        let _ = ringbuf_viol_tx.send(event);
                     }
-                    Err(e) => warn!("Failed to attach BPF-LSM programs: {e}"),
-                },
-                Err(e) => warn!("Failed to load BPF-LSM skeleton: {e}"),
-            },
-            Err(e) => warn!("Failed to open BPF-LSM skeleton: {e}"),
+                    0
+                }) {
+                    if let Ok(built_rb) = rb.build() {
+                        // The drain must outlive every lease. This loop used to end on the
+                        // first poll error, so one EINTR - one signal - silently stopped
+                        // every VIOLATION frame for the rest of the daemon's life while the
+                        // hooks went on denying: enforcement intact, evidence gone.
+                        std::thread::spawn(move || loop {
+                            match built_rb.poll(Duration::from_millis(100)) {
+                                Ok(()) => {}
+                                Err(e) if e.kind() == libbpf_rs::ErrorKind::Interrupted => {}
+                                Err(e) => {
+                                    error!("Ring buffer poll failed: {e}; violations are delayed until it recovers.");
+                                    std::thread::sleep(Duration::from_millis(100));
+                                }
+                            }
+                        });
+                        info!("BPF ringbuffer violation monitor active.");
+                    }
+                }
+
+                // Dup each map fd out of the skeleton. Any failure here means the daemon
+                // cannot enforce leases, so it must not silently fall through to a state
+                // where missions run believing they are contained.
+                match (
+                    MapHandle::try_from(&skel.maps.leased_cgroups),
+                    MapHandle::try_from(&skel.maps.protected_inodes),
+                    MapHandle::try_from(&skel.maps.allowed_exec_inodes),
+                    MapHandle::try_from(&skel.maps.allowed_connect_ipv4),
+                    MapHandle::try_from(&skel.maps.counters),
+                    MapHandle::try_from(&skel.maps.violation_counts),
+                ) {
+                    (
+                        Ok(leased_cgroups),
+                        Ok(protected_inodes),
+                        Ok(allowed_exec_inodes),
+                        Ok(allowed_connect_ipv4),
+                        Ok(counters),
+                        Ok(violation_counts),
+                    ) => {
+                        bpf_sync = Some(Arc::new(LiveBpfSync {
+                            leased_cgroups,
+                            protected_inodes,
+                            allowed_exec_inodes,
+                            allowed_connect_ipv4,
+                            counters,
+                            violation_counts,
+                        }));
+                        info!("Lease maps bound; kernel enforcement is live.");
+                    }
+                    _ => error!(
+                        "Could not duplicate the BPF lease map descriptors. Leases will NOT \
+                         be enforced in-kernel; refusing to report containment."
+                    ),
+                }
+            }
+            Err(e) => warn!("Failed to establish pinned BPF-LSM enforcement: {e:#}"),
         }
     }
 
-    // FAIL CLOSED. Reaching here without map handles means every hook is absent: a tool would run
-    // with the daemon's own privileges while the caller was told it held a capability lease. Each
-    // failure above logged and fell through, so the only symptom was a warning in a log nobody
-    // reads. --mock-bpf is the way to ask for a non-enforcing daemon on purpose.
+    // FAIL CLOSED. A failed pin validation may leave old hooks alive, but this daemon has no
+    // verified policy handles and must not admit new workloads. --mock-bpf explicitly opts out.
     if bpf_sync.is_none() && !args.mock_bpf {
         error!(
-            "Refusing to start: BPF-LSM enforcement is not live{}. Re-run as root on a BPF-LSM kernel, or pass --mock-bpf for a daemon that openly does not contain anything.",
+            "Refusing to start: BPF-LSM enforcement could not be verified{}. Check the kernel and pin-set error above; --mock-bpf explicitly runs without containment.",
             if is_root { "" } else { " (not running as root)" }
         );
         std::process::exit(1);
@@ -497,16 +488,13 @@ async fn main() -> Result<()> {
     }
     let missions_root: Arc<str> = Arc::from(args.missions_root.trim_end_matches('/'));
 
-    // A daemon that stopped - crashed, or stopped by systemd - took its maps and hooks with it and
-    // left any workload still running under splat_leases with nothing policing it. None can be
-    // re-policed: the lease that described it died with the process that held it. So they are ended
-    // here, before this daemon accepts a request, and again on the way out below. A tree that will
-    // not drain is a workload running uncontained, and serving beside it would report a containment
-    // this daemon does not have.
+    // Pins keep policy alive after a crash, but userspace deadlines are gone. Drain orphans before
+    // serving again. The pin loader already drained enforcing leases before clearing stale maps;
+    // this also covers a mock daemon's leftovers.
     match EphemeralCgroup::reap_orphans(Path::new(cgroup::BASE_PATH)) {
         Ok(drained) if drained.is_empty() => {}
         Ok(drained) => warn!(
-            "Ended {} orphaned lease(s) a previous daemon left running unpoliced: {drained:?}",
+            "Ended {} orphaned lease(s) a previous daemon left running: {drained:?}",
             drained.len()
         ),
         Err(e) => {
@@ -514,6 +502,7 @@ async fn main() -> Result<()> {
             std::process::exit(1);
         }
     }
+    cow::reap_leftovers(Path::new(cow::SCRATCH_BASE))?;
     // The skeletons of their jails go the same way; only empty directories and links are removed.
     match jail::reap_leftover_roots(Path::new(jail::ROOTS_BASE)) {
         Ok(0) => {}
@@ -524,8 +513,8 @@ async fn main() -> Result<()> {
     let lease_manager = LeaseManager::new(bpf_sync);
 
     // systemd stops this daemon with SIGTERM, and the workloads it leased are not in its own cgroup,
-    // so they would outlive the stop - unpoliced, once the maps went with the process. End them while
-    // the policy is still installed, then exit cleanly; the unit restarts only on failure.
+    // so they would outlive the stop. End them with their pinned policy still installed, then exit
+    // cleanly; the unit restarts only on failure.
     tokio::spawn(async move {
         let mut terminate = signal(SignalKind::terminate()).expect("install the SIGTERM handler");
         let mut interrupt = signal(SignalKind::interrupt()).expect("install the SIGINT handler");
@@ -536,7 +525,7 @@ async fn main() -> Result<()> {
         match EphemeralCgroup::reap_orphans(Path::new(cgroup::BASE_PATH)) {
             Ok(drained) if drained.is_empty() => info!("Stopping; no lease was running."),
             Ok(drained) => warn!("Stopping; ended {} leased workload(s) still running: {drained:?}", drained.len()),
-            Err(e) => error!("Stopping, but a leased workload could not be drained and is now unpoliced: {e:#}"),
+            Err(e) => error!("Stopping, but a leased workload could not be drained; its pinned policy remains: {e:#}"),
         }
         std::process::exit(0);
     });
@@ -1033,17 +1022,18 @@ async fn handle_client(
                     );
                 }
 
-                if parsed
+                let enable_cow = parsed
                     .get("overlayFs")
                     .and_then(|v| v.get("enableCow"))
                     .and_then(|v| v.as_bool())
-                    .unwrap_or(false)
-                {
+                    .unwrap_or(false);
+                if enable_cow && !lease_mgr.is_enforcing() {
                     unsupported.push(
-                        "overlayFs.enableCow: the overlay would mount in the daemon's own mount \
-                         namespace and the tool could step out of the merged directory, so it \
-                         would not be a workspace boundary",
+                        "overlayFs.enableCow: this daemon is not enforcing, so no workload mount namespace is established",
                     );
+                }
+                if enable_cow && !Path::new(work_dir).is_dir() && !ephemeral_workspace {
+                    unsupported.push("overlayFs.enableCow: workingDirectory must exist; no fallback lowerdir is permitted");
                 }
 
                 if !unsupported.is_empty() {
@@ -1312,7 +1302,12 @@ async fn handle_client(
                 // A lease that could not be installed is a refusal, not a warning. register_lease
                 // rolls back its own partial map writes and returns Err, so there is no state in
                 // which the cgroup is policed while some of its protections are missing.
-                if let Err(e) = lease_mgr.register_lease(cg.cgroup_id, cg.path.clone(), &lease_cfg) {
+                let installed = if enable_cow {
+                    cow::validate_policy(Path::new(work_dir), &lease_cfg.protected_paths, &lease_cfg.allowed_exec_paths)
+                } else {
+                    Ok(())
+                }.and_then(|()| lease_mgr.register_lease(cg.cgroup_id, cg.path.clone(), &lease_cfg));
+                if let Err(e) = installed {
                     error!("Refusing to execute for mission {mission_id}: {e:#}");
                     let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
                     let err_chunk = serde_json::json!({
@@ -1342,6 +1337,7 @@ async fn handle_client(
                         mission_id,
                         Path::new(effective_work_dir),
                         read_only_fs,
+                        enable_cow,
                         Path::new("/"),
                     ) {
                         Ok(plan) => Some(Arc::new(plan)),
@@ -1693,6 +1689,13 @@ async fn handle_client(
 
                 let status = waiter.await.context("join child reaper")??;
                 let exit_code = status.code().unwrap_or(-1);
+                if cgroup_is_real {
+                    cg.kill_all().context("drain workload before removing overlay scratch")?;
+                }
+                // Command retains the pre_exec closure's Arc after spawn. Release both owners
+                // only after draining descendants, before reporting EXIT and scratch teardown.
+                drop(cmd);
+                drop(jail_plan);
 
                 // The workspace goes before EXIT is written, so the frame can say it went. Anything
                 // the tool left running in its cgroup is killed first, so nothing is still writing

@@ -158,6 +158,16 @@ public class ProbeScoringTests
         Assert.Equal("REPLAY", evidence.GetProperty("verdict").GetString());
         Assert.Contains("lost-violation-frame.json", evidence.GetProperty("replay_fixture").GetString()!);
         Assert.NotEqual("PASS", evidence.GetProperty("verdict").GetString());
+        // Historical frames contain no host namespace or daemon-death measurements. A replay must
+        // not inherit their PASS, even when every old protocol check succeeds.
+        var results = evidence.GetProperty("results");
+        foreach (var result in results.EnumerateObject().Where(p =>
+                     p.Name.StartsWith("cow_", StringComparison.Ordinal) ||
+                     p.Name.StartsWith("pins_", StringComparison.Ordinal)))
+        {
+            Assert.False(result.Value.GetBoolean(), result.Name);
+        }
+        Assert.False(evidence.GetProperty("root_feature_observations").GetProperty("lifecycle_requested").GetBoolean());
     }
 
     // ------------------------------------------------------------------ harness

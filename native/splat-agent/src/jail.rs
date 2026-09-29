@@ -17,7 +17,8 @@
 //     spawn refuses the request; a workload never runs half-jailed.
 //
 // Bind mounts keep inode identity, so the exec allow-list and the file deny-list - both keyed on
-// (dev, ino) resolved from the host's view of the path - hold inside the jail unchanged.
+// (dev, ino) resolved from the host's view of the path - hold inside the jail unchanged. CoW changes
+// that identity, so cow::validate_policy refuses policy paths inside an overlay working directory.
 
 use std::ffi::CString;
 use std::fs;
@@ -50,6 +51,12 @@ struct Bind {
     read_only: bool,
 }
 
+// Prepared in the parent; enter only hands these buffers to mount(2).
+struct OverlayBind {
+    target: CString,
+    options: CString,
+}
+
 /// Something the parent created and will remove. Never a tree: removal is one `rmdir` or
 /// `unlink` per entry, so a mount that somehow leaked into the host namespace makes the removal
 /// fail rather than making it recurse into `/usr`.
@@ -60,6 +67,8 @@ enum Created {
 
 pub struct JailPlan {
     new_root: CString,
+    overlay_bind: Option<OverlayBind>,
+    overlay_workspace: Option<crate::cow::OverlayWorkspace>,
     old_root: CString,
     /// The system directories, read-only, mounted first.
     system_binds: Vec<Bind>,
@@ -77,7 +86,7 @@ impl JailPlan {
     /// Builds the root's skeleton under `base` for `mission_id`, with `workdir` bound read-write, or
     /// read-only when `read_only_workdir`. `host` is `/` in the daemon; the tests point it at a
     /// directory of their own.
-    pub fn prepare(base: &Path, mission_id: &str, workdir: &Path, read_only_workdir: bool, host: &Path) -> Result<Self> {
+    pub fn prepare(base: &Path, mission_id: &str, workdir: &Path, read_only_workdir: bool, enable_cow: bool, host: &Path) -> Result<Self> {
         if mission_id.is_empty() || !mission_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.') {
             bail!("mission id {mission_id:?} is not a safe path component");
         }
@@ -93,6 +102,8 @@ impl JailPlan {
         let root = base.join(format!("mission_{mission_id}"));
         let mut plan = Self {
             new_root: c_path(&root),
+            overlay_bind: None,
+            overlay_workspace: None,
             old_root: c_path(&root.join(".oldroot")),
             system_binds: Vec::new(),
             workdir_bind: None,
@@ -155,6 +166,15 @@ impl JailPlan {
             }
         }
         plan.workdir_bind = Some(Bind { source: c_path(&host_workdir), target: c_path(&jail_workdir), read_only: read_only_workdir });
+        if enable_cow {
+            let scratch = host.join(&crate::cow::SCRATCH_BASE[1..]).join(format!("mission_{mission_id}"));
+            let workspace = crate::cow::OverlayWorkspace::setup(&host_workdir, &scratch)?;
+            plan.overlay_bind = Some(OverlayBind { target: c_path(&jail_workdir), options: workspace.options.clone() });
+            plan.overlay_workspace = Some(workspace);
+            // Bind the merged view to itself, never the lowerdir over it. The remount applies
+            // readOnlyFs too when both fields were requested.
+            plan.workdir_bind = Some(Bind { source: c_path(&jail_workdir), target: c_path(&jail_workdir), read_only: read_only_workdir });
+        }
 
         let jail_dev = root.join("dev");
         plan.mkdir(&jail_dev)?;
@@ -304,6 +324,15 @@ pub unsafe fn enter(plan: &JailPlan) -> io::Result<()> {
             check(libc::mkdir(dir.as_ptr(), 0o755))?;
         }
     }
+    if let Some(overlay) = &plan.overlay_bind {
+        check(libc::mount(
+            c"overlay".as_ptr(),
+            overlay.target.as_ptr(),
+            c"overlay".as_ptr(),
+            libc::MS_NOSUID | libc::MS_NODEV,
+            overlay.options.as_ptr().cast(),
+        ))?;
+    }
     if let Some(bind) = &plan.workdir_bind {
         bind_mount(bind)?;
     }
@@ -380,7 +409,7 @@ mod tests {
     fn the_skeleton_mirrors_the_host_and_binds_only_the_system_dirs_and_the_workdir() {
         let host = fake_host();
         let base = base_for(&host);
-        let plan = JailPlan::prepare(&base, "m-1", Path::new("/srv/space"), false, &host).expect("prepare");
+        let plan = JailPlan::prepare(&base, "m-1", Path::new("/srv/space"), false, false, &host).expect("prepare");
         let root = base.join("mission_m-1");
 
         assert!(root.join("usr").is_dir() && root.join("etc").is_dir());
@@ -411,7 +440,7 @@ mod tests {
     #[test]
     fn a_workdir_under_tmp_is_made_in_the_child_after_the_fresh_tmpfs() {
         let host = fake_host();
-        let plan = JailPlan::prepare(&base_for(&host), "m-2", Path::new("/tmp/work"), true, &host).expect("prepare");
+        let plan = JailPlan::prepare(&base_for(&host), "m-2", Path::new("/tmp/work"), true, false, &host).expect("prepare");
 
         let mkdirs = plan.tmp_mkdirs();
         assert_eq!(mkdirs.len(), 1);
@@ -427,7 +456,7 @@ mod tests {
     #[test]
     fn tmp_as_the_workdir_is_the_hosts_tmp_and_no_tmpfs_is_mounted() {
         let host = fake_host();
-        let plan = JailPlan::prepare(&base_for(&host), "m-3", Path::new("/tmp"), false, &host).expect("prepare");
+        let plan = JailPlan::prepare(&base_for(&host), "m-3", Path::new("/tmp"), false, false, &host).expect("prepare");
 
         assert!(plan.tmpfs_tmp.is_none());
         let (source, _, read_only) = plan.binds().last().unwrap().clone();
@@ -438,13 +467,51 @@ mod tests {
     }
 
     #[test]
+    fn overlay_scratch_is_private_and_removed_with_its_plan() {
+        let host = fake_host();
+        for read_only in [false, true] {
+            let plan = JailPlan::prepare(&base_for(&host), "cow", Path::new("/tmp/work"), read_only, true, &host).unwrap();
+            let scratch = host.join("run/splat/cow/mission_cow");
+            assert_eq!(fs::metadata(&scratch).unwrap().mode() & 0o777, 0o700);
+            assert!(scratch.join("upper").is_dir() && scratch.join("work").is_dir());
+            let overlay = plan.overlay_bind.as_ref().unwrap();
+            let bind = plan.workdir_bind.as_ref().unwrap();
+            assert_eq!(overlay.target, bind.source, "the host lowerdir must not hide the overlay");
+            assert_eq!(bind.source, bind.target);
+            assert_eq!(bind.read_only, read_only);
+            fs::write(scratch.join("upper/created-by-workload"), "copy").unwrap();
+            assert!(!host.join("tmp/work/created-by-workload").exists());
+            assert!(JailPlan::prepare(&base_for(&host), "cow", Path::new("/tmp/work"), false, true, &host).is_err());
+            assert!(scratch.join("upper/created-by-workload").exists(), "a collision cannot own another plan's scratch");
+            drop(plan);
+            assert!(!scratch.exists());
+        }
+        fs::remove_dir_all(host).unwrap();
+    }
+
+    #[test]
+    fn overlay_rejects_option_injection_and_inode_policy_overlap() {
+        let host = fake_host();
+        fs::create_dir(host.join("tmp/work,other")).unwrap();
+        assert!(JailPlan::prepare(&base_for(&host), "bad", Path::new("/tmp/work,other"), false, true, &host).is_err());
+        assert!(!base_for(&host).join("mission_bad").exists());
+        let protected = host.join("tmp/work/protected");
+        fs::write(&protected, "secret").unwrap();
+        let names = vec![protected.to_string_lossy().into_owned()];
+        assert!(crate::cow::validate_policy(&host.join("tmp/work"), &names, &[]).is_err());
+        assert!(crate::cow::validate_policy(&host.join("tmp/work"), &[], &names).is_err());
+        assert!(crate::cow::validate_policy(&host.join("srv/space"), &names, &[]).is_ok());
+        fs::remove_dir_all(host).unwrap();
+    }
+
+    #[test]
     fn unsafe_ids_and_paths_are_refused_before_anything_is_made() {
         let host = fake_host();
         let base = base_for(&host);
-        assert!(JailPlan::prepare(&base, "../x", Path::new("/tmp"), false, &host).is_err());
-        assert!(JailPlan::prepare(&base, "m", Path::new("tmp"), false, &host).is_err());
-        assert!(JailPlan::prepare(&base, "m", Path::new("/tmp/../etc"), false, &host).is_err());
-        assert!(JailPlan::prepare(&base, "m", Path::new("/nowhere"), false, &host).is_err());
+        assert!(JailPlan::prepare(&base, "../x", Path::new("/tmp"), false, false, &host).is_err());
+        assert!(JailPlan::prepare(&base, "m", Path::new("tmp"), false, false, &host).is_err());
+        assert!(JailPlan::prepare(&base, "m", Path::new("/tmp/../etc"), false, false, &host).is_err());
+        assert!(JailPlan::prepare(&base, "m", Path::new("/nowhere"), false, false, &host).is_err());
         assert!(!base.exists() || fs::read_dir(&base).unwrap().next().is_none(), "nothing was left behind");
         let _ = fs::remove_dir_all(&host);
     }
@@ -453,7 +520,7 @@ mod tests {
     fn cleanup_never_removes_what_it_did_not_create() {
         let host = fake_host();
         let base = base_for(&host);
-        let plan = JailPlan::prepare(&base, "m-4", Path::new("/srv/space"), false, &host).expect("prepare");
+        let plan = JailPlan::prepare(&base, "m-4", Path::new("/srv/space"), false, false, &host).expect("prepare");
         let root = base.join("mission_m-4");
         // Something appeared inside a skeleton directory - as a leaked mount's contents would.
         fs::write(root.join("usr/not-mine"), "keep").unwrap();
@@ -470,8 +537,8 @@ mod tests {
         let host = fake_host();
         let base = base_for(&host);
         {
-            let _a = JailPlan::prepare(&base, "gone-1", Path::new("/srv/space"), false, &host).unwrap();
-            let _b = JailPlan::prepare(&base, "gone-2", Path::new("/tmp/work"), false, &host).unwrap();
+            let _a = JailPlan::prepare(&base, "gone-1", Path::new("/srv/space"), false, false, &host).unwrap();
+            let _b = JailPlan::prepare(&base, "gone-2", Path::new("/tmp/work"), false, false, &host).unwrap();
             // Forget both without dropping: what a crashed daemon leaves.
             std::mem::forget(_a);
             std::mem::forget(_b);

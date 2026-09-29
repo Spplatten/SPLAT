@@ -9,7 +9,12 @@
 # on that file.
 #
 # Usage:  bash probe-daemon.sh [host:port] [token-file]
+# Root lifecycle proof (stop the service/manual daemon first):
+#   sudo env SPLAT_PROBE_DAEMON=/absolute/path/to/splat-agent bash probe-daemon.sh
+# This mode owns the daemon it kills/restarts, retains its pins, and requires bpftool. Without it
+# persistence checks remain false. Neither a replay nor an ordinary client run proves persistence.
 set -uo pipefail
+cd "$(dirname "$0")"
 ADDR="${1:-127.0.0.1:50051}"
 HOST="${ADDR%%:*}"
 PORT="${ADDR##*:}"
@@ -28,11 +33,13 @@ else
 fi
 [ -n "$TOKEN" ] || echo "  WARNING: no token read from $TOKEN_FILE - every EXECUTE_TOOL will be refused."
 
-python3 - "$HOST" "$PORT" "$TOKEN" <<'PY'
-import base64, hashlib, hmac, json, os, socket, sys, threading, time
+python3 - "$HOST" "$PORT" "$TOKEN" "$TOKEN_FILE" <<'PY'
+import atexit, base64, errno, hashlib, hmac, json, os, socket, subprocess, sys, tempfile, threading, time
+from pathlib import Path
 
 host, port = sys.argv[1], int(sys.argv[2])
 token = sys.argv[3] if len(sys.argv) > 3 else ""
+token_file = sys.argv[4] if len(sys.argv) > 4 else "/etc/splat/agent.token"
 
 # One entry per session: its label, and whether the daemon proved it holds the token. Kept out of the
 # messages, which the checks below read as the daemon's own words.
@@ -75,6 +82,64 @@ if replay_path:
     print(f"== REPLAY: scoring {len(replay)} recorded session(s) from {replay_path} ==")
     print("   No daemon is contacted. This output is a test of the checks, never evidence about a kernel.")
     print()
+
+managed_binary = os.environ.get("SPLAT_PROBE_DAEMON") if replay is None else None
+managed_process = None
+managed_log = None
+managed_args = None
+
+def stop_owned():
+    if managed_process is not None and managed_process.poll() is None:
+        managed_process.terminate()
+        try:
+            managed_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            managed_process.kill()
+            managed_process.wait(timeout=5)
+
+def log_tail():
+    managed_log.seek(0)
+    return managed_log.read().decode(errors="replace")[-4000:]
+
+def launch_owned():
+    global managed_process
+    managed_log.seek(0)
+    managed_log.truncate()
+    managed_process = subprocess.Popen(managed_args, stdout=managed_log, stderr=subprocess.STDOUT)
+    return managed_process
+
+def start_owned():
+    proc = launch_owned()
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError("probe daemon did not start: " + log_tail())
+        try:
+            with socket.create_connection((host, port), timeout=0.2):
+                return
+        except OSError:
+            time.sleep(0.05)
+    stop_owned()
+    raise RuntimeError("probe daemon did not listen within 30 seconds")
+
+if managed_binary:
+    if not hasattr(os, "geteuid") or os.geteuid() != 0 or host not in ("127.0.0.1", "localhost"):
+        sys.exit("SPLAT_PROBE_DAEMON requires root and a loopback address")
+    if not os.path.isabs(managed_binary) or not os.access(managed_binary, os.X_OK):
+        sys.exit("SPLAT_PROBE_DAEMON must name an absolute executable path")
+    # Never signal an existing daemon, and never race systemd's automatic restart. The daemon's
+    # singleton lock is a second guard when another instance listens on a different port.
+    try:
+        with socket.create_connection((host, port), timeout=0.2):
+            sys.exit("stop the existing daemon before running the owned lifecycle probe")
+    except OSError:
+        pass
+    managed_log = tempfile.TemporaryFile()
+    managed_args = [managed_binary, "--listen", f"{host}:{port}", "--auth-token-file", token_file]
+    atexit.register(stop_owned)
+    start_owned()
+    with open(token_file) as f:
+        token = f.read().strip()
 
 def read_line(s, buf):
     """One frame from the socket, and whatever arrived after it."""
@@ -805,6 +870,262 @@ print(f"  workspace made, used, removed  : {workspace_made_and_removed}")
 print(f"  workspace elsewhere refused    : {workspace_elsewhere_refused}")
 print(f"  workspace removed on refusal   : {workspace_removed_on_refusal}")
 
+# These are separate from the historical checks: an older PASS contains no evidence for either
+# feature. Unrun root measurements stay false, and fixture replay never executes this block.
+feature_checks = dict.fromkeys([
+    "cow_overlay_in_child", "cow_host_unchanged", "cow_no_host_mount", "cow_concurrent_isolation",
+    "cow_scratch_removed", "cow_read_only_honored", "cow_bad_options_refused", "cow_inode_overlap_refused",
+    "pins_survive_sigkill", "pins_exec_denied_during_outage", "pins_file_denied_during_outage",
+    "pins_allowed_exec_during_outage", "pins_no_daemon_during_measurement", "pins_same_ids_after_restart",
+    "pins_restart_enforces", "pins_orphans_drained", "pins_wrong_hash_refused",
+    "pins_partial_set_refused", "pins_foreign_map_refused",
+], False)
+feature_observations = {"errors": [], "lifecycle_requested": bool(managed_binary)}
+
+def wait_for(predicate, seconds=10):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return False
+
+def completed(msgs):
+    return exit_frame(msgs).get("exitCode") == 0 and (lease_frame(msgs) or {}).get("enforcing") is True
+
+def probe_cow():
+    host_overlays = lambda: {line for line in Path("/proc/self/mountinfo").read_text().splitlines() if " - overlay " in line}
+    overlays_before = host_overlays()
+    ws = Path(tempfile.mkdtemp(prefix="splat-probe-cow-"))
+    ws.chmod(0o777)
+    mission = "probe-cow-" + ws.name
+    scratch = Path("/run/splat/cow") / ("mission_" + mission)
+    target = "/run/splat/roots/mission_" + mission + str(ws)
+    for name in ("existing", "deleted"):
+        (ws / name).write_text("LOWER")
+        (ws / name).chmod(0o666)
+
+    def cow_call(label, code, **extra):
+        req = {"type": "EXECUTE_TOOL", "missionId": label, "command": "/usr/bin/python3",
+               "argv": ["-c", code], "allowedExecPaths": ["/usr/bin/python3"],
+               "workingDirectory": str(ws), "overlayFs": {"enableCow": True}, "leaseDurationSeconds": 20}
+        req.update(extra)
+        return call(req, label, settle=12)
+
+    code = """from pathlib import Path
+import os, time
+p = Path.cwd()
+mounts = Path('/proc/self/mountinfo').read_text().splitlines()
+assert any(line.split()[4] == str(p) and ' - overlay ' in line for line in mounts)
+Path('existing').write_text('CHILD')
+Path('deleted').unlink()
+Path('new').write_text('NEW')
+assert Path('existing').read_text() == 'CHILD' and not Path('deleted').exists()
+print('COW_OVERLAY_WRITES', flush=True)
+time.sleep(5)
+"""
+    frames = []
+    worker = threading.Thread(target=lambda: frames.extend(cow_call(mission, code) or []))
+    worker.start()
+    try:
+        ready = wait_for(lambda: (scratch / "upper/new").is_file())
+        lower_intact = lambda: ((ws / "existing").read_text() == "LOWER"
+                                and (ws / "deleted").read_text() == "LOWER" and not (ws / "new").exists())
+        intact_during = ready and lower_intact()
+        feature_checks["cow_no_host_mount"] = ready and host_overlays() == overlays_before and not any(
+            line.split()[4] == target for line in Path("/proc/self/mountinfo").read_text().splitlines())
+        isolated = cow_call(mission + "-isolated", "from pathlib import Path; assert not Path('new').exists(); print('ISOLATED')")
+        feature_checks["cow_concurrent_isolation"] = ready and scratch.exists() and completed(isolated) and "ISOLATED" in text(isolated)
+        worker.join(timeout=15)
+        feature_checks["cow_overlay_in_child"] = completed(frames) and "COW_OVERLAY_WRITES" in text(frames)
+        feature_checks["cow_host_unchanged"] = intact_during and lower_intact()
+        feature_checks["cow_scratch_removed"] = not worker.is_alive() and wait_for(lambda: not scratch.exists())
+        readonly = cow_call(mission + "-ro", """from pathlib import Path
+import errno
+try:
+    Path('ro-new').write_text('BAD')
+except OSError as e:
+    assert e.errno == errno.EROFS
+    print('COW_READONLY')
+else:
+    raise AssertionError('write succeeded')
+""", readOnlyFs=True)
+        feature_checks["cow_read_only_honored"] = completed(readonly) and "COW_READONLY" in text(readonly) and not (ws / "ro-new").exists()
+        invalid = ws / "bad,options"
+        invalid.mkdir()
+        refused = cow_call(mission + "-bad", "print('RAN')", workingDirectory=str(invalid))
+        feature_checks["cow_bad_options_refused"] = "mount-option separator" in text(refused) and not had(refused, "STDOUT") and exit_frame(refused).get("exitCode") == -1
+        refused = cow_call(mission + "-inode", "print('RAN')", protectedPaths=[str(ws / "existing")])
+        feature_checks["cow_inode_overlap_refused"] = "overlaps workingDirectory" in text(refused) and not had(refused, "STDOUT") and exit_frame(refused).get("exitCode") == -1
+    finally:
+        worker.join(timeout=15)
+        if not worker.is_alive():
+            shutil.rmtree(ws)
+
+def bpftool(*args):
+    result = subprocess.run(["bpftool", "-j", *map(str, args)], capture_output=True, text=True, timeout=10)
+    if result.returncode:
+        raise RuntimeError(f"bpftool {args}: {result.stderr.strip() or result.stdout.strip()}")
+    return json.loads(result.stdout) if result.stdout.strip() else None
+
+def pin_snapshot(directory):
+    snapshot = {}
+    for path in sorted(directory.iterdir()):
+        kind = "link" if path.name.startswith("link_") else "map"
+        info = bpftool(kind, "show", "pinned", path)
+        if isinstance(info, list):
+            if len(info) != 1:
+                raise RuntimeError("ambiguous pinned object: " + str(path))
+            info = info[0]
+        snapshot[path.name] = {key: info[key] for key in ("id", "prog_id") if key in info}
+    if len(snapshot) != 11 or not all("id" in info for info in snapshot.values()):
+        raise RuntimeError("expected seven pinned maps and four pinned links")
+    return snapshot
+
+def refuses_owned_start(reason):
+    proc = launch_owned()
+    try:
+        refused = proc.wait(timeout=10) != 0 and reason in log_tail()
+    except subprocess.TimeoutExpired:
+        refused = False
+    finally:
+        stop_owned()
+    return refused
+
+def probe_pins():
+    source = Path("src/bpf/lease_lsm.bpf.c")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    directory = Path("/sys/fs/bpf/splat") / digest
+    before = pin_snapshot(directory)
+    feature_observations.update(pin_directory=str(directory), pin_ids_before=before,
+        daemon_binary_sha256=hashlib.sha256(Path(managed_binary).read_bytes()).hexdigest())
+    ws = Path(tempfile.mkdtemp(prefix="splat-probe-pins-"))
+    ws.chmod(0o777)
+    mission = "probe-pins-" + ws.name
+    cg = Path("/sys/fs/cgroup/splat_leases") / ("mission_" + mission)
+    code = """import errno, json, os, subprocess, time
+from pathlib import Path
+def denied(action):
+    try:
+        action()
+    except OSError as e:
+        return e.errno == errno.EPERM
+    return False
+def record(name):
+    allowed = subprocess.run(['/usr/bin/id', '-u'], capture_output=True, text=True)
+    result = {'allowed': allowed.returncode == 0 and allowed.stdout.strip() == str(os.getuid()) and os.getuid() != 0,
+              'exec_denied': denied(lambda: subprocess.run(['/usr/bin/uname', '-s'], capture_output=True)),
+              'file_denied': denied(lambda: Path('/etc/hostname').read_text())}
+    Path(name + '.tmp').write_text(json.dumps(result))
+    os.replace(name + '.tmp', name)
+record('before.json')
+while not Path('continue').exists():
+    time.sleep(0.05)
+record('after.json')
+time.sleep(60)
+"""
+    worker = threading.Thread(target=lambda: call({
+        "type": "EXECUTE_TOOL", "missionId": mission, "command": "/usr/bin/python3", "argv": ["-c", code],
+        "allowedExecPaths": ["/usr/bin/python3", "/usr/bin/id"], "protectedPaths": ["/etc/hostname"],
+        "workingDirectory": str(ws), "leaseDurationSeconds": 60,
+    }, mission, settle=90))
+    # Outside the lease the exact denied executable and file must be usable.
+    control = subprocess.run(["/usr/bin/uname", "-s"], capture_output=True).returncode == 0 and bool(Path("/etc/hostname").read_text())
+    worker.start()
+    try:
+        if not wait_for(lambda: (ws / "before.json").exists()):
+            raise RuntimeError("pinning workload did not reach its pre-kill control")
+        pre = json.loads((ws / "before.json").read_text())
+        feature_observations["pin_workload_before"] = pre
+        managed_process.kill()  # This Popen is ours, never a PID discovered on the host.
+        killed = managed_process.wait(timeout=5) == -9
+        worker.join(timeout=5)
+        (ws / "continue").touch()
+        if not wait_for(lambda: (ws / "after.json").exists()):
+            raise RuntimeError("pinning workload did not survive the daemon's SIGKILL")
+        post = json.loads((ws / "after.json").read_text())
+        feature_observations["pin_workload_after"] = post
+        no_listener = False
+        try:
+            with socket.create_connection((host, port), timeout=0.2):
+                pass
+        except OSError:
+            no_listener = True
+        outage = killed and no_listener and control and all(pre.values())
+        feature_checks["pins_no_daemon_during_measurement"] = outage
+        feature_checks["pins_exec_denied_during_outage"] = outage and post.get("exec_denied") is True
+        feature_checks["pins_file_denied_during_outage"] = outage and post.get("file_denied") is True
+        feature_checks["pins_allowed_exec_during_outage"] = outage and post.get("allowed") is True
+        after_kill = pin_snapshot(directory)
+        feature_observations["pin_ids_after_sigkill"] = after_kill
+        feature_checks["pins_survive_sigkill"] = outage and before == after_kill
+        start_owned()
+        after_restart = pin_snapshot(directory)
+        feature_observations["pin_ids_after_restart"] = after_restart
+        feature_checks["pins_same_ids_after_restart"] = before == after_restart
+        feature_checks["pins_orphans_drained"] = not cg.exists() and bpftool("map", "dump", "pinned", directory / "map_leased_cgroups") == []
+        allowed_again = call({"type": "EXECUTE_TOOL", "missionId": mission + "-allow", "command": "/usr/bin/id",
+                              "argv": ["-u"], "allowedExecPaths": ["/usr/bin/id"], "leaseDurationSeconds": 20}, "pins-restart-allow")
+        denied_again = call({"type": "EXECUTE_TOOL", "missionId": mission + "-deny", "command": "/bin/sh",
+                             "argv": ["-c", "/usr/bin/uname -s"], "allowedExecPaths": ["/bin/sh"],
+                             "leaseDurationSeconds": 20}, "pins-restart-deny")
+        feature_checks["pins_restart_enforces"] = completed(allowed_again) and had(denied_again, "VIOLATION") and exit_frame(denied_again).get("exitCode") not in (None, 0)
+        stop_owned()
+        wrong = directory.with_name("0" * 64)
+        directory.rename(wrong)
+        try:
+            feature_checks["pins_wrong_hash_refused"] = refuses_owned_start("foreign or incomplete BPF pin set")
+        finally:
+            wrong.rename(directory)
+        pin = directory / "map_leased_cgroups"
+        missing = directory / "withheld_map"
+        pin.rename(missing)
+        try:
+            feature_checks["pins_partial_set_refused"] = refuses_owned_start("incomplete BPF pin set")
+        finally:
+            missing.rename(pin)
+        # A same-shaped empty map under the RIGHT hash must still fail: the surviving link uses
+        # a different map ID. Accepting it would make new lease writes invisible to enforcement.
+        backup = directory.parent.parent / ("splat_probe_saved_" + str(os.getpid()))
+        info = bpftool("map", "show", "pinned", pin)
+        info = info[0] if isinstance(info, list) else info
+        pin.rename(backup)
+        try:
+            bpftool("map", "create", pin, "type", "hash", "key", "8", "value", "1",
+                    "entries", info["max_entries"], "name", "probe_foreign", "flags", info.get("flags", 0))
+            feature_checks["pins_foreign_map_refused"] = refuses_owned_start("pinned hook does not match")
+        finally:
+            if pin.exists():
+                pin.unlink()
+            backup.rename(pin)
+    finally:
+        # A valid set is always restored before restart. Startup drains the probe's surviving
+        # workload, so its directory is removed only after that drain has succeeded.
+        if managed_process.poll() is not None:
+            start_owned()
+        worker.join(timeout=10)
+        if not cg.exists():
+            shutil.rmtree(ws)
+
+if replay is None and hasattr(os, "geteuid") and os.geteuid() == 0:
+    print("\n== 18. CoW: private overlay writes, unchanged lowerdir, teardown ==")
+    try:
+        probe_cow()
+    except Exception as e:
+        feature_observations["errors"].append("CoW: " + str(e))
+    if managed_binary:
+        print("\n== 19. Pins: SIGKILL, surviving denials, restart identity, rejected foreign state ==")
+        try:
+            probe_pins()
+        except Exception as e:
+            feature_observations["errors"].append("pins: " + str(e))
+for name, passed in feature_checks.items():
+    print(f"  {name}: {passed}")
+for error in feature_observations["errors"]:
+    print("  root probe error: " + error)
+daemon_proved_itself = bool(handshakes) and all(proven for _, proven in handshakes)
+daemon_frames_proven = bool(frame_sessions) and all(p for _, p in frame_sessions) and not frame_failures
+
 # A run that is not recorded is not proof - the same rule the canary follows.
 import datetime
 # Hash the daemon's kernel program into the record. Without it a months-old PASS kept standing
@@ -819,7 +1140,7 @@ except OSError:
     bpf_sha = "unreadable"
 
 evidence = {
-    "schema": 3,
+    "schema": 4,
     "bpf_source_sha256": bpf_sha,
     # The kernel the daemon enforced under, as the canary and the last-hop probe already record:
     # a claim about "a stock kernel" needs the record to say which one.
@@ -831,7 +1152,9 @@ evidence = {
     "protocol_version": 3,
     "recorded_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
+    "root_feature_observations": feature_observations,
     "results": {
+        **feature_checks,
         "permitted_tool_ran": "uid=" in text(allowed),
         "protected_inode_control_could_read_it": control_read_it,
         "protected_inode_leaked": leaked,
@@ -920,6 +1243,9 @@ evidence = {
 # denied EVERYTHING report PASS, which is the same "harness that cannot fail" the canary was fixed
 # for. Refusals alone prove the hooks fire, not that the policy is right.
 evidence["verdict"] = "PASS" if (
+    all(feature_checks.values())
+    and not feature_observations["errors"]
+    and
     evidence["results"]["permitted_tool_ran"]
     # Without the control the protected-file result is not a measurement.
     and evidence["results"]["protected_inode_control_could_read_it"]

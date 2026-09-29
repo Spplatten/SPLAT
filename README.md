@@ -228,9 +228,11 @@ plans. In order:
    workspace, a `doctor` command that prints what this host will and will not enforce, first-run
    WSL provisioning, single-file distribution, and one recorded end-to-end run of an MCP client's
    command being refused by the kernel.
-2. **The workload's own mount namespace** — makes read-only roots and copy-on-write scratch
-   enforceable, lets an agent run code it just wrote without authorizing itself to, and closes the
-   largest gap the lease does not police today.
+2. **The workload's own mount namespace** — copy-on-write overlays inside the child and BPF links/maps
+   pinned by their source hash are **built, unproven**. The root probe now checks isolated writes,
+   scratch teardown, enforcement across daemon SIGKILL, restart reuse and rejection of foreign pins.
+   Scratch-specific execution authorization remains open; no new containment claim is proven until
+   a root run records PASS for these checks.
 3. **Caller identity on the bridge** — AF_VSOCK or `SO_PEERCRED`, so the daemon identifies its peer
    rather than trusting a secret. Which callers that actually excludes has to be worked out before
    it is claimed.
