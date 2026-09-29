@@ -25,6 +25,13 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
         Converters = { new RoundTripDateTimeConverter() }
     };
 
+    /// <summary>
+    /// The options a bundle's JSON was written with. Exposed so a verifier reads it back the same way
+    /// it was written: the timestamps in a chain are load-bearing, and a reader that parses them to
+    /// local time recomputes different Merkle leaves and reports tampering where there is none.
+    /// </summary>
+    internal static JsonSerializerOptions BundleJson => JsonOpts;
+
     private const string NotRecorded = "not recorded";
 
     /// <summary>The first line of every signed statement, so a signature over one can never pass as another kind.</summary>
@@ -123,7 +130,8 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
         MissionRunRecord runRecord,
         IReadOnlyList<AuditLogEntry> entries,
         string outputDirectory,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        LedgerAnchor? anchor = null)
     {
         ArgumentNullException.ThrowIfNull(runRecord);
         ArgumentNullException.ThrowIfNull(entries);
@@ -149,10 +157,17 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
             ["mission_run_record.json"] = TextBytes(JsonSerializer.Serialize(runRecord, JsonOpts)),
             ["audit_chain.json"] = TextBytes(JsonSerializer.Serialize(entries, JsonOpts)),
             ["merkle_proofs.json"] = TextBytes(JsonSerializer.Serialize(proofs, JsonOpts)),
-            ["run_record_summary.md"] = TextBytes(GenerateMissionRunRecordSummary(runRecord, _signer)),
+            ["run_record_summary.md"] = TextBytes(GenerateMissionRunRecordSummary(runRecord, _signer, anchor)),
             ["verify_proofs.py"] = TextBytes(GeneratePythonVerificationScript()),
             ["verify_proofs.ps1"] = TextBytes(GeneratePowerShellVerificationScript())
         };
+
+        // Inside the signature statement with everything else, so a short bundle cannot be repaired
+        // by trimming its anchor to match.
+        if (anchor is not null)
+        {
+            files["ledger_anchor.json"] = TextBytes(JsonSerializer.Serialize(anchor, JsonOpts));
+        }
 
         if (_signer is not null)
         {
@@ -202,7 +217,7 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
     // With the byte-order mark every text file here has always been written with.
     private static byte[] TextBytes(string content) => [.. Encoding.UTF8.GetPreamble(), .. Encoding.UTF8.GetBytes(content)];
 
-    private static string GenerateMissionRunRecordSummary(MissionRunRecord record, IRunRecordSigner? signer)
+    private static string GenerateMissionRunRecordSummary(MissionRunRecord record, IRunRecordSigner? signer, LedgerAnchor? anchor = null)
     {
         var identity = record.RequestIdentity;
         var permission = record.EffectivePermission;
@@ -278,9 +293,30 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
         }
 
         sb.AppendLine();
-        sb.AppendLine("Tying the entries to the host's own ledger means checking that its ledger verifies, under its key when it has one, and holds these entry hashes. No command makes that comparison yet.");
+        sb.AppendLine("## What this bundle does not prove on its own");
         sb.AppendLine();
-        sb.AppendLine("Run either script from this folder:");
+        sb.AppendLine("Every check above is the bundle against itself. The Merkle root covers the entries this bundle carries, and the signature covers these files - both agree however many of the mission's rows were left out. " +
+                      "Exporting four of a mission's nine rows produces a bundle that passes everything here while reading as the whole of it.");
+        sb.AppendLine();
+
+        if (anchor is null)
+        {
+            sb.AppendLine("**This bundle is unanchored.** Nothing in it says which ledger it came from or how many rows that ledger held for this mission, so nothing here can be compared with the host. Treat the entry count above as what was exported, not as what happened.");
+        }
+        else
+        {
+            sb.AppendLine($"`ledger_anchor.json` names the chain this came out of by its first row (`{anchor.GenesisEntryHash}`), where that chain stood at export (row `{anchor.HeadEntryId}`, `{anchor.HeadEntryHash}`), " +
+                          $"and every row the ledger held for this mission: `{anchor.MissionEntries.Count}` of them, ids `{string.Join(", ", anchor.MissionEntries.Select(e => e.Id))}`. " +
+                          "It is inside the signature statement with every other file, so a short bundle cannot be made consistent by trimming its anchor to match.");
+            sb.AppendLine();
+            sb.AppendLine($"The host reported its chain recomputed at export: `{anchor.LedgerVerifiedAtExport}`. That is the host's own word and proves nothing by itself - a host that would ship a short bundle would write `true` here too. " +
+                          "The anchor's job is to name what to compare, so that a disagreement has somewhere to show up.");
+            sb.AppendLine();
+            sb.AppendLine("Make that comparison on the host: `verify_run_record` in the MCP server takes this bundle and reports, row by row, whether the live ledger still holds exactly these entries at these positions and nothing more for this mission.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("Run either script from this folder for the checks that do not need the host:");
         sb.AppendLine("```");
         sb.AppendLine("python verify_proofs.py");
         sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\verify_proofs.ps1");

@@ -203,11 +203,18 @@ public interface IComplianceArchiveExporter
         string operatorIdentity,
         CancellationToken cancellationToken = default);
 
+    /// <param name="anchor">
+    /// Where the ledger held this mission when the bundle was made, for a verifier to compare against
+    /// the live chain. Null leaves the bundle saying it is unanchored, which is the honest thing for a
+    /// ledger that cannot answer - and a much weaker bundle, because everything else in one agrees
+    /// with itself however much was left out of it.
+    /// </param>
     Task<string> ExportMissionRunRecordPackageAsync(
         MissionRunRecord runRecord,
         IReadOnlyList<AuditLogEntry> entries,
         string outputDirectory,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        LedgerAnchor? anchor = null);
 }
 
 /// <summary>
@@ -288,7 +295,46 @@ public interface IAuditLedger
     Task AppendLogAsync(Guid missionId, string templateId, string action, string details, string operatorIdentity, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AuditLogEntry>> GetAuditLogsAsync(Guid? missionId = null, int limit = 100, CancellationToken cancellationToken = default);
     Task<bool> VerifyLedgerIntegrityAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Where this mission sat in the chain, for a bundle to name. Null from a ledger that cannot say,
+    /// and the bundle then states it is unanchored rather than carrying an anchor nobody measured.
+    /// </summary>
+    Task<LedgerAnchor?> ReadAnchorAsync(Guid missionId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<LedgerAnchor?>(null);
 }
+
+/// <summary>
+/// What ties a bundle to the ledger it came out of.
+///
+/// Everything else in a bundle is self-consistent by construction: the Merkle root covers the entries
+/// the bundle carries, the signature covers the files, and both verify against each other whatever
+/// was left out. Exporting four of a mission's nine rows produces a bundle that passes every check
+/// in it while reading as the whole of the mission - which is not tampering with evidence, it is
+/// choosing it. The anchor is the part a verifier can hold up against the host: which chain, where
+/// in it, and exactly which rows the ledger held for this mission at the moment of export.
+///
+/// It is not itself a proof. A host that lies can write a false anchor as easily as a short bundle.
+/// Its job is to name what to compare, so that a disagreement has somewhere to show up.
+/// </summary>
+public record LedgerAnchor(
+    // The chain's identity: the entry hash of its first row, which no later row can change without
+    // breaking every hash after it. Two ledgers whose first row differs are two chains.
+    string GenesisEntryHash,
+    // Where the chain stood when the bundle was made. A mission's rows sit below this.
+    long HeadEntryId,
+    string HeadEntryHash,
+    // Every row the ledger held for this mission, by id and hash, in the order the chain holds them.
+    // A bundle carrying fewer is a sample of the mission, and this is what lets a verifier say which
+    // row is missing rather than only that something is.
+    IReadOnlyList<LedgerAnchorEntry> MissionEntries,
+    // The host's own word on its chain at export time. It is a courtesy, not evidence: the check that
+    // counts is made against the ledger itself, never read out of the bundle.
+    bool LedgerVerifiedAtExport,
+    int ChainHashVersion,
+    DateTimeOffset AnchoredAtUtc);
+
+public record LedgerAnchorEntry(long Id, string EntryHash, string Action);
 
 public interface ITemplateRegistry
 {

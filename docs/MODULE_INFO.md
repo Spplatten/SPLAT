@@ -226,7 +226,7 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 - **Owns:** [`Program.cs`](../src/splat-mcp/Program.cs) — composition and the stdio loop;
   [`McpServerCommand.cs`](../src/splat-mcp/McpServerCommand.cs) — the command line, decided before
   anything is built;
-  [`McpServerHandler.cs`](../src/splat-mcp/McpServerHandler.cs) — dispatch and the twelve tools;
+  [`McpServerHandler.cs`](../src/splat-mcp/McpServerHandler.cs) — dispatch and the thirteen tools;
   [`McpProtocol.cs`](../src/splat-mcp/McpProtocol.cs) — the JSON-RPC and MCP records;
   [`McpEgressPolicy.cs`](../src/splat-mcp/McpEgressPolicy.cs) — the operator's egress endpoints;
   [`McpOperatorIdentityProvider.cs`](../src/splat-mcp/McpOperatorIdentityProvider.cs);

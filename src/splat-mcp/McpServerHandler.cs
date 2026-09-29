@@ -12,6 +12,7 @@ using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 using MissionController.Infrastructure.Data.Catalog;
+using MissionController.Infrastructure.Data.Compliance;
 using MissionController.Infrastructure.Linux;
 
 namespace SplatMcp;
@@ -24,6 +25,7 @@ public class McpServerHandler
     private readonly WslSubstrateHealthChecker _healthChecker;
     private readonly IMissionExecutionEngine? _missionEngine;
     private readonly IMissionRunRecordAssembler? _runRecords;
+    private readonly RunRecordLedgerVerifier? _recordVerifier;
     private readonly IGovernedInvestigationLoop? _investigationLoop;
     private readonly ITemplateRegistry? _templateRegistry;
     private readonly ISemanticMemoryIndex? _semanticMemory;
@@ -111,9 +113,11 @@ public class McpServerHandler
         string? workspaceRoot = null,
         McpEgressPolicy? egressPolicy = null,
         IMissionRunRecordAssembler? runRecords = null,
-        IIncidentRevocationManager? revocationManager = null)
+        IIncidentRevocationManager? revocationManager = null,
+        RunRecordLedgerVerifier? recordVerifier = null)
     {
         _runRecords = runRecords;
+        _recordVerifier = recordVerifier;
         _leasedExecutor = leasedExecutor ?? throw new ArgumentNullException(nameof(leasedExecutor));
         _policyCompiler = policyCompiler ?? throw new ArgumentNullException(nameof(policyCompiler));
         _auditLedger = auditLedger ?? throw new ArgumentNullException(nameof(auditLedger));
@@ -373,6 +377,19 @@ public class McpServerHandler
             },
             new()
             {
+                Name = "verify_run_record",
+                Description = "Check a run record bundle against this host's ledger. Everything inside a bundle agrees with itself however many of the mission's rows were left out of it; this reports, row by row, whether the live ledger still holds exactly those entries at those positions and nothing more for that mission, whether the bundle's signature covers every file unchanged, and whether the host's own chain recomputes.",
+                InputSchema = JsonSerializer.Deserialize<JsonElement>(@"
+                {
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""bundlePath"": { ""type"": ""string"", ""description"": ""Path to the RUN-RECORD-*.zip to check, as returned by export_run_record."" }
+                    },
+                    ""required"": [""bundlePath""]
+                }")
+            },
+            new()
+            {
                 Name = "run_agent_brain",
                 Description = "Execute SPLAT's Layer 2 Cognitive Planning & Autonomous Reasoning Engine ('The Brain'): Decomposes high-level natural language goals, performs multi-hypothesis testing, verifies grounded telemetry, synthesizes cross-subsystem root cause, and formulates self-healing remediations with Merkle ledger commitment.",
                 InputSchema = JsonSerializer.Deserialize<JsonElement>(@"
@@ -545,6 +562,10 @@ public class McpServerHandler
 
             case "export_run_record":
                 toolResult = await ExecuteExportRunRecordAsync(args, ct);
+                break;
+
+            case "verify_run_record":
+                toolResult = await ExecuteVerifyRunRecordAsync(args, ct);
                 break;
 
             case "list_governed_crews":
@@ -1448,6 +1469,71 @@ public class McpServerHandler
         return new McpToolCallResult
         {
             IsError = false,
+            Content = new List<McpContentItem>
+            {
+                new() { Type = "text", Text = JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }) }
+            }
+        };
+    }
+
+    /// <summary>
+    /// Holds a bundle up against this host's ledger and reports what agrees and what does not.
+    ///
+    /// The result is deliberately a list of named checks rather than a verdict line. A bundle that
+    /// fails because the host's own chain is broken and one that fails because six of the mission's
+    /// rows were left out are different problems for whoever is reading, and collapsing them into
+    /// "invalid" loses the only part an auditor can act on.
+    /// </summary>
+    private async Task<McpToolCallResult> ExecuteVerifyRunRecordAsync(JsonElement args, CancellationToken ct)
+    {
+        if (_recordVerifier == null)
+        {
+            return Refusal("Run record verification is not configured on this server.");
+        }
+
+        string bundlePath = args.TryGetProperty("bundlePath", out var pathProp) ? pathProp.GetString() ?? string.Empty : string.Empty;
+        if (string.IsNullOrWhiteSpace(bundlePath))
+        {
+            return Refusal("'bundlePath' is required: the path to the RUN-RECORD-*.zip to check.");
+        }
+
+        LedgerAgreementResult result;
+        try
+        {
+            result = await _recordVerifier.VerifyAsync(bundlePath, ct);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Refusal($"'{bundlePath}' could not be read: {ex.Message}");
+        }
+
+        await _auditLedger.AppendLogAsync(
+            result.MissionId ?? Guid.Empty,
+            "mcp-tool-verify_run_record",
+            result.Agrees ? "RUN_RECORD_AGREES_WITH_LEDGER" : "RUN_RECORD_DISAGREES_WITH_LEDGER",
+            $"Bundle='{bundlePath}' | {result.Verdict}",
+            await ResolveActorAsync(ct),
+            ct);
+
+        var summary = new
+        {
+            bundle = result.BundlePath,
+            missionId = result.MissionId,
+            agrees = result.Agrees,
+            verdict = result.Verdict,
+            checks = result.Checks.Select(c => new
+            {
+                check = c.Name,
+                result = c.Passed switch { true => "pass", false => "FAIL", null => "not checked" },
+                detail = c.Detail
+            })
+        };
+
+        return new McpToolCallResult
+        {
+            // A disagreement is an answer, not a tool malfunction - but it is the answer a caller must
+            // not skim past, and isError is the only signal an MCP client reliably surfaces.
+            IsError = !result.Agrees,
             Content = new List<McpContentItem>
             {
                 new() { Type = "text", Text = JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }) }

@@ -255,6 +255,73 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         return list;
     }
 
+    /// <summary>
+    /// Reads the anchor for one mission: the chain's first row, its last, and every row the chain
+    /// holds for this mission. Three statements about the same table, read in one connection so a
+    /// row appended between them cannot land in the head while the mission list already closed.
+    ///
+    /// <see cref="VerifyLedgerIntegrityAsync"/> is run here as well, and it walks the whole table.
+    /// An export is rare and a bundle that cannot say whether its own chain recomputed is worth
+    /// less than the scan costs.
+    /// </summary>
+    public async Task<LedgerAnchor?> ReadAnchorAsync(Guid missionId, CancellationToken cancellationToken = default)
+    {
+        await using var conn = _context.CreateConnection();
+
+        await using var boundsCmd = conn.CreateCommand();
+        boundsCmd.CommandText =
+            "SELECT (SELECT EntryHash FROM AuditLedger ORDER BY Id ASC LIMIT 1), " +
+            "       (SELECT Id FROM AuditLedger ORDER BY Id DESC LIMIT 1), " +
+            "       (SELECT EntryHash FROM AuditLedger ORDER BY Id DESC LIMIT 1), " +
+            "       (SELECT COALESCE(HashVersion, 1) FROM AuditLedger ORDER BY Id DESC LIMIT 1);";
+
+        string genesis;
+        long headId;
+        string headHash;
+        int hashVersion;
+        await using (var boundsReader = await boundsCmd.ExecuteReaderAsync(cancellationToken))
+        {
+            // An empty ledger anchors nothing. It also cannot hold the mission whose bundle is being
+            // built, so the caller is better served by "not anchored" than by an anchor of zeroes.
+            if (!await boundsReader.ReadAsync(cancellationToken) || boundsReader.IsDBNull(0))
+            {
+                return null;
+            }
+
+            genesis = boundsReader.GetString(0);
+            headId = boundsReader.GetInt64(1);
+            headHash = boundsReader.GetString(2);
+            hashVersion = (int)boundsReader.GetInt64(3);
+        }
+
+        var missionEntries = new List<LedgerAnchorEntry>();
+        await using (var missionCmd = conn.CreateCommand())
+        {
+            // ASC, and every row: the anchor's whole purpose is to be the complete list, so it is the
+            // one read in this codebase that takes no limit and no newest-first ordering.
+            missionCmd.CommandText = "SELECT Id, EntryHash, Action FROM AuditLedger WHERE MissionId = $mid ORDER BY Id ASC;";
+            missionCmd.Parameters.AddWithValue("$mid", missionId.ToString("D"));
+
+            await using var missionReader = await missionCmd.ExecuteReaderAsync(cancellationToken);
+            while (await missionReader.ReadAsync(cancellationToken))
+            {
+                missionEntries.Add(new LedgerAnchorEntry(
+                    missionReader.GetInt64(0),
+                    missionReader.GetString(1),
+                    missionReader.GetString(2)));
+            }
+        }
+
+        return new LedgerAnchor(
+            GenesisEntryHash: genesis,
+            HeadEntryId: headId,
+            HeadEntryHash: headHash,
+            MissionEntries: missionEntries,
+            LedgerVerifiedAtExport: await VerifyLedgerIntegrityAsync(cancellationToken),
+            ChainHashVersion: hashVersion,
+            AnchoredAtUtc: DateTimeOffset.UtcNow);
+    }
+
     public async Task<bool> VerifyLedgerIntegrityAsync(CancellationToken cancellationToken = default)
     {
         await using var conn = _context.CreateConnection();

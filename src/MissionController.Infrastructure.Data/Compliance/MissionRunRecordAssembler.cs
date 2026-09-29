@@ -50,7 +50,12 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
         var entries = await ReadMissionEntriesAsync(missionId, cancellationToken);
         var record = Assemble(missionId, entries);
 
-        return await _archiveExporter.ExportMissionRunRecordPackageAsync(record, entries, outputDirectory, cancellationToken);
+        // Read after the entries, so a row appended between the two reads shows up as an anchor the
+        // bundle does not cover - a disagreement the verifier names - rather than as an entry under
+        // the record's root that the anchor never listed, which reads as tampering.
+        var anchor = await _auditLedger.ReadAnchorAsync(missionId, cancellationToken);
+
+        return await _archiveExporter.ExportMissionRunRecordPackageAsync(record, entries, outputDirectory, cancellationToken, anchor);
     }
 
     private MissionRunRecord Assemble(Guid missionId, IReadOnlyList<AuditLogEntry> entries)

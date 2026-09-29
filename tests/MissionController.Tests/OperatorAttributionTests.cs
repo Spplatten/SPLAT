@@ -269,9 +269,15 @@ public class OperatorAttributionTests
 
         await handler.ProcessMessageAsync(request);
 
-        string actor = Assert.Single(ledger.Actors);
-        Assert.Equal(@"windows:CONTOSO\sean [S-1-5-21-42] via mcp-stdio", actor);
-        Assert.DoesNotContain("mcp-client", actor);
+        // The flight-recorder row and the sealed run facts. Both, not one of them: the facts row is
+        // what a bundle attributes the call to, so an unattributed second row would put the
+        // transport's name on the evidence that leaves the host.
+        Assert.Equal(2, ledger.Actors.Count);
+        Assert.All(ledger.Actors, actor =>
+        {
+            Assert.Equal(@"windows:CONTOSO\sean [S-1-5-21-42] via mcp-stdio", actor);
+            Assert.DoesNotContain("mcp-client", actor);
+        });
     }
 
     /// <summary>A refused credential must reach the client as an error, not a silent anonymous run.</summary>

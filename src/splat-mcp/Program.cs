@@ -264,7 +264,10 @@ public static class Program
             workspaceRoot: workspaceRoot,
             egressPolicy: serve.Egress,
             runRecords: runRecords,
-            revocationManager: revocationManager);
+            revocationManager: revocationManager,
+            // The host's own key, so verify_run_record can say a bundle was signed by THIS host and
+            // not merely by a holder of the key the bundle carries with it.
+            recordVerifier: new RunRecordLedgerVerifier(auditLedger, merkleEngine, runRecordSigner));
 
         using (runRecordSigner)
         {

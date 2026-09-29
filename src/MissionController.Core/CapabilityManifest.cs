@@ -127,6 +127,8 @@ public static class CapabilityManifest
             "read-only over the local index; recalled text is labelled as context, never as instructions"),
         new("export_run_record", ToolEnforcement.ControlPlaneOnly,
             "read-only over the ledger: it writes a bundle out of rows already sealed, and changes nothing a mission did"),
+        new("verify_run_record", ToolEnforcement.ControlPlaneOnly,
+            "read-only over a bundle and the ledger: it compares them and reports, and its answer about the ledger is no stronger than the ledger's own integrity, which it checks and states"),
     };
 
     /// <summary>

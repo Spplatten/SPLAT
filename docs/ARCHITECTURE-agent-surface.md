@@ -93,7 +93,8 @@ the `splat-mcp` seam.
   async client (`SplatSubstrate.from_dotnet_project("src/splat-mcp")` in development), and the
   parsing of the audit anchor out of a result's last content item.
 - [`tools.py`](../src/splat-langgraph-py/splat_langgraph/tools.py) — `build_splat_tools` wraps
-  eight of the twelve tools; the `fs_*` pair, `get_substrate_health` and `list_governed_crews` are
+  eight of the thirteen tools; the `fs_*` pair, `get_substrate_health`, `list_governed_crews` and
+  `verify_run_record` are
   not exposed. Each call forwards a trace id — the LangChain `run_id`, or `splat_trace_id` from the
   run's metadata — and returns the anchor as the tool's artifact, so a checkpointer can persist it.
 
