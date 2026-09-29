@@ -68,6 +68,53 @@ public class ProbeScoringTests
     }
 
     /// <summary>
+    /// The defect the 2026-09-29 root run actually exposed, which is NOT the one guessed three days
+    /// earlier. Every signal said the kernel refused the datagram - the VIOLATION frame arrived, the
+    /// receipt counted it, the count was whole - and the check still said otherwise, because python's
+    /// traceback echoes the statement it died on and that statement contained the sentinel. The guard
+    /// asked "does this word appear anywhere in the session" and found it inside the message explaining
+    /// why it had not happened.
+    ///
+    /// The lesson is wider than one check: a test that greps a whole session for a success token will
+    /// eventually read a failure message that quotes it. The scoring now reads the workload's STDOUT.
+    /// </summary>
+    [Fact]
+    public void ARefusalWhoseErrorTextQuotesTheSentinel_IsStillScoredAsDenied()
+    {
+        var results = RunReplay("traceback-echoes-the-sentinel.json");
+
+        Assert.True(results["udp_outside_the_lease_blocked"]!.Value,
+            "the sentinel appears only inside a python traceback on STDERR, which is the error " +
+            "explaining the refusal - not the workload reporting a send.");
+
+        // The frame DID arrive here. Asserting it guards against the fix drifting back toward reading
+        // frame delivery as the thing that decides the claim.
+        Assert.True(results["udp_violation_frame_reached_the_session"]!.Value);
+    }
+
+    /// <summary>
+    /// The workspace failure from the same run, and the reason the conjuncts exist. Seven parts passed;
+    /// the eighth failed because the command ran `touch` and `ls` while the lease allow-listed `/bin/sh`
+    /// alone, so the kernel refused them exactly as it should. Before the conjuncts were recorded this
+    /// was a single False, and finding out which half was wrong would have cost another root run.
+    /// </summary>
+    [Fact]
+    public void AWorkspaceWhoseToolExceededItsAllowList_NamesTheConjunctThatFailed()
+    {
+        var results = RunReplay("workspace-exec-not-declared.json");
+
+        Assert.False(results["mission_workspace_made_and_removed"]!.Value);
+
+        // The daemon did its whole job. Only the tool's own write failed, and it failed because the
+        // test asked for an exec it never declared.
+        Assert.True(results["mission_workspace_frame_says_created"]!.Value);
+        Assert.True(results["mission_workspace_path_announced"]!.Value);
+        Assert.True(results["mission_workspace_exit_says_removed"]!.Value);
+        Assert.True(results["mission_workspace_gone_from_the_host"]!.Value);
+        Assert.False(results["mission_workspace_tool_wrote_in_it"]!.Value);
+    }
+
+    /// <summary>
     /// A datagram that actually went out is NOT a denial, whatever else a receipt counted. This is the
     /// guard that keeps the change above from being the weaker test: reading the receipt would let an
     /// unrelated violation stand in for a send that succeeded, and the "SENT" check is what prevents it.

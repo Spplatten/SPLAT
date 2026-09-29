@@ -1,0 +1,48 @@
+{
+  "_comment": [
+    "The defect the 2026-09-29 root run actually exposed, which is not the one guessed on 2026-09-26.",
+    "",
+    "The kernel refused the datagram. The VIOLATION frame ARRIVED. The receipt counted the denial and",
+    "called the count whole. Every signal said refused - and the check still scored it False, because",
+    "python's traceback echoes the statement it died on, and that statement contains the literal",
+    "sentinel:",
+    "",
+    "    STDERR: print('SENT' if s.sendto(b'x',('1.1.1.1',53)) else 'NOTHING')",
+    "    STDERR: PermissionError: [Errno 1] Operation not permitted",
+    "",
+    "The guard asked 'did the word appear anywhere in this session' and the answer was yes - inside the",
+    "message explaining why it had not happened. A refusal the kernel made scored as a send it allowed.",
+    "",
+    "udp_outside_the_lease_blocked must be TRUE here. The sentinel appears only on STDERR, so a check",
+    "that reads the workload's OUTPUT cannot see it. Two things now stop this: the scoring reads",
+    "stdout_text rather than text, and the probe assembles the sentinel at runtime so the source line",
+    "carries 'SE'+'NT' and never the whole word.",
+    "",
+    "Kept as the 2026-09-26 shape too: the receipt path still has to work, because a frame can be lost",
+    "even though this particular failure was not that."
+  ],
+  "sessions": {
+    "allowed": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534, "jailed": true },
+      { "type": "STDOUT", "data": "uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)\n" },
+      { "type": "EXIT", "exitCode": 0, "violationsCounted": 0, "violationsReported": 0, "violationsDropped": 0, "violationsComplete": true }
+    ],
+    "udp-outside": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534 },
+      { "type": "VIOLATION", "detail": 16843009, "detailText": "socket_sendmsg: denied outbound datagram to unapproved IPv4 1.1.1.1" },
+      { "type": "STDERR", "data": "Traceback (most recent call last):\n" },
+      { "type": "STDERR", "data": "  File \"<string>\", line 1, in <module>\n" },
+      { "type": "STDERR", "data": "    print('SENT' if s.sendto(b'x',('1.1.1.1',53)) else 'NOTHING')\n" },
+      { "type": "STDERR", "data": "PermissionError: [Errno 1] Operation not permitted\n" },
+      { "type": "EXIT", "exitCode": 1, "violationsCounted": 1, "violationsReported": 1, "violationsDropped": 0, "violationsComplete": true }
+    ],
+    "udp-inside": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534 },
+      { "type": "STDOUT", "data": "SENT\n" },
+      { "type": "EXIT", "exitCode": 0, "violationsCounted": 0, "violationsReported": 0, "violationsDropped": 0, "violationsComplete": true }
+    ]
+  },
+  "handshakes": [],
+  "frameSessions": [],
+  "frameFailures": []
+}

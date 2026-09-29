@@ -1,0 +1,39 @@
+{
+  "_comment": [
+    "The workspace failure the 2026-09-29 root run explained, thanks to the conjuncts being recorded.",
+    "",
+    "Seven of eight parts passed. The workspace was made, its path was announced, EXIT said it was",
+    "removed and the host agreed it was gone. Only 'the tool wrote in it' failed - because the command",
+    "was `pwd; touch made-here && echo WROTE_WORKSPACE; ls -ld .` while the lease allow-listed /bin/sh",
+    "and nothing else. touch and ls are separate binaries, so the kernel refused both, correctly, and",
+    "the check read that as the daemon failing to provide a usable workspace.",
+    "",
+    "The test was asking for execs it had not declared. Check 16 already had the discipline - 'All from",
+    "sh builtins, so each lease needs nothing but /bin/sh' - and check 17 did not follow it. The command",
+    "is now `pwd; : > made-here && echo WROTE_WORKSPACE`, which creates the file with a redirection and",
+    "no exec at all.",
+    "",
+    "This fixture holds the OLD shape, so the composite must be false while the conjuncts name the cause:",
+    "created true, announced true, exit-says-removed true, gone-from-host true, wrote-in-it FALSE. Before",
+    "the conjuncts were recorded, all of that was a single False and diagnosing it needed another root run."
+  ],
+  "sessions": {
+    "allowed": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534, "jailed": true },
+      { "type": "STDOUT", "data": "uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)\n" },
+      { "type": "EXIT", "exitCode": 0, "violationsCounted": 0, "violationsReported": 0, "violationsDropped": 0, "violationsComplete": true }
+    ],
+    "workspace": [
+      { "type": "LEASE", "enforcing": true, "workloadUid": 65534, "workspace": "/var/lib/splat/missions/probe-workspace", "workspaceCreated": true },
+      { "type": "STDOUT", "data": "/var/lib/splat/missions/probe-workspace\n" },
+      { "type": "VIOLATION", "detail": 1585, "detailText": "bprm_check_security: denied execution of unleased binary (inode 1585)" },
+      { "type": "STDERR", "data": "/bin/sh: 1: touch: Operation not permitted\n" },
+      { "type": "VIOLATION", "detail": 1585, "detailText": "bprm_check_security: denied execution of unleased binary (inode 1585)" },
+      { "type": "STDERR", "data": "/bin/sh: 1: ls: Operation not permitted\n" },
+      { "type": "EXIT", "exitCode": 126, "violationsCounted": 4, "violationsComplete": true, "workspaceRemoved": true }
+    ]
+  },
+  "handshakes": [],
+  "frameSessions": [],
+  "frameFailures": []
+}

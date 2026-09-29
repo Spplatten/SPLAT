@@ -427,11 +427,16 @@ print("== 15. UDP: a datagram names its own destination, and is judged like a co
 print("   sendto() on an unconnected socket never reaches socket_connect, so every leased process")
 print("   had a full UDP path out - DNS included - while allowNetwork:false read as 'no network'.")
 print("   Both halves, because refusals alone would also be what a broken chain produces.")
+# The sentinel is assembled at runtime so it does not appear in the source line. When sendto is
+# refused, python's traceback echoes the statement it died on - and on 2026-09-29 that echo carried the
+# literal 'SENT', so the "did it go out" guard matched the error message rather than any output and
+# scored a refusal the kernel had made as a send it had allowed. Split here, so the only way the word
+# reaches a frame whole is print() actually running.
 udp_bad = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-udp-bad",
     "command": "/usr/bin/python3",
     "argv": ["-c", "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);"
-                   "print('SENT' if s.sendto(b'x',('1.1.1.1',53)) else 'NOTHING')"],
+                   "print('SE'+'NT' if s.sendto(b'x',('1.1.1.1',53)) else 'NOTHI'+'NG')"],
     "allowedExecPaths": ["/usr/bin/python3"],
     "allowNetwork": True, "allowedEgressIps": ["127.0.0.1"], "allowedEgressPorts": [53],
     "leaseDurationSeconds": 20,
@@ -440,7 +445,7 @@ udp_ok = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-udp-ok",
     "command": "/usr/bin/python3",
     "argv": ["-c", "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);"
-                   "print('SENT' if s.sendto(b'x',('127.0.0.1',53)) else 'NOTHING')"],
+                   "print('SE'+'NT' if s.sendto(b'x',('127.0.0.1',53)) else 'NOTHI'+'NG')"],
     "allowedExecPaths": ["/usr/bin/python3"],
     "allowNetwork": True, "allowedEgressIps": ["127.0.0.1"], "allowedEgressPorts": [53],
     "leaseDurationSeconds": 20,
@@ -497,7 +502,12 @@ mission_ws = missions_root + "/probe-workspace"
 shutil.rmtree(mission_ws, ignore_errors=True)
 workspace = show(call({
     "type": "EXECUTE_TOOL", "missionId": "probe-workspace",
-    "command": "/bin/sh", "argv": ["-c", "pwd; touch made-here && echo WROTE_WORKSPACE; ls -ld ."],
+    # Shell builtins and a redirection only. `touch` and `ls` are separate binaries and this lease
+    # allow-lists /bin/sh alone, so on 2026-09-29 the kernel refused both - correctly - and the check
+    # read that as the daemon failing to make a usable workspace. The test was asking for execs it had
+    # not declared. `: > file` creates it with no exec at all, which is the discipline check 16 already
+    # follows: a lease that needs nothing but /bin/sh tests the jail rather than the allow-list.
+    "command": "/bin/sh", "argv": ["-c", "pwd; : > made-here && echo WROTE_WORKSPACE"],
     "allowedExecPaths": ["/bin/sh"],
     "workingDirectory": mission_ws, "ephemeralWorkspace": True,
     "leaseDurationSeconds": 20,
@@ -532,6 +542,16 @@ def had(msgs, t):
 
 def text(msgs):
     return " ".join(str(m.get("data", "")) for m in (msgs or []))
+
+def stdout_text(msgs):
+    """Only what the workload PRINTED, never what failed about it.
+
+    `text` joins every frame, error text included. A check that asks "did the tool report X" and reads
+    that is asking "does X appear anywhere, including in the message explaining why it did not happen".
+    On 2026-09-29 the datagram check paid for exactly that: python's traceback echoed the statement it
+    died on, the echo carried the sentinel, and a refusal the kernel had made scored as a send.
+    """
+    return " ".join(str(m.get("data", "")) for m in (msgs or []) if m.get("type") == "STDOUT")
 
 print()
 print("=" * 68)
@@ -691,7 +711,7 @@ workspace_removed_on_refusal = (
 # The datagram hook. The permitted half is the control: a lease that refused every datagram would
 # score the refusal True and prove only that nothing works.
 udp_frame_reached_the_session = had(udp_bad, "VIOLATION")
-udp_allowed = "SENT" in text(udp_ok) and not had(udp_ok, "VIOLATION")
+udp_allowed = "SENT" in stdout_text(udp_ok) and not had(udp_ok, "VIOLATION")
 
 # The receipt, not the wall. A lease's EXIT carries the kernel's own count for its cgroup, how
 # many VIOLATION frames the caller was sent, and whether those agree. This exists because on
@@ -724,7 +744,7 @@ clean_receipt_counted_zero = exit_frame(udp_ok).get("violationsCounted") == 0
 # race rather than measured it, and the race is a real defect in the return path.
 udp_blocked = (
     (refusal_receipt_counted and refusal_receipt_complete) or udp_frame_reached_the_session
-) and "SENT" not in text(udp_bad)
+) and "SENT" not in stdout_text(udp_bad)
 
 # Roadmap 2.5: the guest signs what the lease did, so a record cannot claim more than the guest
 # said. Verified here the way a stranger's script verifies it - PKCS#1 v1.5 over the exact text the

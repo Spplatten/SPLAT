@@ -214,6 +214,16 @@ impl Drop for JailPlan {
                 let path = match &made {
                     Created::Dir(p) | Created::Entry(p) => p,
                 };
+
+                // Already gone is the goal, not a failure. `.oldroot` is created here in the parent
+                // and removed by the CHILD, which rmdirs it right after pivot_root, so this reliably
+                // finds it missing and used to warn "Left ... behind" about the one entry the jail
+                // disposes of correctly. On 2026-09-29 that line was read as evidence of a jail
+                // teardown fault and sent a diagnosis after an interaction that does not exist.
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    continue;
+                }
+
                 warn!("Left {} behind: {e}", path.display());
             }
         }
