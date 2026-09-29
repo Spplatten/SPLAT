@@ -54,6 +54,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
         IntPtr capabilitiesBlock = IntPtr.Zero;
         IntPtr appContainerSidBuffer = IntPtr.Zero;
         IntPtr environmentBlock = IntPtr.Zero;
+        WindowStationAccess.Outcome? windowStation = null;
         var pi = new Win32Interop.PROCESS_INFORMATION();
 
         try
@@ -105,6 +106,14 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
                         "Network isolation required by this template could not be applied, so the sensor tool was NOT launched. " +
                         isolationFailure);
                 }
+
+                // Before the container is attached, not after: the child joins its window station and
+                // desktop inside user32's DLL_PROCESS_ATTACH, so a station it cannot open kills it
+                // at 0xC0000142 before it runs a line. On an interactive session Windows has already
+                // put an ALL APPLICATION PACKAGES ACE there and this does nothing; over a service,
+                // batch or SSH logon there is no such ACE, which is the whole of the headless
+                // failure recorded on 2026-09-18.
+                windowStation = WindowStationAccess.EnsureAppContainerMayAttach(containerSid);
 
                 appContainerSidBuffer = SensorAppContainer.AllocateNativeSid(containerSid);
 
@@ -240,6 +249,13 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
             // Read back what confines the process before it runs a single instruction; the run record
             // reports this, not the flags this method was called with.
             var appliedControls = ProcessContainmentInspector.Describe(safeProcess, jobSandbox);
+            if (windowStation is { } station)
+            {
+                // Read back like every other control: which station the child is on, and whether the
+                // container may open it. A record that lists containment and cannot say whether the
+                // tool could start under it is missing the half that explains the exit code.
+                appliedControls = [.. appliedControls, station.Description];
+            }
 
             // Close write ends in parent process so EOF can be detected on read
             Win32Interop.CloseHandle(hStdOutWrite);
@@ -305,7 +321,19 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
             Win32Interop.GetExitCodeProcess(safeProcess, out uint exitCode);
             var metrics = jobSandbox.GetResourceMetrics();
 
-            return new ProcessExecutionResult((int)exitCode, stdout, stderr, timedOut, metrics, AppliedControls: appliedControls);
+            // 0xC0000142 is STATUS_DLL_INIT_FAILED, and it reaches here as an exit code with no
+            // output at all - the process died before main. For a tool in an AppContainer on a
+            // station the container cannot open, that is the expected death, and naming it here is
+            // the difference between a diagnosable failure and the "cause unknown" this spent
+            // eleven days as.
+            const uint DllInitFailed = 0xC0000142;
+            string? terminalReason = exitCode == DllInitFailed && windowStation is { ContainerCanAttach: false } denied
+                ? $"the tool died in DLL initialisation (0xC0000142) before running: {denied.Description}. " +
+                  "A process in an AppContainer joins its window station and desktop while user32 loads, " +
+                  "and this host could not open them to the container."
+                : null;
+
+            return new ProcessExecutionResult((int)exitCode, stdout, stderr, timedOut, metrics, terminalReason, AppliedControls: appliedControls);
         }
         finally
         {

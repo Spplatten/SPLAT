@@ -443,4 +443,36 @@ internal static partial class Win32Interop
 
     [LibraryImport("advapi32.dll")]
     public static partial IntPtr FreeSid(IntPtr pSid);
+
+    // The window station and desktop a process is attached to. user32 joins both during DLL_PROCESS_ATTACH,
+    // so a process that may not open them dies in DLL initialisation with 0xC0000142 before running a line -
+    // which is what an AppContainer sensor does over a non-interactive logon. See WindowStationAccess.
+    public const int UOI_NAME = 2;
+    public const int DACL_SECURITY_INFORMATION = 4;
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial IntPtr GetProcessWindowStation();
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial IntPtr GetThreadDesktop(uint dwThreadId);
+
+    [LibraryImport("kernel32.dll")]
+    public static partial uint GetCurrentThreadId();
+
+    /// <summary>
+    /// UOI_NAME comes back as UTF-16 bytes. Declared as a byte buffer rather than char[] because the
+    /// source generator refuses char arrays without runtime marshalling disabled for the assembly,
+    /// and one decode at the call site is cheaper than that switch.
+    /// </summary>
+    [LibraryImport("user32.dll", EntryPoint = "GetUserObjectInformationW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetUserObjectInformation(IntPtr hObj, int nIndex, [Out] byte[]? pvInfo, uint nLength, out uint lpnLengthNeeded);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetUserObjectSecurity(IntPtr hObj, ref int pSIRequested, [Out] byte[]? pSID, uint nLength, out uint lpnLengthNeeded);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetUserObjectSecurity(IntPtr hObj, ref int pSIRequested, byte[] pSID);
 }
