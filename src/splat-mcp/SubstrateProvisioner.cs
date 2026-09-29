@@ -41,6 +41,18 @@ public static class SubstrateProvisioner
         "\n" +
         "[Service]\n" +
         "Type=simple\n" +
+        // bpffs, before the daemon that needs it. Since the links and maps are pinned so the hooks
+        // outlive the daemon, /sys/fs/bpf must be a bpffs mount or the daemon refuses to start and
+        // says so - correctly, because a daemon that cannot pin cannot promise a kill -9 stops
+        // freeing what it was policing. Nothing mounted it: on 2026-09-29 a freshly installed daemon
+        // sat in a restart loop 26 deep, and the service was `enabled`, so the unit's own promise that
+        // it "comes back on its own after a restart" was false on any guest that had rebooted.
+        //
+        // Here rather than in a mount unit or fstab: the requirement belongs to this daemon, so it
+        // travels with the unit that runs it and a stranger installing SPLAT gets it without reading
+        // anything. `mountpoint -q` first because mounting bpffs twice succeeds and stacks; the
+        // absent-then-mount pair is not atomic, which is why the mount is allowed to fail.
+        "ExecStartPre=/bin/sh -c 'mountpoint -q /sys/fs/bpf || mount -t bpf bpffs /sys/fs/bpf'\n" +
         "ExecStart=" + AgentPath + " --listen 127.0.0.1:50051\n" +
         "Restart=on-failure\n" +
         "RestartSec=2\n" +
@@ -137,6 +149,23 @@ public static class SubstrateProvisioner
         }
 
         Line(output, "ok", "BPF-LSM", "bpf is on the boot command line, so the kernel initialised it");
+
+        // 3a. bpffs, which the daemon needs in order to pin. Reported on its own line because on
+        //     2026-09-29 a guest had bpf on the boot line and no bpffs mount, so this checklist read
+        //     "BPF-LSM ok" and then failed three lines later on the service, the token and enforcement -
+        //     none of which was the cause. Finding it took the journal. The unit now mounts it in an
+        //     ExecStartPre, so `--apply` fixes this by rewriting the unit; the line exists so a host
+        //     that is one restart away from a dead daemon says so before the daemon dies.
+        var (_, bpffsType) = await wsl(new[] { "-e", "stat", "-f", "-c", "%T", "/sys/fs/bpf" }, ct);
+        bool bpffs = bpffsType.Trim().Equals("bpffs", StringComparison.OrdinalIgnoreCase);
+        Line(output, bpffs ? "ok" : "todo", "bpffs",
+            bpffs
+                ? "/sys/fs/bpf is a bpffs mount, so the daemon can pin its links and maps"
+                : "/sys/fs/bpf is not bpffs, so the daemon will refuse to start - it cannot pin, and a "
+                  + "kill -9 would free what it was policing. "
+                  + (apply
+                      ? "The unit written below mounts it before starting the daemon."
+                      : "--apply rewrites the unit so it mounts bpffs first."));
 
         // 3b. The Windows drives. WSL mounts them with every mode bit open, so a leased command
         //     running as nobody read the operator's whole profile through /mnt/c - SSH keys included,
