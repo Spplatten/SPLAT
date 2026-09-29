@@ -212,6 +212,52 @@ public sealed class SubstrateProvisionerTests
     /// and the unit; and the token the daemon writes at first start, which no step here creates and
     /// which would otherwise be left behind as a root-owned secret nobody recorded.
     /// </summary>
+    /// <summary>
+    /// The unit must mount bpffs before it starts the daemon, or the daemon's hooks last exactly as
+    /// long as its process and a `kill -9` frees whatever is leased at that moment.
+    ///
+    /// This is a content check on the unit rather than a behaviour check because the failure it
+    /// guards is silent: `/sys/fs/bpf` exists as an ordinary read-only sysfs directory on a guest
+    /// with no bpffs mounted - the state this project's own WSL2 guest was in on 2026-09-29 - so
+    /// nothing downstream notices the mount is missing except the pins that then fail.
+    /// </summary>
+    [Fact]
+    public async Task TheUnitMountsBpffs_BeforeItStartsTheDaemon()
+    {
+        using var daemon = new SubstrateDoctorTests.StandInDaemon(EnforcingAnswer);
+        var guest = new ScriptedGuest();
+        using var shipped = new ShippedAgent();
+
+        await Provision(
+            new McpServerCommand.Provision(Apply: true), new StringWriter(), guest.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget),
+            agentBinaryPath: shipped.Path);
+
+        string unit = Assert.Single(guest.Commands, c => c.Contains("[Unit]", StringComparison.Ordinal)
+                                                      || c.Contains("SPLAT_UNIT", StringComparison.Ordinal));
+
+        int mountAt = unit.IndexOf("mount -t bpf", StringComparison.Ordinal);
+        int startAt = unit.IndexOf("ExecStart=/opt/splat/splat-agent", StringComparison.Ordinal);
+
+        Assert.True(mountAt >= 0, $"The unit does not mount bpffs:\n{unit}");
+        Assert.True(startAt >= 0, $"The unit does not start the daemon:\n{unit}");
+        Assert.True(mountAt < startAt, "The mount must be an ExecStartPre, not something after the daemon is up.");
+
+        // Conditional, so a guest whose distribution already mounted it is left alone - and
+        // because mounting bpffs twice succeeds and stacks. Asserted by the guard's shape rather
+        // than its spelling: `mountpoint -q` and a /proc/mounts grep are the same claim, and a
+        // test that pins one of them fails on a correct change to the other.
+        // The whole directive, taken from the newline before the mount rather than from the mount
+        // itself: the guard sits to its LEFT, so a slice anchored on `mount` cuts the guard off and
+        // the test fails against a unit that is correct. (char)10 because the tooling that writes
+        // this file eats backslash escapes.
+        int lineStart = unit.LastIndexOf((char)10, mountAt) + 1;
+        string directive = unit[lineStart..unit.IndexOf((char)10, mountAt)];
+
+        Assert.StartsWith("ExecStartPre=", directive, StringComparison.Ordinal);
+        Assert.Contains("||", directive, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task EveryChangeAnApplyMakes_IsRecordedInAMountManifest()
     {
