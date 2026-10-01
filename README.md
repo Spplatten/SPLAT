@@ -1,6 +1,6 @@
 # SPLAT — Sandboxed Process Lease & Agent Telemetry
 
-> **A zero-trust execution substrate for autonomous AI agents, by Platten Industries.** Agents don't get trust — they get a *lease*: a time-boxed, resource-clamped, kernel-enforced capability grant, with every action sealed in a tamper-evident cryptographic ledger.
+> **An execution substrate for autonomous AI agents, by Platten Industries.** Agents don't get trust — they get a *lease*: a time-boxed, resource-clamped, kernel-enforced capability grant, with every action written to a hash-chained ledger that is **unkeyed by default**, and that says so on every host it runs on.
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](src/)
 [![Rust](https://img.shields.io/badge/Rust-libbpf--rs%20%2B%20eBPF-CE412B?logo=rust&logoColor=white)](native/splat-agent/)
@@ -16,6 +16,16 @@
 Platten Industries is a one-person company, and this repository is that person's work. No second engineer has reviewed it, no auditor has assessed it, and most commits name an AI assistant as co-author because that is how they were written. None of that is load-bearing either way: what holds the claims up is machine-checked evidence — probe files, recorded runs pinned to the SHA-256 of the source that produced them, and tests that fail the build when prose and evidence disagree. Run the probes rather than trusting the voice. Every section below also names what it does **not** establish, and [`SUPPORTED_POLICY.md`](native/splat-agent/SUPPORTED_POLICY.md) enumerates what a lease does not enforce at all.
 
 ---
+
+## Why not just a container, gVisor, or seccomp?
+
+The three answers that matter, before the long version below.
+
+1. **A container's unit is a machine; a lease's unit is one task.** `docker run` and gVisor both hand the workload a box and let it do what it likes inside that box. A lease names *this binary, this destination, this many seconds* — and an exec or a `connect()` outside it dies with `-EPERM` in the kernel, not in a wrapper the agent shares privilege with. Seccomp has the granularity but filters syscall *numbers and arguments*; it cannot say "this path, for this mission."
+2. **It runs on the machine the agent is already on, on a kernel you did not build.** No cloud round trip, no shipping private source to someone else's infrastructure, no custom kernel and no fork — stock WSL2 with native BTF and `CONFIG_BPF_LSM=y`. That is the deployment story hosted sandboxes structurally cannot tell.
+3. **Every claim here is bound to a probe you can run on your own host,** and the build fails when the documentation oversells *or* undersells what the evidence shows. Claims in this README have been withdrawn after passing once — the status table names each one and why.
+
+If a per-machine perimeter is what you need, use a container: it is simpler, older and better understood. The case for this project starts where "the machine" is too coarse a boundary.
 
 ## The thesis
 
