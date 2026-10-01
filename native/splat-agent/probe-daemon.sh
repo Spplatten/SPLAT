@@ -970,9 +970,14 @@ def bpftool(*args):
 
 def pin_snapshot(directory):
     snapshot = {}
+    # bpftool 7.7 can emit a valid tracing-link object but exit 255 for "show pinned".
+    # Its full inventory succeeds and carries the pin paths with -f. Require that successful
+    # query and an unambiguous path match instead of ignoring a failed command's exit status.
+    links = bpftool("-f", "link", "show")
     for path in sorted(directory.iterdir()):
         kind = "link" if path.name.startswith("link_") else "map"
-        info = bpftool(kind, "show", "pinned", path)
+        info = ([link for link in links if str(path) in link.get("pinned", [])]
+                if kind == "link" else bpftool(kind, "show", "pinned", path))
         if isinstance(info, list):
             if len(info) != 1:
                 raise RuntimeError("ambiguous pinned object: " + str(path))
@@ -985,7 +990,10 @@ def pin_snapshot(directory):
 def refuses_owned_start(reason):
     proc = launch_owned()
     try:
-        refused = proc.wait(timeout=10) != 0 and reason in log_tail()
+        code = proc.wait(timeout=10)
+        output = log_tail()
+        feature_observations.setdefault("pin_startup_refusals", {})[reason] = {"exit_code": code, "log": output}
+        refused = code != 0 and reason in output
     except subprocess.TimeoutExpired:
         refused = False
     finally:
@@ -1014,7 +1022,7 @@ def denied(action):
 def record(name):
     allowed = subprocess.run(['/usr/bin/id', '-u'], capture_output=True, text=True)
     result = {'allowed': allowed.returncode == 0 and allowed.stdout.strip() == str(os.getuid()) and os.getuid() != 0,
-              'exec_denied': denied(lambda: subprocess.run(['/usr/bin/uname', '-s'], capture_output=True)),
+              'exec_denied': denied(lambda: subprocess.run(['/usr/bin/dpkg', '--version'], capture_output=True)),
               'file_denied': denied(lambda: Path('/etc/hostname').read_text())}
     Path(name + '.tmp').write_text(json.dumps(result))
     os.replace(name + '.tmp', name)
@@ -1030,7 +1038,11 @@ time.sleep(60)
         "workingDirectory": str(ws), "leaseDurationSeconds": 60,
     }, mission, settle=90))
     # Outside the lease the exact denied executable and file must be usable.
-    control = subprocess.run(["/usr/bin/uname", "-s"], capture_output=True).returncode == 0 and bool(Path("/etc/hostname").read_text())
+    # Ubuntu's multicall coreutils can give id and uname the SAME inode. An inode allow-list
+    # correctly admits both; the negative control must be a different executable image.
+    distinct = all(not os.path.samefile("/usr/bin/dpkg", allowed) for allowed in ("/usr/bin/python3", "/usr/bin/id"))
+    feature_observations["pin_control_distinct_inode"] = distinct
+    control = distinct and subprocess.run(["/usr/bin/dpkg", "--version"], capture_output=True).returncode == 0 and bool(Path("/etc/hostname").read_text())
     worker.start()
     try:
         if not wait_for(lambda: (ws / "before.json").exists()):
@@ -1092,7 +1104,7 @@ time.sleep(60)
         pin.rename(backup)
         try:
             bpftool("map", "create", pin, "type", "hash", "key", "8", "value", "1",
-                    "entries", info["max_entries"], "name", "probe_foreign", "flags", info.get("flags", 0))
+                    "entries", info["max_entries"], "name", info["name"], "flags", info.get("flags", 0))
             feature_checks["pins_foreign_map_refused"] = refuses_owned_start("pinned hook does not match")
         finally:
             if pin.exists():

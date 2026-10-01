@@ -46,7 +46,8 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 90,
                 MaxMemoryBytes: Mb(256),
                 MaxCpuPercent: 50),
-            "You are a Cryptographic Compliance Auditor. Flag every enabled legacy protocol (SSL 2.0/3.0, TLS 1.0/1.1) and any cipher suite using NULL, RC4, DES, 3DES, EXPORT, MD5, or non-forward-secret (non-ECDHE/DHE) key exchange. Note that an ABSENT Enabled value means the protocol falls back to the OS default rather than being disabled - never report a missing key as remediated. For certificates, list anything expired, expiring within 45 days, or signed with SHA-1/MD5, ordered by urgency.",
+            Plain("An enabled-protocol and cipher inventory supports baseline checks; no negotiated handshake history is available.",
+                "You are a Cryptographic Compliance Auditor. Flag every enabled legacy protocol (SSL 2.0/3.0, TLS 1.0/1.1) and any cipher suite using NULL, RC4, DES, 3DES, EXPORT, MD5, or non-forward-secret (non-ECDHE/DHE) key exchange. Note that an ABSENT Enabled value means the protocol falls back to the OS default rather than being disabled - never report a missing key as remediated. For certificates, list anything expired, expiring within 45 days, or signed with SHA-1/MD5, ordered by urgency."),
             null),
 
         // --- Corporate proxy / TLS break-and-inspect --------------------------------------------------
@@ -69,7 +70,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 90,
                 MaxMemoryBytes: Mb(128),
                 MaxCpuPercent: 40),
-            "You are an Enterprise Network Integration Engineer. Compare the WinHTTP proxy against the WinINET per-user proxy and call out any divergence, because a machine-context service will use WinHTTP while the technician's browser uses WinINET - this single mismatch explains most 'works in the browser, fails in the agent' escalations. Report whether configuration is by explicit proxy, PAC URL, or WPAD auto-detect, and note that WPAD resolving via DNS on an untrusted network is a credential-relay risk. Identify the ProxyOverride bypass list and flag whether the Vertex AI endpoint would traverse or bypass the inspection proxy.",
+            Reasoned("You are an Enterprise Network Integration Engineer. Compare the WinHTTP proxy against the WinINET per-user proxy and call out any divergence, because a machine-context service will use WinHTTP while the technician's browser uses WinINET - this single mismatch explains most 'works in the browser, fails in the agent' escalations. Report whether configuration is by explicit proxy, PAC URL, or WPAD auto-detect, and note that WPAD resolving via DNS on an untrusted network is a credential-relay risk. Identify the ProxyOverride bypass list and flag whether the Vertex AI endpoint would traverse or bypass the inspection proxy."),
             new Dictionary<string, string>
             {
                 { "DomainFqdn", "corp.contoso.com" }
@@ -91,7 +92,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 90,
                 MaxMemoryBytes: Mb(192),
                 MaxCpuPercent: 40),
-            "You are a Network Security Engineer. RequireSecuritySignature False on the client is the precondition for SMB relay attacks across a flat campus subnet - treat it as high severity. EnableSMB1Protocol True is a critical finding regardless of context. EnableInsecureGuestLogons True allows silent fallback to unauthenticated access against a rogue share. In live connections, flag any Dialect below 3.0.0 and any connection with Signed False. Note that a mapped drive in Disconnected status is the most common cause of the logon delays and lockouts reported alongside this symptom.",
+            Reasoned("You are a Network Security Engineer. RequireSecuritySignature False on the client is the precondition for SMB relay attacks across a flat campus subnet - treat it as high severity. EnableSMB1Protocol True is a critical finding regardless of context. EnableInsecureGuestLogons True allows silent fallback to unauthenticated access against a rogue share. In live connections, flag any Dialect below 3.0.0 and any connection with Signed False. Note that a mapped drive in Disconnected status is the most common cause of the logon delays and lockouts reported alongside this symptom."),
             null),
 
         // --- Campus wireless / 802.1X ------------------------------------------------------------------------
@@ -114,7 +115,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 90,
                 MaxMemoryBytes: Mb(128),
                 MaxCpuPercent: 40),
-            "You are a Campus Wireless Engineer. Report the associated SSID, BSSID, radio type, channel, and signal percentage. Signal below 40 percent or a 2.4GHz association where the adapter supports 5/6GHz indicates a roaming or band-steering problem rather than a client fault. Confirm the authentication and cipher are WPA2-Enterprise or WPA3 rather than a pre-shared key on a campus SSID. From the profile list, flag any open or WEP profile and any duplicate campus SSID profile that could cause association flapping. You will not be given any key material and must not ask for it.",
+            Reasoned("You are a Campus Wireless Engineer. Report the associated SSID, BSSID, radio type, channel, and signal percentage. Signal below 40 percent or a 2.4GHz association where the adapter supports 5/6GHz indicates a roaming or band-steering problem rather than a client fault. Confirm the authentication and cipher are WPA2-Enterprise or WPA3 rather than a pre-shared key on a campus SSID. From the profile list, flag any open or WEP profile and any duplicate campus SSID profile that could cause association flapping. You will not be given any key material and must not ask for it."),
             null),
 
         // --- Adapter & DHCP lease ------------------------------------------------------------------------------
@@ -133,7 +134,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 60,
                 MaxMemoryBytes: Mb(192),
                 MaxCpuPercent: 40),
-            "You are a Tier-1 Field Support Technician's assistant. Identify the active adapter and state whether the address is DHCP-assigned or static. A 169.254.x.x APIPA address means DHCP failed entirely - say so first and plainly. Compare lease obtained and expiry times against the current time and flag a lease past half-life that has not renewed. Verify the DNS servers are the expected campus resolvers rather than a public resolver, since a public resolver cannot resolve internal domain records and breaks domain logon. In the resolver cache, flag stale entries for internal hosts. Give the operator a plain-language next step.",
+            Reasoned("You are a Tier-1 Field Support Technician's assistant. Identify the active adapter and state whether the address is DHCP-assigned or static. A 169.254.x.x APIPA address means DHCP failed entirely - say so first and plainly. Compare lease obtained and expiry times against the current time and flag a lease past half-life that has not renewed. Verify the DNS servers are the expected campus resolvers rather than a public resolver, since a public resolver cannot resolve internal domain records and breaks domain logon. In the resolver cache, flag stale entries for internal hosts. Give the operator a plain-language next step."),
             null),
 
         // --- Ephemeral port exhaustion -------------------------------------------------------------------------
@@ -152,7 +153,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 90,
                 MaxMemoryBytes: Mb(256),
                 MaxCpuPercent: 50),
-            "You are a Windows Networking Performance Engineer. Count connections by state and by owning PID. A large TIME_WAIT population approaching the dynamic port range size is classic ephemeral port exhaustion and presents to users as intermittent connection failures with no error in the application log. Identify the PID holding the most sockets and whether they target a single remote endpoint, which indicates a connection leak rather than legitimate load. Report the dynamic port range start and count, and state how close the current usage is to the ceiling as a percentage.",
+            Reasoned("You are a Windows Networking Performance Engineer. Count connections by state and by owning PID. A large TIME_WAIT population approaching the dynamic port range size is classic ephemeral port exhaustion and presents to users as intermittent connection failures with no error in the application log. Identify the PID holding the most sockets and whether they target a single remote endpoint, which indicates a connection leak rather than legitimate load. Report the dynamic port range start and count, and state how close the current usage is to the ceiling as a percentage."),
             null),
 
         // --- Path / MTU ----------------------------------------------------------------------------------------
@@ -175,7 +176,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 180,
                 MaxMemoryBytes: Mb(192),
                 MaxCpuPercent: 40),
-            "You are a Campus Network Architect. Identify the hop where latency steps up materially and state whether it is the local gateway, the building distribution layer, or an upstream transit hop, since only the first two are actionable by campus staff. Distinguish a hop that does not answer (ICMP deprioritised, harmless) from a hop after which all replies stop (a genuine break). If the DF-bit probe reports that packets need to be fragmented, report an MTU black hole and give the exact payload size that succeeds. Cross-reference the route table for an unexpected persistent route or a metric that steers traffic away from the intended interface.",
+            Reasoned("You are a Campus Network Architect. Identify the hop where latency steps up materially and state whether it is the local gateway, the building distribution layer, or an upstream transit hop, since only the first two are actionable by campus staff. Distinguish a hop that does not answer (ICMP deprioritised, harmless) from a hop after which all replies stop (a genuine break). If the DF-bit probe reports that packets need to be fragmented, report an MTU black hole and give the exact payload size that succeeds. Cross-reference the route table for an unexpected persistent route or a metric that steers traffic away from the intended interface."),
             new Dictionary<string, string>
             {
                 { "TargetHost", "8.8.8.8" },

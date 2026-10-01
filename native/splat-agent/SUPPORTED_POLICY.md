@@ -18,7 +18,7 @@ Protocol version 3. Anything else is refused; see `main.rs`, and `docs/SCHEMA.md
 
 | Dimension | Hook | What is checked |
 | --- | --- | --- |
-| Executable identity | `bprm_check_security` | `(cgroup id, dev, ino)` against this lease's allow-list. Every exec, including one an already-running permitted tool performs. |
+| Executable identity | `bprm_check_security` | `(cgroup id, dev, ino)` against this lease's allow-list. Every exec, including one an already-running permitted tool performs. Hardlinks and multicall names sharing an inode are the same executable; arguments and argv[0] are not gated. On the probe guest, id and uname share an inode, so the negative exec control uses a distinct dpkg image. |
 | Protected files | `file_open` | `(cgroup id, dev, ino)` against this lease's deny-list. |
 | IPv4 egress | `socket_connect` | `(cgroup id, address, port)` — the destination must be an endpoint this lease approved. |
 | IPv4 datagrams | `socket_sendmsg` | The same allow-list, for a datagram that names its own destination — a `sendto` on an unconnected socket, which never reaches `socket_connect`. A message with no destination of its own is on a socket `connect` already judged. **Consequence: a leased tool's DNS query is a destination like any other.** A lease with the network on and no resolver on port 53 can reach its addresses by IP and cannot look a name up; `doctor` says so, and nothing adds a resolver on the caller's behalf. |

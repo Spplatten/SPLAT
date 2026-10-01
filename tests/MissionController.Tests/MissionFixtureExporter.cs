@@ -108,6 +108,14 @@ internal static class MissionFixtureExporter
                     continue;
                 }
 
+                // Semantic memory can contain locally simulated answers. Its presence alone is
+                // not evidence that a provider answered, or that the pipeline accepted the run.
+                if (!IsLiveModelIdentity(facts.Model) || facts.QualityAccepted != true)
+                {
+                    log($"  {templateId} {missionId:D}: no accepted live-model run in the sealed facts; skipped");
+                    continue;
+                }
+
                 var fixture = new MissionFixture
                 {
                     MissionId = missionId,
@@ -133,14 +141,14 @@ internal static class MissionFixtureExporter
                         new FixtureAttempt
                         {
                             Index = 0,
-                            Model = template.TargetModel,
+                            Model = facts.Model![(facts.Model!.IndexOf('/') + 1)..],
                             Response = analysis,
                         },
                     },
                 };
 
-                // The expectations are what the pipeline makes of this answer today, and the prompt's
-                // hash is today's too: from here on, a change in either is what the fixture detects.
+                // The index did not retain the prompt. Leave its hash unknown: rebuilding one
+                // today would falsely attest that the historical model was asked that question.
                 MissionReplayHarness.MissionReplay replay;
                 try
                 {
@@ -151,12 +159,6 @@ internal static class MissionFixtureExporter
                 {
                     log($"  {templateId} {missionId:D}: could not be replayed ({ex.Message}); skipped");
                     continue;
-                }
-
-                if (replay.ModelCalls.Count > 0)
-                {
-                    fixture.SystemPromptSha256 = MissionFixture.Sha256Hex(
-                        RecalledContext.NormalizeBoundaries(replay.ModelCalls[0].SystemPrompt));
                 }
 
                 if (replay.Island is not null)
@@ -175,6 +177,15 @@ internal static class MissionFixtureExporter
         }
 
         return written;
+    }
+
+    internal static bool IsLiveModelIdentity(string? model)
+    {
+        if (string.IsNullOrWhiteSpace(model) || model.StartsWith("none:", StringComparison.OrdinalIgnoreCase))
+            return false;
+        int slash = model.IndexOf('/');
+        return slash > 0 && !string.IsNullOrWhiteSpace(model[..slash]) &&
+            !string.IsNullOrWhiteSpace(model[(slash + 1)..]);
     }
 
     /// <summary>

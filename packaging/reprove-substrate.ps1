@@ -25,9 +25,9 @@
          kernel program is recompiled rather than reused from a previous build.
       3. Stop the installed unit if it is running, and wait for the port to be free. A daemon that
          is not this build answering the probes would prove the wrong program.
-      4. Start the fresh binary as root, and wait for it to listen.
-      5. Run probe-daemon.sh as root in the guest - root only so that the token can be read
-         without a prompt - with SPLAT_EVIDENCE_DIR pointed at this tree's evidence directory.
+      4. Let probe-daemon.sh own the fresh root daemon so its SIGKILL/restart checks run without
+         competing for the singleton lock; record into this tree's evidence directory.
+      5. After that daemon is stopped, start the same binary for the host's last-hop probe.
       6. Run probe-last-hop.ps1 from this PowerShell, with its evidence directory pointed the same way.
       7. Always: stop the fresh daemon, and restart the installed unit if it was running.
       8. Read both evidence files back and compare their bpf_source_sha256 with the tree's.
@@ -232,12 +232,21 @@ try {
         exit 1
     }
 
-    Write-Host "[4/8] starting the fresh daemon as root" -ForegroundColor Cyan
+    Write-Host "[4/8] probe-daemon.sh owns the fresh daemon, including SIGKILL and restart" -ForegroundColor Cyan
+    # The lifecycle probe must own the only daemon. Starting the driver's instance first
+    # holds agent.lock and prevents section 19 from ever exercising pinned enforcement.
+    $probe = Invoke-Guest -AsRoot (@'
+cd '__CRATE__'
+SPLAT_PROBE_DAEMON='__BIN__' SPLAT_EVIDENCE_DIR='__EVIDENCE__' bash probe-daemon.sh '__LISTEN__'
+'@).Replace('__CRATE__', $guestCrate).Replace('__BIN__', $bin).Replace('__EVIDENCE__', $guestEvidence).Replace('__LISTEN__', $Listen)
+    $probe.Output -split "`n" | ForEach-Object { Write-Host "   $_" }
+
+    Write-Host "[5/8] starting the fresh daemon for the last-hop probe" -ForegroundColor Cyan
     # Its own token, ceiling and workload identity defaults, exactly as the installed unit runs it.
     # Redirected to files: under this script's own console the daemon's log would interleave with
     # the probes' output, and a daemon that dies at startup has to be readable afterwards.
     $daemon = Start-Process -FilePath 'wsl.exe' -ArgumentList ($wslBase + @('-u', 'root', '-e', $bin, '--listen', $Listen)) `
-        -RedirectStandardOutput $daemonLog -RedirectStandardError $daemonErr -NoNewWindow -PassThru
+        -RedirectStandardOutput $daemonLog -RedirectStandardError $daemonErr -WindowStyle Hidden -PassThru
     $up = Wait-Until { $daemon.HasExited -or (Test-PortAnswers $Listen) } 30 "the daemon to listen at $Listen"
     if ($daemon.HasExited -or -not $up) {
         Write-Host '--- daemon output ---'
@@ -249,13 +258,6 @@ try {
     if ($log -notmatch 'kernel enforcement is live') {
         Write-Host '   WARNING: the daemon is listening but its log does not yet say "kernel enforcement is live"; the probes will say whether it enforces'
     }
-
-    Write-Host "[5/8] probe-daemon.sh, as root so the token needs no prompt" -ForegroundColor Cyan
-    $probe = Invoke-Guest -AsRoot (@'
-cd '__CRATE__'
-SPLAT_EVIDENCE_DIR='__EVIDENCE__' bash probe-daemon.sh '__LISTEN__'
-'@).Replace('__CRATE__', $guestCrate).Replace('__EVIDENCE__', $guestEvidence).Replace('__LISTEN__', $Listen)
-    $probe.Output -split "`n" | ForEach-Object { Write-Host "   $_" }
 
     Write-Host "[6/8] probe-last-hop.ps1, from this host" -ForegroundColor Cyan
     try {

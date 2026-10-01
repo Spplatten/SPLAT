@@ -131,7 +131,10 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Expect:** `Passed! - Failed: 0, Passed: 883`, on a line ending `(net10.0)`. The `dotnet` on this
+**Completion target:** `Passed! - Failed: 0, Passed: 888`, on a line ending `(net10.0)`. The live
+corpus coverage gate currently fails for missing or stale recordings; see
+[the recording guide](../tests/MissionController.Tests/Fixtures/Missions/README.md). Do not bless
+old answers to claim that a changed prompt was exercised. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
 

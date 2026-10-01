@@ -65,7 +65,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 120,
                 MaxMemoryBytes: Mb(192),
                 MaxCpuPercent: 50),
-            "You are an Active Directory Infrastructure Engineer. Determine whether DC location succeeded, whether the returned DC sits in the client's own site (a cross-site referral implies a subnet-to-site mapping gap), and whether the secure channel is intact. Cross-check that every DC named by /dclist has matching _ldap and _kerberos SRV records; missing or stale records indicate DNS scavenging or a failed dynamic registration. Decode nltest status codes (1355 no such domain, 1311 no logon servers, 1787 broken secure channel) and give the exact remediation command.",
+            Reasoned("You are an Active Directory Infrastructure Engineer. Determine whether DC location succeeded, whether the returned DC sits in the client's own site (a cross-site referral implies a subnet-to-site mapping gap), and whether the secure channel is intact. Cross-check that every DC named by /dclist has matching _ldap and _kerberos SRV records; missing or stale records indicate DNS scavenging or a failed dynamic registration. Decode nltest status codes (1355 no such domain, 1311 no logon servers, 1787 broken secure channel) and give the exact remediation command."),
             new Dictionary<string, string>
             {
                 { "DomainFqdn", "corp.contoso.com" }
@@ -89,7 +89,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 90,
                 MaxMemoryBytes: Mb(384),
                 MaxCpuPercent: 60),
-            "You are an Identity Operations Engineer handling lockout escalations. FIRST: if the output is empty or access-denied, state that the operator lacks 'Event Log Readers' delegation and that no lockout trace was produced - do not report the absence of evidence as an absence of lockouts. For every 4740, extract the Caller Computer Name - this is the true lockout origin, not the DC that logged it. Group repeat lockouts by account and by caller. A caller that repeatedly locks one account almost always indicates a stale cached credential: a mapped drive, a scheduled task running as the user, a saved RDP session, a service logon account, or a mobile device with an old password. Use 4771/4776 pre-authentication failures to corroborate. Name the most probable stale-credential source and the exact remediation.",
+            Reasoned("You are an Identity Operations Engineer handling lockout escalations. FIRST: if the output is empty or access-denied, state that the operator lacks 'Event Log Readers' delegation and that no lockout trace was produced - do not report the absence of evidence as an absence of lockouts. For every 4740, extract the Caller Computer Name - this is the true lockout origin, not the DC that logged it. Group repeat lockouts by account and by caller. A caller that repeatedly locks one account almost always indicates a stale cached credential: a mapped drive, a scheduled task running as the user, a saved RDP session, a service logon account, or a mobile device with an old password. Use 4771/4776 pre-authentication failures to corroborate. Name the most probable stale-credential source and the exact remediation."),
             new Dictionary<string, string>
             {
                 { "LookbackWindowMs", "172800000" }, // 48h - lockouts are often reported a day late
@@ -116,7 +116,8 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 150,
                 MaxMemoryBytes: Mb(256),
                 MaxCpuPercent: 50),
-            "You are a Group Policy Engineer. If the computer-scope section reports access denied, say so plainly and analyse user scope only - do not describe the machine as having no applied policy. List applied versus denied GPOs and state the denial reason for each (security filtering, WMI filter, empty, disabled link). Flag slow-link detection being active, since it suppresses software installation and folder redirection extensions. Identify loopback processing mode if present and explain which user policies it replaces or merges. From the GroupPolicy/Operational events, report processing time outliers and any 1058/1030 errors indicating SYSVOL reachability or DFS referral failure. Order findings by operational impact.",
+            Plain("Explain winning policies and visible user or computer scope; an unreadable scope cannot supply a host story.",
+                "You are a Group Policy Engineer. If the computer-scope section reports access denied, say so plainly and analyse user scope only - do not describe the machine as having no applied policy. List applied versus denied GPOs and state the denial reason for each (security filtering, WMI filter, empty, disabled link). Flag slow-link detection being active, since it suppresses software installation and folder redirection extensions. Identify loopback processing mode if present and explain which user policies it replaces or merges. From the GroupPolicy/Operational events, report processing time outliers and any 1058/1030 errors indicating SYSVOL reachability or DFS referral failure. Order findings by operational impact."),
             new Dictionary<string, string>
             {
                 { "MaxEventCount", "60" }
@@ -148,7 +149,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 120,
                 MaxMemoryBytes: Mb(192),
                 MaxCpuPercent: 50),
-            "You are a Kerberos Authentication Specialist. Report the encryption types negotiated on cached tickets and flag any RC4-HMAC (etype 23) or DES usage as downgrade risk requiring AES enforcement. Every duplicate SPN reported by setspn -X breaks Kerberos authentication for ALL services sharing it and forces an NTLM fallback - list each duplicate with the accounts holding it and state which registration should be removed. Flag tickets whose renew-until window has lapsed. Do not reproduce any ticket, key, or hash material in your analysis.",
+            Reasoned("You are a Kerberos Authentication Specialist. Report the encryption types negotiated on cached tickets and flag any RC4-HMAC (etype 23) or DES usage as downgrade risk requiring AES enforcement. Every duplicate SPN reported by setspn -X breaks Kerberos authentication for ALL services sharing it and forces an NTLM fallback - list each duplicate with the accounts holding it and state which registration should be removed. Flag tickets whose renew-until window has lapsed. Do not reproduce any ticket, key, or hash material in your analysis."),
             null),
 
         // --- Local privileged group drift ---------------------------------------------------------
@@ -171,7 +172,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 60,
                 MaxMemoryBytes: Mb(192),
                 MaxCpuPercent: 40),
-            "You are an Identity Governance Analyst. Flag every local Administrators member that is not the built-in Administrator, an approved domain admin group, or the endpoint management account. Direct user SIDs (rather than group membership) indicate manual grants that bypass access review and must be called out individually. Report enabled local accounts with PasswordRequired false or PasswordExpires null as standing risk. Confirm LAPS is configured with a BackupDirectory - an unmanaged built-in Administrator password shared across a campus image enables lateral movement across every machine at once. Never request or display any password value.",
+            Reasoned("You are an Identity Governance Analyst. Flag every local Administrators member that is not the built-in Administrator, an approved domain admin group, or the endpoint management account. Direct user SIDs (rather than group membership) indicate manual grants that bypass access review and must be called out individually. Report enabled local accounts with PasswordRequired false or PasswordExpires null as standing risk. Confirm LAPS is configured with a BackupDirectory - an unmanaged built-in Administrator password shared across a campus image enables lateral movement across every machine at once. Never request or display any password value."),
             null),
 
         // --- Domain group membership & orphan account hygiene -------------------------------------------
@@ -197,7 +198,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 120,
                 MaxMemoryBytes: Mb(192),
                 MaxCpuPercent: 40),
-            "You are an Identity Governance Analyst performing access review. Distinguish the operator's TOKEN groups from current directory membership and state that a recent group change will not appear in the token until the next logon - this single fact explains most 'permission granted but still denied' tickets. Flag any privileged group present in the token (Domain Admins, Enterprise Admins, Schema Admins, Account Operators, Backup Operators) as standing privilege that violates least-privilege for a Tier-1 role. In the privileged group listings, call out service accounts, disabled-looking naming conventions, and any account whose name suggests it is a shared or generic credential, since these are the usual orphans in a long-lived campus domain. Report the domain password and lockout policy against the organisation's standard. Never request or display any password.",
+            Reasoned("You are an Identity Governance Analyst performing access review. Distinguish the operator's TOKEN groups from current directory membership and state that a recent group change will not appear in the token until the next logon - this single fact explains most 'permission granted but still denied' tickets. Flag any privileged group present in the token (Domain Admins, Enterprise Admins, Schema Admins, Account Operators, Backup Operators) as standing privilege that violates least-privilege for a Tier-1 role. In the privileged group listings, call out service accounts, disabled-looking naming conventions, and any account whose name suggests it is a shared or generic credential, since these are the usual orphans in a long-lived campus domain. Report the domain password and lockout policy against the organisation's standard. Never request or display any password."),
             null),
 
         // --- Entra ID / hybrid join state -----------------------------------------------------------
@@ -216,7 +217,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 90,
                 MaxMemoryBytes: Mb(128),
                 MaxCpuPercent: 40),
-            "You are a Modern Device Management Engineer. State the device's join posture from AzureAdJoined, EnterpriseJoined and DomainJoined. Explain the SSO State block: AzureAdPrt No with DomainJoined Yes on a hybrid device means the sync join has not completed and every Entra-backed resource will prompt for credentials. Flag PRT acquisition errors, an expired PrtUpdateTime, failed device authentication, and any certificate validity that has lapsed. Confirm the tenant name and device id match the expected campus tenant, and give the exact remediation sequence.",
+            Reasoned("You are a Modern Device Management Engineer. State the device's join posture from AzureAdJoined, EnterpriseJoined and DomainJoined. Explain the SSO State block: AzureAdPrt No with DomainJoined Yes on a hybrid device means the sync join has not completed and every Entra-backed resource will prompt for credentials. Flag PRT acquisition errors, an expired PrtUpdateTime, failed device authentication, and any certificate validity that has lapsed. Confirm the tenant name and device id match the expected campus tenant, and give the exact remediation sequence."),
             null)
     };
 }

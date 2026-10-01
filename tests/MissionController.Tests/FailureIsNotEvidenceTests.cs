@@ -213,7 +213,8 @@ public class FailureIsNotEvidenceTests
         Assert.False(mismatched.IsSuccess);
         Assert.NotNull(mismatched.Telemetry.InitialFailureReason);
 
-        // And the contract it does satisfy still passes, so this is a real gate, not a blanket no.
+        // A matching contract with captured telemetry still passes. UserPayload alone is not
+        // the grounding haystack: production keeps the model's wrapper out of evidence checks.
         var matched = await engine.ExecuteIslandAsync(new QualityIslandRequest(
             MissionId: Guid.NewGuid(),
             TemplateId: "tpl-offline",
@@ -221,7 +222,8 @@ public class FailureIsNotEvidenceTests
             SystemPrompt: "Diagnose.",
             UserPayload: "disk at 94 percent",
             OperatorIdentity: "operator",
-            RequiredSchema: SchemaContractType.StructuredDiagnosis));
+            RequiredSchema: SchemaContractType.StructuredDiagnosis,
+            ExpectedTelemetryHaystack: "disk at 94 percent"));
 
         Assert.True(matched.IsSuccess);
     }

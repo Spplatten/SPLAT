@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using MissionController.Core;
+using MissionController.Core.Models;
 using MissionController.Core.Replay;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
@@ -61,16 +63,7 @@ public sealed class MissionReplayTests
 
         bool bless = Environment.GetEnvironmentVariable(BlessVariable) == "1";
         var files = MissionReplayHarness.FixtureFiles(directory);
-        if (files.Count == 0)
-        {
-            // Out loud, like the live tests' skip: a replay suite with nothing to replay must never
-            // read as a green one.
-            _out.WriteLine(
-                "NO FIXTURES: nothing has been recorded into " + directory + ". Record a run with " +
-                $"{MissionFixtureDirectoryRecorder.EnvironmentVariable} set, or export the console's runs with " +
-                $"{MissionFixtureExporter.EnvironmentVariable}=1, then promote the reviewed file here.");
-            return;
-        }
+        Assert.NotEmpty(files);
 
         var failures = new List<string>();
         foreach (string file in files)
@@ -125,15 +118,9 @@ public sealed class MissionReplayTests
 
             if (bless)
             {
-                // The answer stays what the model said; the reading of it becomes today's. The template
-                // and prompt hashes move with it, because blessing is accepting the current pipeline.
+                // Reinterpreting an old answer cannot prove that a model saw today's prompt. Keep
+                // the recording's identity; only a fresh live run can renew template coverage.
                 fixture.Expected = observed;
-                fixture.TemplateSha256 = MissionController.Core.Models.MissionRunFacts.HashTemplate(replay.Template);
-                if (replay.ModelCalls.Count > 0)
-                {
-                    fixture.SystemPromptSha256 = MissionFixture.Sha256Hex(
-                        RecalledContext.NormalizeBoundaries(replay.ModelCalls[0].SystemPrompt));
-                }
 
                 await File.WriteAllTextAsync(file, fixture.Serialize(), new UTF8Encoding(false));
                 line.Append(problems.Count == 0 ? "; blessed, unchanged" : $"; blessed, {problems.Count} expectation(s) rewritten");
@@ -231,14 +218,31 @@ public sealed class MissionReplayTests
             Assert.Equal(live.Analysis, fixture.Attempts.Single().Response);
             Assert.Equal(liveRows, fixture.Expected.LedgerActions);
             Assert.Equal("Warning", fixture.Expected.Status);
-            Assert.NotEmpty(fixture.SystemPromptSha256);
+            Assert.Empty(fixture.SystemPromptSha256);
 
             var replay = await MissionReplayHarness.ReplayAsync(fixture);
             Assert.Null(replay.PayloadMismatch());
             Assert.Empty(fixture.Expected.DifferencesFrom(replay.Observed()));
-            Assert.Empty(replay.Notes());
+            Assert.Contains(replay.Notes(), note => note.Contains("was not recorded", StringComparison.Ordinal));
 
             Assert.Empty(await MissionFixtureExporter.ExportAsync(fixtures, _out.WriteLine, dbPath));
+
+            // An indexed answer is not sufficient provenance. Use a fresh destination so
+            // deduplication cannot hide whether sealed simulation/rejection facts are checked.
+            string refusedDirectory = Path.Combine(dir, "refused-exports");
+            string? model = live.Facts.Model;
+            foreach (string invalidModel in new[] { "none: a local simulation (provider/model unavailable)", string.Empty })
+            {
+                live.Facts.Model = invalidModel;
+                await ledger.AppendLogAsync(live.Facts.MissionId, run.TemplateId, MissionRunFacts.LedgerAction,
+                    JsonSerializer.Serialize(live.Facts), "export-test");
+                Assert.Empty(await MissionFixtureExporter.ExportAsync(refusedDirectory, _out.WriteLine, dbPath));
+            }
+            live.Facts.Model = model;
+            live.Facts.QualityAccepted = false;
+            await ledger.AppendLogAsync(live.Facts.MissionId, run.TemplateId, MissionRunFacts.LedgerAction,
+                JsonSerializer.Serialize(live.Facts), "export-test");
+            Assert.Empty(await MissionFixtureExporter.ExportAsync(refusedDirectory, _out.WriteLine, dbPath));
         }
         finally
         {

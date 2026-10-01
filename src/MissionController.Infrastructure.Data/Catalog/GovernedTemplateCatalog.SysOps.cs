@@ -28,7 +28,8 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 60,
                 MaxMemoryBytes: Mb(256),
                 MaxCpuPercent: 40),
-            "You are a Senior Windows System Administrator. Analyze the storage volume output and report any drives with less than 15% free space with remediation suggestions. A HealthStatus other than Healthy means the file system itself has reported a fault; say so before any advice about capacity.",
+            Plain("Capacity and health thresholds already define the verdict; healthy volumes do not require incident hypotheses.",
+                "You are a Senior Windows System Administrator. Analyze the storage volume output and report any drives with less than 15% free space with remediation suggestions. A HealthStatus other than Healthy means the file system itself has reported a fault; say so before any advice about capacity."),
             null),
 
         // --- Patch compliance -------------------------------------------------------------------------
@@ -102,7 +103,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 120,
                 MaxMemoryBytes: Mb(256),
                 MaxCpuPercent: 50),
-            "You are a Windows Platform Engineer. An automatic service in Stopped state is only a finding if it did not stop deliberately - use the SCM events to tell the difference. Event 7031/7034 with a rising restart count is a crash loop and the top priority. Event 7000 with a timeout message usually means a dependency or network resource was unavailable at boot rather than a broken binary. Event 7009 is a start timeout, commonly caused by slow disk on shared campus hardware rather than the service itself. Report the owning StartName for each failure, since a service running as a domain account will fail permanently after a password change.",
+            Reasoned("You are a Windows Platform Engineer. An automatic service in Stopped state is only a finding if it did not stop deliberately - use the SCM events to tell the difference. Event 7031/7034 with a rising restart count is a crash loop and the top priority. Event 7000 with a timeout message usually means a dependency or network resource was unavailable at boot rather than a broken binary. Event 7009 is a start timeout, commonly caused by slow disk on shared campus hardware rather than the service itself. Report the owning StartName for each failure, since a service running as a domain account will fail permanently after a password change."),
             new Dictionary<string, string>
             {
                 { "MaxEventCount", "300" }
@@ -153,7 +154,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 120,
                 MaxMemoryBytes: Mb(128),
                 MaxCpuPercent: 40),
-            "You are an Active Directory Time Service Engineer. Kerberos rejects any ticket whose timestamp is outside the 5-minute default skew tolerance, so an offset approaching that threshold is an imminent total authentication outage for this machine - lead with the offset and its distance from the limit. Confirm the source is the domain hierarchy rather than an internet NTP server or the local CMOS clock, since a domain member syncing externally will drift out of the domain's own consensus. Flag a stratum that is unexpectedly high, a last-successful-sync timestamp that is stale, and a poll interval that has backed off after repeated failures.",
+            Reasoned("You are an Active Directory Time Service Engineer. Kerberos rejects any ticket whose timestamp is outside the 5-minute default skew tolerance, so an offset approaching that threshold is an imminent total authentication outage for this machine - lead with the offset and its distance from the limit. Confirm the source is the domain hierarchy rather than an internet NTP server or the local CMOS clock, since a domain member syncing externally will drift out of the domain's own consensus. Flag a stratum that is unexpectedly high, a last-successful-sync timestamp that is stale, and a poll interval that has backed off after repeated failures."),
             new Dictionary<string, string>
             {
                 { "TimeSourceHost", "time.windows.com" },
@@ -176,7 +177,8 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 90,
                 MaxMemoryBytes: Mb(256),
                 MaxCpuPercent: 50),
-            "You are a Windows Performance Analyst. Memory values from Win32_OperatingSystem are in kilobytes - convert to GB before reporting and state the free physical memory as a percentage of total. Pagefile CurrentUsage well below PeakUsage indicates past pressure that has since cleared, which is useful history rather than a live fault, so distinguish the two. A process whose PrivateMemorySize64 greatly exceeds its WorkingSet64 is paged out and may be idle rather than leaking. Handle counts above roughly 10,000 for a single process suggest a handle leak; name the process and whether it is a user application or a management agent.",
+            Plain("Report the measured memory totals and largest consumers; a single snapshot cannot establish a leak or its history.",
+                "You are a Windows Performance Analyst. Memory values from Win32_OperatingSystem are in kilobytes - convert to GB before reporting and state the free physical memory as a percentage of total. Pagefile CurrentUsage well below PeakUsage indicates past pressure that has since cleared, which is useful history rather than a live fault, so distinguish the two. A process whose PrivateMemorySize64 greatly exceeds its WorkingSet64 is paged out and may be idle rather than leaking. Handle counts above roughly 10,000 for a single process suggest a handle leak; name the process and whether it is a user application or a management agent."),
             new Dictionary<string, string>
             {
                 { "TopProcessCount", "15" }
@@ -198,7 +200,7 @@ public static partial class GovernedTemplateCatalog
                 TimeoutSeconds: 120,
                 MaxMemoryBytes: Mb(256),
                 MaxCpuPercent: 50),
-            "You are a Desktop Performance Engineer supporting shared lab machines. If the Diagnostics-Performance channel returns nothing, state that the channel is unreadable or disabled rather than reporting fast boot times. Event 100 carries total boot duration, 101 names an application that slowed startup, 102 a driver, and 109 a service - attribute delay to the specific named component rather than reporting an aggregate. HiberbootEnabled 1 means Fast Startup is on, so LastBootUpTime reflects a hybrid resume and the machine may not have truly rebooted for patching in weeks; check uptime against that and say so plainly. Rank remediations by seconds recovered per user logon.",
+            Reasoned("You are a Desktop Performance Engineer supporting shared lab machines. If the Diagnostics-Performance channel returns nothing, state that the channel is unreadable or disabled rather than reporting fast boot times. Event 100 carries total boot duration, 101 names an application that slowed startup, 102 a driver, and 109 a service - attribute delay to the specific named component rather than reporting an aggregate. HiberbootEnabled 1 means Fast Startup is on, so LastBootUpTime reflects a hybrid resume and the machine may not have truly rebooted for patching in weeks; check uptime against that and say so plainly. Rank remediations by seconds recovered per user logon."),
             new Dictionary<string, string>
             {
                 { "MaxEventCount", "80" }

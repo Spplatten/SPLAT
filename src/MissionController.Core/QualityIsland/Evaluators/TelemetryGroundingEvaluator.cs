@@ -41,14 +41,22 @@ public sealed class TelemetryGroundingEvaluator : ISemanticEvaluator
                 UngroundedClaims: Array.Empty<string>()));
         }
 
-        // If no telemetry is supplied or required (e.g. goal decomposition / free-form), grounding is neutral
-        if (string.IsNullOrWhiteSpace(telemetryHaystack) ||
-            contractType is SchemaContractType.GoalDecomposition or SchemaContractType.DynamicCodeScript)
+        // Planning can omit telemetry; a diagnosis cannot earn perfect grounding by losing
+        // its sensor. Otherwise truncating all evidence makes an old healthy answer pass.
+        if (contractType is SchemaContractType.GoalDecomposition or SchemaContractType.DynamicCodeScript ||
+            (string.IsNullOrWhiteSpace(telemetryHaystack) && contractType != SchemaContractType.StructuredDiagnosis))
         {
             return Task.FromResult(SemanticEvaluationResult.Pass(1.0, groundingScore: 1.0));
         }
 
         var verdict = _extractor.ExtractFindings(candidateContent, telemetryHaystack);
+        if (string.IsNullOrWhiteSpace(telemetryHaystack))
+        {
+            return Task.FromResult(new SemanticEvaluationResult(
+                SemanticScore: 0.0, GroundingScore: 0.0, CompletenessScore: 1.0, AntiHedgingScore: 1.0,
+                QualityNotes: new[] { "No sensor telemetry was captured; this diagnosis cannot be verified." },
+                UngroundedClaims: verdict.KeyFindings, ParsedVerdict: verdict));
+        }
         var attestation = verdict.Attestation;
 
         if (attestation == null || attestation.Findings.Count == 0)

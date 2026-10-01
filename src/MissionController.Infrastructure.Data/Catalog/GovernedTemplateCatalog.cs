@@ -21,7 +21,7 @@ public static partial class GovernedTemplateCatalog
     /// Bumped whenever the seeded set changes. The registry stores this so startup can skip a
     /// redundant full-catalog upsert when the on-disk set already matches the shipped build.
     /// </summary>
-    public const string CatalogVersion = "2.4.0";
+    public const string CatalogVersion = "2.5.0";
 
     // --- Model governance -----------------------------------------------------------------
     // Pro is reserved for templates whose output requires correlation or adversarial reasoning
@@ -143,8 +143,17 @@ public static partial class GovernedTemplateCatalog
         "CIS benchmark item it maps to, labelled as knowledge. Give a verdict; where evidence is thin, say what " +
         "is missing rather than that it cannot be determined.";
 
-    /// <summary>A role prompt with <see cref="AnalystReasoning"/> appended. Opt-in per template, on purpose.</summary>
-    private static string Reasoned(string rolePrompt) => rolePrompt + AnalystReasoning;
+    // A raw string cannot enter the catalog without a decision. Keeping the rationale beside
+    // each plain prompt prevents a future template from silently skipping the reasoning block.
+    private sealed record CatalogPrompt(string Text);
+
+    private static CatalogPrompt Reasoned(string rolePrompt) => new(rolePrompt + AnalystReasoning);
+
+    private static CatalogPrompt Plain(string rationale, string rolePrompt)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rationale);
+        return new(rolePrompt);
+    }
 
     /// <summary>
     /// Builds a template already bound to the single approved egress rule, enforcing the
@@ -162,7 +171,7 @@ public static partial class GovernedTemplateCatalog
         string category,
         string model,
         SingleToolDefinition tool,
-        string systemPrompt,
+        CatalogPrompt systemPrompt,
         Dictionary<string, string>? parameters = null,
         EgressRule? egress = null) =>
         new(templateId,
@@ -172,7 +181,7 @@ public static partial class GovernedTemplateCatalog
             model,
             tool,
             egress ?? AiGatewayEgress,
-            systemPrompt,
+            systemPrompt.Text,
             parameters ?? new Dictionary<string, string>());
 
     private static IReadOnlyList<SingleToolTemplate>? _all;
