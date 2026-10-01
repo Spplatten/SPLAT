@@ -13,6 +13,10 @@
 
 ---
 
+Platten Industries is a one-person company, and this repository is that person's work. No second engineer has reviewed it, no auditor has assessed it, and most commits name an AI assistant as co-author because that is how they were written. None of that is load-bearing either way: what holds the claims up is machine-checked evidence — probe files, recorded runs pinned to the SHA-256 of the source that produced them, and tests that fail the build when prose and evidence disagree. Run the probes rather than trusting the voice. Every section below also names what it does **not** establish, and [`SUPPORTED_POLICY.md`](native/splat-agent/SUPPORTED_POLICY.md) enumerates what a lease does not enforce at all.
+
+---
+
 ## The thesis
 
 Every mainstream approach to "safe" AI agent execution filters in user space — regex guards, prompt rules, wrapper APIs. All of it runs *beside* the agent, at the same privilege, where a hijacked agent can route around it. SPLAT's position is that containment belongs **below** the agent:
