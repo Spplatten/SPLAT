@@ -134,14 +134,18 @@ public class CatalogProducesEvidenceTests
     }
 
     /// <summary>
-    /// Measured 2026-09-22. Pinned rather than asserted empty, because each of these is a template
-    /// to give an elevated tier or retire, and that is the operator's decision, not a test fix.
+    /// Measured 2026-09-22, and decided 2026-10-01: four of the five were retired rather than given
+    /// an elevated tier. <c>compliance-security-baseline</c> (<c>secedit</c>'s policy export),
+    /// <c>endpoint-bitlocker-compliance</c> (the BitLocker and TPM cmdlets, which answered with
+    /// seven empty labels and so passed as evidence until <see cref="Payload"/> stopped counting
+    /// them), <c>identity-gpo-rsop</c> (<c>gpresult</c>) and <c>identity-lockout-trace</c> (the
+    /// Security event log) are gone from the catalog: a second privilege tier would have cost the
+    /// zero-admin pillar, which is a load-bearing claim, to recover four outputs nobody asked for.
     ///
-    /// All five want a right the restricted token deliberately removes: the Security event log
-    /// (identity-lockout-trace, secops-auth-inspector), <c>gpresult</c> (identity-gpo-rsop),
-    /// <c>secedit</c>'s policy export (compliance-security-baseline) and the BitLocker and TPM
-    /// cmdlets (endpoint-bitlocker-compliance, which answered with empty labels and so passed as
-    /// evidence until <see cref="Payload"/> stopped counting them).
+    /// One is left, and it is the harder call. <c>secops-auth-inspector</c> wants the Security
+    /// event log too, and it is the only authentication telemetry in the product: a governed crew's
+    /// auth-hunter agent and a project's identity stage are both built on it, so retiring it removes
+    /// a capability rather than a dead end. It stays pinned here until that is decided.
     ///
     /// Four left on 2026-09-22 by being fixed. Two had called <c>wmic</c>, which Windows 11 removed.
     /// identity-kerberos-spn had been running a JDK's <c>klist</c>, found ahead of System32 on the
@@ -153,10 +157,6 @@ public class CatalogProducesEvidenceTests
     /// </summary>
     private static readonly string[] ProduceNoEvidence =
     {
-        "compliance-security-baseline",
-        "endpoint-bitlocker-compliance",
-        "identity-gpo-rsop",
-        "identity-lockout-trace",
         "secops-auth-inspector",
     };
 

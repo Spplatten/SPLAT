@@ -84,31 +84,6 @@ public static partial class GovernedTemplateCatalog
             Reasoned("You are a Threat Hunter. Flag any autorun entry whose executable lives in a user-writable location (AppData, ProgramData, Temp, Downloads, Public) or is launched through an interpreter (powershell, wscript, cscript, mshta, rundll32, regsvr32). Report Win32_Service PathName values containing spaces without surrounding quotes as unquoted service path privilege escalation. Verify Winlogon Shell is exactly explorer.exe and Userinit exactly userinit.exe - any appended command is a classic logon hijack. Rank findings by exploitability. Then do what a listing cannot: classify every entry as a Windows component, a signed vendor agent, management tooling, or unexplained, from what you know of how each normally installs - its usual path, publisher and service name - and call out lookalikes: a system binary name in a user-writable path, a vendor name with the wrong path, a task whose author does not match what it runs. Name the mechanism each flagged entry uses as knowledge with its ATT&CK id: Run keys T1547.001, Winlogon helpers T1547.004, services T1543.003, scheduled tasks T1053.005."),
             null),
 
-        // --- BitLocker / TPM compliance --------------------------------------------------------------
-        Template(
-            "endpoint-bitlocker-compliance",
-            "BitLocker Encryption & TPM Compliance",
-            "Reports volume encryption state, protector types, and TPM readiness for full-disk-encryption compliance reporting.",
-            CatEndpoint,
-            ModelPro,
-            new SingleToolDefinition(
-                "bitlocker_compliance_tool",
-                "BitLocker Volume & TPM State Query",
-                PowerShellExe,
-                // Protectors are projected to KeyProtectorId and KeyProtectorType ONLY. The
-                // KeyProtector object also carries RecoveryPassword, which holds the live 48-digit
-                // recovery key - formatting the object wholesale would ship the key that defeats
-                // full-disk encryption straight into the egress stream. The narrow projection is a
-                // hard data-boundary control, not a formatting preference.
-                Ps(@"Get-BitLockerVolume -ErrorAction SilentlyContinue | Select-Object MountPoint,VolumeType,EncryptionMethod,VolumeStatus,ProtectionStatus,EncryptionPercentage,AutoUnlockEnabled,CapacityGB | Format-Table -AutoSize; Write-Output '--- KEY PROTECTOR TYPES (VALUES DELIBERATELY EXCLUDED) ---'; Get-BitLockerVolume -ErrorAction SilentlyContinue | Select-Object -ExpandProperty KeyProtector -ErrorAction SilentlyContinue | Select-Object KeyProtectorId,KeyProtectorType | Format-Table -AutoSize; Write-Output '--- TPM STATE ---'; Get-Tpm -ErrorAction SilentlyContinue | Select-Object TpmPresent,TpmReady,TpmEnabled,TpmActivated,TpmOwned,ManufacturerVersion,LockoutCount | Format-List; Write-Output '--- ENCRYPTION POLICY ---'; Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\FVE' -ErrorAction SilentlyContinue | Format-List"),
-                ExitOkOrPartial,
-                TimeoutSeconds: 90,
-                MaxMemoryBytes: Mb(192),
-                MaxCpuPercent: 40),
-            Plain("Volume and protector settings support a posture report with privilege gaps, not a behavioural investigation.",
-                "You are a Data Protection Compliance Officer. Under the zero-admin operator model an unprivileged technician sees volume status but may see no protector or TPM detail - if those sections are empty or access-denied, say the encryption state was read but protector recoverability could not be verified at this privilege level, and do not infer a missing protector from missing output. Mark any fixed volume NON-COMPLIANT if VolumeStatus is not FullyEncrypted or ProtectionStatus is not On. Flag EncryptionMethod weaker than XtsAes128 as below baseline. A volume whose only protector is TpmPin or Tpm with no RecoveryPassword protector cannot be recovered after a board replacement - report it as a recoverability gap. TpmReady False or TpmPresent False blocks silent encryption entirely on that model. Never request, infer, or display a recovery key value."),
-            null),
-
         // --- Credential Guard / LSA hardening -----------------------------------------------------------
         Template(
             "endpoint-credential-guard",

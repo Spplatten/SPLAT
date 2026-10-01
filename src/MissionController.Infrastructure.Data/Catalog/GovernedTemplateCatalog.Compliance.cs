@@ -31,31 +31,6 @@ public static partial class GovernedTemplateCatalog
                 "You are a Compliance Auditor assessing detection coverage. If auditpol reports access denied, state that the operator lacks the audit-read delegation and that coverage could NOT be assessed - do not conclude that auditing is unconfigured. Otherwise, flag any subcategory set to No Auditing that is required for the organisation's framework, prioritising Logon, Logoff, Account Lockout, Credential Validation, Process Creation, and Object Access. Success-only auditing on Logon leaves failed-logon attacks invisible - call that out specifically. If SCENoApplyLegacyAuditPolicy is absent or zero, legacy policy can silently overwrite the advanced subcategories at every GPO refresh, which makes the whole configuration unreliable. Finally, compare the Security log maxSize and retention against the event volume needed to preserve the organisation's required lookback window."),
             null),
 
-        // --- Local security baseline ---------------------------------------------------------------
-        Template(
-            "compliance-security-baseline",
-            "Local Security Policy Baseline Export",
-            "Exports the effective local security policy (account, lockout, and rights assignment) for baseline drift comparison.",
-            CatCompliance,
-            ModelPro,
-            new SingleToolDefinition(
-                "security_baseline_tool",
-                "SecEdit Policy Export Reader",
-                CmdExe,
-                // secedit writes its export to the process working directory, which the engine
-                // sets to the per-mission NT ACL jail. Because the MSIX manifest disables
-                // FileSystemWriteVirtualization, the .inf lands in the real jail path rather than
-                // being silently redirected into the package's virtual write layer - where the
-                // subsequent 'type' would then fail to find it.
-                "/c secedit /export /cfg baseline.inf /quiet & type baseline.inf & echo --- PASSWORD POLICY --- & net accounts",
-                ExitOkOrToolAbsent,
-                TimeoutSeconds: 120,
-                MaxMemoryBytes: Mb(192),
-                MaxCpuPercent: 40),
-            Plain("Compare the static policy export with baseline settings and report unreadable exports without inventing activity.",
-                "You are a Security Baseline Compliance Analyst. If the export failed or produced no file, report insufficient privilege rather than a clean baseline. Otherwise evaluate: MinimumPasswordLength below the organisation standard, PasswordComplexity disabled, LockoutBadCount of 0 (meaning no lockout threshold at all, permitting unlimited password guessing), ClearTextPassword enabled, and LSAAnonymousNameLookup enabled. In the rights assignment section, flag SeDebugPrivilege, SeBackupPrivilege, SeTakeOwnershipPrivilege, and SeImpersonatePrivilege held by anything beyond Administrators, since each is a direct path to SYSTEM. Present findings as a baseline-drift table with the observed value, the expected value, and the risk."),
-            null),
-
         // --- PowerShell logging coverage ------------------------------------------------------------------
         Template(
             "compliance-powershell-logging",

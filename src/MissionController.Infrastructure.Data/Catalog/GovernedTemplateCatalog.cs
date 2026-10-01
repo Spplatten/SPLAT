@@ -214,10 +214,8 @@ public static partial class GovernedTemplateCatalog
     private static readonly HashSet<string> DenialMeasuredHarmless = new(StringComparer.Ordinal)
     {
         "dev-app-provisioner-bot",
-        "endpoint-bitlocker-compliance",
         "grants-budget-compliance-auditor",
         "grants-eligibility-proposal-engine",
-        "identity-lockout-trace",
         "marketing-social-campaign-publisher",
         "secops-auth-inspector",
         "secops-tls-cipher-audit",

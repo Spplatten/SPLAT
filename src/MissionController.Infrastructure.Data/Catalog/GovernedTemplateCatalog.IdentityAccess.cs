@@ -71,58 +71,6 @@ public static partial class GovernedTemplateCatalog
                 { "DomainFqdn", "corp.contoso.com" }
             }),
 
-        // --- Account lockout tracing ----------------------------------------------------------
-        // Same Event Log Readers delegation path as the brute-force detector above; restricted
-        // token kept, access failure surfaced by the prompt rather than swallowed.
-        Template(
-            "identity-lockout-trace",
-            "Account Lockout Origin Tracer (4740/4767)",
-            "Traces account lockout and unlock events back to the originating caller workstation to isolate stale credential sources.",
-            CatIdentity,
-            ModelPro,
-            new SingleToolDefinition(
-                "wevtutil_lockout_tool",
-                "Lockout Event Channel Query",
-                WevtutilExe,
-                "qe Security /q:\"*[System[(EventID=4740 or EventID=4767 or EventID=4771 or EventID=4776) and TimeCreated[timediff(@SystemTime) <= {LookbackWindowMs}]]]\" /c:{MaxEventCount} /rd:true /f:text",
-                new[] { 0, 5 },
-                TimeoutSeconds: 90,
-                MaxMemoryBytes: Mb(384),
-                MaxCpuPercent: 60),
-            Reasoned("You are an Identity Operations Engineer handling lockout escalations. FIRST: if the output is empty or access-denied, state that the operator lacks 'Event Log Readers' delegation and that no lockout trace was produced - do not report the absence of evidence as an absence of lockouts. For every 4740, extract the Caller Computer Name - this is the true lockout origin, not the DC that logged it. Group repeat lockouts by account and by caller. A caller that repeatedly locks one account almost always indicates a stale cached credential: a mapped drive, a scheduled task running as the user, a saved RDP session, a service logon account, or a mobile device with an old password. Use 4771/4776 pre-authentication failures to corroborate. Name the most probable stale-credential source and the exact remediation."),
-            new Dictionary<string, string>
-            {
-                { "LookbackWindowMs", "172800000" }, // 48h - lockouts are often reported a day late
-                { "MaxEventCount", "300" }
-            }),
-
-        // --- Resultant Set of Policy -----------------------------------------------------------
-        // /scope:user always works for the calling technician; /scope:computer requires elevation
-        // and is expected to fail under the zero-admin model. It is retained in the chain because a
-        // partial RSoP is still the fastest policy triage available to Tier-1, and the '&' chaining
-        // guarantees the user-scope result survives the machine-scope refusal.
-        Template(
-            "identity-gpo-rsop",
-            "Group Policy Resultant Set (RSoP) Analyzer",
-            "Captures applied, denied and filtered Group Policy objects for both machine and user scope, with slow-link and loopback state.",
-            CatIdentity,
-            ModelPro,
-            new SingleToolDefinition(
-                "gpresult_rsop_tool",
-                "GPResult Resultant Set of Policy",
-                CmdExe,
-                "/c gpresult /r /scope:computer & echo --- USER SCOPE --- & gpresult /r /scope:user & echo --- GPO APPLICATION EVENTS --- & wevtutil qe Microsoft-Windows-GroupPolicy/Operational /c:{MaxEventCount} /rd:true /f:text",
-                ExitOkOrToolAbsent,
-                TimeoutSeconds: 150,
-                MaxMemoryBytes: Mb(256),
-                MaxCpuPercent: 50),
-            Plain("Explain winning policies and visible user or computer scope; an unreadable scope cannot supply a host story.",
-                "You are a Group Policy Engineer. If the computer-scope section reports access denied, say so plainly and analyse user scope only - do not describe the machine as having no applied policy. List applied versus denied GPOs and state the denial reason for each (security filtering, WMI filter, empty, disabled link). Flag slow-link detection being active, since it suppresses software installation and folder redirection extensions. Identify loopback processing mode if present and explain which user policies it replaces or merges. From the GroupPolicy/Operational events, report processing time outliers and any 1058/1030 errors indicating SYSVOL reachability or DFS referral failure. Order findings by operational impact."),
-            new Dictionary<string, string>
-            {
-                { "MaxEventCount", "60" }
-            }),
-
         // --- Kerberos ticket & SPN hygiene ------------------------------------------------------
         // Restricted token is KEPT here: klist reads the caller's own ticket cache and setspn
         // performs an authenticated LDAP read, both of which work correctly at Medium integrity.
