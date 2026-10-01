@@ -39,15 +39,15 @@ public static partial class GovernedTemplateCatalog
         // --- Autonomous Social Marketing & Developer App Campaign ------------------------------
         Template(
             "marketing-social-campaign-publisher",
-            "Autonomous Social Campaign & Developer App Publisher",
-            "Drafts, optimizes, and schedules multi-platform developer marketing threads and API release announcements with strict egress guardrails.",
+            "Social Campaign Draft Composer",
+            "Drafts multi-platform developer marketing copy from the brief below, for operator review. The tool echoes the brief and nothing else: no account is reached, nothing is scheduled, and nothing is posted.",
             CatAutonomous,
             ModelPro,
             new SingleToolDefinition(
-                "social_campaign_executor",
-                "Social Campaign Drafter & API Dispatcher",
+                "social_campaign_brief",
+                "Campaign Brief Echo",
                 PowerShellExe,
-                Ps(@"Write-Output '=== SPLAT AUTONOMOUS CAMPAIGN GENERATOR ==='; Write-Output 'Platform: {Platform}'; Write-Output 'Campaign Theme: {CampaignTheme}'; Write-Output 'Target Audience: {TargetAudience}'; Write-Output 'Thread Length: {ThreadLength} posts'; Write-Output 'Call to Action: {CallToAction}'; Write-Output 'Publish Mode: {PublishMode}'"),
+                Ps(@"Write-Output '=== SPLAT CAMPAIGN BRIEF ==='; Write-Output 'Platform: {Platform}'; Write-Output 'Campaign Theme: {CampaignTheme}'; Write-Output 'Target Audience: {TargetAudience}'; Write-Output 'Thread Length: {ThreadLength} posts'; Write-Output 'Call to Action: {CallToAction}'; Write-Output 'Publish Mode: {PublishMode}'; Write-Output '--- WHAT THIS TOOL DID ---'; Write-Output 'Echoed the brief above. No platform API was called, no post was scheduled and nothing was published; the copy is the model''s and is returned to the operator.'"),
                 ExitOkOrPartial,
                 TimeoutSeconds: 60,
                 MaxMemoryBytes: Mb(256),
@@ -67,15 +67,15 @@ public static partial class GovernedTemplateCatalog
         // --- Developer Application & Webhook Provisioner ----------------------------------------
         Template(
             "dev-app-provisioner-bot",
-            "Developer Application & Webhook Provisioner",
-            "Provisions developer applications, validates OAuth callback configurations, and tests webhook endpoints with strict egress isolation.",
+            "Developer Application & Webhook Configuration Review",
+            "Restates a declared OAuth and webhook configuration - callback URL, webhook target, requested scopes - for the model to review against least-privilege practice. Nothing is provisioned, no endpoint is contacted and no secret is generated.",
             CatAutonomous,
             ModelPro,
             new SingleToolDefinition(
-                "app_provisioner_tool",
-                "Developer OAuth & Webhook Harness",
+                "app_config_review",
+                "Declared OAuth & Webhook Configuration",
                 PowerShellExe,
-                Ps(@"Write-Output '=== SPLAT DEVELOPER APP & WEBHOOK PROVISIONER ==='; Write-Output 'Application: {AppName}'; Write-Output 'Environment: {Environment}'; Write-Output 'OAuth Callback: {CallbackUrl}'; Write-Output 'Webhook Target: {WebhookUrl}'; Write-Output 'Requested Scopes: {AllowedScopes}'; Write-Output '--- HEALTH & TLS PROBE ---'; Test-NetConnection -ComputerName 127.0.0.1 -Port 80 -InformationLevel Quiet 2>$null | Out-Null; Write-Output 'Network handshake simulated. Webhook HMAC secret generated in secure memory.'"),
+                Ps(@"Write-Output '=== SPLAT DEVELOPER APP CONFIGURATION REVIEW ==='; Write-Output 'Application: {AppName}'; Write-Output 'Environment: {Environment}'; Write-Output 'OAuth Callback: {CallbackUrl}'; Write-Output 'Webhook Target: {WebhookUrl}'; Write-Output 'Requested Scopes: {AllowedScopes}'; Write-Output '--- WHAT THIS TOOL DID ---'; Write-Output 'Restated the declared configuration above. The callback and webhook targets were not contacted, no application was registered, and no HMAC secret exists: judge the configuration on its own terms, not on any reachability this run established.'"),
                 ExitOkOrPartial,
                 TimeoutSeconds: 90,
                 MaxMemoryBytes: Mb(256),
@@ -179,15 +179,15 @@ public static partial class GovernedTemplateCatalog
         // ineligible profile fails fast instead of producing a polished but unfileable proposal.
         Template(
             "grants-eligibility-proposal-engine",
-            "Autonomous Grant Discovery & Proposal Engine",
-            "Audits applicant eligibility against federal, state, and municipal grant gates (SBIR/STTR, LaunchTN match, municipal micro-grants), then drafts the five-section proposal narrative under draft-only governance with no submission egress.",
+            "Grant Eligibility Assessment & Proposal Draft",
+            "Restates the applicant profile the operator declared, then has the model assess it against published grant gates (SBIR/STTR, LaunchTN match, municipal micro-grants) and draft the five-section narrative. The assessment is the model's reading of the declared facts: no registry is queried, no eligibility is verified, and draft-only governance means nothing is filed.",
             CatAutonomous,
             ModelPro,
             new SingleToolDefinition(
                 "grant_profile_auditor",
                 "Grant Applicant Profile & Program Evidence Collector",
                 PowerShellExe,
-                Ps(@"Write-Output '=== SPLAT AUTONOMOUS GRANT DISCOVERY & PROPOSAL ENGINE ==='; Write-Output 'Applicant: {ApplicantLegalName} [{EntityType}]'; Write-Output 'Headquarters: {HeadquartersLocation}'; Write-Output 'Headcount: {TotalEmployees} FTE | Sector: {IndustrySector}'; Write-Output 'Technology Readiness: TRL {TechnologyReadinessLevel}'; Write-Output 'Core IP: {CoreIntellectualProperty}'; Write-Output 'Academic Partner: {AcademicPartner}'; Write-Output 'Target Program: {TargetProgram}'; Write-Output 'Request: {RequestAmount} USD over {ProjectDurationMonths} months'; Write-Output 'Scoring Focus: {PrimaryScoringCriteria}'; Write-Output '--- GOVERNANCE POSTURE ---'; Write-Output 'Draft-only mission: no submission egress; portal credentials never enter this sandbox.'; Write-Output 'Output is a reviewable draft requiring operator sign-off before any filing.'"),
+                Ps(@"Write-Output '=== SPLAT AUTONOMOUS GRANT DISCOVERY & PROPOSAL ENGINE ==='; Write-Output 'Applicant: {ApplicantLegalName} [{EntityType}]'; Write-Output 'Headquarters: {HeadquartersLocation}'; Write-Output 'Headcount: {TotalEmployees} FTE | Sector: {IndustrySector}'; Write-Output 'Technology Readiness: TRL {TechnologyReadinessLevel}'; Write-Output 'Core IP: {CoreIntellectualProperty}'; Write-Output 'Academic Partner: {AcademicPartner}'; Write-Output 'Target Program: {TargetProgram}'; Write-Output 'Request: {RequestAmount} USD over {ProjectDurationMonths} months'; Write-Output 'Scoring Focus: {PrimaryScoringCriteria}'; Write-Output '--- GOVERNANCE POSTURE ---'; Write-Output 'Draft-only mission: no submission egress; portal credentials never enter this sandbox.'; Write-Output 'Output is a reviewable draft requiring operator sign-off before any filing.'; Write-Output 'Eligibility is not verified here: no registry, portal or award database was queried, and every fact above is the one the operator supplied.'"),
                 ExitOkOrPartial,
                 TimeoutSeconds: 90,
                 MaxMemoryBytes: Mb(256),

@@ -33,18 +33,52 @@ public sealed class TemplateEvidenceHonestyTests
         "Verified valid token",
     };
 
-    [Fact]
-    public void NoTemplateTool_PrintsTheContainmentItRunsUnder()
+    /// <summary>
+    /// The same fabrication, one level out: not "a mechanism is protecting me" but "I performed an
+    /// action" by a tool that performed nothing. `dev-app-provisioner-bot` probed a loopback port,
+    /// piped the result to <c>Out-Null</c>, and printed "Webhook HMAC secret generated in secure
+    /// memory" — no secret, no memory, and the one real measurement discarded. The grounder would
+    /// have anchored a model's repetition of that line in the telemetry and certified it.
+    ///
+    /// These phrases claim an effect outside the process. A tool that genuinely dispatches, schedules
+    /// or provisions should report what came back — a status code, an id, a response — which is a
+    /// reading and not one of these. The negative form is always allowed and is the idiom the
+    /// `source-*` probes already use: "Nothing is published, and no credential is presented."
+    /// </summary>
+    private static readonly string[] AssertedEffects =
     {
+        "secret generated",
+        "in secure memory",
+        "handshake simulated",
+        "credentials rotated",
+        "dispatched to",
+        "scheduled for",
+        "published to",
+        "provisioned successfully",
+        "registered successfully",
+        "submitted successfully",
+    };
+
+    [Fact]
+    public void NoTemplateTool_PrintsAClaimItCannotSupport()
+    {
+        // One fact, two vocabularies, on purpose: a second [Fact] would move the suite's advertised
+        // count and send three documents and the Field Guide out of sync for a check that is the same
+        // check. The message says which kind was found so the fix is obvious either way.
         var fabrications = GovernedTemplateCatalog.All
             .SelectMany(template => AssertedMechanisms
                 .Where(phrase => template.Tool.ArgumentsTemplate.Contains(phrase, StringComparison.OrdinalIgnoreCase))
-                .Select(phrase => $"{template.TemplateId}: \"{phrase}\""))
+                .Select(phrase => $"containment claimed - {template.TemplateId}: \"{phrase}\""))
+            .Concat(GovernedTemplateCatalog.All
+                .SelectMany(template => AssertedEffects
+                    .Where(phrase => template.Tool.ArgumentsTemplate.Contains(phrase, StringComparison.OrdinalIgnoreCase))
+                    .Select(phrase => $"effect claimed - {template.TemplateId}: \"{phrase}\"")))
             .ToList();
 
         Assert.True(
             fabrications.Count == 0,
-            "These tools print containment claims into the stdout their findings are grounded against: "
+            "These tools print into the stdout their own findings are grounded against a claim the run "
+            + "does not support. Report what was observed, or state what was not done: "
             + string.Join("; ", fabrications));
     }
 
