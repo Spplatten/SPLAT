@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using MissionController.Core;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 using MissionController.Infrastructure.Data;
@@ -14,6 +16,7 @@ using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Data.Compliance;
 using MissionController.Infrastructure.Linux;
+using MissionController.Infrastructure.Network.Identity;
 using SplatMcp;
 using Xunit;
 
@@ -32,6 +35,7 @@ namespace MissionController.Tests;
 public class McpRunRecordTests : IDisposable
 {
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"splat-mcp-record-{Guid.NewGuid():N}.db");
+    private readonly string _exportDirectory = Path.Combine(Path.GetTempPath(), $"splat-mcp-bundle-{Guid.NewGuid():N}");
 
     public void Dispose()
     {
@@ -39,6 +43,7 @@ public class McpRunRecordTests : IDisposable
         GC.Collect();
         GC.WaitForPendingFinalizers();
         try { File.Delete(_dbPath); } catch (IOException) { }
+        if (Directory.Exists(_exportDirectory)) Directory.Delete(_exportDirectory, recursive: true);
     }
 
     /// <summary>
@@ -49,6 +54,8 @@ public class McpRunRecordTests : IDisposable
     private sealed class ReportingLeasedExecutor : ILeasedExecutor
     {
         public LeaseSpec? LastLease { get; private set; }
+        public IReadOnlyList<string>? LastArgv { get; private set; }
+        public string? LastCommand { get; private set; }
         public LeaseOutcome Outcome { get; set; } = new(
             CgroupId: 4211,
             CgroupPath: "/sys/fs/cgroup/splat/mission",
@@ -70,6 +77,10 @@ public class McpRunRecordTests : IDisposable
             OutcomePublicKey: "cHVibGlj");
 
         public int ExitCode { get; set; }
+        public string StandardOutput { get; set; } = "6.6.87.2-microsoft-standard-WSL2\n";
+        public string StandardError { get; set; } = string.Empty;
+        public string? TerminalReason { get; set; }
+        public LeaseViolationEvent? Violation { get; set; }
 
         public Task<ProcessExecutionResult> ExecuteLeasedAsync(
             LeaseSpec lease,
@@ -81,13 +92,16 @@ public class McpRunRecordTests : IDisposable
             CancellationToken ct = default)
         {
             LastLease = lease;
+            LastArgv = argv.ToArray();
+            LastCommand = command;
+            if (Violation is not null) violations?.Report(Violation);
             return Task.FromResult(new ProcessExecutionResult(
                 ExitCode: ExitCode,
-                StandardOutput: "6.6.87.2-microsoft-standard-WSL2\n",
-                StandardError: string.Empty,
+                StandardOutput: StandardOutput,
+                StandardError: StandardError,
                 TimedOut: false,
                 FinalMetrics: new JobResourceMetrics(1024, 0, 10, 10, 0),
-                TerminalReason: null,
+                TerminalReason: TerminalReason,
                 AppliedControls: null,
                 LimitsReadBack: new JobLimitsReadback(512 * 1024 * 1024, 512 * 1024 * 1024, 50, 8, true),
                 Lease: Outcome));
@@ -126,12 +140,194 @@ public class McpRunRecordTests : IDisposable
         return Guid.Parse(match.Groups[1].Value);
     }
 
+    [Theory]
+    [InlineData("argv")]
+    [InlineData("legacy")]
+    [InlineData("run_code")]
+    [InlineData("refused")]
+    [InlineData("pem")]
+    public async Task LeaseTools_CredentialsNeverReachLedgerRowsOrExportedBundle(string requestShape)
+    {
+        const string apiKey = "mc_live_mcp_fixture_1234567890";
+        const string password = "mcp-password-fixture";
+        const string keyMaterial = "c2VjcmV0LWZpeHR1cmUtb25seQ==";
+        string[] argv = requestShape == "pem"
+            ? new[] { apiKey, $"password={password}", $"-----BEGIN PRIVATE KEY-----\n{keyMaterial}\n-----END PRIVATE KEY-----" }
+            : new[] { apiKey, $"password={password}" };
+        string code = $"print('{apiKey}', 'password={password}')";
+        object arguments = requestShape switch
+        {
+            "legacy" => new { command = "/bin/echo", arguments = $"'{apiKey}' 'password={password}'" },
+            "run_code" => new { language = "python", code },
+            "refused" => new { command = "/bin/echo", args = argv, allowNetwork = true, allowedEgressIps = new[] { "93.184.216.34" } },
+            _ => new { command = "/bin/echo", args = argv }
+        };
+        var executor = new ReportingLeasedExecutor();
+        var ledger = new SqliteChainedAuditLedger(new SqliteStorageContext(_dbPath));
+        var handler = new McpServerHandler(executor, new TemplatePolicyCompiler(), ledger);
+
+        var response = await handler.ProcessMessageAsync(ToolCall(arguments,
+            requestShape == "run_code" ? "run_code" : "run_command"));
+        var missionId = MissionIdIn(TextOf(response));
+        if (requestShape == "refused")
+        {
+            Assert.Null(executor.LastLease);
+        }
+        else
+        {
+            // Redaction belongs at the evidence boundary: the process still needs its real arguments.
+            Assert.Equal(requestShape == "run_code" ? new[] { "-c", code } : argv, executor.LastArgv);
+        }
+
+        var entries = await ledger.GetAuditLogsAsync(missionId, 100);
+        Assert.Equal(2, entries.Count);
+        Assert.All(entries, entry =>
+        {
+            Assert.DoesNotContain(apiKey, entry.Details);
+            Assert.DoesNotContain(password, entry.Details);
+            Assert.DoesNotContain(keyMaterial, entry.Details);
+        });
+        var facts = JsonSerializer.Deserialize<MissionRunFacts>(entries.Single(e => e.Action == MissionRunFacts.LedgerAction).Details)!;
+        Assert.Contains("[SECRET_REF:", facts.CommandLine);
+        Assert.Contains("[REDACTED_SECRET]", facts.CommandLine);
+        Assert.True(facts.RedactionCount >= 2);
+        Assert.Contains("CredentialAssignment", facts.RedactedCategories);
+        await AssertSanitizedBundleAsync(ledger, missionId, apiKey, password, keyMaterial);
+    }
+
+    private async Task AssertSanitizedBundleAsync(IAuditLedger ledger, Guid missionId, params string[] secrets)
+    {
+        Directory.CreateDirectory(_exportDirectory);
+        string keyPath = Path.Combine(_exportDirectory, "signing.pem");
+        File.WriteAllText(keyPath, RunRecordKeyFile.NewKeyPem(out _));
+        using var signer = RunRecordKeyFile.Load(keyPath);
+        var merkle = new MerkleTreeEngine();
+        var assembler = new MissionRunRecordAssembler(ledger, merkle, new ComplianceArchiveExporter(merkle, signer));
+        string bundle = await assembler.AssembleAndExportBundleAsync(missionId, _exportDirectory);
+
+        // Checking just the record misses the duplicate facts inside audit_chain and merkle_proofs.
+        using (var archive = ZipFile.OpenRead(bundle))
+        {
+            Assert.Contains(archive.Entries, entry => entry.FullName == "mission_run_record.json");
+            Assert.Contains(archive.Entries, entry => entry.FullName == "audit_chain.json");
+            Assert.Contains(archive.Entries, entry => entry.FullName == "merkle_proofs.json");
+            foreach (var entry in archive.Entries)
+            {
+                using var reader = new StreamReader(entry.Open());
+                string content = await reader.ReadToEndAsync();
+                foreach (string secret in secrets) Assert.DoesNotContain(secret, content);
+            }
+        }
+
+        // Scrubbing a bundle after hashing its rows would hide the leak by breaking the evidence.
+        Assert.True(await ledger.VerifyLedgerIntegrityAsync());
+        var agreement = await new RunRecordLedgerVerifier(ledger, merkle, signer).VerifyAsync(bundle);
+        Assert.True(agreement.Agrees, agreement.Verdict);
+        Assert.All(agreement.Checks, check => Assert.True(check.Passed, check.Detail));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunCommand_ScrubsRegisteredCredentialsFromOutputAndEvidence_WithoutRewritingSignedBytes(bool sensitiveReceipt)
+    {
+        const string secret = "fixture-registered-s3cr3t";
+        var credentials = new PromptCredentialSanitizer();
+        credentials.RegisterKnownSecret(secret);
+        var executor = new ReportingLeasedExecutor
+        {
+            StandardOutput = secret,
+            StandardError = $"failed with {secret}",
+            TerminalReason = secret,
+            Violation = new LeaseViolationEvent(4211, 42, KernelViolationHook.Open, 0, secret, secret, DateTime.UtcNow)
+        };
+        string workDir = $"/tmp/{secret}";
+        executor.Outcome = executor.Outcome with
+        {
+            Workspace = workDir,
+            CgroupPath = $"/sys/fs/cgroup/{secret}",
+            SignedOutcome = sensitiveReceipt ? $"splat-lease-outcome/1|workspace={workDir}" : executor.Outcome.SignedOutcome
+        };
+        var ledger = new SqliteChainedAuditLedger(new SqliteStorageContext(_dbPath));
+        var handler = new McpServerHandler(executor, new TemplatePolicyCompiler(), ledger, credentialSanitizer: credentials);
+        string command = $"/tools/{secret}";
+
+        var response = await handler.ProcessMessageAsync(ToolCall(new
+        {
+            command, args = new[] { secret }, workingDirectory = workDir, traceId = secret, clientName = secret
+        }, "run_command"));
+
+        Assert.Equal(command, executor.LastCommand);
+        Assert.Equal(workDir, executor.LastLease!.WorkingDirectory);
+        Assert.Equal(new[] { secret }, executor.LastArgv);
+        Assert.DoesNotContain(secret, response.Result!.Value.GetRawText());
+        Assert.Contains("KERNEL VIOLATION CONTAINMENT REPORT", TextOf(response));
+        var missionId = MissionIdIn(TextOf(response));
+        var entries = await ledger.GetAuditLogsAsync(null, 100);
+        Assert.Contains(entries, e => e.Action == "EXTERNAL_TRACE_CORRELATED");
+        Assert.All(entries, entry => Assert.DoesNotContain(secret, entry.Details));
+        var record = await AssemblerFor(ledger).AssembleRunRecordAsync(missionId);
+        Assert.Equal(MissionRunFacts.HashLease(executor.LastLease), record.RequestIdentity.PolicyVersionOrHash);
+        Assert.Contains("Credential", record.Outcome.RedactedCategories);
+        if (sensitiveReceipt)
+        {
+            Assert.Null(record.EnforcementState.GuestSignedOutcome);
+            Assert.Null(record.EnforcementState.GuestOutcomeSignature);
+            Assert.Null(record.EnforcementState.GuestOutcomeKeyId);
+            Assert.Null(record.EnforcementState.GuestOutcomePublicKey);
+            Assert.Contains("GuestOutcomeWithheld", record.Outcome.RedactedCategories);
+        }
+        else
+        {
+            Assert.Equal(executor.Outcome.SignedOutcome, record.EnforcementState.GuestSignedOutcome);
+            Assert.Equal(executor.Outcome.OutcomeSignature, record.EnforcementState.GuestOutcomeSignature);
+            Assert.Equal(executor.Outcome.OutcomeKeyId, record.EnforcementState.GuestOutcomeKeyId);
+            Assert.Equal(executor.Outcome.OutcomePublicKey, record.EnforcementState.GuestOutcomePublicKey);
+        }
+        await AssertSanitizedBundleAsync(ledger, missionId, secret);
+    }
+
+    private sealed class FailingSanitizer : ICredentialSanitizer, IDataLossPreventionSanitizer
+    {
+        SanitizationResult ICredentialSanitizer.Sanitize(string input) => throw new InvalidOperationException(input);
+        DlpSanitizationResult IDataLossPreventionSanitizer.Sanitize(string input) => throw new InvalidOperationException(input);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunCommand_AScannerFailureWithholdsTextInsteadOfFallingBackToRawEvidence(bool credentialScannerFails)
+    {
+        const string secret = "fixture-scanner-failure-secret";
+        var scanner = new FailingSanitizer();
+        var executor = new ReportingLeasedExecutor { StandardOutput = secret };
+        var ledger = new SqliteChainedAuditLedger(new SqliteStorageContext(_dbPath));
+        var handler = new McpServerHandler(executor, new TemplatePolicyCompiler(), ledger,
+            credentialSanitizer: credentialScannerFails ? scanner : null,
+            dlpSanitizer: credentialScannerFails ? null : scanner);
+
+        var response = await handler.ProcessMessageAsync(ToolCall(new { command = "/bin/echo", args = new[] { secret } }, "run_command"));
+
+        Assert.Equal(new[] { secret }, executor.LastArgv);
+        Assert.DoesNotContain(secret, TextOf(response));
+        Assert.Contains("[REDACTED_SANITIZATION_FAILURE]", TextOf(response));
+        var missionId = MissionIdIn(TextOf(response));
+        var entries = await ledger.GetAuditLogsAsync(missionId, 100);
+        Assert.All(entries, entry => Assert.DoesNotContain(secret, entry.Details));
+        var record = await AssemblerFor(ledger).AssembleRunRecordAsync(missionId);
+        Assert.True(record.Outcome.RedactionCount > 0);
+        Assert.Contains("SanitizationFailure", record.Outcome.RedactedCategories);
+        await AssertSanitizedBundleAsync(ledger, missionId, secret);
+    }
+
     [Fact]
     public async Task RunCommand_SealsFacts_SoTheAssemblerBuildsARecordFromTheLedgerAlone()
     {
         var executor = new ReportingLeasedExecutor();
         var ledger = new SqliteChainedAuditLedger(new SqliteStorageContext(_dbPath));
-        var handler = new McpServerHandler(executor, new TemplatePolicyCompiler(), ledger);
+        var actor = new OperatorIdentity("operator@example.test", "operator@example.test", OperatorAuthenticationMethod.BearerToken, "mcp-stdio");
+        var handler = new McpServerHandler(executor, new TemplatePolicyCompiler(), ledger,
+            identityProvider: new StaticOperatorIdentityProvider(actor));
 
         var response = await handler.ProcessMessageAsync(ToolCall(new
         {
@@ -146,6 +342,8 @@ public class McpRunRecordTests : IDisposable
         var record = await AssemblerFor(ledger).AssembleRunRecordAsync(missionId);
 
         Assert.Equal(missionId, record.RequestIdentity.MissionId);
+        Assert.Equal(actor.ToLedgerIdentity(), record.RequestIdentity.Principal);
+        Assert.All(await ledger.GetAuditLogsAsync(missionId, 100), entry => Assert.Equal(actor.ToLedgerIdentity(), entry.OperatorIdentity));
 
         // The policy in force was the lease, named by its content. A record whose policy field says
         // "run_command" names the tool, not the envelope, and two calls with different egress would

@@ -135,7 +135,10 @@ internal static class MissionReplayHarness
                 throw new InvalidOperationException($"the replay never reached the model: {why}");
             }
 
-            var verdict = new JsonFindingsExtractor().ExtractFindings(Island.OutputContent, Payload, Template.Name);
+            // Match the engine's unwrapped sensor haystack. Random boundary digits can otherwise
+            // "ground" an absent number and make the same recorded mission change verdict on replay.
+            string? telemetry = Payload is null ? null : RecalledContext.Undelimit(Payload);
+            var verdict = new JsonFindingsExtractor().ExtractFindings(Island.OutputContent, telemetry, Template.Name);
             return FixtureVerdict.From(Island, verdict, LedgerActions);
         }
 

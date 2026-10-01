@@ -14,6 +14,8 @@ using MissionController.Core.Models;
 using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Data.Compliance;
 using MissionController.Infrastructure.Linux;
+using MissionController.Infrastructure.Network.Dlp;
+using MissionController.Infrastructure.Network.Identity;
 
 namespace SplatMcp;
 
@@ -22,6 +24,8 @@ public class McpServerHandler
     private readonly ILeasedExecutor _leasedExecutor;
     private readonly ITemplatePolicyCompiler _policyCompiler;
     private readonly IAuditLedger _auditLedger;
+    private readonly ICredentialSanitizer _credentialSanitizer;
+    private readonly IDataLossPreventionSanitizer _dlpSanitizer;
     private readonly WslSubstrateHealthChecker _healthChecker;
     private readonly IMissionExecutionEngine? _missionEngine;
     private readonly IMissionRunRecordAssembler? _runRecords;
@@ -114,13 +118,17 @@ public class McpServerHandler
         McpEgressPolicy? egressPolicy = null,
         IMissionRunRecordAssembler? runRecords = null,
         IIncidentRevocationManager? revocationManager = null,
-        RunRecordLedgerVerifier? recordVerifier = null)
+        RunRecordLedgerVerifier? recordVerifier = null,
+        ICredentialSanitizer? credentialSanitizer = null,
+        IDataLossPreventionSanitizer? dlpSanitizer = null)
     {
         _runRecords = runRecords;
         _recordVerifier = recordVerifier;
         _leasedExecutor = leasedExecutor ?? throw new ArgumentNullException(nameof(leasedExecutor));
         _policyCompiler = policyCompiler ?? throw new ArgumentNullException(nameof(policyCompiler));
         _auditLedger = auditLedger ?? throw new ArgumentNullException(nameof(auditLedger));
+        _credentialSanitizer = credentialSanitizer ?? new PromptCredentialSanitizer();
+        _dlpSanitizer = dlpSanitizer ?? new RegexDataLossPreventionSanitizer();
         _healthChecker = healthChecker ?? new WslSubstrateHealthChecker();
         _missionEngine = missionEngine;
         _investigationLoop = investigationLoop;
@@ -204,7 +212,7 @@ public class McpServerHandler
         }
         catch (Exception ex)
         {
-            return CreateErrorResponse(request.Id, -32603, $"Internal server error: {ex.Message}");
+            return CreateErrorResponse(request.Id, -32603, Scrub($"Internal server error: {ex.Message}"));
         }
     }
 
@@ -485,7 +493,7 @@ public class McpServerHandler
                 // No answer is not the same as "not revoked". The call is refused, and the refusal
                 // is recorded, so a revocation database that quietly went missing shows up as
                 // refused calls rather than as calls that were never checked.
-                await _auditLedger.AppendLogAsync(
+                await AppendScrubbedLogAsync(
                     Guid.NewGuid(),
                     $"mcp-tool-{toolName}",
                     "CALL_REFUSED_REVOCATION_UNREADABLE",
@@ -501,7 +509,7 @@ public class McpServerHandler
 
             if (revStatus.IsRevoked)
             {
-                await _auditLedger.AppendLogAsync(
+                await AppendScrubbedLogAsync(
                     Guid.NewGuid(),
                     $"mcp-tool-{toolName}",
                     "CALL_REFUSED_REVOKED_PRINCIPAL",
@@ -720,7 +728,7 @@ public class McpServerHandler
         if (egressRefusal is not null)
         {
             string refusedActor = await ResolveActorAsync(ct);
-            await _auditLedger.AppendLogAsync(
+            await AppendScrubbedLogAsync(
                 missionId,
                 ledgerTool,
                 "EGRESS_REQUEST_REFUSED",
@@ -750,7 +758,7 @@ public class McpServerHandler
                     new()
                     {
                         Type = "text",
-                        Text = $"[SPLAT POLICY] {toolName} was refused before any lease was requested: {egressRefusal} " +
+                        Text = $"[SPLAT POLICY] {toolName} was refused before any lease was requested: {Scrub(egressRefusal)} " +
                                "This is a check in the MCP host, not a kernel denial.\n" +
                                $"[SPLAT RUN RECORD] mission {missionId:D} — export it with the export_run_record tool."
                     }
@@ -800,6 +808,9 @@ public class McpServerHandler
             violations: violationProgress,
             ct: ct);
 
+        string actor = await ResolveActorAsync(ct);
+        var facts = NewLeaseFacts(missionId, ledgerTool, actor, startedAtUtc, command, argumentsForLog, workDir, timeoutSec);
+
         // What the leased process printed is the least trustworthy text this server produces, and it
         // leaves here for another agent's context window. Two things follow from the boundary, and
         // the second is not about the model at all: SPLAT's own lines below it can no longer be
@@ -819,22 +830,21 @@ public class McpServerHandler
 
         var outputSb = new StringBuilder();
         outputSb.AppendLine(RecalledContext.Delimit(
-            $"SANDBOXED PROCESS OUTPUT - '{command}'", commandBoundary, sandboxOutput.ToString()));
+            $"SANDBOXED PROCESS OUTPUT - '{Scrub(command, facts)}'", commandBoundary, Scrub(sandboxOutput.ToString(), facts)));
 
         if (violations.Count > 0)
         {
             outputSb.AppendLine("\n[KERNEL VIOLATION CONTAINMENT REPORT]");
             foreach (var v in violations)
             {
-                outputSb.AppendLine($"  -EPERM: Hook={v.Hook} Comm={v.ProcessComm} Detail={v.DetailText} (PID={v.ProcessId})");
+                outputSb.AppendLine(Scrub($"  -EPERM: Hook={v.Hook} Comm={v.ProcessComm} Detail={v.DetailText} (PID={v.ProcessId})", facts));
             }
         }
 
         outputSb.AppendLine($"[Process Exited with code {execResult.ExitCode}]");
 
         // Record flight recorder log in audit ledger
-        string actor = await ResolveActorAsync(ct);
-        await _auditLedger.AppendLogAsync(
+        await AppendScrubbedLogAsync(
             missionId,
             ledgerTool,
             "EXECUTED_LEASABLE_COMMAND",
@@ -842,7 +852,6 @@ public class McpServerHandler
             actor,
             ct);
 
-        var facts = NewLeaseFacts(missionId, ledgerTool, actor, startedAtUtc, command, argumentsForLog, workDir, timeoutSec);
         facts.TemplateSha256 = MissionRunFacts.HashLease(lease);
         facts.DeclaredEgress = allowNetwork
             ? $"{string.Join(",", leaseAddresses)}:{string.Join(",", leasePorts)} (the operator's egress policy, as far as the caller asked for it)"
@@ -959,6 +968,7 @@ public class McpServerHandler
     private async Task SealLeaseFactsAsync(MissionRunFacts facts)
     {
         facts.EndedAtUtc ??= DateTimeOffset.UtcNow;
+        ScrubLeaseFacts(facts);
         try
         {
             await _auditLedger.AppendLogAsync(
@@ -974,6 +984,75 @@ public class McpServerHandler
             // A ledger that refuses this row refused the call's other rows too, so there is no
             // record this could still complete - and failing the tool call here would turn a
             // storage fault into a sandbox escape report.
+        }
+    }
+
+    private string Scrub(string text, MissionRunFacts? facts = null)
+    {
+        try
+        {
+            // The opaque map contains the original credentials and must never reach evidence.
+            var credentials = _credentialSanitizer.Sanitize(text);
+            var dlp = _dlpSanitizer.Sanitize(credentials.SanitizedText);
+            if (facts is not null)
+            {
+                facts.RedactionCount += credentials.RedactedCount + dlp.RedactedCount;
+                if (credentials.RedactedCount > 0 && !facts.RedactedCategories.Contains("Credential"))
+                    facts.RedactedCategories.Add("Credential");
+                foreach (string category in dlp.RedactedCategories)
+                {
+                    if (!facts.RedactedCategories.Contains(category)) facts.RedactedCategories.Add(category);
+                }
+            }
+            return dlp.SanitizedContent;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // A failed scanner must withhold the text, including any exception that echoes it.
+            if (facts is not null)
+            {
+                facts.RedactionCount++;
+                if (!facts.RedactedCategories.Contains("SanitizationFailure"))
+                    facts.RedactedCategories.Add("SanitizationFailure");
+            }
+            return "[REDACTED_SANITIZATION_FAILURE]";
+        }
+    }
+
+    private Task AppendScrubbedLogAsync(
+        Guid missionId, string templateId, string action, string details, string actor, CancellationToken ct) =>
+        _auditLedger.AppendLogAsync(missionId, Scrub(templateId), action, Scrub(details), actor, ct);
+
+    private void ScrubLeaseFacts(MissionRunFacts facts)
+    {
+        // Scrub values before JSON escaping and before the ledger hashes them. Filtering serialized
+        // JSON can miss escaped credentials or break the schema; filtering exports breaks proofs.
+        // The resolved principal is attribution, not caller text: masking email-shaped identities
+        // would collapse distinct authenticated operators into the same ledger actor.
+        facts.ExecutablePath = Scrub(facts.ExecutablePath, facts);
+        if (facts.CommandLine is not null) facts.CommandLine = Scrub(facts.CommandLine, facts);
+        if (facts.WorkspacePath is not null) facts.WorkspacePath = Scrub(facts.WorkspacePath, facts);
+        facts.DeclaredEgress = Scrub(facts.DeclaredEgress, facts);
+        facts.Admission = Scrub(facts.Admission, facts);
+        if (facts.TerminalReason is not null) facts.TerminalReason = Scrub(facts.TerminalReason, facts);
+        if (facts.JobName is not null) facts.JobName = Scrub(facts.JobName, facts);
+        for (int i = 0; i < facts.AppliedControls.Count; i++)
+            facts.AppliedControls[i] = Scrub(facts.AppliedControls[i], facts);
+
+        // The guest receipt can repeat a workspace path. A sensitive receipt is withheld in full:
+        // changing its signed bytes would manufacture a signature failure in an otherwise valid run.
+        bool withholdReceipt = false;
+        foreach (string? signedField in new[] { facts.GuestSignedOutcome, facts.GuestOutcomeSignature, facts.GuestOutcomeKeyId, facts.GuestOutcomePublicKey })
+        {
+            if (signedField is not null && Scrub(signedField, facts) != signedField) withholdReceipt = true;
+        }
+        if (withholdReceipt)
+        {
+            facts.GuestSignedOutcome = null;
+            facts.GuestOutcomeSignature = null;
+            facts.GuestOutcomeKeyId = null;
+            facts.GuestOutcomePublicKey = null;
+            facts.RedactedCategories.Add("GuestOutcomeWithheld");
         }
     }
 
@@ -1000,7 +1079,7 @@ public class McpServerHandler
             var blockedMission = Guid.NewGuid();
             string blockedActor = await ResolveActorAsync(ct);
             string rejection = astResult.RejectionReason ?? "Forbidden script primitive detected";
-            await _auditLedger.AppendLogAsync(
+            await AppendScrubbedLogAsync(
                 blockedMission,
                 "mcp-tool-run_code",
                 "DYNAMIC_CODE_AST_BLOCKED",
@@ -1026,7 +1105,7 @@ public class McpServerHandler
                 IsError = true,
                 Content = new List<McpContentItem>
                 {
-                    new() { Type = "text", Text = $"[PRE-FLIGHT AST SECURITY REJECTION] {astResult.RejectionReason}" }
+                    new() { Type = "text", Text = $"[PRE-FLIGHT AST SECURITY REJECTION] {Scrub(rejection)}" }
                 }
             };
         }
@@ -1089,7 +1168,7 @@ public class McpServerHandler
         using var handle = _workspace.OpenForRead(path, out string? resolvedPath);
         if (handle is null)
         {
-            await _auditLedger.AppendLogAsync(
+            await AppendScrubbedLogAsync(
                 Guid.NewGuid(),
                 "mcp-tool-fs_read",
                 "REFUSED_FILE_READ_OUT_OF_WORKSPACE",
@@ -1109,7 +1188,7 @@ public class McpServerHandler
                 content = await reader.ReadToEndAsync(ct);
             }
 
-            await _auditLedger.AppendLogAsync(
+            await AppendScrubbedLogAsync(
                 Guid.NewGuid(),
                 "mcp-tool-fs_read",
                 "AUDITED_FILE_READ",
@@ -1159,7 +1238,7 @@ public class McpServerHandler
         using var handle = _workspace.OpenForWrite(path, out string? resolvedPath);
         if (handle is null)
         {
-            await _auditLedger.AppendLogAsync(
+            await AppendScrubbedLogAsync(
                 Guid.NewGuid(),
                 "mcp-tool-fs_write",
                 "REFUSED_FILE_WRITE_OUT_OF_WORKSPACE",
@@ -1177,7 +1256,7 @@ public class McpServerHandler
             {
                 await writer.WriteAsync(content.AsMemory(), ct);
             }
-            await _auditLedger.AppendLogAsync(
+            await AppendScrubbedLogAsync(
                 Guid.NewGuid(),
                 "mcp-tool-fs_write",
                 "AUDITED_FILE_WRITE",
@@ -1507,7 +1586,7 @@ public class McpServerHandler
             return Refusal($"'{bundlePath}' could not be read: {ex.Message}");
         }
 
-        await _auditLedger.AppendLogAsync(
+        await AppendScrubbedLogAsync(
             result.MissionId ?? Guid.Empty,
             "mcp-tool-verify_run_record",
             result.Agrees ? "RUN_RECORD_AGREES_WITH_LEDGER" : "RUN_RECORD_DISAGREES_WITH_LEDGER",
@@ -1831,12 +1910,14 @@ public class McpServerHandler
     {
         string? traceId = ReadOptionalString(args, "traceId");
         string? clientName = ReadOptionalString(args, "clientName");
+        if (traceId is not null) traceId = Scrub(traceId);
+        if (clientName is not null) clientName = Scrub(clientName);
 
         try
         {
             if (!string.IsNullOrWhiteSpace(traceId))
             {
-                await _auditLedger.AppendLogAsync(
+                await AppendScrubbedLogAsync(
                     Guid.NewGuid(),
                     $"mcp-tool-{toolName}",
                     "EXTERNAL_TRACE_CORRELATED",
@@ -1881,7 +1962,7 @@ public class McpServerHandler
             toolResult.Content.Add(new McpContentItem
             {
                 Type = "text",
-                Text = $"{{\"auditAnchor\":null,\"anchorError\":{JsonSerializer.Serialize(ex.Message)}}}"
+                Text = $"{{\"auditAnchor\":null,\"anchorError\":{JsonSerializer.Serialize(Scrub(ex.Message))}}}"
             });
         }
 

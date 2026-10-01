@@ -267,7 +267,9 @@ public static class Program
             revocationManager: revocationManager,
             // The host's own key, so verify_run_record can say a bundle was signed by THIS host and
             // not merely by a holder of the key the bundle carries with it.
-            recordVerifier: new RunRecordLedgerVerifier(auditLedger, merkleEngine, runRecordSigner));
+            recordVerifier: new RunRecordLedgerVerifier(auditLedger, merkleEngine, runRecordSigner),
+            credentialSanitizer: credSanitizer,
+            dlpSanitizer: dlpSanitizer);
 
         using (runRecordSigner)
         {
