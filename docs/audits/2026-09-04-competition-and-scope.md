@@ -73,7 +73,11 @@ The roadmap should have one authoritative status record with capability, owner, 
 
 ## Economics correction
 
-`IDEAS.md:105` describes 3,000 endpoints, 600 tickets resolved monthly and $25 saved per ticket. Those assumptions give **600 × $25 × 12 = $180,000 annual gross benefit**.
+The idea ledger moved to the untracked `private/IDEAS.md` on 2026-10-01, so the line numbers below
+no longer resolve in this tree. The figures stay: a finding whose subject has been taken away is not
+a finding, and the correction is the reason this audit is kept.
+
+`IDEAS.md:105` described 3,000 endpoints, 600 tickets resolved monthly and $25 saved per ticket. Those assumptions give **600 × $25 × 12 = $180,000 annual gross benefit**.
 
 At the document's own `IDEAS.md:50` price of $5-$12 per endpoint/month, annual license cost is **$180,000-$432,000**. Net savings before model, deployment, infrastructure and support cost are therefore **$0 to -$252,000**, not over $150,000. Break-even is **600-1,440 avoided tickets per month**, before those extra costs.
 

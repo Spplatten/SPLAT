@@ -16,7 +16,7 @@ scanned for unmeasured claims and broken links exactly as before. It cannot be a
 Finished is not the same as removed. Five build plans were deleted outright on 2026-09-09 and are
 recorded at the bottom of this file; those had nothing left citing them.
 
-Last reconciled **2026-09-26**, when model-proposed parameter targeting landed in the ReAct loop ([ARCHITECTURE-control-plane.md](ARCHITECTURE-control-plane.md)) and the README's last-hop claim was restored against the kernel program that ships; the two governance templates and the status-gate record date from 2026-09-23, and the architecture, context and module reference from 2026-09-10.
+Last reconciled **2026-10-01**, when three internal commercial documents moved out of this directory to the untracked `private/` — the row at the bottom of this file says which, and why. Before that, **2026-09-26**: model-proposed parameter targeting landed in the ReAct loop ([ARCHITECTURE-control-plane.md](ARCHITECTURE-control-plane.md)) and the README's last-hop claim was restored against the kernel program that ships; the two governance templates and the status-gate record date from 2026-09-23, and the architecture, context and module reference from 2026-09-10.
 Read [the OEM subtraction plan](audits/2026-09-09-oem-subtraction-plan.md) first; everything else
 is either an input to it, an artifact it produces, or a record of how the project got here. To
 change the code rather than the plan, start with [CONTEXT.md](CONTEXT.md).
@@ -80,14 +80,6 @@ exist. Write accordingly.
 | [SPLAT-Field-Guide.html](SPLAT-Field-Guide.html) | Someone learning what SPLAT does, from zero | **Current, and the source of truth** for [TUTORIAL.md](TUTORIAL.md) and the published artifact. Change this one first, then re-sync the other two. |
 | [TUTORIAL.md](TUTORIAL.md) | Same reader, in the repo | Derived from the Field Guide. Do not edit independently. |
 | [...SPLAT-Enterprise-Executive-Brief.md](...SPLAT-Enterprise-Executive-Brief.md) | A direct enterprise buyer | **Audience superseded.** Kept as long-form positioning and as source material for an OEM licensee's own materials. |
-| [...PITCH-Microsoft-CorpDev-Copilot-Safety.md](...PITCH-Microsoft-CorpDev-Copilot-Safety.md) | Microsoft CorpDev | **Byproduct, not a path.** Becomes possible with a traction record; do not sequence work around it. |
-
-## Commercial
-
-| Document | What it is |
-| --- | --- |
-| [TARGETS-cold-outreach.md](TARGETS-cold-outreach.md) | Who to contact, in what order, and what to sell them on the first call. Updated 2026-09-09 for the assessment motion. |
-| [PLATTEN-INDUSTRIES-MASTER-PROPOSAL.md](PLATTEN-INDUSTRIES-MASTER-PROPOSAL.md) | **Partly superseded.** Its four direct-sales tracks were set aside for OEM licensing; the buyer-pain analysis and unit economics survive. |
 
 ## The record — audits, and why they stay
 
@@ -102,6 +94,25 @@ comments, commit messages and the live plan all use.
 | [audits/2026-09-04-competition-and-scope.md](audits/2026-09-04-competition-and-scope.md) | The positioning corrections, and the contradiction table that forced the F15/F17 decision. |
 | [audits/2026-09-04-roadmap.md](audits/2026-09-04-roadmap.md) | **Superseded as a plan.** Retained for the work-package → F-number map and the six-group evidence contract that P3's run record fills in. |
 | [audits/WAVE-PLAN.md](audits/WAVE-PLAN.md) | What each remediation wave contained and which commit closed it. Waves 1–4 done; Wave 5 open behind the runtime floor. |
+
+## Moved out of the repository 2026-10-01
+
+Four documents, to the untracked `private/` at the repository root. Not finished and not superseded
+— the distinction this directory draws elsewhere does not apply. They are internal commercial
+material whose cost of being read by the wrong person is higher than its value to anyone reading
+this tree: a prospect who finds the price ladder learns the floor before the first call, and a
+competitor who finds the segment ordering learns the plan. Everything in this directory is written
+for a reader who is not us; these three were not.
+
+The engineering reasoning that cited them stays here. Where a link pointed at one, the citing
+document now says what the claim was and where the file went, so nothing silently dangles.
+
+| Moved | Why it is not in a public tree |
+| --- | --- |
+| `TARGETS-cold-outreach.md` | A working prospect list with the segments ordered by speed-to-cash, where to source each, and the honest caveats to carry into a call — including which claim not to make to a regulated buyer. Headed `INTERNAL` from the day it was written. |
+| `PLATTEN-INDUSTRIES-MASTER-PROPOSAL.md` | The full price ladder — per seat, per endpoint, MSP wholesale, sovereign bands, add-on packs, hourly rate — and the ROI model that, worked honestly, does not close at list price. Both are load-bearing internally and neither survives contact with a buyer. |
+| `PITCH-Microsoft-CorpDev-Copilot-Safety.md` | A brief addressed to one named company's corporate development group, built around that company's own revenue lines. Marked a byproduct rather than a path since 2026-09-09; publishing it tells every other reader the author is shopping. |
+| `IDEAS.md` | The idea ledger, and the reason moving the master proposal alone would have been theatre: it carries the same price ladder, the same ROI figure the competition audit refutes, and a valuation comp. Its §5 feature backlog went with it — a list of what is not built yet is its own kind of signal. |
 
 ## Removed 2026-09-09
 
@@ -124,4 +135,4 @@ Five build plans for work that has since shipped. Git has them —
 | --- | --- |
 | [`../native/splat-agent/SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md) | What a lease actually enforces, what the daemon refuses, and what is reachable and not claimed. The most load-bearing document in the repository, and the one to attach to any commercial conversation. |
 | [`../README.md`](../README.md) | The repository's own front page. Test-bound: claims about kernel enforcement are checked against the hash of the BPF source that ships. |
-| [`../scope.md`](../scope.md), [`../IDEAS.md`](../IDEAS.md) | Early scope and idea capture. Historical; the contradiction table in the competition audit is where they were reconciled against the tree. |
+| [`../scope.md`](../scope.md) | Early scope capture. Historical; the contradiction table in the competition audit is where it was reconciled against the tree. Its companion idea ledger moved to the untracked `private/` on 2026-10-01 — see the row below. |

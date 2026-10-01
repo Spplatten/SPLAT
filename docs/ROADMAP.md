@@ -182,7 +182,7 @@ next.
 | General-liability and E&O cover | Not tracked | The first client machine |
 | The OEM term sheet: draw the open-core line at the daemon, and attach `SUPPORTED_POLICY.md` as Exhibit A | A draft exists outside the repository; its runtime defect went away with P0 | It is sent |
 | The first containment assessment | Unblocked: P1's exit was met on 2026-09-18 | — |
-| The first outreach | Triggered: P1's exit was met on 2026-09-18; the targets are in [TARGETS-cold-outreach.md](TARGETS-cold-outreach.md) | — |
+| The first outreach | Triggered: P1's exit was met on 2026-09-18; the target list moved to the untracked `private/` on 2026-10-01 | — |
 
 ## Human-only steps
 

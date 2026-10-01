@@ -266,8 +266,8 @@ the bundle alone what it was permitted to do and what it did.**
 - **LLC and IP assignment.** A sole proprietorship cannot sign the term sheet's §5. This is
   paperwork, it is cheap, and it blocks signature rather than engineering — start it now, in
   parallel with P0.
-- **Cold outreach.** `docs/TARGETS-cold-outreach.md` already names the tiers. The sending trigger is
-  P1's exit condition, not P3's.
+- **Cold outreach.** The target list already names the tiers; it moved to the untracked `private/`
+  on 2026-10-01. The sending trigger is P1's exit condition, not P3's.
 
 ---
 
@@ -311,8 +311,9 @@ than a business.
 you on someone else's host. A sole proprietorship carries that personally. LLC, IP assignment, and a
 basic general-liability/E&O policy before the first client machine, not after.
 
-Acquisition interest (`docs/...PITCH-Microsoft-CorpDev-Copilot-Safety.md`) is a byproduct of a traction
-record, not a path. It becomes possible for the same reason OEM does, and not one day sooner.
+Acquisition interest — the brief for it moved to the untracked `private/` on 2026-10-01 — is a
+byproduct of a traction record, not a path. It becomes possible for the same reason OEM does, and
+not one day sooner.
 
 ---
 

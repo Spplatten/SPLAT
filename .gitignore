@@ -69,3 +69,11 @@ splat-proof.txt
 node_modules/
 .DS_Store
 Thumbs.db
+
+# Internal commercial material. Moved out of docs/ on 2026-10-01: the cold-outreach target list
+# (headed INTERNAL since the day it was written), the full price ladder and ROI model, and a pitch
+# addressed to a named company's corporate development group. None of it is a secret in the
+# credential sense and all of it is leverage - a prospect reading the ladder learns the floor, and a
+# competitor reading the segment order learns the plan. The engineering rationale that cited them
+# stays in docs/; see the removal row in docs/README.md for what replaced each link.
+private/
