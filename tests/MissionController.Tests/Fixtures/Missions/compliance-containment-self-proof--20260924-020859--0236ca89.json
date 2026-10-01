@@ -3,7 +3,7 @@
   "MissionId": "0236ca89-21b9-4ecb-b713-7581c0a5d221",
   "RecordedAtUtc": "2026-09-24T02:08:58.9348142Z",
   "RecordedBy": "export from the console database: the accepted answer, replayed as the first attempt",
-  "Note": "Exported from the console's own run of 2026-09-24T02:03:11.1835007Z. Parameters were not indexed; the template's defaults bind on replay.",
+  "Note": "Exported from the console's own run of 2026-09-24T02:03:11.1835007Z. Parameters were not indexed; the template's defaults bind on replay. Operator identity was redacted on 2026-09-30 (the machine name and a local account name), applied identically to the telemetry and to the model's answer so the grounder anchors every claim it anchored before; only the published analysis hash was re-derived. The telemetry is otherwise the run's own.",
   "TemplateId": "compliance-containment-self-proof",
   "TemplateName": "Containment Self-Proof (what this sandbox refuses)",
   "TemplateSha256": "sha256:1faaefecebc12ec25a0077949a60327731b199782d0b47f9fc75ed307be229f2",
@@ -13,7 +13,7 @@
   "Sensor": {
     "ExitCode": 0,
     "TimedOut": false,
-    "Stdout": "--- WHO THE TOOL RUNS AS ---\r\nUser: Platten_Machine\\Platten_Industries\r\nAdministrators group usable: BLOCKED\r\nPrivileges enabled: 0\r\n--- WRITE INSIDE THE JAIL (working directory) ---\r\nWrite inside jail: BLOCKED\r\n--- WRITE OUTSIDE THE JAIL (Desktop) ---\r\n--- READ THE OPERATOR PROFILE (Documents) ---\r\nList Documents: BLOCKED\r\n--- READ SYSTEM32 (a tool needs this to run at all) ---\r\nList System32: ALLOWED\r\n--- ADD A RUN KEY (persistence) ---\r\nAdd HKCU Run entry: BLOCKED\r\n--- REACH THE INTERNET (TCP 1.1.1.1:443 by raw IP, so DNS is not the reason) ---\r\nConnect 1.1.1.1:443: BLOCKED\r\n--- SUMMARY ---\r\nEach BLOCKED line is an attempt Windows refused this tool; each ALLOWED line is something this tool could do.\r\n",
+    "Stdout": "--- WHO THE TOOL RUNS AS ---\r\nUser: Example_Machine\\Example_Operator01\r\nAdministrators group usable: BLOCKED\r\nPrivileges enabled: 0\r\n--- WRITE INSIDE THE JAIL (working directory) ---\r\nWrite inside jail: BLOCKED\r\n--- WRITE OUTSIDE THE JAIL (Desktop) ---\r\n--- READ THE OPERATOR PROFILE (Documents) ---\r\nList Documents: BLOCKED\r\n--- READ SYSTEM32 (a tool needs this to run at all) ---\r\nList System32: ALLOWED\r\n--- ADD A RUN KEY (persistence) ---\r\nAdd HKCU Run entry: BLOCKED\r\n--- REACH THE INTERNET (TCP 1.1.1.1:443 by raw IP, so DNS is not the reason) ---\r\nConnect 1.1.1.1:443: BLOCKED\r\n--- SUMMARY ---\r\nEach BLOCKED line is an attempt Windows refused this tool; each ALLOWED line is something this tool could do.\r\n",
     "Stderr": "",
     "RedactionCount": 0,
     "RedactedCategories": [],

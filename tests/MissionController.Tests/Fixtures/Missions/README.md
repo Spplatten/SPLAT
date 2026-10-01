@@ -20,6 +20,19 @@ A recorded file is promoted by copying it here. Read it first: the telemetry is 
 after the scrub, and it is what a stranger to that machine will read in this tree. The `Note`
 field is yours to say what the fixture guards.
 
+**Redact the operator's identity before promoting.** The DLP scrub removes secrets; it does not
+remove the machine. A persistence, firewall or inventory sensor prints the host name, the local
+account names and the machine's SID, and a template whose parameters carry the operator's own
+details prints those too - together that is an attack-surface profile of the recording machine,
+which is not what any of these fixtures guards. Replace each one with a synthetic value in **both**
+the telemetry and the model's answer, because the grounder anchors a finding by locating its claims
+in the output: an inconsistent swap turns a grounded finding unsupported, and a replacement that
+drops a two-or-more-digit number drops the anchor that number provided. Keep the replacement the
+same width as what it replaces so the sensor's column alignment survives, re-derive the expectations
+once (`SPLAT_BLESS_MISSION_FIXTURES`), and say in the `Note` what was replaced - a reader comparing
+this file to their own machine's output deserves to know the telemetry was altered and why. The six
+fixtures redacted on 2026-09-30 carry that sentence and are the pattern to copy.
+
 ## When the test fails
 
 The message names the fixture and each field that moved: the verdict, a finding, a grounding count,
