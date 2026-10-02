@@ -93,16 +93,25 @@ agent just wrote — are one missing capability. The plan's §3 has the argument
 
 ---
 
-## Done 2026-09-19 — P3: the per-mission run record
+## P3: the per-mission run record — 3.1 to 3.6 done 2026-09-19, 3.7 open
 
 **Exit:** someone who did not run a mission can verify from the bundle alone what it was permitted to
 do and what it did. The schema already exists — the six-group evidence contract in
 [the 09-04 roadmap](audits/2026-09-04-roadmap.md). Fill it in; do not redesign it.
 
-**Met, for a mission.** The engine seals what it observed as the mission's last ledger row, the record
-is assembled from that row and the mission's own rows, and the bundle is signed with a key the
-operator keeps. What it does not cover: a `run_command` or `run_code` lease is not a mission and gets
-no record, and nothing yet compares a bundle's entry hashes against the host's own ledger.
+**Met on the host; not yet met for a stranger.** The engine seals what it observed as the mission's
+last ledger row, the record is assembled from that row and the mission's own rows, and the bundle is
+signed with a key the operator keeps. The two gaps this paragraph used to name are closed: a
+`run_command` or `run_code` lease seals the same `MISSION_RUN_FACTS` row a mission does, on every
+path including refusals (2026-09-29), and `verify_run_record` holds a bundle's entries against the
+host's live chain row by row, with `ledger_anchor.json` naming the chain and the position the bundle
+was cut from (2026-09-29).
+
+What is left is the word **alone** in the exit above. Every check a recipient can run without the
+host is a check of the bundle against itself: the Merkle root covers the entries the bundle carries
+and the signature covers the files, so both agree however many of the mission's rows were left out.
+`verify_run_record` closes that, and it runs on the host. Item 3.7 is the version a stranger can
+run.
 
 | # | Item | Owner | State | Done when |
 | --- | --- | --- | --- | --- |
@@ -112,6 +121,7 @@ no record, and nothing yet compares a bundle's entry hashes against the host's o
 | 3.4 | Truthful terminal reasons from the bridge | agent | **Done 2026-09-18.** `WslLeasedExecutor` disentangles caller cancellation (`CallerCancelled`, exit code -3) from local lease deadline expiry (`LocalDeadlineExpired`, exit code -2), abrupt stream EOF (`AbruptDisconnect`, exit code -1), and explicit exit (`ExplicitExit`). No result claims a kill, because the daemon sends no kill confirmation yet. A deadline that fires between two reads counts as expiry, not as a dropped connection (fixed 2026-09-19). Wire tests assert each condition independently | Caller cancellation, local timeout and a confirmed kill are three different results, and only the last claims a kill |
 | 3.5 | The policy compiler refuses a destination it cannot resolve | agent | **Done 2026-09-18.** `TemplatePolicyCompiler` injects `IHostAddressResolver` and fails closed on unresolvable hosts, IPv6-only results, or empty address sets via `PolicyCompilationException`. It no longer substitutes loopback (`127.0.0.1`) on DNS failure. Explicit loopback and port range boundaries (1-65535) are verified | Fixed before any production path compiles a policy |
 | 3.6 | F20 — a remediation verdict from a measured postcondition, not an exit code | agent | **Done 2026-09-19.** An action declares its postcondition: a probe command and the output it expects, or a check in code. `SandboxedRemediationEngine` refuses a fix or rollback that declares none before anything runs, and logs `REMEDIATION_*_REFUSED`. After a clean exit it measures the declared postcondition. A failed measurement fails the step (`REMEDIATION_*_POSTCONDITION_FAILED`), and only a passed one is `COMPLETED`, so no remediation verdict is read from an exit code. The workflow engine's remediation call, which built an action with no rollback to run and so could never run, is gone. A check in code is not saved with a template, since templates are stored as JSON, so a test holds every fix the catalog ships to a postcondition declared as data. The catalog ships no fixes yet: which fixes the product offers, each with its check, is content still to write | Each remediation declares what "restored" means, and its verdict is read from that |
+| 3.7 | A published ledger checkpoint, so the bundle can be checked without the host | agent | **Scoped 2026-10-02, not started.** `verify_run_record` answers the question properly and runs on the host; a recipient holding only a zip has the in-bundle scripts, which check the bundle against itself. `ledger_anchor.json` already names what to compare - the chain by its first row's hash, the head id and hash at export, and every row the ledger held for that mission - but nothing the recipient can hold it against. Two constructions, and only the second meets the exit above. **Head checkpoint:** the host periodically publishes a signed (genesis, head id, head hash, issued-at), using the run record key a recipient already needs the fingerprint of. That detects a bundle naming a chain the host never published, and one claiming rows beyond any head the host has ever stated - but it cannot show that the rows in the bundle were in the ledger. **Merkle checkpoint:** the published statement carries a root over the whole chain to that head, and the bundle carries an inclusion proof per entry against it, so a recipient verifies offline that every row it holds was in the host's ledger when the checkpoint was issued. No new cryptography - `MerkleTreeEngine.BuildTree` and `GenerateProof` already do this, and bundles already ship `merkle_proofs.json`; what changes is the root they are proved against, from the mission's own entries to the chain's. The cost is honest and should be stated before it is built: the export walks every ledger row rather than the mission's, and a checkpoint goes stale as the chain grows, so the recipient's guarantee is always 'as of' a date | A bundle and a published checkpoint, with no access to the host, show that every row the bundle carries was in the ledger at the checkpoint's date |
 
 ---
 
