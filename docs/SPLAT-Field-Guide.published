@@ -46,8 +46,8 @@
 # matches `<header class="hero">`, and an earlier republish lost that opening tag, so the live page
 # rendered its title placard as bare text for months while every other copy looked right.
 
-published  2026-09-29
-version    63
+published  2026-10-02
+version    64
 source     docs/SPLAT-Field-Guide.html
-sha256     2a9d8731b5e38b1a9169d69b1dffa4291244a4a0582ced81cae9db31f51982a0
-handoff    census 60 -> 62: an average-price probe in dollars, and a catalog search that finds whether the data exists at all
+sha256     36a51e557a226b94a9d594013bf483823e1a07f36b652daf98e23090c6347f70
+handoff    census 62 -> 58: the four templates that needed elevation are retired, and five derived numbers that had drifted with them - fifty-five, eleven, ten, thirty-nine, the fortieth - are recounted against the catalog as 58/9/45/8/37
