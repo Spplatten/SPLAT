@@ -49,6 +49,11 @@ param(
     [switch] $Desktop,
     [int]    $Seconds = 30,
     [switch] $Assemble,
+    [string] $Terminal,
+    [string] $From,
+    [int]    $FontSize   = 20,
+    [double] $LineDelay  = 0.07,
+    [double] $Hold       = 4.0,
     [string] $FfmpegPath,
     [int]    $Width  = 1920,
     [int]    $Height = 1080,
@@ -198,10 +203,100 @@ function New-Card {
 }
 
 # ------------------------------------------------------------------------------------------------
+# Terminal replays
+#
+# A transcript under demo\transcripts is real output, captured from a real run and committed so it
+# can be diffed when the tool's output changes. Replaying it as a clip rather than screen-grabbing
+# a console window buys three things: the operator's home directory never reaches the frame, the
+# text is legible at 1080p instead of whatever the console happened to be sized to, and the clip
+# re-renders when the output changes instead of needing the window set up again.
+#
+# It is a replay, and the shot list requires the caption to say so. A rendered clip must never be
+# cut in a way that implies a live run.
+# ------------------------------------------------------------------------------------------------
+function New-TerminalClip {
+    param([string] $Ffmpeg, $Spec, [string] $Id, [string] $TranscriptPath)
+
+    if (-not (Test-Path $TranscriptPath)) { Fail "No transcript at $TranscriptPath." }
+    $lines = Get-Content -LiteralPath $TranscriptPath
+
+    $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("splat-term-" + $Id)
+    if (Test-Path $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force }
+    New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+
+    $font = Join-Path $env:WINDIR 'Fonts\consola.ttf'
+    if (-not (Test-Path $font)) { Fail "No Consolas at $font; a terminal replay needs a monospace face." }
+    Copy-Item -LiteralPath $font -Destination (Join-Path $scratch 'term.ttf') -Force
+
+    $lineHeight = [int]([Math]::Round($FontSize * 1.42))
+    $marginX    = 70
+    $marginY    = [int]([Math]::Max(40, ($Height - ($lines.Count * $lineHeight)) / 2))
+
+    $ok      = '0x7FD88F'   # a check that passed
+    $note    = '0xE8C07A'   # a row doctor marks "--": available, not claimed
+    $refused = '0xFF8A7A'   # the kernel said no
+    $plain   = '0xC8D0DC'
+    $accent  = [string] $Spec.Accent
+    $head    = [string] $Spec.Headline
+
+    $filters = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $text = [string] $lines[$i]
+        if ($text.Trim().Length -eq 0) { continue }
+
+        # A refusal is the one line the tape exists to show, so it gets its own colour in both the
+        # doctor table and the probe's JSON, where it arrives as a quoted violation string.
+        if     ($text -match '^\s*(PS|\$)>')    { $color = $accent }
+        elseif ($text -match '\-EPERM')         { $color = $refused }
+        elseif ($text -match '"?PASS"?')        { $color = $ok }
+        elseif ($text -match '^\s*ok\s')        { $color = $ok }
+        elseif ($text -match '^\s*--\s')        { $color = $note }
+        elseif ($text -match '^Verdict:')       { $color = $accent }
+        elseif ($text -match '^\S')             { $color = $head }
+        else                                    { $color = $plain }
+
+        # drawtext reads a backslash in its text as an escape, so a Windows path renders as
+        # "C:UsersoperatorAppData" unless each one is doubled. The transcripts are full of them.
+        $file = "t$i.txt"
+        [System.IO.File]::WriteAllText(
+            (Join-Path $scratch $file), $text.Replace('\', '\\'),
+            (New-Object System.Text.UTF8Encoding($false)))
+
+        $y  = $marginY + ($i * $lineHeight)
+        $at = ($i * $LineDelay).ToString('0.###', $inv)
+        # Each line carries its own enable window, which is what makes the block appear to stream
+        # the way the command produced it without rendering a frame sequence by hand.
+        $filters.Add(
+            "drawtext=fontfile=term.ttf:textfile=$file" +
+            ":fontcolor=${color}:fontsize=$FontSize" +
+            ":x=${marginX}:y=$y" +
+            ":enable='gte(t,$at)'")
+    }
+    if ($filters.Count -eq 0) { Fail "Transcript $TranscriptPath has no visible lines." }
+
+    $seconds = ($lines.Count * $LineDelay) + $Hold
+    $fadeOut = [Math]::Max(0.0, $seconds - 0.5)
+    $chain   = ($filters -join ',') + ",fade=t=out:st=$($fadeOut.ToString('0.###', $inv)):d=0.5"
+
+    $target = Join-Path $cardsDir "$Id.mp4"
+    $ffArgs = @(
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi',
+        '-i', "color=c=$($Spec.Background):s=$($Width)x$($Height):d=$($seconds.ToString('0.###', $inv)):r=$Fps",
+        '-vf', $chain,
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-an',
+        $target
+    )
+    Invoke-Ffmpeg -Ffmpeg $Ffmpeg -FfArgs $ffArgs -WorkingDirectory $scratch -What "Terminal $Id"
+    Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host ("  term  {0,-12} {1,5}s  {2} lines  {3}" -f $Id, [Math]::Round($seconds,1), $lines.Count, $target)
+}
+
+# ------------------------------------------------------------------------------------------------
 # Entry points
 # ------------------------------------------------------------------------------------------------
-if (-not ($Cards -or $Capture -or $Assemble)) {
-    Fail 'Nothing to do. Pass -Cards, -Capture <id> or -Assemble.'
+if (-not ($Cards -or $Capture -or $Assemble -or $Terminal)) {
+    Fail 'Nothing to do. Pass -Cards, -Capture <id>, -Terminal <id> -From <file> or -Assemble.'
 }
 
 if (-not (Test-Path $specFile)) { Fail "Missing card spec: $specFile" }
@@ -215,6 +310,15 @@ if ($Cards) {
     Assert-Drawtext $ffmpeg
     Write-Host "Rendering $($spec.Cards.Count) cards at $($Width)x$($Height)@$Fps ..."
     foreach ($card in $spec.Cards) { New-Card -Ffmpeg $ffmpeg -Spec $spec -Card $card }
+}
+
+if ($Terminal) {
+    Assert-Drawtext $ffmpeg
+    if (-not $From) {
+        $From = Join-Path $demoRoot "transcripts\$Terminal.txt"
+    }
+    Write-Host "Rendering terminal replay '$Terminal' from $From ..."
+    New-TerminalClip -Ffmpeg $ffmpeg -Spec $spec -Id $Terminal -TranscriptPath $From
 }
 
 if ($Capture) {
