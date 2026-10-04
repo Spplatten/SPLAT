@@ -124,6 +124,84 @@ public sealed class MerkleTreeEngine : IMerkleProofEngine
         return string.Equals(currentHash, proof.RootHash, StringComparison.OrdinalIgnoreCase);
     }
 
+    public MerkleConsistencyProof GenerateConsistencyProof(MerkleTree tree, int previousLeafCount)
+    {
+        ArgumentNullException.ThrowIfNull(tree);
+        if (previousLeafCount <= 0 || previousLeafCount > tree.LeafCount)
+            throw new ArgumentOutOfRangeException(nameof(previousLeafCount));
+        if (tree.Levels is not { Count: > 0 } levels)
+            throw new InvalidOperationException("A consistency proof requires the indexed tree returned by BuildTree.");
+
+        return new MerkleConsistencyProof(previousLeafCount, tree.LeafCount,
+            Subtrees(0, previousLeafCount).Select(n => levels[n.Height][n.Start >> n.Height]).ToArray(),
+            Subtrees(previousLeafCount, tree.LeafCount).Select(n => levels[n.Height][n.Start >> n.Height]).ToArray());
+    }
+
+    public bool VerifyConsistencyProof(MerkleConsistencyProof proof, string previousRoot, string root)
+    {
+        if (proof is null || proof.Schema != 1 || proof.PreviousLeafCount <= 0 || proof.LeafCount < proof.PreviousLeafCount ||
+            proof.PrefixSubtreeHashes is null || proof.AppendedSubtreeHashes is null ||
+            !IsHash(previousRoot) || !IsHash(root))
+            return false;
+
+        var prefix = Subtrees(0, proof.PreviousLeafCount).ToArray();
+        var appended = Subtrees(proof.PreviousLeafCount, proof.LeafCount).ToArray();
+        if (prefix.Length != proof.PrefixSubtreeHashes.Count || appended.Length != proof.AppendedSubtreeHashes.Count ||
+            !proof.PrefixSubtreeHashes.All(IsHash) || !proof.AppendedSubtreeHashes.All(IsHash))
+            return false;
+
+        var peaks = prefix.Select((node, i) => (node.Height, Hash: proof.PrefixSubtreeHashes[i].ToLowerInvariant())).ToList();
+        if (!string.Equals(Collapse(peaks), previousRoot, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        for (int i = 0; i < appended.Length; i++)
+        {
+            int height = appended[i].Height;
+            string hash = proof.AppendedSubtreeHashes[i].ToLowerInvariant();
+            while (peaks.Count > 0 && peaks[^1].Height == height)
+            {
+                hash = ComputeParentHash(peaks[^1].Hash, hash);
+                peaks.RemoveAt(peaks.Count - 1);
+                height++;
+            }
+            peaks.Add((height, hash));
+        }
+
+        return string.Equals(Collapse(peaks), root, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsHash(string? hash) => hash is { Length: 64 } && hash.All(Uri.IsHexDigit);
+
+    private static IEnumerable<(int Start, int Height)> Subtrees(int start, int end)
+    {
+        while (start < end)
+        {
+            int height = 0;
+            while (height < 30 && (1L << (height + 1)) <= end - start && start % (1L << (height + 1)) == 0)
+                height++;
+            yield return (start, height);
+            start += 1 << height;
+        }
+    }
+
+    private static string Collapse(IReadOnlyList<(int Height, string Hash)> peaks)
+    {
+        var (height, hash) = peaks[^1];
+        for (int i = peaks.Count - 2; i >= 0; i--)
+        {
+            // Keep the shipped tree's duplicate-last rule. Padding only when closing the root
+            // lets the same unpadded prefix be extended without changing any historical root.
+            while (height < peaks[i].Height)
+            {
+                hash = ComputeParentHash(hash, hash);
+                height++;
+            }
+            hash = ComputeParentHash(peaks[i].Hash, hash);
+            height++;
+        }
+        return hash;
+    }
+
     private static bool FindProofPath(MerkleTreeNode current, long targetEntryId, List<MerkleProofStep> proofSteps, ref string? leafHash)
     {
         if (current.Left == null && current.Right == null)

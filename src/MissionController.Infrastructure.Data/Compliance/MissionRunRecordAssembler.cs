@@ -53,7 +53,8 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
         return Assemble(missionId, entries);
     }
 
-    public async Task<string> AssembleAndExportBundleAsync(Guid missionId, string outputDirectory, CancellationToken cancellationToken = default)
+    public async Task<string> AssembleAndExportBundleAsync(Guid missionId, string outputDirectory, CancellationToken cancellationToken = default,
+        SignedLedgerCheckpoint? previousCheckpoint = null)
     {
         // One read serves the record and the bundle. Two reads let an entry appended between them into
         // the proofs but not under the record's root, and the bundle then failed its own verification.
@@ -74,9 +75,13 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
             var (tree, chain) = await _checkpoints.ReadChainAsync(cancellationToken);
             if (_checkpoints.Sign(_checkpoints.Describe(tree, chain)) is { } signed)
             {
-                inclusion = new ChainInclusion(signed, _checkpoints.ProveInChain(tree, entries));
+                inclusion = new ChainInclusion(signed, _checkpoints.ProveInChain(tree, entries),
+                    previousCheckpoint is null ? null : _checkpoints.ProveConsistency(previousCheckpoint, signed, tree));
             }
         }
+
+        if (previousCheckpoint is not null && inclusion?.Consistency is null)
+            throw new InvalidOperationException("A prior checkpoint was supplied, but no signing key is configured to prove its continuation.");
 
         return await _archiveExporter.ExportMissionRunRecordPackageAsync(
             record, entries, outputDirectory, cancellationToken, anchor, inclusion);

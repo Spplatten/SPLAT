@@ -329,6 +329,104 @@ public class ChainInclusionTests : IDisposable
     }
 
     [Fact]
+    public async Task ALaterBundleProvesContinuationWithoutDisclosingOtherMissions()
+    {
+        var (ledger, missionId) = await LedgerWithTrafficAsync(keyed: true);
+        using var signer = NewSigner(_dir);
+        string firstBundle = await AssemblerFor(ledger, signer).AssembleAndExportBundleAsync(missionId, _dir);
+        var (earlier, oldProofs, oldEntries) = OpenAsRecipient(firstBundle);
+        Assert.NotNull(earlier);
+        await ledger.AppendLogAsync(Guid.NewGuid(), "other", "ACTION", "private other mission narrative", "operator");
+
+        string laterBundle = await AssemblerFor(ledger, signer).AssembleAndExportBundleAsync(
+            missionId, Path.Combine(_dir, "later"), previousCheckpoint: earlier);
+        var (later, proofs, entries) = OpenAsRecipient(laterBundle);
+        using var archive = ZipFile.OpenRead(laterBundle);
+        using var reader = new StreamReader(archive.GetEntry("chain_consistency.json")!.Open());
+        string json = await reader.ReadToEndAsync();
+        var consistency = JsonSerializer.Deserialize<LedgerConsistency>(json);
+        Assert.NotNull(consistency);
+        Assert.DoesNotContain("private other mission narrative", json, StringComparison.Ordinal);
+        Assert.True(LedgerConsistencyCheck.Verify(consistency).Holds);
+
+        foreach (var result in new[]
+        {
+            ChainInclusionCheck.Verify(earlier, oldProofs, oldEntries, consistency),
+            ChainInclusionCheck.Verify(later, proofs, entries, consistency),
+        })
+        {
+            Assert.True(result.Holds, string.Join("\n", result.Failures));
+            Assert.Contains(result.Checks, c => c.Contains("as its prefix", StringComparison.Ordinal));
+            Assert.Contains(result.Checks, c => c.Contains("not changes between them or after", StringComparison.Ordinal));
+            Assert.Contains(result.Checks, c => c.Contains("this offline check has no ledger key", StringComparison.Ordinal));
+        }
+
+        using var signatureReader = new StreamReader(archive.GetEntry("signature.json")!.Open());
+        var signature = JsonSerializer.Deserialize<ComplianceArchiveExporter.RunRecordSignature>(await signatureReader.ReadToEndAsync());
+        Assert.Contains("file chain_consistency.json sha256 ", signature!.Statement, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConsistencyCannotSubstituteCountsRootsOrSigningIdentity()
+    {
+        var (ledger, missionId) = await LedgerWithTrafficAsync();
+        using var signer = NewSigner(_dir);
+        var builder = new LedgerCheckpointBuilder(ledger, new MerkleTreeEngine(), signer);
+        var (firstTree, firstEntries) = await builder.ReadChainAsync();
+        var earlier = builder.Sign(builder.Describe(firstTree, firstEntries))!;
+        await ledger.AppendLogAsync(Guid.NewGuid(), "other", "ACTION", "later", "operator");
+        var (tree, rows) = await builder.ReadChainAsync();
+        var later = builder.Sign(builder.Describe(tree, rows))!;
+        var honest = builder.ProveConsistency(earlier, later, tree);
+        Assert.True(LedgerConsistencyCheck.Verify(honest).Holds);
+
+        var changedRoot = builder.Sign(later.Checkpoint with { ChainMerkleRoot = new string('0', 64) })!;
+        using var stranger = NewSigner(_dir);
+        var foreignBuilder = new LedgerCheckpointBuilder(ledger, new MerkleTreeEngine(), stranger);
+        var foreign = foreignBuilder.Sign(later.Checkpoint)!;
+        var forgedFingerprint = foreign with { KeyId = signer.KeyId };
+        foreach (var invalid in new[]
+        {
+            honest with { Proof = honest.Proof with { PreviousLeafCount = firstTree.LeafCount - 1 } },
+            honest with { Proof = honest.Proof with { LeafCount = tree.LeafCount + 1 } },
+            honest with { Later = changedRoot },
+            honest with { Later = foreign },
+            honest with { Later = forgedFingerprint },
+            honest with { Earlier = later, Later = earlier },
+        })
+            Assert.False(LedgerConsistencyCheck.Verify(invalid).Holds);
+
+        Assert.False(LedgerCheckpointBuilder.SignatureHolds(forgedFingerprint));
+        Assert.False(LedgerCheckpointBuilder.SignatureHolds(later with { Algorithm = "unknown" }));
+        var unrelated = builder.Sign(later.Checkpoint with { IssuedAtUtc = later.Checkpoint.IssuedAtUtc.AddSeconds(1) })!;
+        var result = ChainInclusionCheck.Verify(unrelated, builder.ProveInChain(tree, rows), rows, honest);
+        Assert.False(result.Holds);
+        Assert.Contains(result.Failures, f => f.Contains("does not include this bundle's checkpoint", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnExportRefusesRewrittenHistoryOrAnUnsignedContinuation()
+    {
+        var (ledger, missionId) = await LedgerWithTrafficAsync();
+        using var signer = NewSigner(_dir);
+        string bundle = await AssemblerFor(ledger, signer).AssembleAndExportBundleAsync(missionId, _dir);
+        var (earlier, _, _) = OpenAsRecipient(bundle);
+        Assert.NotNull(earlier);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => AssemblerFor(ledger, null).AssembleAndExportBundleAsync(
+            missionId, Path.Combine(_dir, "unsigned"), previousCheckpoint: earlier));
+
+        using (var connection = new SqliteStorageContext(_dbs.Single()).CreateConnection())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "UPDATE AuditLedger SET Action = 'REWRITTEN' WHERE Id = 1";
+            await command.ExecuteNonQueryAsync();
+        }
+        var refusal = await Assert.ThrowsAsync<InvalidOperationException>(() => AssemblerFor(ledger, signer).AssembleAndExportBundleAsync(
+            missionId, Path.Combine(_dir, "rewritten"), previousCheckpoint: earlier));
+        Assert.Contains("unchanged prefix", refusal.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AnUnsignedHost_ShipsNoCheckpoint_AndTheCheckSaysSoRatherThanFailing()
     {
         var (ledger, missionId) = await LedgerWithTrafficAsync();

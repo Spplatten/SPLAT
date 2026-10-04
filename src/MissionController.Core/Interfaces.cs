@@ -192,6 +192,8 @@ public interface IMerkleProofEngine
     MerkleTree BuildTree(IReadOnlyList<AuditLogEntry> entries);
     MerkleProof GenerateProof(MerkleTree tree, long entryId);
     bool VerifyProof(MerkleProof proof);
+    MerkleConsistencyProof GenerateConsistencyProof(MerkleTree tree, int previousLeafCount);
+    bool VerifyConsistencyProof(MerkleConsistencyProof proof, string previousRoot, string root);
 }
 
 public interface IComplianceArchiveExporter
@@ -227,8 +229,10 @@ public interface IMissionRunRecordAssembler
 {
     Task<MissionRunRecord> AssembleRunRecordAsync(Guid missionId, CancellationToken cancellationToken = default);
 
-    /// <summary>Writes the record's bundle, signed when a signing key is configured, and returns its path.</summary>
-    Task<string> AssembleAndExportBundleAsync(Guid missionId, string outputDirectory, CancellationToken cancellationToken = default);
+    /// <summary>Writes the record's bundle, signed when a signing key is configured, and returns its path.
+    /// Supplying a prior checkpoint requires a signed consistency proof or refuses the export.</summary>
+    Task<string> AssembleAndExportBundleAsync(Guid missionId, string outputDirectory, CancellationToken cancellationToken = default,
+        SignedLedgerCheckpoint? previousCheckpoint = null);
 }
 
 /// <summary>
@@ -356,9 +360,9 @@ public record LedgerAnchorEntry(long Id, string EntryHash, string Action);
 /// What it does not do, and the row in the roadmap says so: a proof is valid only against the exact
 /// root it was generated for, so a recipient needs the checkpoint for the head their bundle names.
 /// An export therefore issues one. Proving that a later checkpoint extends an earlier one needs a
-/// consistency proof over an append-only tree, which <see cref="IMerkleProofEngine"/> does not build;
-/// until it does, the guarantee is "these rows were in the chain at this head", never "and nothing
-/// was removed afterwards".
+/// consistency proof. When an earlier checkpoint is supplied at export, the bundle also carries
+/// that proof and both signed heads. It establishes a shared prefix at those two snapshots, never
+/// that nothing changed between them or after the later one.
 /// </para>
 /// </summary>
 public record LedgerCheckpoint(
@@ -395,7 +399,13 @@ public record SignedLedgerCheckpoint(
 /// </summary>
 public record ChainInclusion(
     SignedLedgerCheckpoint Checkpoint,
-    IReadOnlyList<MerkleProof> Proofs);
+    IReadOnlyList<MerkleProof> Proofs,
+    LedgerConsistency? Consistency = null);
+
+public record LedgerConsistency(
+    SignedLedgerCheckpoint Earlier,
+    SignedLedgerCheckpoint Later,
+    MerkleConsistencyProof Proof);
 
 public interface ITemplateRegistry
 {

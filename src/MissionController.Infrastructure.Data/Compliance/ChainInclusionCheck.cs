@@ -22,10 +22,10 @@ namespace MissionController.Infrastructure.Data.Compliance;
 ///
 /// <para>
 /// What it cannot say, and the caller must not imply: that nothing was removed from the chain
-/// afterwards, that the checkpoint is the operator's rather than someone's, or that rows exist
-/// which the bundle does not carry. The first needs a consistency proof over an append-only tree,
-/// the second needs the reader to compare the key id with a fingerprint published somewhere they
-/// already trust, and the third is what the host-side verifier is for.
+/// after the latest signed snapshot, that the checkpoint is the operator's rather than someone's,
+/// or that rows exist which the bundle does not carry. A supplied consistency proof checks the
+/// prefix only at its two signed snapshots. The second needs the reader to compare the key id with
+/// a fingerprint published somewhere they already trust, and the third needs the host-side verifier.
 /// </para>
 /// </summary>
 public static class ChainInclusionCheck
@@ -40,7 +40,8 @@ public static class ChainInclusionCheck
     public static Result Verify(
         SignedLedgerCheckpoint? checkpoint,
         IReadOnlyList<MerkleProof>? proofs,
-        IReadOnlyList<AuditLogEntry>? bundledEntries)
+        IReadOnlyList<AuditLogEntry>? bundledEntries,
+        LedgerConsistency? consistency = null)
     {
         var passed = new List<string>();
         var failed = new List<string>();
@@ -61,6 +62,18 @@ public static class ChainInclusionCheck
         }
 
         passed.Add($"The checkpoint is signed by key {checkpoint.KeyId}; compare that with the fingerprint the operator published.");
+
+        if (consistency is not null)
+        {
+            var continuation = LedgerConsistencyCheck.Verify(consistency);
+            if (!continuation.Holds)
+                failed.Add(continuation.Verdict);
+            else if (checkpoint.KeyId != consistency.Earlier.KeyId ||
+                (checkpoint.Statement != consistency.Earlier.Statement && checkpoint.Statement != consistency.Later.Statement))
+                failed.Add("The consistency proof does not include this bundle's checkpoint.");
+            else
+                passed.Add(continuation.Verdict);
+        }
 
         var byId = proofs.GroupBy(p => p.EntryId).ToDictionary(g => g.Key, g => g.First());
         string root = checkpoint.Checkpoint.ChainMerkleRoot;
@@ -108,7 +121,8 @@ public static class ChainInclusionCheck
         if (failed.Count == 0)
         {
             passed.Add($"All {bundledEntries.Count} rows prove into the chain root {Short(root)} at head {head} ({checkpoint.Checkpoint.TotalEntries} entries, issued {checkpoint.Checkpoint.IssuedAtUtc:O}).");
-            passed.Add("Not established: that nothing was removed from the chain after this head, which needs a consistency proof this build does not produce.");
+            if (consistency is null)
+                passed.Add("Not established: that a later chain preserves this head; no consistency proof between signed checkpoints was supplied.");
         }
 
         return new Result(failed.Count == 0, passed, failed);

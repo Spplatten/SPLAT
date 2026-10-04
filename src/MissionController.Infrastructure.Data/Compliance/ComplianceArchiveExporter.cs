@@ -178,6 +178,8 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
         {
             files["checkpoint.json"] = TextBytes(JsonSerializer.Serialize(chainInclusion.Checkpoint, JsonOpts));
             files["chain_inclusion.json"] = TextBytes(JsonSerializer.Serialize(chainInclusion.Proofs, JsonOpts));
+            if (chainInclusion.Consistency is not null)
+                files["chain_consistency.json"] = TextBytes(JsonSerializer.Serialize(chainInclusion.Consistency, JsonOpts));
         }
 
         if (_signer is not null)

@@ -151,7 +151,8 @@ public sealed class LedgerCheckpointBuilder
     public static bool SignatureHolds(SignedLedgerCheckpoint signed)
     {
         ArgumentNullException.ThrowIfNull(signed);
-        if (signed.Statement != StatementFor(signed.Checkpoint))
+        if (signed.Checkpoint is null || signed.PublicKey is null || signed.Signature is null ||
+            signed.Statement != StatementFor(signed.Checkpoint))
         {
             // The statement and the fields disagree, so one of them was edited after signing.
             return false;
@@ -159,8 +160,14 @@ public sealed class LedgerCheckpointBuilder
 
         try
         {
+            byte[] publicKey = Convert.FromBase64String(signed.PublicKey);
+            if (signed.Algorithm != "RSASSA-PKCS1-v1_5-SHA256" || signed.KeyId != RsaRunRecordSigner.KeyIdOf(publicKey))
+                return false;
+
             using var rsa = RSA.Create();
-            rsa.ImportRSAPublicKey(Convert.FromBase64String(signed.PublicKey), out _);
+            rsa.ImportRSAPublicKey(publicKey, out int bytesRead);
+            if (bytesRead != publicKey.Length)
+                return false;
             return rsa.VerifyData(
                 Encoding.UTF8.GetBytes(signed.Statement),
                 Convert.FromBase64String(signed.Signature),
@@ -185,5 +192,22 @@ public sealed class LedgerCheckpointBuilder
         ArgumentNullException.ThrowIfNull(chain);
         ArgumentNullException.ThrowIfNull(missionEntries);
         return missionEntries.OrderBy(e => e.Id).Select(e => _merkle.GenerateProof(chain, e.Id)).ToList();
+    }
+
+    public LedgerConsistency ProveConsistency(SignedLedgerCheckpoint earlier, SignedLedgerCheckpoint later, MerkleTree chain)
+    {
+        ArgumentNullException.ThrowIfNull(earlier);
+        ArgumentNullException.ThrowIfNull(later);
+        ArgumentNullException.ThrowIfNull(chain);
+        if (chain.LeafCount != later.Checkpoint.TotalEntries || chain.RootHash != later.Checkpoint.ChainMerkleRoot ||
+            earlier.Checkpoint.TotalEntries <= 0 || earlier.Checkpoint.TotalEntries > chain.LeafCount)
+            throw new InvalidOperationException("The checkpoints cannot describe this tree and an earlier prefix of it.");
+
+        var consistency = new LedgerConsistency(earlier, later,
+            _merkle.GenerateConsistencyProof(chain, earlier.Checkpoint.TotalEntries));
+        var checkedProof = LedgerConsistencyCheck.Verify(consistency);
+        if (!checkedProof.Holds)
+            throw new InvalidOperationException(checkedProof.Verdict);
+        return consistency;
     }
 }

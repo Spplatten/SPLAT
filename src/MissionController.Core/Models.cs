@@ -410,6 +410,15 @@ public record MerkleProof(
     public IReadOnlyList<MerkleProofStep> Steps => ProofSteps;
 }
 
+// Perfect subtrees covering [0, PreviousLeafCount) and [PreviousLeafCount, LeafCount).
+// Their positions and heights come from the signed counts, never from the proof's claims.
+public record MerkleConsistencyProof(
+    int PreviousLeafCount,
+    int LeafCount,
+    IReadOnlyList<string> PrefixSubtreeHashes,
+    IReadOnlyList<string> AppendedSubtreeHashes,
+    int Schema = 1);
+
 public record CompliancePackageManifest(
     string PackageId,
     ComplianceFramework Framework,
