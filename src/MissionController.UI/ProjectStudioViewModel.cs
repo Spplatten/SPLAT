@@ -349,10 +349,11 @@ public partial class ProjectStudioViewModel : ObservableObject
                 SelectedAgentTemplate = AgentTemplates[0];
             }
 
-            if (SelectedProject == null && Projects.Count > 0)
-            {
-                SelectedProject = Projects[0];
-            }
+            // No project is selected for the operator. Selecting one calls LoadProjectIntoDraft,
+            // so auto-selecting the first saved playbook opened the page with the definition
+            // fields already full of a read-only built-in's text - which reads as a draft the
+            // operator started and did not. The stage picker above is different: it is a choice
+            // within a draft, not the draft itself, so it keeps its default.
         }
         finally
         {

@@ -249,36 +249,64 @@ def splash_bitmap(lockup, emblem):
     canvas = Image.new("RGBA", (SPLASH_W, SPLASH_H), (0, 0, 0, 0))
 
     mark = lockup.copy()
-    mark.thumbnail((SPLASH_W, 470), Image.LANCZOS)
-    canvas.alpha_composite(mark, ((SPLASH_W - mark.width) // 2, 44))
+    mark.thumbnail((SPLASH_W, 430), Image.LANCZOS)
+    mark_x = (SPLASH_W - mark.width) // 2
+    canvas.alpha_composite(mark, (mark_x, 40))
+    mark_bottom = 40 + mark.height
 
     # Type and rules go on their own layer so one shadow pass covers all of them: every one of these
     # is a light grey on whatever desktop is behind the window, and unshadowed they vanish on a
     # light one exactly as the wordmark did.
     ink = Image.new("RGBA", (SPLASH_W, SPLASH_H), (0, 0, 0, 0))
     pen = ImageDraw.Draw(ink)
-    regular = ImageFont.truetype(str(FONT_REGULAR), 17)
-    small = ImageFont.truetype(str(FONT_REGULAR), 15)
-    semibold = ImageFont.truetype(str(FONT_BOLD), 17)
+
+    # Every size below is in canvas pixels, and the canvas is 2x what the window asks for. These
+    # were 17/15/17 with 2.2/2.6/1.6 tracking - 1x metrics on a 2x canvas - so the runtime halving
+    # put roughly 8px type on screen under a shadow sized for type twice that. The result read as
+    # a smudge rather than as letters. The rules below moved with them: the layout coordinates
+    # were already in 2x space, so the type had been sitting in slots built for glyphs this size.
+    regular = ImageFont.truetype(str(FONT_REGULAR), 34)
+    small = ImageFont.truetype(str(FONT_REGULAR), 30)
+    semibold = ImageFont.truetype(str(FONT_BOLD), 34)
     mid = SPLASH_W // 2
 
-    pen.rectangle([mid - 95, 556, mid + 95, 559], fill=(76, 194, 255, 255))      # the accent rule
-    tracked(pen, (mid, 590), "STARTING MISSION CONTROL", regular, (128, 147, 172, 255), 2.2)
-    pen.rectangle([mid - 240, 640, mid + 240, 641], fill=(100, 117, 142, 255))   # the divider
+    # The wordmark's strapline is drawn here rather than taken from the artwork. In the source JPG
+    # it is roughly 20 raster pixels tall, which lands near 5 on screen - small enough that the
+    # shadow keeping it legible on a light desktop closed up the letterforms it was separating.
+    # Live type at the splash's own scale is the only version of this line that survives the trip.
+    # Mid-tone, not the artwork's white. Every other line here is a grey-blue for the same reason:
+    # the window is transparent, so white type is only as readable as the desktop behind it, and a
+    # shadow heavy enough to rescue white at this size is the bloom this change exists to remove.
+    strapline = ImageFont.truetype(str(FONT_BOLD), 26)
+    tracked(pen, (mid, mark_bottom + 22), "SOFTWARE INFRASTRUCTURE",
+            strapline, (146, 166, 194, 255), 6.0)
+
+    pen.rectangle([mid - 130, 544, mid + 130, 550], fill=(76, 194, 255, 255))    # the accent rule
+    tracked(pen, (mid, 578), "STARTING MISSION CONTROL", regular, (128, 147, 172, 255), 4.4)
+    pen.rectangle([mid - 300, 634, mid + 300, 636], fill=(100, 117, 142, 255))   # the divider
 
     badge = emblem.copy()
     badge.thumbnail((SPLASH_W, 74), Image.LANCZOS)
     strap = "ENTERPRISE eBPF SECURITY"
-    strap_width = sum(pen.textlength(ch, font=semibold) for ch in strap) + (2.6 * (len(strap) - 1))
-    row = int(mid - ((badge.width + 18 + strap_width) / 2))
-    canvas.alpha_composite(badge, (row, 668))
-    tracked(pen, (int(row + badge.width + 18 + (strap_width / 2)), 695), strap,
-            semibold, (122, 140, 165, 255), 2.6)
+    strap_width = sum(pen.textlength(ch, font=semibold) for ch in strap) + (5.2 * (len(strap) - 1))
+    row = int(mid - ((badge.width + 22 + strap_width) / 2))
+    canvas.alpha_composite(badge, (row, 658))
+    # Centred on the badge rather than sitting at a fixed offset from it: the strap's cap height
+    # changed with the font size and the badge's did not.
+    tracked(pen, (int(row + badge.width + 22 + (strap_width / 2)), 658 + ((badge.height - 34) // 2)),
+            strap, semibold, (122, 140, 165, 255), 5.2)
 
-    tracked(pen, (mid, 736), "© PLATTEN INDUSTRIES 2026", small, (110, 128, 152, 255), 1.6)
+    tracked(pen, (mid, 744), "© PLATTEN INDUSTRIES 2026", small, (110, 128, 152, 255), 3.2)
 
-    canvas.alpha_composite(on_glass(ink, radius=5, opacity=0.75, passes=2)
-                           .crop((15, 15, 15 + SPLASH_W, 15 + SPLASH_H)))
+    # One tight pass, not two soft ones. Stacked blur gave the type a halo wide enough to close the
+    # counters of the letters it was meant to separate from the desktop; a single darker pass at a
+    # smaller radius does the same job - legible white-on-white - without the bloom. The crop is
+    # derived from the radius because on_glass pads by three times it, and a hard-coded 15 here
+    # silently shifted the whole layer the moment that radius moved.
+    ink_radius = 4
+    ink_pad = ink_radius * 3
+    canvas.alpha_composite(on_glass(ink, radius=ink_radius, opacity=0.85, passes=1)
+                           .crop((ink_pad, ink_pad, ink_pad + SPLASH_W, ink_pad + SPLASH_H)))
     return canvas
 
 
@@ -354,7 +382,15 @@ def main():
     # The shadowed marks are intermediates now, not assets: they exist only inside the splash
     # bitmap, which is the one place anything is drawn on a transparent window.
     print("splash bitmap ...")
-    splash = splash_bitmap(on_glass(p_lockup, opacity=0.68, passes=3), on_glass(e_emblem, radius=6))
+    # The wordmark was carrying three stacked radius-9 shadows, which is what blurred "SOFTWARE
+    # INFRASTRUCTURE" into the plate behind it: the artwork is a 501px raster shown at about 220px,
+    # so a bloom that wide swallows strokes that are already sub-pixel. One tighter, darker pass
+    # keeps the white legible on a light desktop without eating the letterforms.
+    # The splash takes the mark without its strapline - rows 623-645 - because it draws that line
+    # as live type at its own scale. The saved splat-lockup.png keeps the full artwork.
+    p_mark = cut(primary, 118, 610)
+    splash = splash_bitmap(on_glass(p_mark, radius=7, opacity=0.85, passes=1),
+                           on_glass(e_emblem, radius=5, opacity=0.8, passes=1))
     write_splash(splash, ASSETS / "splat-splash.bgra.gz")
     print(f"  {'splat-splash.bgra.gz':<32} {splash.width}x{splash.height}  "
           f"{(ASSETS / 'splat-splash.bgra.gz').stat().st_size / 1024:6.1f} KB")

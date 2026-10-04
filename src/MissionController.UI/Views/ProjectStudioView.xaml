@@ -105,11 +105,11 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <TextBox Grid.Column="0" Header="Project ID" Text="{x:Bind ViewModel.ProjectId, Mode=TwoWay}" />
-                            <TextBox Grid.Column="1" Header="Name" Text="{x:Bind ViewModel.ProjectName, Mode=TwoWay}" />
-                            <TextBox Grid.Row="1" Grid.ColumnSpan="2" Header="Description" Text="{x:Bind ViewModel.ProjectDescription, Mode=TwoWay}" AcceptsReturn="True" TextWrapping="Wrap" />
-                            <TextBox Grid.Row="2" Grid.Column="0" Header="Category" Text="{x:Bind ViewModel.ProjectCategory, Mode=TwoWay}" />
-                            <TextBox Grid.Row="2" Grid.Column="1" Header="Operator project goal (optional)" Text="{x:Bind ViewModel.ProjectGoal, Mode=TwoWay}" />
+                            <TextBox Grid.Column="0" Header="Project ID" PlaceholderText="project-custom-..." Text="{x:Bind ViewModel.ProjectId, Mode=TwoWay}" />
+                            <TextBox Grid.Column="1" Header="Name" PlaceholderText="What this playbook is called" Text="{x:Bind ViewModel.ProjectName, Mode=TwoWay}" />
+                            <TextBox Grid.Row="1" Grid.ColumnSpan="2" Header="Description" PlaceholderText="What this playbook does, and what it hands back" Text="{x:Bind ViewModel.ProjectDescription, Mode=TwoWay}" AcceptsReturn="True" TextWrapping="Wrap" />
+                            <TextBox Grid.Row="2" Grid.Column="0" Header="Category" PlaceholderText="Custom Projects" Text="{x:Bind ViewModel.ProjectCategory, Mode=TwoWay}" />
+                            <TextBox Grid.Row="2" Grid.Column="1" Header="Operator project goal (optional)" PlaceholderText="A goal every stage is told to serve" Text="{x:Bind ViewModel.ProjectGoal, Mode=TwoWay}" />
                         </Grid>
 
                         <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="12">
