@@ -68,11 +68,12 @@ public class ChainInclusionTests : IDisposable
     /// covers rows the bundle will never carry, so a corpus of one mission would prove nothing
     /// about whether the proofs reach past it.
     /// </summary>
-    private async Task<(SqliteChainedAuditLedger Ledger, Guid MissionId)> LedgerWithTrafficAsync()
+    private async Task<(SqliteChainedAuditLedger Ledger, Guid MissionId)> LedgerWithTrafficAsync(bool keyed = false)
     {
         string dbPath = Path.Combine(_dir, $"{Guid.NewGuid():N}.db");
         _dbs.Add(dbPath);
-        var ledger = new SqliteChainedAuditLedger(new SqliteStorageContext(dbPath));
+        var ledger = new SqliteChainedAuditLedger(new SqliteStorageContext(dbPath),
+            keyed ? System.Security.Cryptography.RandomNumberGenerator.GetBytes(32) : null);
 
         foreach (int i in Enumerable.Range(0, 5))
         {
@@ -130,18 +131,28 @@ public class ChainInclusionTests : IDisposable
             signer is null ? null : new LedgerCheckpointBuilder(ledger, merkle, signer));
     }
 
-    [Fact]
-    public async Task ARecipientWithNothingButTheZip_ProvesEveryRowWasInTheChain()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ARecipientWithNothingButTheZip_ProvesEveryRowWasInTheChain(bool keyed)
     {
-        var (ledger, missionId) = await LedgerWithTrafficAsync();
+        var (ledger, missionId) = await LedgerWithTrafficAsync(keyed);
         using var signer = NewSigner(_dir);
 
+        // The global checkpoint read and the filtered mission read must both carry the metadata.
+        Assert.All(await ledger.GetAuditLogsAsync(), e =>
+            Assert.Equal(SqliteChainedAuditLedger.ComputeDetailsCommitment(e.DetailsSalt!, e.Details), e.DetailsCommitment));
         string bundle = await AssemblerFor(ledger, signer).AssembleAndExportBundleAsync(missionId, _dir);
         var (checkpoint, proofs, entries) = OpenAsRecipient(bundle);
 
         Assert.NotNull(checkpoint);
         Assert.NotNull(proofs);
         Assert.NotNull(entries);
+        Assert.All(entries, e =>
+        {
+            Assert.False(string.IsNullOrEmpty(e.DetailsSalt));
+            Assert.Equal(SqliteChainedAuditLedger.ComputeDetailsCommitment(e.DetailsSalt, e.Details), e.DetailsCommitment);
+        });
 
         var result = ChainInclusionCheck.Verify(checkpoint, proofs, entries);
 
@@ -154,24 +165,19 @@ public class ChainInclusionTests : IDisposable
         Assert.True(checkpoint!.Checkpoint.TotalEntries > entries!.Count,
             $"the chain root covers {checkpoint.Checkpoint.TotalEntries} rows and the bundle carries {entries.Count}");
         Assert.Contains("Not established", string.Join(" ", result.Checks));
+        Assert.Contains(result.Checks, c => c.Contains("Details text matches the salted commitment", StringComparison.Ordinal));
+        Assert.Equal(keyed, result.Checks.Any(c => c.Contains("this offline check has no ledger key", StringComparison.Ordinal)));
     }
     /// <summary>
-    /// This test was written to catch an edited row and it did not, which is the finding.
-    ///
-    /// <see cref="MerkleTreeEngine.ComputeLeafHash"/> hashes a row's id, entry hash, timestamp,
-    /// action and actor - its identity - and not its Details. So an inclusion proof places the row
-    /// in the chain and says nothing about the narrative a person reads, and rewriting Details
-    /// leaves every proof verifying. The ledger itself binds them, because EntryHash commits to a
-    /// salted commitment over Details, but audit_chain.json carries neither the commitment nor the
-    /// salt, so a recipient has nothing to recompute against.
-    ///
-    /// Pinned rather than fixed: closing it means shipping the commitment and salt in the bundle,
-    /// and a test that quietly passed would have let this go out as a complete offline check.
+    /// The leaf alone still accepts this edit. The exported salt and commitment make the changed
+    /// narrative detectable without the ledger, including when EntryHash itself is keyed.
     /// </summary>
-    [Fact]
-    public async Task AnEditedDetailsFieldIsNotCaught_AndTheCheckSaysSo()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnEditedDetailsFieldIsCaughtByItsExportedCommitment(bool keyed)
     {
-        var (ledger, missionId) = await LedgerWithTrafficAsync();
+        var (ledger, missionId) = await LedgerWithTrafficAsync(keyed);
         using var signer = NewSigner(_dir);
         string bundle = await AssemblerFor(ledger, signer).AssembleAndExportBundleAsync(missionId, _dir);
         var (checkpoint, proofs, entries) = OpenAsRecipient(bundle);
@@ -182,8 +188,74 @@ public class ChainInclusionTests : IDisposable
 
         var result = ChainInclusionCheck.Verify(checkpoint, proofs, edited);
 
-        Assert.True(result.Holds, "the leaf does not cover Details, so the proofs still hold");
-        Assert.Contains(result.Checks, c => c.Contains("Not established: the Details text", StringComparison.Ordinal));
+        Assert.False(result.Holds);
+        Assert.Contains(result.Failures, c => c.Contains("Details text does not match its salted commitment", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReplacingDetailsAndCommitmentCannotClaimAKeyedBinding(bool keyed)
+    {
+        var (ledger, missionId) = await LedgerWithTrafficAsync(keyed);
+        using var signer = NewSigner(_dir);
+        string bundle = await AssemblerFor(ledger, signer).AssembleAndExportBundleAsync(missionId, _dir);
+        var (checkpoint, proofs, entries) = OpenAsRecipient(bundle);
+        const string forgedDetails = "ExitCode: 0 (nothing was refused)";
+        var edited = entries!.Select(e => e.Action == "TOOL_EXECUTION_COMPLETED"
+            ? e with
+            {
+                Details = forgedDetails,
+                DetailsCommitment = SqliteChainedAuditLedger.ComputeDetailsCommitment(e.DetailsSalt!, forgedDetails),
+            }
+            : e).ToList();
+
+        var result = ChainInclusionCheck.Verify(checkpoint, proofs, edited);
+
+        // v2 recomputes to the proven EntryHash. v3 cannot do so without the HMAC key, so its
+        // inclusion result must explicitly leave the commitment-to-leaf link unestablished.
+        Assert.Equal(keyed, result.Holds);
+        if (keyed)
+        {
+            Assert.Contains(result.Checks, c => c.Contains("Not established:", StringComparison.Ordinal)
+                && c.Contains("replacing both Details and commitment can pass", StringComparison.Ordinal));
+            Assert.Contains("Details verification and its limits", result.Verdict, StringComparison.Ordinal);
+            Assert.DoesNotContain(result.Checks, c => c.Contains("binds to its proven EntryHash", StringComparison.Ordinal));
+        }
+        else
+        {
+            Assert.Contains(result.Failures, c => c.Contains("unkeyed row hash does not recompute", StringComparison.Ordinal));
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task MissingMetadataKeepsInclusionWithoutClaimingTheTextWasVerified(bool keyed, bool retainedCommitment)
+    {
+        var (ledger, missionId) = await LedgerWithTrafficAsync(keyed);
+        using var signer = NewSigner(_dir);
+        string bundle = await AssemblerFor(ledger, signer).AssembleAndExportBundleAsync(missionId, _dir);
+        var (checkpoint, proofs, entries) = OpenAsRecipient(bundle);
+        Assert.NotNull(entries);
+        var missing = entries.Select(e => e with
+        {
+            Details = "[REDACTED - this marker is not authenticated]",
+            DetailsSalt = null,
+            DetailsCommitment = retainedCommitment ? e.DetailsCommitment : null,
+        }).ToList();
+        // Old JSON omits the fields entirely; a retention sweep omits only the destroyed salt.
+        var json = JsonSerializer.Serialize(missing, new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        });
+        var result = ChainInclusionCheck.Verify(checkpoint, proofs, JsonSerializer.Deserialize<List<AuditLogEntry>>(json));
+
+        Assert.True(result.Holds, string.Join("\n", result.Failures));
+        Assert.Equal(entries.Count, result.Checks.Count(c => c.Contains("Details text; its commitment or salt is absent", StringComparison.Ordinal)));
+        Assert.DoesNotContain(result.Checks, c => c.Contains("Details text matches", StringComparison.Ordinal));
     }
 
     /// <summary>

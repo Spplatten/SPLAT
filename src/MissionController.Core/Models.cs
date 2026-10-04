@@ -370,7 +370,10 @@ public record AuditLogEntry(
     string EntryHash,
     // Which chain the row was written into (SqliteChainedAuditLedger's 1, 2 or 3); 0 when the entry
     // did not come from that ledger and nothing says.
-    int HashVersion = 0)
+    int HashVersion = 0,
+    // Older exports omit both; retention erases the salt while preserving the commitment.
+    string? DetailsCommitment = null,
+    string? DetailsSalt = null)
 {
     public long SequenceNumber => Id;
     public string CurrentHash => EntryHash;

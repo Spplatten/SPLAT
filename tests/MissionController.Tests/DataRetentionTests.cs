@@ -147,6 +147,8 @@ public class DataRetentionTests : IDisposable
         var entries = await _ledger.GetAuditLogsAsync(missionId);
         Assert.All(entries, e => Assert.DoesNotContain("jsmith on WS-04", e.Details));
         Assert.All(entries, e => Assert.Contains("REDACTED", e.Details));
+        Assert.All(entries, e => Assert.Null(e.DetailsSalt));
+        Assert.All(entries, e => Assert.False(string.IsNullOrEmpty(e.DetailsCommitment)));
     }
 
     [Fact]
