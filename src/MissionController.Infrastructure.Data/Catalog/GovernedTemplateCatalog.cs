@@ -31,6 +31,10 @@ public static partial class GovernedTemplateCatalog
         "endpoint-bitlocker-compliance" => "The BitLocker and TPM sensors require privileges the restricted token removes.",
         "identity-gpo-rsop" => "The gpresult sensor requires privileges the restricted token removes.",
         "identity-lockout-trace" => "The Security event log is unavailable to the restricted token.",
+        // Replaced rather than simply dropped: identity-auth-posture answers what a standard-user
+        // token can measure about authentication exposure, so the crew agent and the project stage
+        // that were built on this one still have a sensor that reports something.
+        "secops-auth-inspector" => "The Security event log is unavailable to the restricted token; identity-auth-posture replaces it.",
         _ => null,
     };
 
@@ -228,7 +232,6 @@ public static partial class GovernedTemplateCatalog
         "grants-budget-compliance-auditor",
         "grants-eligibility-proposal-engine",
         "marketing-social-campaign-publisher",
-        "secops-auth-inspector",
         "secops-tls-cipher-audit",
         // Added 2026-09-21, after reading what they return rather than only the comparison's verdict.
         "compliance-legacy-protocols",

@@ -398,7 +398,13 @@ Rules:
                 score += 5.0;
                 matchedKeywords.Add("network-domain");
             }
-            else if ((lower.Contains("auth") || lower.Contains("login") || lower.Contains("brute") || lower.Contains("attack") || lower.Contains("event") || lower.Contains("hack") || lower.Contains("secops")) &&
+            // "lockout" and "password" joined the list on 2026-10-03 with the template they route
+            // to. The catalog no longer reads the Security channel, so the identity sensor answers
+            // exposure rather than events - and the words a person uses for exposure were the ones
+            // that matched nothing. "brute" and "attack" still route here on purpose: this is the
+            // closest the catalog can come, and the template's own prompt opens by saying it reads
+            // no authentication events, which is a better answer than no route at all.
+            else if ((lower.Contains("auth") || lower.Contains("login") || lower.Contains("brute") || lower.Contains("attack") || lower.Contains("event") || lower.Contains("hack") || lower.Contains("secops") || lower.Contains("lockout") || lower.Contains("password")) &&
                      (t.TemplateId.Contains("auth") || t.TemplateId.Contains("secops") || t.TemplateId.Contains("security")))
             {
                 score += 5.0;
@@ -517,7 +523,7 @@ Rules:
                 score += 5.0;
                 matchedKeywords.Add("network-evidence");
             }
-            else if ((context.Contains("auth") || context.Contains("login") || context.Contains("brute") || context.Contains("4625") || context.Contains("logon") || context.Contains("security")) &&
+            else if ((context.Contains("auth") || context.Contains("login") || context.Contains("brute") || context.Contains("4625") || context.Contains("logon") || context.Contains("security") || context.Contains("lockout") || context.Contains("password")) &&
                      (t.TemplateId.Contains("auth") || t.TemplateId.Contains("secops") || t.TemplateId.Contains("security")))
             {
                 score += 5.0;

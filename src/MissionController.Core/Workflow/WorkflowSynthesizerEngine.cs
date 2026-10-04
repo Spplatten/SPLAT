@@ -684,7 +684,7 @@ Rules, all enforced after you answer:
                     Name: "Cron Log Schedule (15m)",
                     NodeType: WorkflowNodeType.Trigger,
                     Configuration: new Dictionary<string, string> { { "Interval", "15m" } }),
-                Mission("collect-logs", "Governed Authentication Log Sweep", "secops-auth-inspector"),
+                Mission("collect-logs", "Governed Authentication Posture Check", "identity-auth-posture"),
                 new(
                     NodeId: "condition-check",
                     Name: "Error Spike Detector",

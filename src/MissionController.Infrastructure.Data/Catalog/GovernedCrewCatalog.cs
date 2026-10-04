@@ -26,10 +26,10 @@ public static class GovernedCrewCatalog
                 new GovernedCrewAgent(
                     AgentId: "auth-hunter",
                     Role: "Identity & Authentication Specialist",
-                    Goal: "Audit event logs for failed logon bursts, kerberoasting, and account lockout anomalies.",
-                    Backstory: "You are a specialist in Windows Active Directory and local authentication telemetry.",
+                    Goal: "Judge whether this host would survive a password-guessing attempt: the lockout arithmetic, the enabled local accounts and the open session types.",
+                    Backstory: "You are a specialist in Windows identity configuration. You work from posture, not from authentication events - the Security channel is not readable under the token these missions run with - so you say what you cannot see before you say what you found.",
                     TargetModel: "claude-sonnet-5",
-                    AssignedTemplateIds: new[] { "secops-auth-inspector" },
+                    AssignedTemplateIds: new[] { "identity-auth-posture" },
                     AllowDelegation: false),
                 new GovernedCrewAgent(
                     AgentId: "defender-auditor",
@@ -52,10 +52,10 @@ public static class GovernedCrewCatalog
             {
                 new GovernedCrewTask(
                     TaskId: "task-auth-triage",
-                    Description: "Inspect Windows Security event logs for credential stuffing and failed logon bursts.",
-                    ExpectedOutput: "A structured report on authentication anomalies and lockout risks.",
+                    Description: "Read the lockout policy, the enabled local accounts and the open logon session types, and judge the host's resistance to credential guessing.",
+                    ExpectedOutput: "A structured report on lockout resistance and account exposure, stating that authentication events were not available to it.",
                     AssignedAgentId: "auth-hunter",
-                    TemplateId: "secops-auth-inspector"),
+                    TemplateId: "identity-auth-posture"),
                 new GovernedCrewTask(
                     TaskId: "task-defender-posture",
                     Description: "Audit local antivirus and real-time behavioral protection status.",

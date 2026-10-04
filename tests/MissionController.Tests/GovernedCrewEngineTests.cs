@@ -196,7 +196,7 @@ public class GovernedCrewEngineTests
     [Fact]
     public async Task Hierarchical_Orchestration_ManagerRoutesSubTasks_ToSpecializedAgents()
     {
-        var templateSec = BuildTemplate("secops-auth-inspector");
+        var templateSec = BuildTemplate("identity-auth-posture");
         var registry = new MockTemplateRegistry(new[] { templateSec });
         var missionEngine = new MockMissionExecutionEngine(
             toolOutput: "Security events clean",
@@ -213,11 +213,11 @@ public class GovernedCrewEngineTests
             ManagerAgent: new GovernedCrewAgent("manager", "Incident Commander", "Lead Response", "Leader", "claude-3-5-sonnet", AllowDelegation: true),
             Agents: new[]
             {
-                new GovernedCrewAgent("auth-worker", "Auth Analyst", "Analyze Auth", "Worker", "claude-3-5-sonnet", new[] { "secops-auth-inspector" })
+                new GovernedCrewAgent("auth-worker", "Auth Analyst", "Analyze Auth", "Worker", "claude-3-5-sonnet", new[] { "identity-auth-posture" })
             },
             Tasks: new[]
             {
-                new GovernedCrewTask("task-sec-triage", "Triage security events", "Triage findings", "auth-worker", "secops-auth-inspector")
+                new GovernedCrewTask("task-sec-triage", "Triage security events", "Triage findings", "auth-worker", "identity-auth-posture")
             });
 
         var result = await engine.RunCrewAsync(crew, new Dictionary<string, string>(), "test-operator");

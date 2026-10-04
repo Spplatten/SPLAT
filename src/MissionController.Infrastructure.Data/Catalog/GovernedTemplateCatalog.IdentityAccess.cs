@@ -7,40 +7,43 @@ public static partial class GovernedTemplateCatalog
 {
     private static IEnumerable<SingleToolTemplate> IdentityAccessTemplates() => new[]
     {
-        // --- 4624/4625 brute-force detector -------------------------------------------------
-        // The Security channel is ACL'd, but the restricted token is deliberately KEPT: the
-        // product's zero-local-admin pillar means the correct access path is the non-admin
-        // "Event Log Readers" (S-1-5-32-573) delegation, and CreateRestrictedToken only drops the
-        // ADMINISTRATORS SID (S-1-5-32-544) - a delegated Event Log Readers membership survives
-        // the restriction intact. An operator without that delegation gets 0x5 and empty stdout,
-        // so the prompt below is required to report the access failure as a delegation gap rather
-        // than as "zero failed logons", which would be a silent false-negative on a detector.
+        // --- Authentication posture -----------------------------------------------------------
+        // What replaced the 4624/4625 brute-force detector on 2026-10-03, and the reason is worth
+        // keeping: that template read the Security channel, which needs an "Event Log Readers"
+        // delegation most hosts do not have, so on 2026-10-01 it was the ONLY one of the 54 Windows
+        // templates that produced no evidence - 66 characters of "Access is denied." It never lied
+        // about it; its prompt reported the delegation gap. But a crew agent whose only assigned
+        // template can never answer is a stub, and the choice was an elevated tier for one template
+        // or a sensor that works. The zero-admin pillar is load-bearing and public; one template is
+        // not worth it.
+        //
+        // This answers a narrower question honestly rather than the same question emptily: not who
+        // failed to log on, which needs the event log, but whether this host could resist someone
+        // trying. The lockout policy, the local accounts and the open session types are all readable
+        // by a standard user, and together they are the spray-resistance an auditor can act on. The
+        // prompt says what it cannot see, because a reader who wants 4625s must not mistake this
+        // for them.
         Template(
-            "secops-auth-inspector",
-            "Auth Inspector (4624/4625 Brute-Force)",
-            "Extracts successful and failed logon events from the Windows Security channel to surface password-spray and brute-force patterns.",
+            "identity-auth-posture",
+            "Authentication Posture & Lockout Resistance",
+            "Reports the account lockout policy, local account state and open logon session types - the authentication exposure a standard-user token can measure without the Security event log.",
             CatIdentity,
             ModelPro,
             new SingleToolDefinition(
-                "wevtutil_security_tool",
-                "Windows Event Log Security Channel Query",
-                WevtutilExe,
-                // /rd:true reads newest-first so /c: caps the set at the MOST RECENT events rather
-                // than truncating at the oldest; the timediff predicate bounds the window
-                // server-side to keep the payload inside the memory clamp on busy controllers.
-                "qe Security /q:\"*[System[(EventID=4624 or EventID=4625) and TimeCreated[timediff(@SystemTime) <= {LookbackWindowMs}]]]\" /c:{MaxEventCount} /rd:true /f:text",
-                // Access-denied is a legitimate, expected outcome for an under-delegated operator,
-                // so 0x5 is admitted as a result the model must interpret rather than a crash.
-                new[] { 0, 5 },
+                "auth_posture_tool",
+                "Lockout Policy, Local Account State & Session Types",
+                PowerShellExe,
+                // net.exe for the policy because `net accounts` needs no privilege and no WMI;
+                // Get-LocalUser reads the SAM directly. Win32_LogonSession is WMI and is the one
+                // part that can come back empty inside a container with no local subsystems, so it
+                // is last and SilentlyContinue: a missing session table must not cost the policy.
+                Ps(@"net accounts; Write-Output '--- LOCAL ACCOUNTS ---'; Get-LocalUser | Select-Object Name,Enabled,LastLogon,PasswordLastSet,PasswordExpires,UserMayChangePassword | Format-Table -AutoSize; Write-Output '--- OPEN LOGON SESSIONS BY TYPE ---'; Get-CimInstance Win32_LogonSession -ErrorAction SilentlyContinue | Group-Object LogonType | Select-Object Count,@{n='LogonType';e={$_.Name}} | Format-Table -AutoSize"),
+                ExitOkOrPartial,
                 TimeoutSeconds: 90,
-                MaxMemoryBytes: Mb(384),
-                MaxCpuPercent: 60),
-            Reasoned("You are a Tier-2 SecOps Identity Analyst. FIRST: if the output is empty or contains an access-denied error, report exactly that the operator lacks 'Event Log Readers' delegation on this host and that the audit was NOT performed - never state or imply that no failed logons were found, because an unreadable log and a clean log are not the same result. Otherwise, correlate 4625 failures by Account Name, Source Network Address and Logon Type. Flag password-spray (many distinct accounts from one source), brute-force (one account, many attempts), and any 4625 burst immediately followed by a 4624 success from the same source. Decode Status/Sub Status codes (0xC000006A bad password, 0xC0000064 unknown user, 0xC0000234 locked out, 0xC0000072 disabled). Treat Logon Type 3 (network) and 10 (RDP) from external addresses as higher severity than Type 2 (console). State the recommended containment action. Beyond decoding the events, say what the actor is doing: a spray, credential stuffing, a targeted brute force, or a service or scheduled task retrying a stale password - and which of those the timing, the account mix and the sub-status codes actually support. Map it as knowledge with its ATT&CK id: T1110.003 spray, T1110.004 stuffing, T1110.001 brute force, T1078 when a success follows the failures."),
-            new Dictionary<string, string>
-            {
-                { "LookbackWindowMs", "86400000" }, // 24h rolling window
-                { "MaxEventCount", "400" }
-            }),
+                MaxMemoryBytes: Mb(256),
+                MaxCpuPercent: 40),
+            Reasoned("You are a Tier-2 SecOps Identity Analyst. SAY FIRST what this sensor cannot see: it reads no authentication events, so it cannot report who failed to log on, when, or from where - a host under active password spray and a quiet one look identical here. What it measures is whether a spray would succeed. Read the lockout threshold, duration and observation window together: a threshold of 0 means no lockout at all, and a short observation window resets the counter fast enough that a slow spray never trips a high threshold - state the arithmetic rather than the setting. Name every enabled local account, because each is a spray target, and flag any that is enabled with no password expiry or has never logged on. Logon type 3 is network, 10 is RemoteInteractive; an unexpected count of either on a workstation is worth a sentence. Where a recommendation maps to a CIS benchmark item or a MITRE ATT&CK technique, label it as knowledge rather than as something this output showed."),
+            null),
 
         // --- Domain controller locator & SRV health ------------------------------------------
         Template(

@@ -214,7 +214,7 @@ public class RemediationEngineTests
 
             var action = new RemediationAction(
                 "rollback-verified",
-                "secops-auth-inspector",
+                "identity-auth-posture",
                 "Rollback With Verified Probe",
                 "Rollback executes and independent probe confirms restored state",
                 RemediationRiskLevel.Moderate,
@@ -271,7 +271,7 @@ public class RemediationEngineTests
 
             var action = new RemediationAction(
                 "rollback-fail-probe",
-                "secops-auth-inspector",
+                "identity-auth-posture",
                 "Rollback With Failing Expected Output",
                 "Rollback exits 0 but probe detects state still broken",
                 RemediationRiskLevel.Moderate,

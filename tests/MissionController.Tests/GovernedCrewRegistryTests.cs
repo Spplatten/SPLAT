@@ -44,7 +44,7 @@ public class GovernedCrewRegistryTests : IDisposable
                     ""goal"": ""Analyze authentication logs"",
                     ""backstory"": ""Senior SecOps analyst specializing in AD events."",
                     ""targetModel"": ""claude-3-5-sonnet"",
-                    ""assignedTemplateIds"": [""secops-auth-inspector""],
+                    ""assignedTemplateIds"": [""identity-auth-posture""],
                     ""allowDelegation"": false
                 }
             ],
@@ -54,7 +54,7 @@ public class GovernedCrewRegistryTests : IDisposable
                     ""description"": ""Scan security event logs for anomalies"",
                     ""expectedOutput"": ""Log summary"",
                     ""assignedAgentId"": ""hunter-1"",
-                    ""templateId"": ""secops-auth-inspector""
+                    ""templateId"": ""identity-auth-posture""
                 }
             ],
             ""maxRpm"": 25,

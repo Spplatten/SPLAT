@@ -30,7 +30,7 @@ public class AgentBrainTests
         });
 
     private static readonly SingleToolTemplate SecTemplate = new(
-        TemplateId: "secops-auth-inspector",
+        TemplateId: "identity-auth-posture",
         Name: "Sentinel-SecOps",
         Description: "Hunts for brute force logon anomalies",
         Category: "Security",
@@ -41,7 +41,7 @@ public class AgentBrainTests
         ParameterFields: Array.Empty<TemplateParameterField>(),
         AvailableRemediations: new[]
         {
-            new RemediationAction("sec-lockout", "secops-auth-inspector", "Enforce Account Lockout", "Sets lockout threshold", RemediationRiskLevel.Moderate, true, "net.exe", "accounts /lockoutthreshold:5", "net.exe", "accounts /lockoutthreshold:0")
+            new RemediationAction("sec-lockout", "identity-auth-posture", "Enforce Account Lockout", "Sets lockout threshold", RemediationRiskLevel.Moderate, true, "net.exe", "accounts /lockoutthreshold:5", "net.exe", "accounts /lockoutthreshold:0")
         });
 
     private static readonly SingleToolTemplate DiskTemplate = new(
@@ -61,7 +61,11 @@ public class AgentBrainTests
 
     [Theory]
     [InlineData("Why is my internet dropping and DNS resolving so slowly?", "net-dns-audit")]
-    [InlineData("Investigate potential brute force attacks and failed logon attempts", "secops-auth-inspector")]
+    // The goal changed with the template. "Investigate brute force attacks" used to route to a
+    // detector that read the Security channel; nothing in the catalog reads it any more, so a goal
+    // phrased as event hunting has no honest destination and the heuristic should not be taught to
+    // pretend otherwise. What it can route is a question about exposure.
+    [InlineData("Check the account lockout policy and which local accounts are enabled", "identity-auth-posture")]
     [InlineData("Our C: drive is completely out of space and needs temp cleanup", "sysops-disk-space")]
     public async Task CognitiveGoalDecomposer_Heuristic_Routes_Accurately(string userGoal, string expectedTemplateId)
     {

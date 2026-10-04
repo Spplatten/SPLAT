@@ -320,7 +320,7 @@ public class WorkflowEngineTests
         Assert.Contains(graph.Nodes, n => n.NodeType == WorkflowNodeType.Condition);
         Assert.Contains(graph.Nodes, n =>
             n.NodeType == WorkflowNodeType.GovernedMission &&
-            n.Configuration[WorkflowExecutionEngine.TemplateIdKey] == "secops-auth-inspector");
+            n.Configuration[WorkflowExecutionEngine.TemplateIdKey] == "identity-auth-posture");
     }
 
     [Fact]

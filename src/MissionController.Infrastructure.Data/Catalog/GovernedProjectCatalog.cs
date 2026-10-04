@@ -15,7 +15,7 @@ public static class GovernedProjectCatalog
             new[]
             {
                 new ProjectStage("events", "Collect system and application failure clusters", "sysops-event-triage", "Cluster the machine's recent critical and error events by root cause. Prioritize storage, unexpected shutdown, and driver evidence."),
-                new ProjectStage("identity", "Check authentication pressure", "secops-auth-inspector", "Look for failed logon bursts, lockout patterns, and identity evidence that could explain the incident."),
+                new ProjectStage("identity", "Check authentication exposure", "identity-auth-posture", "Read the lockout policy, the enabled local accounts and the open session types: whether this host could resist someone trying, since the authentication events themselves are not readable here."),
                 new ProjectStage("network", "Check local connectivity path", "net-dns-audit", "Measure the local connectivity path and identify whether the incident is local, upstream, or external.")
             },
             new[]

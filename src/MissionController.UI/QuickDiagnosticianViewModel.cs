@@ -112,7 +112,7 @@ public partial class QuickDiagnosticianViewModel : ObservableObject
 
         // Populate the frontline governed autonomous AI agents.
         Tiles.Add(new FriendlyDiagnosticTile("network", "net-dns-audit", "Atlas-Net", "Diagnoses connection drops, high latency, and listening sockets", "\uE774", "#00E5FF"));
-        Tiles.Add(new FriendlyDiagnosticTile("security", "secops-auth-inspector", "Sentinel-SecOps", "Hunts for unauthorized login attempts and brute-force attacks", "\uE72E", "#FF7043"));
+        Tiles.Add(new FriendlyDiagnosticTile("security", "identity-auth-posture", "Sentinel-SecOps", "Checks whether this machine could resist a password-guessing attempt", "\uE72E", "#FF7043"));
         Tiles.Add(new FriendlyDiagnosticTile("disk", "sysops-disk-space", "Titan-SysOps", "Analyzes hard drive space exhaustion and suggests safe cleanup targets", "\uEDA2", "#AB47BC"));
         Tiles.Add(new FriendlyDiagnosticTile("antivirus", "secops-defender-status", "Aegis-Endpoint", "Verifies Microsoft Defender real-time shield and signature freshness", "\uE815", "#6CCB5F"));
         Tiles.Add(new FriendlyDiagnosticTile("activedirectory", "identity-ad-group-hygiene", "Vanguard-AD", "Audits Active Directory identity, Kerberos tickets, and privileged SIDs", "\uE716", "#FFD700"));

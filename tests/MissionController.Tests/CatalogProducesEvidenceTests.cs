@@ -142,10 +142,19 @@ public class CatalogProducesEvidenceTests
     /// Security event log) are gone from the catalog: a second privilege tier would have cost the
     /// zero-admin pillar, which is a load-bearing claim, to recover four outputs nobody asked for.
     ///
-    /// One is left, and it is the harder call. <c>secops-auth-inspector</c> wants the Security
-    /// event log too, and it is the only authentication telemetry in the product: a governed crew's
-    /// auth-hunter agent and a project's identity stage are both built on it, so retiring it removes
-    /// a capability rather than a dead end. It stays pinned here until that is decided.
+    /// The fifth was the harder call and was settled on 2026-10-03. <c>secops-auth-inspector</c>
+    /// wanted the Security event log too, and it was the only authentication telemetry in the
+    /// product - a governed crew's auth-hunter agent and a project's identity stage were built on
+    /// it - so retiring it would have removed a capability rather than a dead end. It was
+    /// <em>replaced</em>: <c>identity-auth-posture</c> reads the lockout policy, the local accounts
+    /// and the open session types, all of which a standard-user token can see, and says in its own
+    /// prompt that it reads no authentication events. That is a narrower question answered honestly
+    /// instead of the same question answered with 66 characters of "Access is denied."
+    ///
+    /// **This list is now empty, and that is the claim.** Every Windows template in the shipped
+    /// catalog produces usable evidence under the restricted token; measured 2026-10-03 on an
+    /// otherwise idle machine, because this test spawns all of them unisolated and contention
+    /// reports a working template as silent.
     ///
     /// Four left on 2026-09-22 by being fixed. Two had called <c>wmic</c>, which Windows 11 removed.
     /// identity-kerberos-spn had been running a JDK's <c>klist</c>, found ahead of System32 on the
@@ -155,10 +164,7 @@ public class CatalogProducesEvidenceTests
     /// its configuration, passed on 2026-09-21 and failed on 2026-09-22 with no line changed: the
     /// service refuses this token only while it is running, and it starts on a trigger.
     /// </summary>
-    private static readonly string[] ProduceNoEvidence =
-    {
-        "secops-auth-inspector",
-    };
+    private static readonly string[] ProduceNoEvidence = Array.Empty<string>();
 
     /// <summary>
     /// The evidence, less what carries none: the template's own echoed section headers, and a
