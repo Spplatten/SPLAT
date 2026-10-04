@@ -21,7 +21,18 @@ public static partial class GovernedTemplateCatalog
     /// Bumped whenever the seeded set changes. The registry stores this so startup can skip a
     /// redundant full-catalog upsert when the on-disk set already matches the shipped build.
     /// </summary>
-    public const string CatalogVersion = "2.5.0";
+    public const string CatalogVersion = "2.5.1";
+
+    // Removing a seed does not remove its persisted row. Keep retired identities reserved so
+    // an upgraded registry cannot launch them, or import them again under their historical IDs.
+    public static string? RetirementReason(string templateId) => templateId switch
+    {
+        "compliance-security-baseline" => "The secedit policy export requires privileges the restricted token removes.",
+        "endpoint-bitlocker-compliance" => "The BitLocker and TPM sensors require privileges the restricted token removes.",
+        "identity-gpo-rsop" => "The gpresult sensor requires privileges the restricted token removes.",
+        "identity-lockout-trace" => "The Security event log is unavailable to the restricted token.",
+        _ => null,
+    };
 
     // --- Model governance -----------------------------------------------------------------
     // Pro is reserved for templates whose output requires correlation or adversarial reasoning

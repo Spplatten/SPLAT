@@ -39,16 +39,26 @@ namespace MissionController.Infrastructure.Data.Catalog;
 public static class DerivedTemplateGuard
 {
     /// <summary>
-    /// Why this template may not be trusted as a derivative of its stated base, or null when it may
-    /// be - including when it states no base at all, which is every catalog template.
+    /// Why this template is retired or may not be trusted as a derivative of its stated base,
+    /// or null when it may be used, including current catalog templates with no stated base.
     /// </summary>
     public static string? Problem(SingleToolTemplate template)
     {
         ArgumentNullException.ThrowIfNull(template);
 
+        if (GovernedTemplateCatalog.RetirementReason(template.TemplateId) is { } retired)
+        {
+            return $"'{template.TemplateId}' is retired: {retired} Its stored record is retained, but it may not run.";
+        }
+
         if (string.IsNullOrWhiteSpace(template.SourceTemplateId))
         {
             return null;
+        }
+
+        if (GovernedTemplateCatalog.RetirementReason(template.SourceTemplateId) is { } retiredBase)
+        {
+            return $"'{template.TemplateId}' derives from retired template '{template.SourceTemplateId}': {retiredBase}";
         }
 
         var source = GovernedTemplateCatalog.All

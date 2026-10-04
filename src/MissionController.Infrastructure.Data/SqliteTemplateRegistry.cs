@@ -30,8 +30,8 @@ public sealed class SqliteTemplateRegistry : ITemplateRegistry
 
     private async Task InitializeDefaultCatalogAsync()
     {
-        // Seed the reviewable catalog on every startup so upgrades replace the obsolete seed set
-        // while user-authored templates remain intact under their own TemplateId values.
+        // Refresh active seeds without erasing historical or user-authored rows. Retirement is
+        // checked on every read and save, so an obsolete seed retained here cannot still run.
         foreach (var template in GovernedTemplateCatalog.All)
         {
             await RegisterTemplateAsync(template).ConfigureAwait(false);
