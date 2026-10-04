@@ -131,7 +131,8 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
         IReadOnlyList<AuditLogEntry> entries,
         string outputDirectory,
         CancellationToken cancellationToken = default,
-        LedgerAnchor? anchor = null)
+        LedgerAnchor? anchor = null,
+        ChainInclusion? chainInclusion = null)
     {
         ArgumentNullException.ThrowIfNull(runRecord);
         ArgumentNullException.ThrowIfNull(entries);
@@ -167,6 +168,16 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
         if (anchor is not null)
         {
             files["ledger_anchor.json"] = TextBytes(JsonSerializer.Serialize(anchor, JsonOpts));
+        }
+
+        // The pair that lets a recipient check this bundle without the host: the operator's signed
+        // statement about the whole chain, and one inclusion proof per entry rooted at it. Both go
+        // inside the signature statement with everything else, so neither can be swapped for a
+        // friendlier one after the fact.
+        if (chainInclusion is not null)
+        {
+            files["checkpoint.json"] = TextBytes(JsonSerializer.Serialize(chainInclusion.Checkpoint, JsonOpts));
+            files["chain_inclusion.json"] = TextBytes(JsonSerializer.Serialize(chainInclusion.Proofs, JsonOpts));
         }
 
         if (_signer is not null)

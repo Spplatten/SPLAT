@@ -27,14 +27,24 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
     private readonly IMerkleProofEngine _merkleEngine;
     private readonly IComplianceArchiveExporter _archiveExporter;
 
+    /// <summary>
+    /// Builds the signed chain statement and the inclusion proofs a bundle needs to be checkable
+    /// away from this host (roadmap 3.7). Null on a host with no run record key, or none configured:
+    /// the bundle then ships without them and says so, rather than carrying proofs against a
+    /// statement nobody signed.
+    /// </summary>
+    private readonly LedgerCheckpointBuilder? _checkpoints;
+
     public MissionRunRecordAssembler(
         IAuditLedger auditLedger,
         IMerkleProofEngine merkleEngine,
-        IComplianceArchiveExporter archiveExporter)
+        IComplianceArchiveExporter archiveExporter,
+        LedgerCheckpointBuilder? checkpoints = null)
     {
         _auditLedger = auditLedger ?? throw new ArgumentNullException(nameof(auditLedger));
         _merkleEngine = merkleEngine ?? throw new ArgumentNullException(nameof(merkleEngine));
         _archiveExporter = archiveExporter ?? throw new ArgumentNullException(nameof(archiveExporter));
+        _checkpoints = checkpoints;
     }
 
     public async Task<MissionRunRecord> AssembleRunRecordAsync(Guid missionId, CancellationToken cancellationToken = default)
@@ -55,7 +65,21 @@ public sealed class MissionRunRecordAssembler : IMissionRunRecordAssembler
         // the record's root that the anchor never listed, which reads as tampering.
         var anchor = await _auditLedger.ReadAnchorAsync(missionId, cancellationToken);
 
-        return await _archiveExporter.ExportMissionRunRecordPackageAsync(record, entries, outputDirectory, cancellationToken, anchor);
+        // The chain, read once and proved against once. A second read for the proofs would give a
+        // different root the moment anything appended, and every proof against the first would then
+        // fail at a recipient for a reason that is not tampering.
+        ChainInclusion? inclusion = null;
+        if (_checkpoints is not null)
+        {
+            var (tree, chain) = await _checkpoints.ReadChainAsync(cancellationToken);
+            if (_checkpoints.Sign(_checkpoints.Describe(tree, chain)) is { } signed)
+            {
+                inclusion = new ChainInclusion(signed, _checkpoints.ProveInChain(tree, entries));
+            }
+        }
+
+        return await _archiveExporter.ExportMissionRunRecordPackageAsync(
+            record, entries, outputDirectory, cancellationToken, anchor, inclusion);
     }
 
     private MissionRunRecord Assemble(Guid missionId, IReadOnlyList<AuditLogEntry> entries)

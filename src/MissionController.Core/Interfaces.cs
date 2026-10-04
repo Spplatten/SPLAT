@@ -214,7 +214,8 @@ public interface IComplianceArchiveExporter
         IReadOnlyList<AuditLogEntry> entries,
         string outputDirectory,
         CancellationToken cancellationToken = default,
-        LedgerAnchor? anchor = null);
+        LedgerAnchor? anchor = null,
+        ChainInclusion? chainInclusion = null);
 }
 
 /// <summary>
@@ -335,6 +336,66 @@ public record LedgerAnchor(
     DateTimeOffset AnchoredAtUtc);
 
 public record LedgerAnchorEntry(long Id, string EntryHash, string Action);
+
+/// <summary>
+/// A statement about the whole chain at one moment, which the operator publishes.
+///
+/// The anchor tells a verifier what to compare; this is the thing to compare it against. Every
+/// check a bundle's recipient could previously run was a check of the bundle against itself - the
+/// Merkle root in it covers the entries in it, and the signature covers the files - so a bundle
+/// holding four of a mission's nine rows passed all of them. <see cref="RunRecordLedgerVerifier"/>
+/// closes that, and runs on the host. This is the version a stranger can run.
+///
+/// <see cref="ChainMerkleRoot"/> is the root over EVERY ledger entry up to <see cref="HeadEntryId"/>,
+/// not over one mission's. A bundle exported against this head carries an inclusion proof per entry
+/// whose own root is this one, so a recipient with the bundle and this statement verifies offline
+/// that each row it holds was in the ledger when the statement was signed - without the host, and
+/// without being able to see any other mission's rows.
+///
+/// <para>
+/// What it does not do, and the row in the roadmap says so: a proof is valid only against the exact
+/// root it was generated for, so a recipient needs the checkpoint for the head their bundle names.
+/// An export therefore issues one. Proving that a later checkpoint extends an earlier one needs a
+/// consistency proof over an append-only tree, which <see cref="IMerkleProofEngine"/> does not build;
+/// until it does, the guarantee is "these rows were in the chain at this head", never "and nothing
+/// was removed afterwards".
+/// </para>
+/// </summary>
+public record LedgerCheckpoint(
+    string GenesisEntryHash,
+    long HeadEntryId,
+    string HeadEntryHash,
+    string ChainMerkleRoot,
+    int ChainHashVersion,
+    int TotalEntries,
+    DateTimeOffset IssuedAtUtc);
+
+/// <summary>
+/// A <see cref="LedgerCheckpoint"/> and the operator's signature over it.
+///
+/// The signature says the statement came from a holder of that key; it cannot say the holder is
+/// honest, which no signature can. What it buys a recipient is that the checkpoint they found
+/// published and the bundle they were handed were produced by the same key, so a bundle naming a
+/// chain nobody published, or a head beyond anything the host has ever stated, stops being
+/// something they have to take on trust.
+/// </summary>
+public record SignedLedgerCheckpoint(
+    LedgerCheckpoint Checkpoint,
+    string Algorithm,
+    string KeyId,
+    string PublicKey,
+    string Statement,
+    string Signature);
+
+/// <summary>
+/// What a bundle carries so that a stranger can check it: the checkpoint it was cut against, and
+/// one inclusion proof per entry rooted at that checkpoint's chain root. Both or neither - a proof
+/// without the statement it proves against is unverifiable, and the statement without the proofs
+/// says only that a chain existed.
+/// </summary>
+public record ChainInclusion(
+    SignedLedgerCheckpoint Checkpoint,
+    IReadOnlyList<MerkleProof> Proofs);
 
 public interface ITemplateRegistry
 {
