@@ -46,8 +46,8 @@
 # matches `<header class="hero">`, and an earlier republish lost that opening tag, so the live page
 # rendered its title placard as bare text for months while every other copy looked right.
 
-published  2026-10-02
-version    64
+published  2026-10-06
+version    65
 source     docs/SPLAT-Field-Guide.html
-sha256     36a51e557a226b94a9d594013bf483823e1a07f36b652daf98e23090c6347f70
-handoff    census 62 -> 58: the four templates that needed elevation are retired, and five derived numbers that had drifted with them - fifty-five, eleven, ten, thirty-nine, the fortieth - are recounted against the catalog as 58/9/45/8/37
+sha256     d4249e1e5fdd0a9cc4dc57b7eb22db90a80c339536a53ac35a3175cf09e2f425
+handoff    census 58/9/45/8/37 -> 58/8/46/8/38 after identity-auth-posture; the two counts the suite never read - thirty-eight unused connections and the one-in-seven fraction - were wrong in both documents and are now bound

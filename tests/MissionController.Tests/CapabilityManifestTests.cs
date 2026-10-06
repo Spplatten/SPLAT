@@ -30,6 +30,26 @@ public sealed class CapabilityManifestTests
         return dir!.FullName;
     }
 
+    /// <summary>
+    /// A census count in the English the documents write it in. The prose spells these out rather
+    /// than printing a digit, which is why they drifted unnoticed while the digits beside them were
+    /// bound - a word is invisible to a test that reads <c>\d+</c>.
+    /// </summary>
+    private static string InWords(int n)
+    {
+        string[] units =
+        {
+            "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+            "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"
+        };
+        string[] tens = { "", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety" };
+
+        Assert.InRange(n, 0, 99);
+        return n < 20 ? units[n]
+            : n % 10 == 0 ? tens[n / 10]
+            : tens[n / 10] + "-" + units[n % 10];
+    }
+
     private static async Task<List<(string Name, string Description)>> ServedToolsAsync()
     {
         var handler = new McpServerHandler(new NeverCalledExecutor(), new TemplatePolicyCompiler(), new SilentLedger());
@@ -122,6 +142,15 @@ public sealed class CapabilityManifestTests
         Assert.True(leasedRow.Success, "the roadmap no longer states how many templates run under the Linux lease in the form this test reads");
         Assert.Equal(census.Leased, int.Parse(leasedRow.Groups["leased"].Value));
 
+        // The row's own remainder states the third group: the templates that keep a network stack
+        // because the container would blind them. Unbound until now, and it showed - the roadmap
+        // said thirty-nine while the guide said thirty-seven and the catalog said thirty-eight.
+        // Two documents disagreeing about the same count is worse than either being stale, because
+        // a reader who checks one against the other learns only that nobody is counting.
+        var stackRow = Regex.Match(roadmap, @"(?<n>[A-Za-z]+(?:-[a-z]+)?) keep a network stack they never use");
+        Assert.True(stackRow.Success, "the roadmap no longer states how many keep an unused network stack in the form this test reads");
+        Assert.Equal(InWords(census.LocalSubsystems), stackRow.Groups["n"].Value.ToLowerInvariant());
+
         // The Field Guide states the same census in prose. That document is what a non-engineer reads
         // to decide whether to trust this, and it spent weeks telling them Windows did not filter
         // network sockets at all - which the census above disproves for 33 of the 49. Bound here so
@@ -153,6 +182,32 @@ public sealed class CapabilityManifestTests
             var leased = Regex.Match(text, @"(?<leased>\d+) run inside the Linux guest");
             Assert.True(leased.Success, $"{doc} no longer states how many run under the Linux lease in the form this test reads");
             Assert.Equal(census.Leased, int.Parse(leased.Groups["leased"].Value));
+
+            // The remaining two groups, in the words the prose uses for them. Both are stated twice
+            // and both had drifted: the count that keeps an unused connection, and the count that
+            // genuinely dials out.
+            var unused = Regex.Match(text, @"(?<n>[A-Za-z]+(?:-[a-z]+)?) specialists keep a phone they never use");
+            Assert.True(unused.Success, $"{doc} no longer states how many keep an unused connection in the form this test reads");
+            Assert.Equal(InWords(census.LocalSubsystems), unused.Groups["n"].Value.ToLowerInvariant());
+
+            var dials = Regex.Matches(text, @"(?<n>[A-Za-z]+) (?:of them|more) genuinely want the internet");
+            Assert.Equal(2, dials.Count);
+            foreach (Match dial in dials)
+            {
+                Assert.Equal(InWords(census.NeedsNetwork), dial.Groups["n"].Value.ToLowerInvariant());
+            }
+
+            // Parts 2 to 4 give the same fact as a fraction, because a lay reader meets it long
+            // before any of the counts. It read "a fifth" when nine of forty-nine were denied and
+            // still read "a fifth" at eight of fifty-four, which is a rounder claim than the
+            // number supports - so the fraction is bound to the census like everything else.
+            int oneIn = (int)Math.Round((double)census.Windows / census.NetworkDenied, MidpointRounding.AwayFromZero);
+            var fractions = Regex.Matches(text, @"[Oo]ne in (?<n>[a-z]+) (?:tools|specialists)");
+            Assert.True(fractions.Count >= 4, $"{doc} states the denial fraction fewer times than this test can see");
+            foreach (Match fraction in fractions)
+            {
+                Assert.Equal(InWords(oneIn), fraction.Groups["n"].Value);
+            }
 
             // The document names the catalog size three more times, and named it "40+" in two of
             // them while the sentence above said 49 - the vague number is the one that survives a
