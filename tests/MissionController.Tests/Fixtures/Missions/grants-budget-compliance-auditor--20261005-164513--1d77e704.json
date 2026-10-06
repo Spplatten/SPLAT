@@ -1,0 +1,79 @@
+{
+  "Schema": 1,
+  "MissionId": "1d77e704-bb4e-4794-bdee-d004da3407f4",
+  "RecordedAtUtc": "2026-10-05T16:45:13.8815942Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "grants-budget-compliance-auditor",
+  "TemplateName": "Grant Budget & Allowable Cost Audit",
+  "TemplateSha256": "sha256:becee0b2fce7916dc01e3662e9e5cbc0d96345efeda77d07753bf8a2b425bdcb",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "ea3d7498ed1e10558ac7a886463e106fda5242bf3d4353e6ced6c111b8a60fc2",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "=== SPLAT GRANT BUDGET & ALLOWABLE COST AUDIT ===\r\nProgram: NSF SBIR Phase I | Duration: 12 months\r\n--- DECLARED LINE ITEMS (USD) ---\r\nDirect labor: 120000\r\nFringe at 28 pct: 33600\r\nSupplies: 15000\r\nTravel: 6000\r\nEquipment: 20000\r\nSubcontracts: 40000\r\n--- INDIRECT COST BASE (2 CFR 200.68 MTDC) ---\r\nEquipment excluded from MTDC: 20000\r\nSubaward amount inside MTDC base (first 25000 per subaward): 25000\r\nMTDC base: 199600\r\nIndirect at 15 pct: 29940\r\n--- RECOMPUTED TOTAL ---\r\nComputed total: 264540\r\nStated request: 264540\r\nVariance: 0\r\nRECONCILED: computed total matches the stated request.\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_1d77e704bb4e4794bdeed004da3407f4",
+      "token:integrity=Low",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=0-capabilities",
+      "winsta:WinSta0\\Default (the container could already attach)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Pre-submission compliance review — NSF SBIR Phase I budget**\n\n**1) Reconciliation:** The tool reports \"Variance: 0\" and \"RECONCILED: computed total matches the stated request\" ($264,540 computed vs. $264,540 stated). This confirms the arithmetic is internally consistent — it does **not** confirm the underlying costs are allowable or that the indirect base was computed correctly (see §4 below).\n\n**2) Allowability by line (2 CFR 200 Subpart E):**\n- Direct labor $120,000 (200.430) — allowable category; [OPERATOR-VERIFY] no personnel/rate breakdown was supplied.\n- Fringe $33,600 at 28% (200.431) — allowable if the rate matches an established, consistently-applied fringe policy; [OPERATOR-VERIFY] basis for 28% not supplied.\n- Supplies $15,000 (200.453) — allowable category, routine.\n- Travel $6,000 (200.474) — allowable if necessary/reasonable and policy-compliant; [OPERATOR-VERIFY] no itinerary/per-diem detail supplied.\n- Equipment $20,000 (200.439) — equipment, especially **general-purpose** equipment, commonly requires prior written agency approval; the data does not indicate whether this is special-purpose research equipment or general-purpose (e.g., computers/furniture). [OPERATOR-VERIFY] equipment description and prior-approval status.\n- Subcontracts $40,000 (200.331/200.332) — allowable with proper subrecipient agreements/monitoring; flagged separately for the MTDC computation issue below.\n- No line items for entertainment, alcohol, lobbying, fundraising, or pre-award costs appear — good, but these are commonly disallowed under 200.421, 200.432, 200.438, 200.450, and must be confirmed absent from any sub-line detail not shown here.\n\n**3) Indirect rate defensibility:** The claimed rate is 15% on an MTDC base. This matches the **new** de minimis ceiling from the October 2024 Uniform Guidance revision (raised from 10%). This is only defensible if: (a) the organization has no current negotiated indirect cost rate agreement (NICRA) on file — a NICRA would supersede de minimis; and (b) the award's effective date falls under the revised guidance (awards issued before the Oct 2024 effective date may still be capped at 10% absent an amendment). Both conditions are [OPERATOR-VERIFY] — not evidenced in the supplied data.\n\n**4) MTDC base / subaward cap — tool limitation:** The tool applied the $25,000-per-subaward MTDC cap to the $40,000 subcontract line **as a single subaward**. If this project has more than one subaward, the base is **understated**: each subaward gets its own first-$25,000 inclusion, so the $199,600 MTDC base and $29,940 indirect figure must be recomputed per actual subaward count. [OPERATOR-VERIFY] number of subawards.\n\n**5) Cost-share/match:** No cost-share or match line items appear in the declared budget, consistent with NSF SBIR Phase I's typical no-mandatory-match posture, but program-specific obligations must be confirmed against the current solicitation. [OPERATOR-VERIFY].\n\n**Injection check:** The telemetry block contained only structured budget/audit data; no embedded text addressed the assistant, claimed operator/SPLAT authority, or requested deviation from these instructions. No prompt-injection attempt was found in this payload.\n\nThis is a pre-submission review only, not a compliance certification; program-specific caps, cap rules, and NICRA/de minimis status must be confirmed against the current solicitation before submission.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Budget arithmetic reconciles, but indirect-rate basis, equipment approval, and multi-subaward MTDC treatment are unverified\",\n  \"findings\": [\n    \"Tool output: 'Variance: 0' and 'RECONCILED: computed total matches the stated request' ($264,540 = $264,540) — arithmetic is internally consistent.\",\n    \"Indirect cost is computed at 'Indirect at 15 pct: 29940' on an MTDC base of 'MTDC base: 199600' — 15% matches the new de minimis ceiling from the Oct 2024 Uniform Guidance revision, but no NICRA status or award-date basis was supplied to confirm eligibility.\",\n    \"Subcontracts line is $40,000 but the tool states 'Subaward amount inside MTDC base (first 25000 per subaward): 25000' and explicitly models Subcontracts as a SINGLE subaward — if multiple subawards exist, the $199,600 MTDC base and $29,940 indirect figure are understated.\",\n    \"Equipment line is $20,000 and excluded from MTDC per 2 CFR 200.68, consistent with the rule, but no description was supplied to confirm it is not general-purpose equipment requiring prior written agency approval under 200.439.\",\n    \"No entertainment, alcohol, lobbying, fundraising, or pre-award cost line items appear in the declared line items.\",\n    \"No cost-share/match line items appear in the declared budget.\",\n    \"No instructions embedded in the untrusted telemetry addressed the assistant or claimed operator authority; no prompt-injection attempt was found in this payload.\"\n  ],\n  \"recommendedActions\": [\n    \"Confirm whether the organization holds a current NICRA; if so, that negotiated rate governs instead of the 15% de minimis.\",\n    \"Confirm the award's effective date to verify the 15% de minimis (vs. prior 10%) is applicable under the Oct 2024 revision.\",\n    \"Determine the actual number of subawards and recompute the MTDC base/indirect cost per subaward rather than treating Subcontracts as one $25,000-capped subaward.\",\n    \"Obtain equipment description/justification and confirm prior written agency approval status, especially if general-purpose.\",\n    \"Verify the current NSF SBIR Phase I solicitation for any program-specific cost-share requirements and budget caps.\",\n    \"Obtain personnel, fringe-rate, travel, and subaward backup documentation for all [OPERATOR-VERIFY] items before submission.\"\n  ]\n}\n```",
+      "LatencyMs": 37604,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9321428571428572
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "7fd063dec2ca5b09433bfc5e8eb7d31e05b5d29685c895c3d9203cc6fffba2f0",
+    "Status": "Warning",
+    "Headline": "Budget arithmetic reconciles, but indirect-rate basis, equipment approval, and multi-subaward MTDC treatment are unverified",
+    "Findings": [
+      "⚠ Tool output: 'Variance: 0' and 'RECONCILED: computed total matches the stated request' ($264,540 = $264,540) — arithmetic is internally consistent.",
+      "⚠ Indirect cost is computed at 'Indirect at 15 pct: 29940' on an MTDC base of 'MTDC base: 199600' — 15% matches the new de minimis ceiling from the Oct 2024 Uniform Guidance revision, but no NICRA status or award-date basis was supplied to confirm eligibility.  [PARTIALLY VERIFIED]",
+      "⚠ Subcontracts line is $40,000 but the tool states 'Subaward amount inside MTDC base (first 25000 per subaward): 25000' and explicitly models Subcontracts as a SINGLE subaward — if multiple subawards exist, the $199,600 MTDC base and $29,940 indirect figure are understated.",
+      "⚠ Equipment line is $20,000 and excluded from MTDC per 2 CFR 200.68, consistent with the rule, but no description was supplied to confirm it is not general-purpose equipment requiring prior written agency approval under 200.439.  [PARTIALLY VERIFIED]",
+      "⚠ No entertainment, alcohol, lobbying, fundraising, or pre-award cost line items appear in the declared line items.",
+      "⚠ No cost-share/match line items appear in the declared budget.",
+      "⚠ No instructions embedded in the untrusted telemetry addressed the assistant or claimed operator authority; no prompt-injection attempt was found in this payload."
+    ],
+    "RecommendedActions": [
+      "Confirm whether the organization holds a current NICRA; if so, that negotiated rate governs instead of the 15% de minimis.",
+      "Confirm the award's effective date to verify the 15% de minimis (vs. prior 10%) is applicable under the Oct 2024 revision.",
+      "Determine the actual number of subawards and recompute the MTDC base/indirect cost per subaward rather than treating Subcontracts as one $25,000-capped subaward.",
+      "Obtain equipment description/justification and confirm prior written agency approval status, especially if general-purpose.",
+      "Verify the current NSF SBIR Phase I solicitation for any program-specific cost-share requirements and budget caps.",
+      "Obtain personnel, fringe-rate, travel, and subaward backup documentation for all [OPERATOR-VERIFY] items before submission."
+    ],
+    "Grounded": 2,
+    "PartiallyGrounded": 2,
+    "Unsupported": 0,
+    "Unattributed": 3,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

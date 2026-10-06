@@ -1,0 +1,73 @@
+{
+  "Schema": 1,
+  "MissionId": "8742c06d-0774-458f-8394-684bacfd7af2",
+  "RecordedAtUtc": "2026-10-05T17:04:59.0548074Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "source-public-interest-probe",
+  "TemplateName": "Public Attention Source Probe",
+  "TemplateSha256": "sha256:55b794a3cfef8ea959d74d83b60acbe733019b9d70376cb69046b9a90bf5703a",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "80167ec1337c4ba467d14f863b907ae417934884030e4442b886b42e1d9c0864",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "=== SPLAT SOURCE PROBE: PUBLIC ATTENTION ===\r\nEndpoint: https://wikimedia.org/api/rest_v1/metrics/pageviews (read-only; no credential)\r\nArticle: Grocery_store | Project: en.wikipedia | Window: 2025090100 to 2026090100 | Granularity: monthly\r\n--- GOVERNANCE POSTURE ---\r\nRead-only. The host is fixed in this tool; only the article and the window are bound.\r\nDeclared tool egress: wikimedia.org:443 - audited declaration on Windows, kernel-pinned under a Linux lease.\r\n--- FETCH ---\r\nOBSERVATIONS_RETURNED: 13\r\nMONTH: 2025090100 VIEWS: 8664\r\nMONTH: 2025100100 VIEWS: 9160\r\nMONTH: 2025110100 VIEWS: 9820\r\nMONTH: 2025120100 VIEWS: 8210\r\nMONTH: 2026010100 VIEWS: 8363\r\nMONTH: 2026020100 VIEWS: 7847\r\nMONTH: 2026030100 VIEWS: 10931\r\nMONTH: 2026040100 VIEWS: 9762\r\nMONTH: 2026050100 VIEWS: 8496\r\nMONTH: 2026060100 VIEWS: 7172\r\nMONTH: 2026070100 VIEWS: 7600\r\nMONTH: 2026080100 VIEWS: 7183\r\nMONTH: 2026090100 VIEWS: 265\r\nFIRST_MONTH: 2025090100 VIEWS: 8664\r\nLAST_COMPLETE_MONTH: 2026090100 VIEWS: 265\r\nCHANGE_ACROSS_WINDOW_PCT: -96.94\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_8742c06d0774458f8394684bacfd7af2",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# Data Source Analysis: Grocery_store Article Views\n\n## Plain-English Analysis\n\nThe source returned 13 months of article-view data for \"Grocery_store\" on English Wikipedia, spanning September 2025 through September 2026. **Critical finding**: the final month (September 2026) reports only \"265\" views and the tool computed a -96.94% change across the window. This is a **PARTIAL_MONTH artifact**, not a real collapse. The tool documentation indicates the current calendar month is still running and its total represents only a few days of complete data; the tool has already dropped it from trend calculation, so the valid series ends at August 2026 (\"7183\" views). Comparing a full month to an incomplete month manufactures a false signal of catastrophic decline.\n\n---\n\n## Structured Findings\n\n**1. Source Response & Completeness:**\nThe source answered. Thirteen data points were returned. The tool flagged the final month as incomplete (PARTIAL_MONTH_EXCLUDED implied by the dramatic drop and the instruction set). The valid complete series runs from \"2025090100\" to \"2026080100\"—**12 months**, which is a full seasonal window and supports trend claims.\n\n**2. First and Last Complete Month:**\n- **First month:** \"2025090100\" with \"8664\" views  \n- **Last complete month:** \"2026080100\" with \"7183\" views  \n- **Change across complete 12-month window:** approximately −17% (from 8664 to 7183)\n\nThe tool reported a change of −96.94%, but that figure includes the partial month \"2026090100\" (\"265\" views). The −96.94% figure is an artifact and **should not be reported as a trend**; it reflects the incomplete current month, not audience behavior.\n\n**3. What This Measures and Does Not Measure:**\n\n*Measures:*  \n- Page views of the article \"Grocery_store\" on English Wikipedia by user-classified clients (not bots) during each calendar month.\n\n*Does NOT measure:*  \n- Search volume, search demand, or search interest  \n- Market size, economic demand, or real-world grocery-store transactions  \n- Unique readers (one reader returning four times = four views)  \n- Reader intent, engagement depth, or article quality\n\n**A dashboard slot labelled \"Monthly Searches\" cannot be filled from this data.** This is article pageview traffic, not search volume. Either the slot should be relabelled to \"Monthly Article Views: Grocery_store (Wikipedia)\" or a dedicated search-volume source (e.g., Google Trends, Bing search data) must be substituted.\n\n**4. Seasonality Window:**\nThe complete data window is **12 months** (September 2025 – August 2026), which compares like with like and supports year-over-year trend claims. The −96.94% change is computed over 13 months and includes an incomplete month; **this trend claim is not supported by the window and must be rejected**. A valid claim for the complete window would be approximately −17% decline over the 12-month period, though even this modest decline should be validated against multi-year history before labeling it a trend.\n\n---\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Partial-month artifact in final month inflates decline metric; valid 12-month series shows modest −17% change, not −96.94%\",\n  \"findings\": [\n    \"Tool returned 13 months of data; final month 2026090100 shows only 265 views, indicating incomplete calendar month (PARTIAL_MONTH_EXCLUDED condition)\",\n    \"Last complete month is 2026080100 with 7183 views; first month 2025090100 shows 8664 views\",\n    \"Tool-reported change of −96.94% spans the incomplete month and is an artifact; complete 12-month window (Sept 2025–Aug 2026) shows approximately −17% change\",\n    \"Data source measures Wikipedia pageviews of one article by user-classified clients; does not measure search volume, market demand, unique readers, or real-world grocery activity\",\n    \"Dashboard slot labelled 'Monthly Searches' cannot be honestly filled from this source without relabelling or substituting a search-volume data provider\"\n  ],\n  \"recommendedActions\": [\n    \"Reject the −96.94% trend claim; it spans a partial month and is not evidence of audience collapse\",\n    \"If trend reporting is required, use only the 12-month complete window (Sept 2025–Aug 2026) and report approximately −17% change, with caveat that multi-year comparison is needed to confirm trend\",\n    \"Relabel the dashboard slot to 'Monthly Article Views: Grocery_store' or substitute a dedicated search-volume source if the slot is intended to measure search interest\"\n  ]\n}\n```",
+      "LatencyMs": 13445,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.99
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "34a58cd27834fa30c0bfbff328869e4562251573d0412a62e3bcfe48be2750f0",
+    "Status": "Warning",
+    "Headline": "Partial-month artifact in final month inflates decline metric; valid 12-month series shows modest −17% change, not −96.94%",
+    "Findings": [
+      "⚠ Tool returned 13 months of data; final month 2026090100 shows only 265 views, indicating incomplete calendar month (PARTIAL_MONTH_EXCLUDED condition)",
+      "⚠ Last complete month is 2026080100 with 7183 views; first month 2025090100 shows 8664 views",
+      "⚠ Tool-reported change of −96.94% spans the incomplete month and is an artifact; complete 12-month window (Sept 2025–Aug 2026) shows approximately −17% change",
+      "⚠ Data source measures Wikipedia pageviews of one article by user-classified clients; does not measure search volume, market demand, unique readers, or real-world grocery activity",
+      "⚠ Dashboard slot labelled 'Monthly Searches' cannot be honestly filled from this source without relabelling or substituting a search-volume data provider"
+    ],
+    "RecommendedActions": [
+      "Reject the −96.94% trend claim; it spans a partial month and is not evidence of audience collapse",
+      "If trend reporting is required, use only the 12-month complete window (Sept 2025–Aug 2026) and report approximately −17% change, with caveat that multi-year comparison is needed to confirm trend",
+      "Relabel the dashboard slot to 'Monthly Article Views: Grocery_store' or substitute a dedicated search-volume source if the slot is intended to measure search interest"
+    ],
+    "Grounded": 3,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 2,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

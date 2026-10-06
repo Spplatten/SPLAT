@@ -16,6 +16,7 @@ record a local simulation, which does not satisfy the corpus gate:
 | The console or `splat-mcp` | Set `SPLAT_RECORD_MISSIONS_DIR` to a directory before starting either. Every mission that reaches its analysis writes one file there. |
 | Runs the console has already done | `SPLAT_EXPORT_MISSION_FIXTURES=1 dotnet test --filter FullyQualifiedName~MissionReplayTests` reads the console's database (or `SPLAT_DB_PATH`) and writes one fixture per accepted live-model mission indexed today; `SPLAT_EXPORT_MISSION_FIXTURES_SINCE=yyyy-MM-dd` reaches further back. The sealed facts must name a live provider/model and an accepted analysis. Exported fixtures carry the accepted answer as the first attempt and no parameters or prompt hash, because the index did not retain those inputs or a rejected first attempt. |
 | The live canary | `LiveMissionTests` records its mission to `SPLAT_RECORD_MISSIONS_DIR` when set, and replays what it recorded before it passes. |
+| A full live sitting | Set `SPLAT_RECORD_CORPUS=1` and an absolute private `SPLAT_RECORD_MISSIONS_DIR`, then run only `LiveMissionTests.TheCorpus_RecordsCurrentTemplatesSequentially_AndReplaysEveryLiveAnswer`. It runs one sensor at a time, uses the real Linux substrate for guest templates, replays every answer, and resumes past current accepted recordings. It spends model credit; it never promotes recordings automatically. For an older installed app, point `SPLAT_DATA_DIR` at the data directory holding its vault. |
 
 A recorded file is promoted by copying it here. Read it first: the telemetry is the machine's own,
 after the scrub, and it is what a stranger to that machine will read in this tree. The `Note`
@@ -25,8 +26,10 @@ field is yours to say what the fixture guards.
 shipped catalog and fails for every missing or stale recording. Simulations, rejected diagnoses,
 timed-out or empty sensors, and files without a recorded answer do not cover a template. Rejected
 runs can still guard regressions in the replay suite. A template change requires a fresh run, even if the old
-answer still replays. This gate is **built, unproven** until the missing live runs are recorded;
-neither a green sensor smoke test nor a replay of an old answer establishes diagnosis accuracy.
+answer still replays. All 58 current templates were recorded against live models on 2026-10-05,
+including the four real guest leases, then replayed and redacted before promotion. The coverage
+and privacy gates pass. This holds the observed pipeline verdicts; it does not independently
+establish the accuracy of every diagnosis or cover other host conditions.
 
 The catalog requires an explicit `Reasoned(...)` or `Plain(rationale, ...)` choice for every
 prompt. The plain rationale is stored beside the template in source. Changing that choice does

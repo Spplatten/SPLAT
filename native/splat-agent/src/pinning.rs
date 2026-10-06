@@ -128,7 +128,7 @@ pub fn load<'obj>(object: &'obj mut MaybeUninit<libbpf_rs::OpenObject>) -> Resul
     crate::cgroup::EphemeralCgroup::reap_orphans(Path::new(crate::cgroup::BASE_PATH))?;
     for map in [
         &skel.maps.leased_cgroups, &skel.maps.protected_inodes, &skel.maps.allowed_exec_inodes,
-        &skel.maps.allowed_connect_ipv4, &skel.maps.violation_counts,
+        &skel.maps.allowed_connect_ipv4, &skel.maps.violation_counts, &skel.maps.scratch_exec_devs,
     ] {
         let mut key = vec![0u8; map.key_size() as usize];
         loop {

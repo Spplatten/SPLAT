@@ -16,6 +16,7 @@ using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Data.Compliance;
+using MissionController.Infrastructure.Linux;
 using MissionController.Infrastructure.Network.Ai;
 using MissionController.Infrastructure.Network.Dlp;
 using MissionController.Infrastructure.Network.Http;
@@ -48,6 +49,7 @@ namespace MissionController.Tests;
 /// Every assertion below is on the live path; a run that only proved the skip would be worse than
 /// no test, so the skip is reported out loud rather than passing quietly.
 /// </summary>
+[Collection(SerialProcessSpawning.Name)]
 public sealed class LiveMissionTests
 {
     private readonly ITestOutputHelper _out;
@@ -234,6 +236,45 @@ public sealed class LiveMissionTests
         string templateId = Environment.GetEnvironmentVariable("SPLAT_CANARY_TEMPLATE") is { Length: > 0 } chosen
             ? chosen.Trim()
             : DefaultCanaryTemplate;
+        await RecordAndReplayAsync(templateId);
+    }
+
+    [Fact]
+    public async Task TheCorpus_RecordsCurrentTemplatesSequentially_AndReplaysEveryLiveAnswer()
+    {
+        // Opt-in because this spends model credit and runs real sensors. Resume only from actual
+        // current, accepted recordings; the coverage gate still requires reviewed promotion.
+        if (Environment.GetEnvironmentVariable("SPLAT_RECORD_CORPUS") != "1")
+        {
+            _out.WriteLine("SKIPPED: set SPLAT_RECORD_CORPUS=1 and SPLAT_RECORD_MISSIONS_DIR for a live sitting.");
+            return;
+        }
+        Assert.True(await HaveKeyAsync(), "No live model key is reachable.");
+        string directory = Environment.GetEnvironmentVariable(MissionFixtureDirectoryRecorder.EnvironmentVariable) ?? "";
+        Assert.True(Path.IsPathFullyQualified(directory), "Recording requires an absolute private output directory.");
+        Directory.CreateDirectory(directory);
+        var failures = new List<string>();
+        foreach (var template in GovernedTemplateCatalog.All.OrderBy(t => t.TemplateId, StringComparer.Ordinal))
+        {
+            var recorded = Directory.EnumerateFiles(directory, "*.json").Select(MissionFixture.Load).ToList();
+            if (MissionCorpusTests.CoverageProblems(new[] { template }, recorded).Count == 0)
+                continue;
+            try
+            {
+                await RecordAndReplayAsync(template.TemplateId);
+                recorded = Directory.EnumerateFiles(directory, "*.json").Select(MissionFixture.Load).ToList();
+                failures.AddRange(MissionCorpusTests.CoverageProblems(new[] { template }, recorded));
+            }
+            catch (Exception ex)
+            {
+                failures.Add(template.TemplateId + ": " + ex.Message);
+            }
+        }
+        Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
+    }
+
+    private async Task RecordAndReplayAsync(string templateId)
+    {
         var template = GovernedTemplateCatalog.All.Single(t => t.TemplateId == templateId);
 
         string dir = Path.Combine(Path.GetTempPath(), "splat-canary-" + Guid.NewGuid().ToString("N"));
@@ -258,7 +299,8 @@ public sealed class LiveMissionTests
                 credentialSanitizer: new PromptCredentialSanitizer(),
                 revocationManager: null,
                 findingsExtractor: new JsonFindingsExtractor(),
-                recorder: recorder);
+                recorder: recorder,
+                substrates: new LinuxLeaseSubstrate(new WslLeasedExecutor(), new TemplatePolicyCompiler()));
 
             var clock = Stopwatch.StartNew();
             var chunks = new List<MissionChunk>();

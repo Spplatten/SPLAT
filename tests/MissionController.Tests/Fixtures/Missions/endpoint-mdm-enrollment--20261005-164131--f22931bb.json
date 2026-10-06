@@ -1,0 +1,77 @@
+{
+  "Schema": 1,
+  "MissionId": "f22931bb-bec4-43d4-95c3-6fe460f68814",
+  "RecordedAtUtc": "2026-10-05T16:41:31.2604356Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "endpoint-mdm-enrollment",
+  "TemplateName": "Intune / MDM Enrollment & Policy Sync Health",
+  "TemplateSha256": "sha256:b5200f325009f55976e7598a2b8087361cb134ce67558717504695c659ff86db",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "6e5916321cbc97138b636308758a61d878a461793122e2d708b91b674b4e11f2",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "--- MDM ENROLLMENTS ---\r\n\r\n\r\nPSChildName     : 8345CBE6-CEFC-462A-8219-78F3FC0377C1\r\nUPN             : \r\nProviderID      : Deploy Authority\r\nEnrollmentState : 1\r\nEnrollmentType  : 30\r\nAADResourceID   : \r\n\r\nPSChildName     : C429BE2D-071B-4E13-B616-4141C334ECDF\r\nUPN             : \r\nProviderID      : Cloud Authority\r\nEnrollmentState : 1\r\nEnrollmentType  : 31\r\nAADResourceID   : \r\n\r\nPSChildName     : E17005D5-A50E-4E57-BE94-1D4FA69C6F93\r\nUPN             : \r\nProviderID      : Local Authority\r\nEnrollmentState : 1\r\nEnrollmentType  : 28\r\nAADResourceID   : \r\n\r\n\r\n\r\n--- INTUNE MANAGEMENT EXTENSION ---\r\n--- CO-MANAGEMENT WORKLOADS ---\r\n--- APPLIED MDM POLICY AREAS ---\r\nDataProtection\r\nknobs\r\n--- MDM SYNC TASK ---\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_f22931bbbec443d495c36fe460f68814",
+      "token:integrity=Low",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=0-capabilities",
+      "winsta:WinSta0\\Default (the container could already attach)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Analysis for the operator**\n\n**STORY:** This host reports three MDM enrollment records, all showing `EnrollmentState : 1` (enrolled), which on its face looks healthy. But every other section that should confirm *active* management is empty: no IntuneManagementExtension (IME) status, no co-management workload list, and critically, no EnterpriseMgmt scheduled tasks at all. The \"Applied MDM Policy Areas\" list contains only `DataProtection` and a second line reading `knobs` — not a real CSP/policy area name. Put together, the decisive items are: (1) the three enrollment `ProviderID` values, (2) the empty MDM Sync Task section, and (3) the malformed policy-area entry — these three say the device *thinks* it's enrolled but has no live sync mechanism and the output itself may be unreliable.\n\n**KNOWN-GOOD:** Nothing here is a recognizable, waveable-through artifact. A normal Intune-managed Windows box would show `ProviderID : MS DM Server` (or a documented Intune provider string) with `EnrollmentType` values from the known small set (e.g., 0, 6, 7, 29 for Azure AD-joined Intune MDM) — none of that is present. The lookalikes that would NOT be waved through: `ProviderID : Deploy Authority`, `Cloud Authority`, `Local Authority` are not real Microsoft enrollment provider identifiers I know of; they read like placeholder/synthetic labels rather than production MDM provider strings. The policy area `knobs` is not a real DataProtection/CSP policy area name either.\n\n**HYPOTHESES:**\n- *Enrollment records with unrecognized ProviderIDs* — benign: lab/test tenant with custom-named enrollment provider, or a sanitized/redacted sample feeding this sensor; hostile: registry values under `HKLM\\SOFTWARE\\Microsoft\\Enrollments\\<GUID>` were tampered with to fake an \"enrolled\" appearance while the real MDM channel is dead. Settling evidence: pull `dsregcmd /status` and the raw registry `ProviderID` strings directly and compare against the tenant's actual Intune/ConfigMgr provider name.\n- *Empty IME / co-management / sync-task sections* — benign: the service and scheduled tasks are simply not installed because this device is config-only (not Win32-app managed); hostile: IntuneManagementExtension service was stopped/removed and EnterpriseMgmt tasks deleted to block all future policy delivery (defense evasion). Settling evidence: `Get-Service IntuneManagementExtension` status and `Get-ScheduledTask -TaskPath \"\\Microsoft\\Windows\\EnterpriseMgmt\\*\"` existence.\n- *\"knobs\" literal string* — benign: truncated/garbled output from the collection script; hostile: tampering of the diagnostic pipeline itself to hide or fabricate policy area data. Settling evidence: re-run the native `Get-MdmPolicy`/CSP dump independently and diff against this sensor's report.\n\n**PLAN:** First, cheaply refute the worst case — run `dsregcmd /status` and inspect the live registry `ProviderID` values; this is free and immediately tells you whether the enrollment is real or spoofed. Second, check containment-relevant state: IME service status and the EnterpriseMgmt scheduled task list, since a stopped IME only blocks Win32 app/script delivery (device configuration via native CSP, e.g. DataProtection, keeps applying) — confirm which policies are actually still landing before alarming the user about \"total MDM failure.\" Third, if EnterpriseMgmt tasks are truly absent, proceed to cleanup/recovery: unenroll and re-enroll the device, since without those tasks it will never sync again on its own.\n\n```json\n{\n  \"status\": \"Critical\",\n  \"headline\": \"Device shows three 'enrolled' MDM records but no EnterpriseMgmt sync tasks and non-standard provider names, indicating a broken or possibly spoofed management channel\",\n  \"findings\": [\n    \"MDM enrollment records show EnrollmentState : 1 for all three entries, but ProviderID values are 'Deploy Authority', 'Cloud Authority', and 'Local Authority' — not recognized Microsoft MDM provider identifiers (knowledge).\",\n    \"EnrollmentType values are 30, 31, and 28 for the three entries, which do not match the commonly documented enrollment type enumeration (knowledge).\",\n    \"The '--- INTUNE MANAGEMENT EXTENSION ---' section returned no data, so IME service/version/log status could not be confirmed.\",\n    \"The '--- CO-MANAGEMENT WORKLOADS ---' section returned no data, so no workload split (ConfigMgr vs Intune) could be confirmed.\",\n    \"Applied MDM Policy Areas lists only 'DataProtection' and a second entry literally reading 'knobs', which is not a recognized CSP/policy area name and suggests malformed or tampered output.\",\n    \"The '--- MDM SYNC TASK ---' section is empty, meaning no EnterpriseMgmt scheduled tasks were found in this collection.\"\n  ],\n  \"recommendedActions\": [\n    \"Run 'dsregcmd /status' and inspect HKLM:\\\\SOFTWARE\\\\Microsoft\\\\Enrollments\\\\<EnrollmentID>\\\\ProviderID directly to confirm whether 'Deploy Authority'/'Cloud Authority'/'Local Authority' are genuine tenant provider names or evidence of registry tampering (maps to MITRE T1112 - Modify Registry, and T1556 - defense evasion of auth/management telemetry).\",\n    \"Check 'Get-Service IntuneManagementExtension' and review C:\\\\ProgramData\\\\Microsoft\\\\IntuneManagementExtension\\\\Logs\\\\IntuneManagementExtension.log; if stopped, note this only halts Win32 app delivery and PowerShell script policy — native CSP-delivered settings like DataProtection will continue to apply, so do not report this as a blanket management failure.\",\n    \"Run 'Get-ScheduledTask -TaskPath \\\"\\\\Microsoft\\\\Windows\\\\EnterpriseMgmt\\\\*\\\"' to confirm the absence of sync tasks seen in this output; if confirmed absent, the device cannot self-recover.\",\n    \"Recovery path for missing EnterpriseMgmt tasks: unenroll the device (remove the work/school account via Settings > Accounts > Access work or school, or 'dsregcmd /leave' for Azure AD-joined devices), delete the stale enrollment key under HKLM:\\\\SOFTWARE\\\\Microsoft\\\\Enrollments\\\\<EnrollmentID>, then trigger fresh auto-enrollment (rejoin Azure AD / Company Portal re-enroll, or 'gpupdate /force' with MDM auto-enrollment GPO) and verify the EnterpriseMgmt scheduled tasks reappear afterward.\",\n    \"Escalate for manual review: the combination of non-standard ProviderID strings and the malformed policy-area entry 'knobs' should be treated as a potential tampering/incident indicator, not assumed to be a benign collection artifact, until the raw registry and CSP state are independently verified.\"\n  ]\n}\n```",
+      "LatencyMs": 48783,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9791666666666667
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "33c614e6e1573c98d144d325375a13b6be9410634ede1765e5a3e3ee55acec71",
+    "Status": "Critical",
+    "Headline": "Device shows three 'enrolled' MDM records but no EnterpriseMgmt sync tasks and non-standard provider names, indicating a broken or possibly spoofed management channel",
+    "Findings": [
+      "\uD83D\uDD34 MDM enrollment records show EnrollmentState : 1 for all three entries, but ProviderID values are 'Deploy Authority', 'Cloud Authority', and 'Local Authority' — not recognized Microsoft MDM provider identifiers (knowledge).",
+      "\uD83D\uDD34 EnrollmentType values are 30, 31, and 28 for the three entries, which do not match the commonly documented enrollment type enumeration (knowledge).",
+      "\uD83D\uDD34 The '--- INTUNE MANAGEMENT EXTENSION ---' section returned no data, so IME service/version/log status could not be confirmed.",
+      "\uD83D\uDD34 The '--- CO-MANAGEMENT WORKLOADS ---' section returned no data, so no workload split (ConfigMgr vs Intune) could be confirmed.",
+      "\uD83D\uDD34 Applied MDM Policy Areas lists only 'DataProtection' and a second entry literally reading 'knobs', which is not a recognized CSP/policy area name and suggests malformed or tampered output.",
+      "\uD83D\uDD34 The '--- MDM SYNC TASK ---' section is empty, meaning no EnterpriseMgmt scheduled tasks were found in this collection."
+    ],
+    "RecommendedActions": [
+      "Run 'dsregcmd /status' and inspect HKLM:\\SOFTWARE\\Microsoft\\Enrollments\\<EnrollmentID>\\ProviderID directly to confirm whether 'Deploy Authority'/'Cloud Authority'/'Local Authority' are genuine tenant provider names or evidence of registry tampering (maps to MITRE T1112 - Modify Registry, and T1556 - defense evasion of auth/management telemetry).",
+      "Check 'Get-Service IntuneManagementExtension' and review C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs\\IntuneManagementExtension.log; if stopped, note this only halts Win32 app delivery and PowerShell script policy — native CSP-delivered settings like DataProtection will continue to apply, so do not report this as a blanket management failure.",
+      "Run 'Get-ScheduledTask -TaskPath \"\\Microsoft\\Windows\\EnterpriseMgmt\\*\"' to confirm the absence of sync tasks seen in this output; if confirmed absent, the device cannot self-recover.",
+      "Recovery path for missing EnterpriseMgmt tasks: unenroll the device (remove the work/school account via Settings > Accounts > Access work or school, or 'dsregcmd /leave' for Azure AD-joined devices), delete the stale enrollment key under HKLM:\\SOFTWARE\\Microsoft\\Enrollments\\<EnrollmentID>, then trigger fresh auto-enrollment (rejoin Azure AD / Company Portal re-enroll, or 'gpupdate /force' with MDM auto-enrollment GPO) and verify the EnterpriseMgmt scheduled tasks reappear afterward.",
+      "Escalate for manual review: the combination of non-standard ProviderID strings and the malformed policy-area entry 'knobs' should be treated as a potential tampering/incident indicator, not assumed to be a benign collection artifact, until the raw registry and CSP state are independently verified."
+    ],
+    "Grounded": 1,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 5,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

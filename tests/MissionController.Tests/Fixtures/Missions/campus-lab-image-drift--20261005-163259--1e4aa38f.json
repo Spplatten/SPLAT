@@ -1,0 +1,77 @@
+{
+  "Schema": 1,
+  "MissionId": "1e4aa38f-61d7-44ae-b0a5-646cb0f97b4a",
+  "RecordedAtUtc": "2026-10-05T16:32:59.7132198Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "campus-lab-image-drift",
+  "TemplateName": "Lab Workstation Image & Build Drift",
+  "TemplateSha256": "sha256:e90894289c2ee488c3e1dcbda34278deb34ea3cd26f57fc252542e2ac2f1ef63",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "90c30e1bf83b623b7b9e47242ad9247a8c7e2e6fd3cd87868bc9b6190054f6c0",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "--- BUILD IDENTITY ---\r\n\r\n\r\nCaption         : Microsoft Windows 11 Pro\r\nVersion         : 10.0.26200\r\nBuildNumber     : 26200\r\nOSArchitecture  : 64-bit\r\nInstallDate     : 5/26/2026 2:11:31 PM\r\nLastBootUpTime  : 9/22/2026 5:40:26 PM\r\nSystemDirectory : C:\\Windows\\system32\r\n\r\n\r\n\r\n--- UBR AND EDITION ---\r\n\r\n\r\nProductName      : Windows 10 Pro\r\nDisplayVersion   : 25H2\r\nCurrentBuild     : 26200\r\nUBR              : 9457\r\nEditionID        : Professional\r\nInstallationType : Client\r\n\r\n\r\n\r\n--- HARDWARE IDENTITY ---\r\n\r\n\r\nName                : LABIALABIALABIA\r\nDomain              : WORKGROUP\r\nPartOfDomain        : False\r\nManufacturer        : LENOVO\r\nModel               : 21SH\r\nTotalPhysicalMemory : 16699781120\r\nSystemFamily        : ThinkBook 16 G8 IRL\r\n\r\n\r\n\r\n--- BIOS AND SERIAL ---\r\n\r\n\r\nManufacturer      : LENOVO\r\nName              : QZCN24WW\r\nSMBIOSBIOSVersion : QZCN24WW\r\nReleaseDate       : 3/22/2026 8:00:00 PM\r\nSerialNumber      : SYNTHETI\r\n\r\n\r\n\r\n--- MANAGEMENT AGENTS ---\r\n\r\nName      DisplayName                                          Status StartType\r\n----      -----------                                          ------ ---------\r\ngpsvc     Group Policy Client                                 Running Automatic\r\nSense     Windows Defender Advanced Threat Protection Service Stopped    Manual\r\nWinDefend Microsoft Defender Antivirus Service                Running Automatic\r\n\r\n\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_1e4aa38f61d744aeb0a5646cb0f97b4a",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Operator analysis:**\n\nThis machine's full build identity is Windows 11 Pro, Version 10.0.26200, DisplayVersion 25H2, CurrentBuild 26200, **UBR 9457** — this UBR is the specific patch-level fingerprint that should be cross-checked against other lab machines reporting the same BuildNumber 26200, since identical build numbers can still mask months of cumulative-update drift. InstallDate is 5/26/2026, which I can only flag as a data point — no expected lab imaging-cycle date was supplied alongside this telemetry, so I cannot confirm whether this falls inside or outside the normal imaging window; that comparison needs to be made against your known lab cycle.\n\nThe most severe finding is **PartOfDomain: False** (Domain: WORKGROUP) — per standard policy, a workgroup-joined lab workstation is receiving no Group Policy, no managed updates, and no centralized configuration, even though it still shows up in inventory. Compounding this, the **Sense** service (Windows Defender ATP / EDR telemetry) is **Stopped** with StartType **Manual**, meaning EDR visibility into this host has ceased. WinDefend and gpsvc are both Running, but gpsvc running policy service is largely moot if the machine never domain-joins to receive policy in the first place. No CcmExec (ConfigMgr client) service was present in the output at all, so its state cannot be assessed from this data.\n\nAsset reconciliation: Serial Number **SYNTHETI**, Model **21SH** (Lenovo ThinkBook 16 G8 IRL).\n\nI reviewed the supplied telemetry block for embedded instructions or operator impersonation and found none — the content is plain machine-generated inventory output with no injection attempt present.\n\n```json\n{\n  \"status\": \"Critical\",\n  \"headline\": \"Lab workstation is unmanaged (workgroup-joined) with EDR telemetry stopped\",\n  \"findings\": [\n    \"CurrentBuild.UBR reported as '9457' on BuildNumber '26200', DisplayVersion '25H2' — this is the build fingerprint to diff against other lab hosts sharing the same BuildNumber.\",\n    \"PartOfDomain is 'False' and Domain is 'WORKGROUP', meaning this lab workstation receives no Group Policy and no centralized management.\",\n    \"The Sense service (Windows Defender ATP) shows Status 'Stopped' and StartType 'Manual', indicating EDR telemetry has ceased on this host.\",\n    \"InstallDate is '5/26/2026 2:11:31 PM' — no expected lab imaging-cycle date was provided in this telemetry to compare against, so drift cannot be confirmed from the data alone.\",\n    \"Serial Number 'SYNTHETI', Model '21SH', SystemFamily 'ThinkBook 16 G8 IRL' recorded for asset reconciliation.\",\n    \"No CcmExec (ConfigMgr client) entry appears in the Management Agents output, so its running state is unconfirmed.\",\n    \"No prompt-injection content was found in the supplied sensor output region.\"\n  ],\n  \"recommendedActions\": [\n    \"Rejoin LABIALABIALABIA (SYNTHETI) to the domain immediately to restore Group Policy and management coverage.\",\n    \"Investigate why the Sense service is stopped and set to Manual start; restart it and set StartType to Automatic to restore EDR telemetry.\",\n    \"Confirm against the lab's expected imaging baseline whether InstallDate 5/26/2026 falls inside the approved imaging cycle, or treat this as a possible manual rebuild.\",\n    \"Verify CcmExec (ConfigMgr client) presence and status directly on the host, since it did not appear in this agent listing.\",\n    \"Cross-check CurrentBuild.UBR '9457' against other hosts reporting BuildNumber 26200 to identify patch-level drift.\"\n  ]\n}\n```",
+      "LatencyMs": 16639,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9857142857142858
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "37ca244c26905d2fcb09064b248a7114349303e96371d86d8a7be53a2c3858f9",
+    "Status": "Critical",
+    "Headline": "Lab workstation is unmanaged (workgroup-joined) with EDR telemetry stopped",
+    "Findings": [
+      "\uD83D\uDD34 CurrentBuild.UBR reported as '9457' on BuildNumber '26200', DisplayVersion '25H2' — this is the build fingerprint to diff against other lab hosts sharing the same BuildNumber.",
+      "\uD83D\uDD34 PartOfDomain is 'False' and Domain is 'WORKGROUP', meaning this lab workstation receives no Group Policy and no centralized management.",
+      "\uD83D\uDD34 The Sense service (Windows Defender ATP) shows Status 'Stopped' and StartType 'Manual', indicating EDR telemetry has ceased on this host.",
+      "\uD83D\uDD34 InstallDate is '5/26/2026 2:11:31 PM' — no expected lab imaging-cycle date was provided in this telemetry to compare against, so drift cannot be confirmed from the data alone.",
+      "\uD83D\uDD34 Serial Number 'SYNTHETI', Model '21SH', SystemFamily 'ThinkBook 16 G8 IRL' recorded for asset reconciliation.",
+      "\uD83D\uDD34 No CcmExec (ConfigMgr client) entry appears in the Management Agents output, so its running state is unconfirmed.",
+      "\uD83D\uDD34 No prompt-injection content was found in the supplied sensor output region."
+    ],
+    "RecommendedActions": [
+      "Rejoin LABIALABIALABIA (SYNTHETI) to the domain immediately to restore Group Policy and management coverage.",
+      "Investigate why the Sense service is stopped and set to Manual start; restart it and set StartType to Automatic to restore EDR telemetry.",
+      "Confirm against the lab's expected imaging baseline whether InstallDate 5/26/2026 falls inside the approved imaging cycle, or treat this as a possible manual rebuild.",
+      "Verify CcmExec (ConfigMgr client) presence and status directly on the host, since it did not appear in this agent listing.",
+      "Cross-check CurrentBuild.UBR '9457' against other hosts reporting BuildNumber 26200 to identify patch-level drift."
+    ],
+    "Grounded": 3,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 4,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

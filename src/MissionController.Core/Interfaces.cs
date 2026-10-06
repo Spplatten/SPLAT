@@ -534,7 +534,8 @@ public record LeaseResourceLimits(
 public record OverlayFsSpec(
     bool EnableCow,
     string LowerDir,
-    string ScratchDir);
+    string ScratchDir,
+    bool AllowScratchExec = false);
 
 public enum KernelViolationHook
 {

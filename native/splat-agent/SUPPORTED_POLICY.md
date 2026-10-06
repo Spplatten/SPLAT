@@ -19,6 +19,7 @@ Protocol version 3. Anything else is refused; see `main.rs`, and `docs/SCHEMA.md
 | Dimension | Hook | What is checked |
 | --- | --- | --- |
 | Executable identity | `bprm_check_security` | `(cgroup id, dev, ino)` against this lease's allow-list. Every exec, including one an already-running permitted tool performs. Hardlinks and multicall names sharing an inode are the same executable; arguments and argv[0] are not gated. On the probe guest, id and uname share an inode, so the negative exec control uses a distinct dpkg image. |
+| `overlayFs.allowScratchExec` | `bprm_check_security` | **Root probe PASS** against `6fc637d8`. Explicitly grants execution from this lease's merged overlay filesystem, including its lower files; it is not a claim that code was authored or reviewed by an agent. Requires `enableCow` and, when an operator ceiling exists, its separate `allowScratchExec: true`. The child registers the mounted overlay's device before dropping privilege. Copies outside it, including `/tmp`, and other leases receive no grant. The initial command still requires `allowedExecPaths`. |
 | Protected files | `file_open` | `(cgroup id, dev, ino)` against this lease's deny-list. |
 | IPv4 egress | `socket_connect` | `(cgroup id, address, port)` — the destination must be an endpoint this lease approved. |
 | IPv4 datagrams | `socket_sendmsg` | The same allow-list, for a datagram that names its own destination — a `sendto` on an unconnected socket, which never reaches `socket_connect`. A message with no destination of its own is on a socket `connect` already judged. **Consequence: a leased tool's DNS query is a destination like any other.** A lease with the network on and no resolver on port 53 can reach its addresses by IP and cannot look a name up; `doctor` says so, and nothing adds a resolver on the caller's behalf. |
@@ -27,7 +28,7 @@ Protocol version 3. Anything else is refused; see `main.rs`, and `docs/SCHEMA.md
 Policy is keyed per lease. Two concurrent missions do not see each other's permissions, and
 revoking one does not remove an entry another still holds.
 
-Hook persistence is **built, unproven**: all seven maps and four links are pinned under
+Hook persistence recorded **PASS under root** against BPF source `6fc637d8`: all eight maps and four links are pinned under
 `/sys/fs/bpf/splat/<SHA-256 of src/bpf/lease_lsm.bpf.c>`. Restart reuses only that complete set,
 checks map schemas and each hook's program tag, attachment and map IDs, then drains orphan
 workloads before clearing stale policy. A different hash, incomplete set or foreign map refuses
@@ -41,7 +42,7 @@ while the daemon is dead.
 | --- | --- | --- |
 | The workload's root | mount namespace and `pivot_root`, in `pre_exec` | A root holding `/usr`, `/bin`, `/sbin`, `/lib*` and `/etc` read-only, the working directory, a fresh `/tmp`, `/proc` and six device nodes. `/home`, `/root`, `/mnt`, `/var`, `/opt` and `/sys` are absent, not hidden. **Built 2026-09-20, pending the root probe** - see the note below. |
 | `readOnlyFs` | the same | The working directory bound read-only as well. Refused only by a daemon that is not enforcing, which jails nothing. |
-| `overlayFs.enableCow` | child mount namespace, before the workdir bind | **built, unproven**. The parent prepares private `upper/` and `work/`; the child mounts an overlay on its working-directory target. Writes are discarded after the cgroup drains. `readOnlyFs` still makes the merged view read-only. A mock daemon, missing lowerdir, mount-option separators and inode policy paths overlapping the lowerdir are refused. Executing newly created scratch inodes is not authorized by this feature. |
+| `overlayFs.enableCow` | child mount namespace, before the workdir bind | **Root probe PASS** against `6fc637d8`. The parent prepares private `upper/` and `work/`; the child mounts an overlay on its working-directory target. Writes are discarded after the cgroup drains. `readOnlyFs` still makes the merged view read-only. A mock daemon, missing lowerdir, mount-option separators and inode policy paths overlapping the lowerdir are refused. Executing newly created scratch inodes is not authorized by this feature. |
 | Memory, CPU, PID ceilings | cgroup v2 | Written to `memory.max`, `cpu.max`, `pids.max`, then **read back**; a controller that did not take the clamp fails the request. |
 | Lease lifetime | expiry reaper | On expiry the cgroup is killed and drained *before* its policy is withdrawn. |
 | Caller identity | protocol 3 handshake | A root-owned 0600 shared secret that never crosses the wire. Every connection opens with `HELLO`, and the daemon answers with an HMAC-SHA256 over the caller's nonce and its own, which the caller checks before it sends anything more. Every request then travels in an `AUTHENTICATED` frame whose proof covers both nonces, its place on the connection and its exact bytes, checked in fixed time before the request is parsed. Required on **every** request, `HEALTH_CHECK` included since 2026-09-11: that answer carries `enforcing`, the kernel version and the live lease count, so leaving it open told an unauthenticated caller exactly when this daemon would run work it cannot contain. Since 2026-09-23 the answers prove themselves too: a caller that asks in its `HELLO` receives every later frame in a `PROVEN` wrapper whose proof covers both nonces, the frame's number on the connection and its exact bytes, and the `CHALLENGE` that agreed to it is proven under a label of its own, so the agreement cannot be stripped off in transit. A caller that does not ask is answered unwrapped, as before. |
@@ -75,9 +76,11 @@ These are reachable by a leased process. They are listed so nobody has to discov
 
 ## What has been proven, and where
 
-The historical kernel checks were recorded against a root daemon on kernel
-6.18.33.2 in `evidence/daemon-probe.json`; that run does not prove CoW or persistent hooks.
-Both additions are **built, unproven** until a fresh root run records PASS for their new checks.
+The root run on kernel 6.18.33.2 recorded **PASS over 74 checks**, including nine explicit scratch
+execution checks, eight CoW mount checks and eleven pin lifecycle checks, in
+`evidence/daemon-probe.json` at `2026-10-06T03:47:49Z`. The last-hop probe also recorded PASS.
+The scratch grant covers executable files in the merged overlay, including lower files; it
+does not validate their authorship, contents or arguments. Both opt-in flags default to false.
 That file carries the SHA-256 of
 the BPF source it exercised, and `DocumentationDriftTests` fails the build if the README claims
 enforcement while the hash does not match what ships — so the proof cannot outlive the program.

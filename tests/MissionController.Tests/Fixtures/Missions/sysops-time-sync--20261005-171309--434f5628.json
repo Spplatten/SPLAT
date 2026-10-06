@@ -1,0 +1,80 @@
+{
+  "Schema": 1,
+  "MissionId": "434f5628-37ad-432d-809d-ea75a682be63",
+  "RecordedAtUtc": "2026-10-05T17:13:09.4468788Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "sysops-time-sync",
+  "TemplateName": "W32Time Sync & Kerberos Skew Diagnostic",
+  "TemplateSha256": "sha256:58318b025f6a54eb2562b2feaece3660a5e9422d81ebaedcfd18fa61f16a49d8",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "63b1e60dea1367f67873a8db0bee758a504e0163e22bfbec74029b9a3f924645",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "Leap Indicator: 3(not synchronized)\nStratum: 0 (unspecified)\nPrecision: -23 (119.209ns per tick)\nRoot Delay: 0.0436273s\nRoot Dispersion: 8.7265899s\nReferenceId: 0x00000000 (unspecified)\nLast Successful Sync Time: 10/5/2026 5:45:48 AM\nSource: time.windows.com,0x9 \nPoll Interval: 10 (1024s)\n\nPhase Offset: 0.9565033s\nClockRate: 0.0156250s\nState Machine: 0 (Unset)\nTime Source Flags: 0 (None)\nServer Role: 0 (None)\nLast Sync Error: 1 (The computer did not resync because no time data was available.)\nTime since Last Good Sync Time: 4073.0277911s\n\n--- CONFIGURATION --- \r\n\r\nHKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\W32Time\\Parameters\r\n    NtpServer    REG_SZ    time.windows.com,0x9\r\n    ServiceDll    REG_EXPAND_SZ    %systemroot%\\system32\\w32time.dll\r\n    ServiceDllUnloadOnStop    REG_DWORD    0x1\r\n    ServiceMain    REG_SZ    SvchostEntry_W32Time\r\n    Type    REG_SZ    NTP\r\n\r\n\r\nHKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\W32Time\\TimeProviders\\NtpClient\r\n    AllowNonstandardModeCombinations    REG_DWORD    0x1\r\n    CompatibilityFlags    REG_DWORD    0x80000000\r\n    CrossSiteSyncFlags    REG_DWORD    0x2\r\n    DllName    REG_EXPAND_SZ    %systemroot%\\system32\\w32time.dll\r\n    Enabled    REG_DWORD    0x1\r\n    EventLogFlags    REG_DWORD    0x1\r\n    InputProvider    REG_DWORD    0x1\r\n    LargeSampleSkew    REG_DWORD    0x3\r\n    ResolvePeerBackoffMaxTimes    REG_DWORD    0x7\r\n    ResolvePeerBackoffMinutes    REG_DWORD    0xf\r\n    SignatureAuthAllowed    REG_DWORD    0x1\r\n    SpecialPollInterval    REG_DWORD    0x4000\r\n    SpecialPollTimeRemaining    REG_MULTI_SZ    time.windows.com,8021c14\r\n\r\n--- PEERS --- \r\n#Peers: 1\n\nPeer: time.windows.com,0x9\nState: Pending\nTime Remaining: 6002.7155669s\nMode: 0 (reserved)\nStratum: 0 (unspecified)\nPeerPoll Interval: 0 (unspecified)\nHostPoll Interval: 0 (unspecified)\n--- LIVE OFFSET SAMPLES --- \r\nTracking time.windows.com [168.61.215.74:123].\nCollecting 5 samples.\nThe current time is 10/5/2026 1:11:53 PM.\n13:11:53, +01.1470042s\n13:11:55, +01.1490127s\n13:11:57, +01.1492223s\n13:12:00, +01.1488216s\n13:12:02, +01.1472192s\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_434f562837ad432d809dea75a682be63",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**STORY:** This host's Windows Time service has stopped functioning as a trustworthy time source: Leap Indicator reads `3 (not synchronized)`, Stratum is `0 (unspecified)`, ReferenceId is `0x00000000 (unspecified)`, and Last Sync Error is `1 (The computer did not resync because no time data was available)`. The service is configured to pull time from **`time.windows.com`** — a public internet NTP pool, not a domain controller — which is the wrong hierarchy for a machine that needs Kerberos-consistent time. The poll interval has backed off to `SpecialPollInterval 0x4000` (16384s, ~4.5h) with a peer still `Pending` and `Time Remaining: 6002.7s`, consistent with repeated failed sync attempts rather than healthy operation. Separately, the live 5-sample probe against the same server shows a real, small, stable offset of ~+1.15s — well inside Kerberos' 300s tolerance — so the *physical* clock is not yet dangerously wrong, but the *service state* says it has given up trusting its own sync, and the \"Last Successful Sync Time\" (5:45:48 AM) is inconsistent with the \"Time since Last Good Sync\" field (4073s ≈ 68 min), which is itself a red flag about the integrity of the reported state.\n\n**KNOWN-GOOD:**\n- `w32time.dll` at `%systemroot%\\system32\\w32time.dll`, `SvchostEntry_W32Time` — standard Microsoft Windows Time service binary and entry point, expected on every Windows host.\n- Use of `time.windows.com` as an NTP source — normal default for a **standalone/workgroup** Windows box, not flagged by itself.\n- Lookalike that would NOT be waved through: an `NtpServer` value pointing to an unfamiliar IP/hostname, or a `ServiceDll` path outside `system32`, or a `Type` value other than `NTP`/`NT5DS`/`AllSync` — none of those appear here, but the *use* of `NTP` type on what should be a domain member is the thing to verify.\n\n**HYPOTHESES:**\n1. **Wrong time source (NTP vs domain hierarchy).** Benign: host is standalone/workgroup, not domain-joined, so `time.windows.com` is correct by default. Hostile: a domain member was deliberately repointed off the domain hierarchy to desynchronize it from AD consensus (enables ticket timestamp games or breaks auth as a DoS). Settles with: `w32tm /query /configuration` Type value plus domain-join status (`dsregcmd /status` or `wmic computersystem get domain, partofdomain`).\n2. **Sync failure / LI=3 / Stratum 0 / Error 1.** Benign: outbound UDP/123 blocked by firewall or transient network/DNS issue. Hostile: time service intentionally disabled/throttled to let clock drift unchecked or to mask log-timestamp correlation. Settles with: System event log entries for W32Time (Event IDs 29, 36, 38, 50) and a firewall/connectivity test to the NTP endpoint.\n3. **Backed-off poll interval (16384s) and Pending peer.** Benign: standard W32Time backoff behavior after transient failures, will self-heal once connectivity returns. Hostile: attacker-induced throttling to delay detection of a stopped sync. Settles with: repeated `w32tm /query /status` over the next hour to confirm interval is shrinking back toward normal as sync succeeds.\n4. **Last-Successful-Sync vs Time-Since-Last-Good-Sync mismatch.** Benign: the local clock itself is the unsynchronized one, so both timestamp fields are being computed against an inaccurate base, producing an apparent contradiction. Hostile: timestamp fields were altered to obscure how long sync has actually been broken. Settles with: cross-referencing this host's last successful Kerberos auth time as seen by a domain controller against the Local clock.\n\nNo instruction-like text was found embedded in this telemetry; nothing in the sensor output addressed the analyst or attempted to redirect task behavior.\n\n**PLAN:**\n1. Cheap/refuting first: run `w32tm /query /status` and `w32tm /query /configuration` live, confirm domain-join state, and test UDP/123 reachability to `168.61.215.74` — this single check resolves hypotheses 1 and 2 at minimal cost.\n2. If domain-joined: reconfigure the client to sync from the domain hierarchy (`w32tm /config /syncfromflags:domhier /update`) rather than the manual NTP peer, and restart `w32time`.\n3. Pull System event log W32Time entries to confirm root cause (firewall vs. service failure vs. tampering) before assuming benign network blip.\n4. Containment only if tampering evidence emerges (unexpected registry/GPO changes, disabled firewall rule, service account anomalies) — escalate to IR.\n5. Cleanup/verification: monitor `w32tm /query /status` for Stratum returning to a normal value (1–4), Leap Indicator returning to `0`, and poll interval shrinking back to default, confirming the fix held over 24–48h.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Time service reports unsynchronized state, zero/unspecified stratum, and sync failure while sourcing time from an internet NTP server instead of the domain hierarchy\",\n  \"findings\": [\n    \"Leap Indicator is '3(not synchronized)', meaning the system does not currently consider its clock trustworthy\",\n    \"Stratum is '0 (unspecified)' and ReferenceId is '0x00000000 (unspecified)', both indicating no valid time reference has been established\",\n    \"Last Sync Error is '1 (The computer did not resync because no time data was available.)', confirming an explicit sync failure\",\n    \"Source is configured as 'time.windows.com,0x9' (an internet NTP server), not a domain controller/PDC source\",\n    \"Poll Interval has backed off to '10 (1024s)' in the status block and SpecialPollInterval is set to '0x4000' (16384s / ~4.5 hours) in the registry, consistent with repeated failed sync attempts\",\n    \"Peer state is 'Pending' with 'Time Remaining: 6002.7155669s' (~100 minutes) before the next sync attempt\",\n    \"Last Successful Sync Time is '10/5/2026 5:45:48 AM' while current time is reported as '10/5/2026 1:11:53 PM', a gap of several hours, yet 'Time since Last Good Sync Time' is reported as only '4073.0277911s' (~68 minutes) - these two figures are inconsistent\",\n    \"Live offset samples against the same server show a small, stable drift of approximately +1.147 to +1.149 seconds, far below the 300-second Kerberos skew tolerance\"\n  ],\n  \"recommendedActions\": [\n    \"Run 'w32tm /query /status' and 'w32tm /query /configuration' interactively to confirm current live state matches this captured output (baseline refresh before acting)\",\n    \"Confirm domain-join status (e.g., 'dsregcmd /status' or 'wmic computersystem get domain,partofdomain'); if domain-joined, this machine should be syncing via NT5DS from the domain hierarchy, not a manually configured NTP peer - knowledge: CIS Benchmark time-sync guidance and AD Kerberos requirement that domain members derive time from the same hierarchy as the KDC\",\n    \"If domain-joined, reconfigure with 'w32tm /config /syncfromflags:domhier /update' and restart the W32Time service to restore hierarchy-based sync\",\n    \"Check outbound UDP/123 connectivity from this host to its intended time source to rule out a firewall or network block as the cause of 'Last Sync Error: 1'\",\n    \"Review System event log for W32Time entries (Event IDs 29, 36, 38, 50) to establish how long sync has actually been failing and whether failures are config-driven or environmental - knowledge: these event IDs are the standard W32Time error/warning signatures\",\n    \"After remediation, monitor 'w32tm /query /status' until Stratum returns to a normal value (1-4), Leap Indicator reads '0', and the poll interval returns to its configured default, confirming the fix held\",\n    \"If any unexpected registry or GPO change to NtpServer/Type is found during investigation, treat as a possible indicator of tampering with system time configuration (maps to MITRE ATT&CK T1562 Impair Defenses) and escalate to incident response\"\n  ]\n}\n```",
+      "LatencyMs": 67285,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9375
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "9b843ea1cf9aee1780a5d483b6f3c846dcff62abe9bd06fe47e23084857aa9fe",
+    "Status": "Warning",
+    "Headline": "Time service reports unsynchronized state, zero/unspecified stratum, and sync failure while sourcing time from an internet NTP server instead of the domain hierarchy",
+    "Findings": [
+      "⚠ Leap Indicator is '3(not synchronized)', meaning the system does not currently consider its clock trustworthy",
+      "⚠ Stratum is '0 (unspecified)' and ReferenceId is '0x00000000 (unspecified)', both indicating no valid time reference has been established",
+      "⚠ Last Sync Error is '1 (The computer did not resync because no time data was available.)', confirming an explicit sync failure",
+      "⚠ Source is configured as 'time.windows.com,0x9' (an internet NTP server), not a domain controller/PDC source",
+      "⚠ Poll Interval has backed off to '10 (1024s)' in the status block and SpecialPollInterval is set to '0x4000' (16384s / ~4.5 hours) in the registry, consistent with repeated failed sync attempts",
+      "⚠ Peer state is 'Pending' with 'Time Remaining: 6002.7155669s' (~100 minutes) before the next sync attempt  [PARTIALLY VERIFIED]",
+      "⚠ Last Successful Sync Time is '10/5/2026 5:45:48 AM' while current time is reported as '10/5/2026 1:11:53 PM', a gap of several hours, yet 'Time since Last Good Sync Time' is reported as only '4073.0277911s' (~68 minutes) - these two figures are inconsistent",
+      "⚠ Live offset samples against the same server show a small, stable drift of approximately +1.147 to +1.149 seconds, far below the 300-second Kerberos skew tolerance  [PARTIALLY VERIFIED]"
+    ],
+    "RecommendedActions": [
+      "Run 'w32tm /query /status' and 'w32tm /query /configuration' interactively to confirm current live state matches this captured output (baseline refresh before acting)",
+      "Confirm domain-join status (e.g., 'dsregcmd /status' or 'wmic computersystem get domain,partofdomain'); if domain-joined, this machine should be syncing via NT5DS from the domain hierarchy, not a manually configured NTP peer - knowledge: CIS Benchmark time-sync guidance and AD Kerberos requirement that domain members derive time from the same hierarchy as the KDC",
+      "If domain-joined, reconfigure with 'w32tm /config /syncfromflags:domhier /update' and restart the W32Time service to restore hierarchy-based sync",
+      "Check outbound UDP/123 connectivity from this host to its intended time source to rule out a firewall or network block as the cause of 'Last Sync Error: 1'",
+      "Review System event log for W32Time entries (Event IDs 29, 36, 38, 50) to establish how long sync has actually been failing and whether failures are config-driven or environmental - knowledge: these event IDs are the standard W32Time error/warning signatures",
+      "After remediation, monitor 'w32tm /query /status' until Stratum returns to a normal value (1-4), Leap Indicator reads '0', and the poll interval returns to its configured default, confirming the fix held",
+      "If any unexpected registry or GPO change to NtpServer/Type is found during investigation, treat as a possible indicator of tampering with system time configuration (maps to MITRE ATT&CK T1562 Impair Defenses) and escalate to incident response"
+    ],
+    "Grounded": 2,
+    "PartiallyGrounded": 2,
+    "Unsupported": 0,
+    "Unattributed": 4,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

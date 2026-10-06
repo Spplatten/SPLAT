@@ -30,6 +30,9 @@ struct PolicyFile {
     /// Every executable a lease names must start with one of these. Each must be absolute; a
     /// trailing '/' is added if missing, so "/usr/bin" cannot also admit "/usr/binx".
     allowed_exec_prefixes: Vec<String>,
+    /// Existing ceilings keep refusing executable scratch until the operator opts in.
+    #[serde(default)]
+    allow_scratch_exec: bool,
     /// `a.b.c.d:port` endpoints. Absent means the ceiling does not bound egress; an empty list
     /// means no lease may reach the network at all.
     #[serde(default)]
@@ -55,6 +58,7 @@ struct LimitsFile {
 #[derive(Debug)]
 pub struct Ceiling {
     exec_prefixes: Vec<String>,
+    allow_scratch_exec: bool,
     egress: Option<BTreeSet<(Ipv4Addr, u16)>>,
     protected: Vec<String>,
     max_duration: Option<u32>,
@@ -130,6 +134,7 @@ impl Ceiling {
         let limits = file.limits.unwrap_or_default();
         Ok(Self {
             exec_prefixes,
+            allow_scratch_exec: file.allow_scratch_exec,
             egress,
             protected: file.always_protected_paths,
             max_duration: file.max_lease_duration_seconds,
@@ -170,6 +175,13 @@ impl Ceiling {
             }
         }
 
+        Ok(())
+    }
+
+    pub fn check_scratch_exec(&self, requested: bool) -> std::result::Result<(), String> {
+        if requested && !self.allow_scratch_exec {
+            return Err("scratch execution is outside the exec ceiling (allowScratchExec is false)".into());
+        }
         Ok(())
     }
 
@@ -215,6 +227,16 @@ mod tests {
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn scratch_execution_requires_an_explicit_operator_grant() {
+        let closed = Ceiling::parse(POLICY).unwrap();
+        assert!(closed.check_scratch_exec(true).is_err());
+        assert!(closed.check_scratch_exec(false).is_ok());
+        let open = Ceiling::parse(r#"{"schema":1,"allowedExecPrefixes":["/bin/"],"allowScratchExec":true}"#).unwrap();
+        assert!(open.check_scratch_exec(true).is_ok());
+        assert!(Ceiling::parse(r#"{"schema":1,"allowedExecPrefixes":["/bin/"],"allowScratchExec":"true"}"#).is_err());
     }
 
     #[test]

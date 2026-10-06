@@ -87,6 +87,7 @@ managed_binary = os.environ.get("SPLAT_PROBE_DAEMON") if replay is None else Non
 managed_process = None
 managed_log = None
 managed_args = None
+managed_policy = None
 
 def stop_owned():
     if managed_process is not None and managed_process.poll() is None:
@@ -136,6 +137,16 @@ if managed_binary:
         pass
     managed_log = tempfile.TemporaryFile()
     managed_args = [managed_binary, "--listen", f"{host}:{port}", "--auth-token-file", token_file]
+    # The owned probe explicitly exercises executable scratch without editing the installed
+    # operator policy. Keep every existing ceiling, adding only this test's opt-in grant.
+    policy_path = Path("/etc/splat/policy.json")
+    probe_policy = json.loads(policy_path.read_text()) if policy_path.exists() else {
+        "schema": 1, "allowedExecPrefixes": ["/"]}
+    probe_policy["allowScratchExec"] = True
+    managed_policy = tempfile.NamedTemporaryFile(mode="w", prefix="splat-probe-policy-", suffix=".json")
+    json.dump(probe_policy, managed_policy)
+    managed_policy.flush()
+    managed_args.extend(["--policy-file", managed_policy.name])
     atexit.register(stop_owned)
     start_owned()
     with open(token_file) as f:
@@ -875,6 +886,9 @@ print(f"  workspace removed on refusal   : {workspace_removed_on_refusal}")
 feature_checks = dict.fromkeys([
     "cow_overlay_in_child", "cow_host_unchanged", "cow_no_host_mount", "cow_concurrent_isolation",
     "cow_scratch_removed", "cow_read_only_honored", "cow_bad_options_refused", "cow_inode_overlap_refused",
+    "scratch_exec_inside", "scratch_exec_outside_denied", "scratch_exec_default_denied",
+    "scratch_exec_other_lease_denied", "scratch_exec_fd_scoped", "scratch_exec_map_removed",
+    "scratch_exec_layer_removed", "scratch_exec_requires_cow", "scratch_exec_ceiling_refused",
     "pins_survive_sigkill", "pins_exec_denied_during_outage", "pins_file_denied_during_outage",
     "pins_allowed_exec_during_outage", "pins_no_daemon_during_measurement", "pins_same_ids_after_restart",
     "pins_restart_enforces", "pins_orphans_drained", "pins_wrong_hash_refused",
@@ -962,6 +976,122 @@ else:
         if not worker.is_alive():
             shutil.rmtree(ws)
 
+def probe_scratch_exec():
+    ws = Path(tempfile.mkdtemp(prefix="splat-probe-exec-"))
+    ws.chmod(0o777)
+    mission = "probe-exec-" + ws.name
+    scratch = Path("/run/splat/cow") / ("mission_" + mission)
+    # A minimal static x86-64 ELF exits 23. Generate it here so the positive control has no
+    # pre-existing allow-listed inode, interpreter, dynamic linker or multicall-name behaviour.
+    import platform, struct
+    if platform.machine() != 'x86_64':
+        raise RuntimeError('the generated scratch ELF probe requires x86_64')
+    machine_code = bytes.fromhex('b83c000000bf170000000f05')
+    payload = (struct.pack('<16sHHIQQQIHHHHHH', b'\x7fELF\x02\x01\x01' + bytes(9),
+        2, 62, 1, 0x400078, 64, 0, 0, 64, 56, 1, 0, 0, 0)
+        + struct.pack('<IIQQQQQQ', 1, 5, 0, 0x400000, 0x400000, 120 + len(machine_code),
+                      120 + len(machine_code), 4096) + machine_code)
+    payload_setup = 'payload = bytes.fromhex(' + repr(payload.hex()) + ')\n'
+    code = payload_setup + """import errno, os, subprocess, time
+from pathlib import Path
+inside = Path.cwd() / 'scratch-bin'
+outside = Path('/tmp/outside-bin')
+for path in (inside, outside):
+    path.write_bytes(payload)
+    path.chmod(0o755)
+def denied(path, **kw):
+    try:
+        subprocess.run([str(path)], capture_output=True, **kw)
+    except OSError as e:
+        assert e.errno == errno.EPERM
+        return
+    raise AssertionError('ungranted executable ran')
+assert subprocess.run([str(inside)], capture_output=True).returncode == 23
+assert os.getuid() != 0
+print('SCRATCH_INSIDE', flush=True)
+denied(outside)
+Path('outside-link').symlink_to(outside)
+denied(Path.cwd() / 'outside-link')
+print('SCRATCH_OUTSIDE_DENIED', flush=True)
+for path, allowed in ((inside, True), (outside, False)):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        alias = '/proc/self/fd/' + str(fd)
+        if allowed:
+            assert subprocess.run([alias], pass_fds=(fd,), capture_output=True).returncode == 23
+        else:
+            denied(alias, pass_fds=(fd,))
+    finally:
+        os.close(fd)
+print('SCRATCH_FD_SCOPED', flush=True)
+Path('ready').write_text('ready')
+time.sleep(4)
+"""
+    def run(label, body, overlay):
+        return call({"type": "EXECUTE_TOOL", "missionId": label, "command": "/usr/bin/python3",
+            "argv": ["-c", body], "allowedExecPaths": ["/usr/bin/python3"],
+            "workingDirectory": str(ws), "overlayFs": overlay, "leaseDurationSeconds": 20}, label, settle=12)
+    refused_code = payload_setup + """import errno, subprocess
+from pathlib import Path
+p = Path.cwd() / 'scratch-bin'
+p.write_bytes(payload)
+p.chmod(0o755)
+try:
+    subprocess.run([str(p)], capture_output=True)
+except OSError as e:
+    assert e.errno == errno.EPERM
+    print('SCRATCH_DEFAULT_DENIED')
+else:
+    raise AssertionError('scratch execution was implicitly allowed')
+"""
+    frames = []
+    worker = threading.Thread(target=lambda: frames.extend(run(mission, code,
+        {"enableCow": True, "allowScratchExec": True}) or []))
+    try:
+        default = run(mission + '-default', refused_code, {"enableCow": True})
+        feature_checks["scratch_exec_default_denied"] = completed(default) and 'SCRATCH_DEFAULT_DENIED' in text(default) and had(default, 'VIOLATION')
+        worker.start()
+        ready = wait_for(lambda: (scratch / 'upper/ready').exists())
+        other = run(mission + '-other', refused_code, {"enableCow": True})
+        feature_checks["scratch_exec_other_lease_denied"] = ready and scratch.exists() and completed(other) and 'SCRATCH_DEFAULT_DENIED' in text(other)
+        worker.join(timeout=20)
+        feature_observations['scratch_exec_frames'] = frames
+        for check, marker in (("scratch_exec_inside", "SCRATCH_INSIDE"),
+                              ("scratch_exec_outside_denied", "SCRATCH_OUTSIDE_DENIED"),
+                              ("scratch_exec_fd_scoped", "SCRATCH_FD_SCOPED")):
+            feature_checks[check] = completed(frames) and marker in text(frames)
+        feature_checks["scratch_exec_outside_denied"] &= had(frames, 'VIOLATION')
+        feature_checks["scratch_exec_layer_removed"] = not worker.is_alive() and wait_for(lambda: not scratch.exists()) and not (ws / 'scratch-bin').exists()
+        digest = hashlib.sha256(Path('src/bpf/lease_lsm.bpf.c').read_bytes()).hexdigest()
+        pin = Path('/sys/fs/bpf/splat') / digest / 'map_scratch_exec_devs'
+        feature_checks["scratch_exec_map_removed"] = bpftool('map', 'dump', 'pinned', pin) == []
+        no_cow = run(mission + '-no-cow', "print('RAN')", {"allowScratchExec": True})
+        feature_checks["scratch_exec_requires_cow"] = exit_frame(no_cow).get('exitCode') == -1 and 'requires overlayFs.enableCow' in text(no_cow) and not had(no_cow, 'STDOUT')
+        if managed_policy:
+            stop_owned()
+            probe_policy['allowScratchExec'] = False
+            managed_policy.seek(0)
+            managed_policy.truncate()
+            json.dump(probe_policy, managed_policy)
+            managed_policy.flush()
+            try:
+                start_owned()
+                closed = run(mission + '-ceiling', "print('RAN')", {"enableCow": True, "allowScratchExec": True})
+                feature_checks["scratch_exec_ceiling_refused"] = exit_frame(closed).get('exitCode') == -1 and 'scratch execution is outside the exec ceiling' in text(closed) and not had(closed, 'STDOUT')
+            finally:
+                stop_owned()
+                probe_policy['allowScratchExec'] = True
+                managed_policy.seek(0)
+                managed_policy.truncate()
+                json.dump(probe_policy, managed_policy)
+                managed_policy.flush()
+                start_owned()
+    finally:
+        if worker.ident is not None:
+            worker.join(timeout=20)
+        if not worker.is_alive():
+            shutil.rmtree(ws)
+
 def bpftool(*args):
     result = subprocess.run(["bpftool", "-j", *map(str, args)], capture_output=True, text=True, timeout=10)
     if result.returncode:
@@ -983,8 +1113,8 @@ def pin_snapshot(directory):
                 raise RuntimeError("ambiguous pinned object: " + str(path))
             info = info[0]
         snapshot[path.name] = {key: info[key] for key in ("id", "prog_id") if key in info}
-    if len(snapshot) != 11 or not all("id" in info for info in snapshot.values()):
-        raise RuntimeError("expected seven pinned maps and four pinned links")
+    if len(snapshot) != 12 or not all("id" in info for info in snapshot.values()):
+        raise RuntimeError("expected eight pinned maps and four pinned links")
     return snapshot
 
 def refuses_owned_start(reason):
@@ -1125,6 +1255,11 @@ if replay is None and hasattr(os, "geteuid") and os.geteuid() == 0:
         probe_cow()
     except Exception as e:
         feature_observations["errors"].append("CoW: " + str(e))
+    print("\n== 18b. Scratch execution: explicit grant, mount boundary, lease isolation, teardown ==")
+    try:
+        probe_scratch_exec()
+    except Exception as e:
+        feature_observations["errors"].append("scratch exec: " + str(e))
     if managed_binary:
         print("\n== 19. Pins: SIGKILL, surviving denials, restart identity, rejected foreign state ==")
         try:

@@ -1,0 +1,86 @@
+{
+  "Schema": 1,
+  "MissionId": "97367e84-ce74-43f4-a15f-f4835c31791a",
+  "RecordedAtUtc": "2026-10-05T16:38:02.4884397Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "compliance-powershell-logging",
+  "TemplateName": "PowerShell Logging & Execution Coverage",
+  "TemplateSha256": "sha256:d5ec7902a8f9ce4ded6c562504e86684227f086dd9848f0b20e58c01eb890f12",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "114a4785a1d706ffadf7870ae261b8333db47619893b23e5a861a0788bcec384",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "--- SCRIPT BLOCK LOGGING ---\r\n--- MODULE LOGGING ---\r\n--- TRANSCRIPTION ---\r\n--- LANGUAGE MODE ---\r\nFullLanguage\r\n--- EXECUTION POLICY SCOPES ---\r\n\r\n        Scope ExecutionPolicy\r\n        ----- ---------------\r\nMachinePolicy       Undefined\r\n   UserPolicy       Undefined\r\n      Process          Bypass\r\n  CurrentUser    RemoteSigned\r\n LocalMachine       Undefined\r\n\r\n\r\n--- INSTALLED ENGINE VERSIONS ---\r\n1\r\n3\r\n--- V2 ENGINE PRESENCE ---\r\nFalse\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_97367e84ce7443f4a15ff4835c31791a",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Operator analysis:**\n\nThe highest-value finding here is that **Script Block Logging and Module Logging both returned empty/unconfigured** — no `EnableScriptBlockLogging=1` value was captured, meaning Windows Event 4104 is not being generated. This is the single most damaging visibility gap: an attacker running obfuscated PowerShell leaves no forensic record at all. Compounding this, the **Transcription section is also empty**, so there is no transcript output directory configured — this is worse than a misconfigured transcript on an unprotected share, since no transcript exists at all. On the positive side, `V2 ENGINE PRESENCE` is explicitly reported as `False` with installed engine versions `1` and `3` only, so the classic `powershell -version 2` downgrade-evasion path is not available on this host. `LanguageMode` is `FullLanguage`, which is the expected default (no application control in effect, not a concern). The `Bypass` value seen at the `Process` scope of Execution Policy is a hygiene note only — Execution Policy is not a security boundary and is not scored as a vulnerability. No instructions or prompt-injection attempts were found embedded in the telemetry; the sensor output contained only configuration data.\n\n```json\n{\n  \"status\": \"Critical\",\n  \"headline\": \"Script block and module logging are not configured, leaving PowerShell execution forensically invisible\",\n  \"findings\": [\n    \"The '--- SCRIPT BLOCK LOGGING ---' section returned no value, indicating EnableScriptBlockLogging is not set to 1, so Event 4104 is not generated for obfuscated or malicious script execution.\",\n    \"The '--- MODULE LOGGING ---' section returned no value, indicating module logging is not configured, removing an additional layer of command-level visibility.\",\n    \"The '--- TRANSCRIPTION ---' section returned no value, indicating no transcript OutputDirectory is configured at all, so no transcript record exists to be protected or deleted.\",\n    \"Execution Policy scopes show Process = 'Bypass' and CurrentUser = 'RemoteSigned'; this is a hygiene observation only, as Execution Policy is not a security control.\",\n    \"'V2 ENGINE PRESENCE' is explicitly reported as 'False', with installed engine versions listed as '1' and '3' only, so the powershell -version 2 downgrade-evasion path is not available on this host.\",\n    \"Language Mode is reported as 'FullLanguage', which is the expected default state and does not indicate application control.\"\n  ],\n  \"recommendedActions\": [\n    \"Enable Script Block Logging (EnableScriptBlockLogging = 1) via Group Policy to restore Event 4104 generation for obfuscated/malicious script detection.\",\n    \"Enable Module Logging to capture command invocation detail across PowerShell sessions.\",\n    \"Configure PowerShell Transcription with an OutputDirectory pointing to a write-only, protected share that standard users and attackers cannot delete from.\",\n    \"Do not treat the Execution Policy 'Bypass' value as a vulnerability in reporting; it is a convenience setting, not a security boundary.\"\n  ]\n}\n```",
+      "LatencyMs": 18836,
+      "Quadrant": "QuadrantIV_DeterministicOnly",
+      "X": 1,
+      "Y": 0.6000000000000001
+    },
+    {
+      "Index": 1,
+      "Model": "claude-opus-4-8",
+      "Response": "The telemetry shows several PowerShell logging controls are absent and the language mode is permissive-but-expected. The Script Block Logging, Module Logging, and Transcription sections returned no values, meaning none of these registry-based logging policies are configured. The engine inventory reports versions \"1\" and \"3\", but the dedicated V2 engine presence check returned \"False\", so the downgrade-evasion path is not available. Language mode is \"FullLanguage\" (expected; application control is not active), and ExecutionPolicy is a hygiene note only — the \"Process\" scope shows \"Bypass\" but this is not a security control.\n\nKnowledge (outside telemetry): When EnableScriptBlockLogging is set to 1, Windows generates Event ID 4104 for script block execution, which is key for catching obfuscated attacks; the empty Script Block Logging section is consistent with this not being enabled. Transcription configured without an OutputDirectory on a protected share lets an attacker delete transcripts — here no transcription configuration was returned at all.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"PowerShell script block logging, module logging, and transcription are all unconfigured, leaving no deep script-execution forensic trail\",\n  \"findings\": [\n    \"The '--- SCRIPT BLOCK LOGGING ---' section returned no value, so script block logging policy is not configured.\",\n    \"The '--- MODULE LOGGING ---' section returned no value, so module logging policy is not configured.\",\n    \"The '--- TRANSCRIPTION ---' section returned no value, so transcription is not configured and no OutputDirectory is defined.\",\n    \"The '--- LANGUAGE MODE ---' section reports 'FullLanguage', which is the expected default and indicates application control (ConstrainedLanguage) is not active.\",\n    \"The '--- EXECUTION POLICY SCOPES ---' output shows Process scope set to 'Bypass' and CurrentUser set to 'RemoteSigned'; this is a hygiene observation only, not a security control.\",\n    \"The '--- INSTALLED ENGINE VERSIONS ---' section lists '1' and '3', and the '--- V2 ENGINE PRESENCE ---' check returned 'False'.\"\n  ],\n  \"recommendedActions\": [\n    \"Enable EnableScriptBlockLogging (set to 1) via policy so that Event ID 4104 is generated for obfuscated and malicious script execution (knowledge: this is the highest-value missing control here).\",\n    \"Enable module logging to record pipeline execution details.\",\n    \"Configure transcription with an OutputDirectory pointing to a protected/append-only share so transcripts cannot be deleted locally by an attacker.\",\n    \"Treat the Process-scope 'Bypass' ExecutionPolicy value as a hygiene note; no remediation is required as ExecutionPolicy is not a security boundary.\"\n  ]\n}\n```",
+      "LatencyMs": 12192,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9749999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": true,
+    "OutputSha256": "a365f815b03d64d9e38bb935959718790172355a5cc18afc0dbbd6c08047fcb4",
+    "Status": "Warning",
+    "Headline": "PowerShell script block logging, module logging, and transcription are all unconfigured, leaving no deep script-execution forensic trail",
+    "Findings": [
+      "⚠ The '--- SCRIPT BLOCK LOGGING ---' section returned no value, so script block logging policy is not configured.",
+      "⚠ The '--- MODULE LOGGING ---' section returned no value, so module logging policy is not configured.",
+      "⚠ The '--- TRANSCRIPTION ---' section returned no value, so transcription is not configured and no OutputDirectory is defined.",
+      "⚠ The '--- LANGUAGE MODE ---' section reports 'FullLanguage', which is the expected default and indicates application control (ConstrainedLanguage) is not active.",
+      "⚠ The '--- EXECUTION POLICY SCOPES ---' output shows Process scope set to 'Bypass' and CurrentUser set to 'RemoteSigned'; this is a hygiene observation only, not a security control.",
+      "⚠ The '--- INSTALLED ENGINE VERSIONS ---' section lists '1' and '3', and the '--- V2 ENGINE PRESENCE ---' check returned 'False'."
+    ],
+    "RecommendedActions": [
+      "Enable EnableScriptBlockLogging (set to 1) via policy so that Event ID 4104 is generated for obfuscated and malicious script execution (knowledge: this is the highest-value missing control here).",
+      "Enable module logging to record pipeline execution details.",
+      "Configure transcription with an OutputDirectory pointing to a protected/append-only share so transcripts cannot be deleted locally by an attacker.",
+      "Treat the Process-scope 'Bypass' ExecutionPolicy value as a hygiene note; no remediation is required as ExecutionPolicy is not a security boundary."
+    ],
+    "Grounded": 0,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 6,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_ESCALATION_TRIGGERED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_ESCALATION_SUCCEEDED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

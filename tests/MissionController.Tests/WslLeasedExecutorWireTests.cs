@@ -322,8 +322,10 @@ public class WslLeasedExecutorWireTests
     /// were hardcoded on the daemon side until 2026-09-03; a template could name one approved
     /// destination and the kernel would never hear about it.
     /// </summary>
-    [Fact]
-    public async Task TheDeclaredLeaseTravelsIntactToTheDaemon()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TheDeclaredLeaseTravelsIntactToTheDaemon(bool allowScratchExec)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -331,7 +333,7 @@ public class WslLeasedExecutorWireTests
 
         var daemon = RunStandInDaemonAsync(listener, "{\"type\":\"EXIT\",\"exitCode\":0}");
 
-        var lease = SampleLease();
+        var lease = SampleLease() with { OverlayFs = new OverlayFsSpec(true, "/unused", "/unused", allowScratchExec) };
         var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
         await executor.ExecuteLeasedAsync(lease, "/usr/bin/curl", new[] { "--max-time", "3" });
 
@@ -363,6 +365,8 @@ public class WslLeasedExecutorWireTests
         Assert.Equal("10.1.2.3", root.GetProperty("allowedEgressIps")[0].GetString());
         Assert.Equal(15, root.GetProperty("leaseDurationSeconds").GetInt32());
         Assert.Equal(64 * 1024 * 1024, root.GetProperty("limits").GetProperty("maxMemoryBytes").GetInt64());
+        Assert.True(root.GetProperty("overlayFs").GetProperty("enableCow").GetBoolean());
+        Assert.Equal(allowScratchExec, root.GetProperty("overlayFs").GetProperty("allowScratchExec").GetBoolean());
     }
 
     /// <summary>

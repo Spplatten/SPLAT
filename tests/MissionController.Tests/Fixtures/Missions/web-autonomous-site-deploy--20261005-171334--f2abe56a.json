@@ -1,0 +1,72 @@
+{
+  "Schema": 1,
+  "MissionId": "f2abe56a-1d79-4f8f-8e58-52ee11d8978c",
+  "RecordedAtUtc": "2026-10-05T17:13:34.7402407Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "web-autonomous-site-deploy",
+  "TemplateName": "Autonomous Web Builder & Deployment Engine",
+  "TemplateSha256": "sha256:62ac5768a6a5198479c862d6ed355c8146fae8758fdbbb5b52a166f80b6a7104",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "ec486c291f882440451456c8bc669c4d6552b96cb6e79c5abe88005afedde182",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "=== SPLAT AUTONOMOUS WEB BUILD & DEPLOYMENT ===\r\nRepository: https://github.com/Spplatten/SPLAT [Branch: main]\r\nBuild Command: npm run build\r\nOutput Directory: dist\r\nTarget Provider: CloudflarePages (Scope: Production)\r\n--- ENVIRONMENT & RUNTIME INSPECTION ---\r\nv24.16.0\r\n11.13.0\ngit version 2.54.0.windows.1\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_f2abe56a1d794f8f8e5852ee11d8978c",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Operator analysis:** The telemetry supplied only contains basic repo/pipeline metadata (repo URL, branch, build command `npm run build`, output directory `dist`, target `CloudflarePages`) and three runtime version strings (Node `v24.16.0`, npm `11.13.0`, Git `2.54.0.windows.1`). None of the four areas requested for this release-readiness review — build artifact completeness, secret leakage scan of the bundle, CSP/HSTS header verification, or CDN caching configuration — have any corresponding data in this output. No scan results, file listings, header dumps, or cache-control values were provided, so none of those checks can be verified from this telemetry. I did not find any text in the sensor output attempting to redirect my instructions or claiming operator/SPLAT authority; this batch appears to be plain environment info rather than an injection attempt.\n\nBecause the actual checks you asked about are unaddressed by the data on hand, I'm marking this Warning rather than Healthy — an unverified pipeline should not be treated as cleared for production release. Recommend re-running the pipeline with the actual build log, `dist/` artifact listing, a secret-scan (e.g. for `.env`, `*.pem`, `id_rsa`), and the deployed response headers before signing off on a Cloudflare Pages production release.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Telemetry only contains repo/build metadata and tool versions — none of the four requested release checks (artifact completeness, secret leakage, CSP/HSTS headers, CDN caching) have supporting data\",\n  \"findings\": [\n    \"Output shows only pipeline metadata: 'Build Command: npm run build', 'Output Directory: dist', 'Target Provider: CloudflarePages (Scope: Production)'\",\n    \"Runtime inspection returned only version strings: 'v24.16.0', '11.13.0', 'git version 2.54.0.windows.1', with no accompanying scan or audit results\",\n    \"No data present regarding bundle contents, secret scanning (.env, private keys), CSP/HSTS headers, or CDN/cache settings — these cannot be assessed from the given output\"\n  ],\n  \"recommendedActions\": [\n    \"Re-run the pipeline inspection to capture the actual build log and a file listing of the 'dist' output directory\",\n    \"Run a secret-scanning tool (e.g. gitleaks/truffleHog) against the built artifacts before each production deploy\",\n    \"Fetch and review the deployed response headers (Content-Security-Policy, Strict-Transport-Security) directly from the Cloudflare Pages production URL\",\n    \"Review Cloudflare Pages cache-control and edge-caching rules for static assets vs. HTML documents\"\n  ]\n}\n```",
+      "LatencyMs": 14247,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9833333333333334
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "79be3c9b8eac3a46411c1186e688b203029d666d2c3304dc4acc40ef87f36634",
+    "Status": "Warning",
+    "Headline": "Telemetry only contains repo/build metadata and tool versions — none of the four requested release checks (artifact completeness, secret leakage, CSP/HSTS headers, CDN caching) have supporting data",
+    "Findings": [
+      "⚠ Output shows only pipeline metadata: 'Build Command: npm run build', 'Output Directory: dist', 'Target Provider: CloudflarePages (Scope: Production)'",
+      "⚠ Runtime inspection returned only version strings: 'v24.16.0', '11.13.0', 'git version 2.54.0.windows.1', with no accompanying scan or audit results",
+      "⚠ No data present regarding bundle contents, secret scanning (.env, private keys), CSP/HSTS headers, or CDN/cache settings — these cannot be assessed from the given output"
+    ],
+    "RecommendedActions": [
+      "Re-run the pipeline inspection to capture the actual build log and a file listing of the 'dist' output directory",
+      "Run a secret-scanning tool (e.g. gitleaks/truffleHog) against the built artifacts before each production deploy",
+      "Fetch and review the deployed response headers (Content-Security-Policy, Strict-Transport-Security) directly from the Cloudflare Pages production URL",
+      "Review Cloudflare Pages cache-control and edge-caching rules for static assets vs. HTML documents"
+    ],
+    "Grounded": 1,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 2,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

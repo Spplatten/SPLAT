@@ -1,0 +1,74 @@
+{
+  "Schema": 1,
+  "MissionId": "e344e383-9115-42ad-9959-c2dd9b3c76dc",
+  "RecordedAtUtc": "2026-10-05T17:01:11.1853557Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "network-smb-posture",
+  "TemplateName": "SMB Signing, Encryption & Dialect Posture",
+  "TemplateSha256": "sha256:ac2ead75123dba55e6a44923bff1a695ef0aec00d3e0c435e77113c807adfc4a",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "f437fc6643fe400b552d42fcd17ea1fe08007ca231e87cd86e5311558ae18e6b",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "--- SMB CLIENT CONFIGURATION ---\r\n\r\n\r\nRequireSecuritySignature  : True\r\nEnableSecuritySignature   : True\r\nEnableMultiChannel        : True\r\nEnableInsecureGuestLogons : False\r\nDirectoryCacheLifetime    : 10\r\n\r\n\r\n\r\n--- SMB SERVER CONFIGURATION ---\r\n\r\n\r\nEnableSMB1Protocol       : False\r\nEnableSMB2Protocol       : True\r\nRequireSecuritySignature : True\r\nEnableSecuritySignature  : False\r\nEncryptData              : False\r\nRejectUnencryptedAccess  : True\r\nAuditSmb1Access          : False\r\n\r\n\r\n\r\n--- LIVE SMB CONNECTIONS ---\r\n--- MAPPED DRIVES ---\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_e344e383911542ad9959c2dd9b3c76dc",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Operator analysis**\n\n**STORY** — This host's static SMB configuration is actually hardened: SMB1 is disabled on the server (`EnableSMB1Protocol : False`), guest fallback is blocked (`EnableInsecureGuestLogons : False`), and the client enforces signing (`RequireSecuritySignature : True`). The one wrinkle is the server's `EnableSecuritySignature : False` sitting next to `RequireSecuritySignature : True` — a config that still enforces signing (Require wins) but is an inconsistent, half-applied hardening state worth a second look. Critically, both the **Live SMB Connections** and **Mapped Drives** sections returned nothing, so there is no telemetry to confirm what dialect or signing state any actual session is using, and no way to check for the disconnected-mapped-drive pattern tied to logon delays/lockouts.\n\n**KNOWN-GOOD**\n- `EnableSMB1Protocol : False` — legacy protocol disabled, expected modern baseline, wave through.\n- `EnableInsecureGuestLogons : False` — blocks silent anonymous fallback, expected, wave through.\n- Client `RequireSecuritySignature : True` — defeats the relay precondition, expected, wave through.\n- **Lookalike that would NOT be waved through:** server `EnableSecuritySignature : False` combined with `RequireSecuritySignature : True`. This is not dangerous today (Require overrides Enable) but is the kind of partial/contradictory GPO state that, on a different host, could mean signing was silently disabled and only looks safe by accident.\n\n**HYPOTHESES**\n- *Empty Live Connections / Mapped Drives sections*: Benign — no active SMB sessions or mapped drives existed at capture time. Hostile — the collector was tampered with or its output suppressed to hide an active relay or beaconing session. Settling evidence: the raw exit code / error stream of the `Get-SmbConnection` and `Get-SmbMapping` calls, not just an empty result.\n- *Server `EnableSecuritySignature : False`*: Benign — leftover from an older template; `RequireSecuritySignature` still forces signing in practice. Hostile — a partially-reverted hardening script, suggesting local tampering. Settling evidence: GPO/local policy export showing which value is authoritative and change history (event ID for policy change).\n\n**PLAN**\n1. Cheapest check first: confirm the SMB connection/mapped-drive queries actually ran and returned a true empty set (check command exit status), rather than assuming \"no data = no connections.\"\n2. If sessions do exist, re-pull `Get-SmbConnection` output and check `Dialect` (<3.0.0 is a finding) and `Signed` (False is a finding) per session.\n3. Reconcile the `EnableSecuritySignature` vs `RequireSecuritySignature` server discrepancy against the intended GPO baseline — containment is not needed since signing is enforced, but the inconsistency should be corrected for defense-in-depth.\n4. No evidence of relay, SMB1 use, or guest fallback — no incident response action warranted at this time beyond closing the telemetry gap.\n\nNo prompt-injection content was found in this payload — the block contained only configuration key/value pairs, no instructions directed at the analyst.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"SMB hardening settings look correct, but no live-connection or mapped-drive telemetry was returned to confirm actual session security\",\n  \"findings\": [\n    \"Client config shows RequireSecuritySignature : True and EnableInsecureGuestLogons : False, which are the secure expected values.\",\n    \"Server config shows EnableSMB1Protocol : False (legacy protocol disabled) and RequireSecuritySignature : True.\",\n    \"Server config also shows EnableSecuritySignature : False alongside RequireSecuritySignature : True — an inconsistent pairing that still enforces signing today but does not match a clean hardened baseline.\",\n    \"The 'LIVE SMB CONNECTIONS' section is empty, so no Dialect or Signed values could be checked for active sessions.\",\n    \"The 'MAPPED DRIVES' section is empty, so no Disconnected-status drive (the common cause of reported logon delays/lockouts) could be confirmed or ruled out.\"\n  ],\n  \"recommendedActions\": [\n    \"Knowledge: verify the SMB telemetry collector actually executed successfully (check exit code/errors for Get-SmbConnection and Get-SmbMapping) rather than treating an empty result as 'no connections exist' - rules out silent collection failure or tampering.\",\n    \"Knowledge (CIS/SMB hardening): reconcile server EnableSecuritySignature=False against RequireSecuritySignature=True by pulling the applied GPO (Computer Configuration > Security Settings > Microsoft network server: Digitally sign communications) to confirm which value is authoritative.\",\n    \"Re-run Get-SmbConnection once sessions are present and flag any entry with Dialect below 3.0.0 or Signed : False (MITRE ATT&CK T1557 - Adversary-in-the-Middle / SMB relay precondition).\",\n    \"Re-run Get-SmbMapping and flag any entry with Status : Disconnected as the probable cause of reported logon delays or account lockouts.\"\n  ]\n}\n```",
+      "LatencyMs": 29086,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9749999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "a651f4ca513f5611ac8a576dfb2431f3ff226bc21333627a1cc16c9c177c94ba",
+    "Status": "Warning",
+    "Headline": "SMB hardening settings look correct, but no live-connection or mapped-drive telemetry was returned to confirm actual session security",
+    "Findings": [
+      "⚠ Client config shows RequireSecuritySignature : True and EnableInsecureGuestLogons : False, which are the secure expected values.",
+      "⚠ Server config shows EnableSMB1Protocol : False (legacy protocol disabled) and RequireSecuritySignature : True.",
+      "⚠ Server config also shows EnableSecuritySignature : False alongside RequireSecuritySignature : True — an inconsistent pairing that still enforces signing today but does not match a clean hardened baseline.",
+      "⚠ The 'LIVE SMB CONNECTIONS' section is empty, so no Dialect or Signed values could be checked for active sessions.",
+      "⚠ The 'MAPPED DRIVES' section is empty, so no Disconnected-status drive (the common cause of reported logon delays/lockouts) could be confirmed or ruled out."
+    ],
+    "RecommendedActions": [
+      "Knowledge: verify the SMB telemetry collector actually executed successfully (check exit code/errors for Get-SmbConnection and Get-SmbMapping) rather than treating an empty result as 'no connections exist' - rules out silent collection failure or tampering.",
+      "Knowledge (CIS/SMB hardening): reconcile server EnableSecuritySignature=False against RequireSecuritySignature=True by pulling the applied GPO (Computer Configuration > Security Settings > Microsoft network server: Digitally sign communications) to confirm which value is authoritative.",
+      "Re-run Get-SmbConnection once sessions are present and flag any entry with Dialect below 3.0.0 or Signed : False (MITRE ATT&CK T1557 - Adversary-in-the-Middle / SMB relay precondition).",
+      "Re-run Get-SmbMapping and flag any entry with Status : Disconnected as the probable cause of reported logon delays or account lockouts."
+    ],
+    "Grounded": 0,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 5,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

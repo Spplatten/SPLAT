@@ -1,0 +1,75 @@
+{
+  "Schema": 1,
+  "MissionId": "cd56de64-7342-4af1-85b8-d146c5211317",
+  "RecordedAtUtc": "2026-10-05T17:04:08.5594984Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "secops-tls-cipher-audit",
+  "TemplateName": "TLS & SChannel Cipher Suite Auditor",
+  "TemplateSha256": "sha256:9df50d1a148f2e75a9c8b504f3068cf14838b2714fb0b1c94a0067022936faf0",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "8f3ad163cdc52823b778dca16792f813b08ccfd6b988b35cf664cfc63823c58e",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "--- SCHANNEL PROTOCOL KEYS ---\r\n\r\n\r\nPSPath            : Microsoft.PowerShell.Core\\Registry::HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\SecurityPro\r\n                    viders\\SCHANNEL\\Protocols\\TLS 1.2\\Client\r\nEnabled           : 1\r\nDisabledByDefault : 0\r\n\r\n\r\n\r\n--- LOCALMACHINE CERTIFICATE EXPIRY ---\r\n",
+    "Stderr": "Select-Object : Property \"Name\" cannot be found.\r\nAt line:1 char:52\r\n+ ... rAction SilentlyContinue | Select-Object -ExpandProperty Name; Write- ...\r\n+                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : InvalidArgument: (Microsoft.Windo....TlsCipherSuite:PSObject) [Select-Object], PSArgumen \r\n   tException\r\n    + FullyQualifiedErrorId : ExpandPropertyNotFound,Microsoft.PowerShell.Commands.SelectObjectCommand\r\n \r\n",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_cd56de6473424af185b8d146c5211317",
+      "token:integrity=Low",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=0-capabilities",
+      "winsta:WinSta0\\Default (the container could already attach)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Operator analysis:**\n\nThe data collected is incomplete and does not support a compliance verdict. Only one registry key was returned — TLS 1.2 Client is explicitly `Enabled = 1` with `DisabledByDefault = 0`, which is acceptable. However, no registry entries were returned for SSL 2.0, SSL 3.0, TLS 1.0, or TLS 1.1 — per the audit rule, an absent `Enabled` value means the protocol falls back to the OS default rather than being disabled, so **legacy protocol status cannot be confirmed as remediated** and must be treated as an open risk until explicit `Enabled=0` keys are found. Separately, both the certificate-expiry query and the cipher-suite enumeration failed with PowerShell errors (`Select-Object : Property \"Name\" cannot be found` against a `TlsCipherSuite` object), so no certificate expiry/signature data or enabled-cipher-suite data was actually collected — these checks must be re-run with corrected cmdlet syntax before any certificate or cipher finding can be made. No prompt-injection attempt was detected in this telemetry; the only non-telemetry content was a standard PowerShell error message, not an instruction directed at the auditor.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Legacy-protocol and certificate checks are inconclusive due to missing registry keys and a failed query\",\n  \"findings\": [\n    \"Registry shows TLS 1.2 Client with 'Enabled : 1' and 'DisabledByDefault : 0', which is a compliant forward-secret-capable protocol state.\",\n    \"No registry keys were returned for SSL 2.0, SSL 3.0, TLS 1.0, or TLS 1.1 — per audit policy, an absent Enabled value means the protocol defaults to the OS setting rather than being disabled, so these legacy protocols cannot be confirmed as remediated.\",\n    \"The certificate expiry collection step errored out: 'Select-Object : Property \\\"Name\\\" cannot be found... [Select-Object], PSArgumentException ... FullyQualifiedErrorId : ExpandPropertyNotFound', meaning no certificate expiry or signature-algorithm data was retrieved.\",\n    \"The same error trace indicates the query was run against a 'Microsoft.Windows...TlsCipherSuite' object, implying the intended cipher-suite enumeration (for NULL/RC4/DES/3DES/EXPORT/MD5/non-PFS suites) also failed and returned no cipher data.\",\n    \"No prompt-injection attempt was found in this telemetry; the only non-telemetry text was a standard PowerShell exception message.\"\n  ],\n  \"recommendedActions\": [\n    \"Re-query HKLM:\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\SecurityProviders\\\\SCHANNEL\\\\Protocols for SSL 2.0, SSL 3.0, TLS 1.0, and TLS 1.1 explicitly and confirm each has 'Enabled : 0' and 'DisabledByDefault : 1' on both Client and Server subkeys; do not treat their absence as disabled.\",\n    \"Fix the certificate-expiry script (use 'Get-ChildItem Cert:\\\\LocalMachine\\\\My | Select-Object Subject, NotAfter, SignatureAlgorithm' or equivalent) and re-run to identify certificates that are expired, expiring within 45 days, or signed with SHA-1/MD5.\",\n    \"Fix the cipher-suite enumeration (e.g., 'Get-TlsCipherSuite | Select-Object Name' instead of '-ExpandProperty Name') and re-run to check for NULL, RC4, DES, 3DES, EXPORT, MD5, or non-ECDHE/DHE key-exchange suites enabled on this host.\",\n    \"Re-submit this audit once corrected telemetry is available before closing out this check.\"\n  ]\n}\n```",
+      "LatencyMs": 16417,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.98
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "f35102d63622c97c2c939e3cfc5978478e194fd1d14f9e7504a300b6be8a4a0f",
+    "Status": "Warning",
+    "Headline": "Legacy-protocol and certificate checks are inconclusive due to missing registry keys and a failed query",
+    "Findings": [
+      "⚠ Registry shows TLS 1.2 Client with 'Enabled : 1' and 'DisabledByDefault : 0', which is a compliant forward-secret-capable protocol state.",
+      "⚠ No registry keys were returned for SSL 2.0, SSL 3.0, TLS 1.0, or TLS 1.1 — per audit policy, an absent Enabled value means the protocol defaults to the OS setting rather than being disabled, so these legacy protocols cannot be confirmed as remediated.",
+      "⚠ The certificate expiry collection step errored out: 'Select-Object : Property \"Name\" cannot be found... [Select-Object], PSArgumentException ... FullyQualifiedErrorId : ExpandPropertyNotFound', meaning no certificate expiry or signature-algorithm data was retrieved.",
+      "⚠ The same error trace indicates the query was run against a 'Microsoft.Windows...TlsCipherSuite' object, implying the intended cipher-suite enumeration (for NULL/RC4/DES/3DES/EXPORT/MD5/non-PFS suites) also failed and returned no cipher data.",
+      "⚠ No prompt-injection attempt was found in this telemetry; the only non-telemetry text was a standard PowerShell exception message."
+    ],
+    "RecommendedActions": [
+      "Re-query HKLM:\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols for SSL 2.0, SSL 3.0, TLS 1.0, and TLS 1.1 explicitly and confirm each has 'Enabled : 0' and 'DisabledByDefault : 1' on both Client and Server subkeys; do not treat their absence as disabled.",
+      "Fix the certificate-expiry script (use 'Get-ChildItem Cert:\\LocalMachine\\My | Select-Object Subject, NotAfter, SignatureAlgorithm' or equivalent) and re-run to identify certificates that are expired, expiring within 45 days, or signed with SHA-1/MD5.",
+      "Fix the cipher-suite enumeration (e.g., 'Get-TlsCipherSuite | Select-Object Name' instead of '-ExpandProperty Name') and re-run to check for NULL, RC4, DES, 3DES, EXPORT, MD5, or non-ECDHE/DHE key-exchange suites enabled on this host.",
+      "Re-submit this audit once corrected telemetry is available before closing out this check."
+    ],
+    "Grounded": 1,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 4,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

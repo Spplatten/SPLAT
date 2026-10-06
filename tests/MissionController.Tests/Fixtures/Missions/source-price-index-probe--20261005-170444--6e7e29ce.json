@@ -1,0 +1,67 @@
+{
+  "Schema": 1,
+  "MissionId": "6e7e29ce-6c6e-414e-b5f3-9128ee449963",
+  "RecordedAtUtc": "2026-10-05T17:04:44.7512854Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "source-price-index-probe",
+  "TemplateName": "Public Price Index Source Probe",
+  "TemplateSha256": "sha256:137ea436ee2a7c8194d32ae45df904da2d71c1b6b304810d927f41fd2af59942",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "4f657fb149b89660f49d54b7ca76165cdb8488b9c10d6d335fce6486dd063f33",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "=== SPLAT SOURCE PROBE: PUBLIC PRICE INDEX ===\r\nEndpoint: https://api.bls.gov/publicAPI/v1/timeseries/data/ (v1; no registration)\r\nSeries: CUUR0000SAF1 | Years: 2024-2026\r\n--- GOVERNANCE POSTURE ---\r\nRead-only. No API key is presented, and v1 requires none.\r\nDeclared tool egress: api.bls.gov:443 - audited declaration on Windows, kernel-pinned under a Linux lease.\r\n--- FETCH ---\r\nAPI_STATUS: REQUEST_SUCCEEDED\r\nSERIES_ID: CUUR0000SAF1\r\nOBSERVATIONS_RETURNED: 32\r\nLATEST_PERIOD: August 2026\r\nLATEST_VALUE: 350.418\r\nPRIOR_YEAR_PERIOD: August 2025\r\nPRIOR_YEAR_VALUE: 341.295\r\nTWELVE_MONTH_CHANGE_PCT: 2.67\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_6e7e29ce6c6e414eb5f39128ee449963",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# Data Source Analyst Report\n\n**API Status:** The endpoint returned `REQUEST_SUCCEEDED`, indicating the Bureau of Labor Statistics API answered the probe successfully.\n\n**Series Identification and Latest Measurement:**\nSeries `CUUR0000SAF1` (Urban All Items, Cereals and Bakery Products) reports its latest period as August 2026 with a published value of `350.418`. The prior-year period (August 2025) was `341.295`. The tool computed a twelve-month change of `2.67%` — this is the proportional increase from the August 2025 index level to August 2026, not a recomputed value but the difference as delivered by the API.\n\n**What This Series Measures:**\nThis is a **Consumer Price Index level**, not a dollar amount or household spending figure. A value of `350.418` means that the average price of cereals and bakery products in urban U.S. markets stands at approximately 3.504 times the price level in the reference period (December 1983 = 100). It is an index of price *levels relative to a baseline*, not a bill, budget, or expenditure. If a dashboard slot requires dollars spent on cereals and bakery products by households, this series cannot fill it; the Consumer Expenditure Survey reports actual dollar outlays and is the correct source for that question.\n\n**Provenance for Publication:**\nAny figure taken from this retrieval must be accompanied by: Series ID `CUUR0000SAF1`, Period `August 2026`, Published Value `350.418`, and Retrieval Date of this probe.\n\n```json\n{\n  \"status\": \"Healthy\",\n  \"headline\": \"BLS price index series CUUR0000SAF1 successfully retrieved with current data through August 2026; cereals and bakery prices up 2.67% year-over-year.\",\n  \"findings\": [\n    \"API_STATUS returned REQUEST_SUCCEEDED; 32 observations retrieved across 2024–2026 range.\",\n    \"Latest period August 2026 reports index value 350.418; August 2025 was 341.295; twelve-month change computed as 2.67%.\",\n    \"Series measures price level relative to December 1983 baseline (=100), not dollar expenditure or household spending.\"\n  ]\n}\n```",
+      "LatencyMs": 6686,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.7666666666666666
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "b86743aba93896c7b9413448494635ac6a559692eef38c3e0e9749ebbf009738",
+    "Status": "Healthy",
+    "Headline": "BLS price index series CUUR0000SAF1 successfully retrieved with current data through August 2026; cereals and bakery prices up 2.67% year-over-year.",
+    "Findings": [
+      "✓ API_STATUS returned REQUEST_SUCCEEDED; 32 observations retrieved across 2024–2026 range.",
+      "✓ Latest period August 2026 reports index value 350.418; August 2025 was 341.295; twelve-month change computed as 2.67%.",
+      "✓ Series measures price level relative to December 1983 baseline (=100), not dollar expenditure or household spending.  [UNSUPPORTED - not found in collected telemetry]"
+    ],
+    "RecommendedActions": [],
+    "Grounded": 2,
+    "PartiallyGrounded": 0,
+    "Unsupported": 1,
+    "Unattributed": 0,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

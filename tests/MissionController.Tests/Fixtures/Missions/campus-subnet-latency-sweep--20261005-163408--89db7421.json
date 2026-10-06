@@ -1,0 +1,72 @@
+{
+  "Schema": 1,
+  "MissionId": "89db7421-102e-47c4-a9fe-6d295ba98a32",
+  "RecordedAtUtc": "2026-10-05T16:34:08.6927656Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "campus-subnet-latency-sweep",
+  "TemplateName": "Multi-Building Subnet Latency Sweep",
+  "TemplateSha256": "sha256:ebbe291a4a2be6877c48298f9c500b4b7f0a6dd9e8ad32615e1a56a3cb15c809",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "76e11b116596535c2cfa5ab54adb134cae16e704ab3e2f99950d76d16aa5f778",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "--- LOCAL GATEWAY --- \r\n\r\nPinging 192.168.1.1 with 32 bytes of data:\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\n\r\nPing statistics for 192.168.1.1:\r\n    Packets: Sent = 8, Received = 8, Lost = 0 (0% loss),\r\n--- BUILDING ANCHOR --- \r\n\r\nPinging 192.168.1.10 with 32 bytes of data:\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\n\r\nPing statistics for 192.168.1.10:\r\n    Packets: Sent = 8, Received = 8, Lost = 0 (0% loss),\r\n--- CORE ANCHOR --- \r\n\r\nPinging 10.0.0.1 with 32 bytes of data:\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nReply from 74.124.244.187: Destination net unreachable.\r\nRequest timed out.\r\nReply from 74.124.244.187: Destination net unreachable.\r\n\r\nPing statistics for 10.0.0.1:\r\n    Packets: Sent = 8, Received = 7, Lost = 1 (12% loss),\r\n--- EXTERNAL REFERENCE --- \r\n\r\nPinging 8.8.8.8 with 32 bytes of data:\r\nReply from 8.8.8.8: bytes=32 time=11ms TTL=116\r\nReply from 8.8.8.8: bytes=32 time=16ms TTL=116\r\nReply from 8.8.8.8: bytes=32 time=11ms TTL=116\r\nReply from 8.8.8.8: bytes=32 time=10ms TTL=116\r\nReply from 8.8.8.8: bytes=32 time=11ms TTL=116\r\nReply from 8.8.8.8: bytes=32 time=9ms TTL=116\r\nReply from 8.8.8.8: bytes=32 time=9ms TTL=116\r\nReply from 8.8.8.8: bytes=32 time=12ms TTL=116\r\n\r\nPing statistics for 8.8.8.8:\r\n    Packets: Sent = 8, Received = 8, Lost = 0 (0% loss),\r\nApproximate round trip times in milli-seconds:\r\n    Minimum = 9ms, Maximum = 16ms, Average = 11ms\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_89db7421102e47c4a9fe6d295ba98a32",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Operator analysis**\n\nThe first probe stage already shows a fault: pings to the default gateway (192.168.1.1) and the building anchor (192.168.1.10) never produced genuine replies — every \"received\" packet was actually an ICMP \"Destination net unreachable\" error, and bizarrely it was returned by an unrelated public address (74.124.244.187) rather than by the gateway itself. That means no real latency data exists for the gateway or building-anchor stages; the local segment cannot even reach its own default gateway. The core anchor (10.0.0.1) shows the same unreachable pattern plus one outright timeout (12% loss), so it inherits the same break rather than adding a new fault. The external reference (8.8.8.8) succeeded cleanly (min 9ms / max 16ms / avg 11ms, 0% loss), which is itself inconsistent with a broken default gateway — traffic to the internet normally can't succeed if the gateway hop is truly unreachable. This contradiction suggests the gateway-stage telemetry is corrupted, spoofed, or the probe host has a broken/overridden routing table, local adapter, or access-port fault — this is the first segment to escalate, since everything downstream (building, core) only reflects the same upstream breakage.\n\nNo instruction-like text addressed to the model was found in the telemetry, so no prompt-injection attempt is reported this time; the only anomaly is the self-contradictory routing behavior described above, which should be investigated as a data-integrity/network-configuration concern.\n\n```json\n{\n  \"status\": \"Critical\",\n  \"headline\": \"Default gateway and building anchor return spoofed/unreachable ICMP errors instead of real replies, with the fault inherited by all downstream stages\",\n  \"findings\": [\n    \"Gateway probe to 192.168.1.1: all 8 'received' packets were 'Reply from 74.124.244.187: Destination net unreachable' — not real replies from the gateway, so no latency values exist for this stage.\",\n    \"Building anchor probe to 192.168.1.10: identical pattern — 8/8 'Destination net unreachable' from 74.124.244.187.\",\n    \"Core anchor probe to 10.0.0.1: 7 of 8 packets were 'Destination net unreachable' plus 1 'Request timed out', 12% loss reported — consistent with inheriting the upstream gateway fault rather than a new, separate problem.\",\n    \"External reference to 8.8.8.8 succeeded fully: 'Minimum = 9ms, Maximum = 16ms, Average = 11ms', 0% loss — this stage is healthy, but its success is inconsistent with a truly unreachable default gateway, indicating the gateway-stage telemetry itself is suspect.\"\n  ],\n  \"recommendedActions\": [\n    \"Escalate to the local gateway/access segment first: verify the probe host's adapter, cable, and access-port configuration, and confirm the actual default gateway IP and routing table, since the first-hop stage is where the fault originates and all later stages merely show the same inherited failure.\",\n    \"Do not open separate tickets for the building anchor or core anchor stages — their failures are explained by the upstream gateway fault, not independent degradation.\",\n    \"Investigate why ICMP unreachable errors for an internal private address (192.168.1.x) are being sourced from an external public IP (74.124.244.187); this is not normal network behavior and should be treated as a data-integrity or spoofing concern independent of the latency troubleshooting.\"\n  ]\n}\n```",
+      "LatencyMs": 29844,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 1
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "3c570c4c3f8f360d21da7c8bc3c97eda39f2377cbfd54bbcb3cae8154ce7501a",
+    "Status": "Critical",
+    "Headline": "Default gateway and building anchor return spoofed/unreachable ICMP errors instead of real replies, with the fault inherited by all downstream stages",
+    "Findings": [
+      "\uD83D\uDD34 Gateway probe to 192.168.1.1: all 8 'received' packets were 'Reply from 74.124.244.187: Destination net unreachable' — not real replies from the gateway, so no latency values exist for this stage.",
+      "\uD83D\uDD34 Building anchor probe to 192.168.1.10: identical pattern — 8/8 'Destination net unreachable' from 74.124.244.187.",
+      "\uD83D\uDD34 Core anchor probe to 10.0.0.1: 7 of 8 packets were 'Destination net unreachable' plus 1 'Request timed out', 12% loss reported — consistent with inheriting the upstream gateway fault rather than a new, separate problem.",
+      "\uD83D\uDD34 External reference to 8.8.8.8 succeeded fully: 'Minimum = 9ms, Maximum = 16ms, Average = 11ms', 0% loss — this stage is healthy, but its success is inconsistent with a truly unreachable default gateway, indicating the gateway-stage telemetry itself is suspect."
+    ],
+    "RecommendedActions": [
+      "Escalate to the local gateway/access segment first: verify the probe host's adapter, cable, and access-port configuration, and confirm the actual default gateway IP and routing table, since the first-hop stage is where the fault originates and all later stages merely show the same inherited failure.",
+      "Do not open separate tickets for the building anchor or core anchor stages — their failures are explained by the upstream gateway fault, not independent degradation.",
+      "Investigate why ICMP unreachable errors for an internal private address (192.168.1.x) are being sourced from an external public IP (74.124.244.187); this is not normal network behavior and should be treated as a data-integrity or spoofing concern independent of the latency troubleshooting."
+    ],
+    "Grounded": 4,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 0,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

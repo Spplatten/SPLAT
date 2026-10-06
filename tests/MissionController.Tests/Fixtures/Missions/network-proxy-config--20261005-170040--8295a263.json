@@ -1,0 +1,76 @@
+{
+  "Schema": 1,
+  "MissionId": "8295a263-eb64-49cd-9a02-87c53d3f989e",
+  "RecordedAtUtc": "2026-10-05T17:00:40.8687492Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "network-proxy-config",
+  "TemplateName": "Corporate Proxy, PAC & TLS Inspection Chain",
+  "TemplateSha256": "sha256:528ce6e118760d7d2a08caf224217acb7ed5ff7787d98f6c03dfebe4024945f7",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "00561dfeede5efa905c1025be53f05efb4a7347e375c2d82ae15a7f0fca240ea",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "\r\nCurrent WinHTTP proxy settings:\r\n\r\n    Direct access (no proxy server).\r\n\r\n--- WININET USER PROXY --- \r\n\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\r\n    CertificateRevocation    REG_DWORD    0x1\r\n    DisableCachingOfSSLPages    REG_DWORD    0x0\r\n    IE5_UA_Backup_Flag    REG_SZ    5.0\r\n    PrivacyAdvanced    REG_DWORD    0x1\r\n    SecureProtocols    REG_DWORD    0x2800\r\n    User Agent    REG_SZ    Mozilla/4.0 (compatible; MSIE 8.0; Win32)\r\n    ZonesSecurityUpgrade    REG_BINARY    F04474C385EDDC01\r\n    WarnonZoneCrossing    REG_DWORD    0x0\r\n    EnableNegotiate    REG_DWORD    0x1\r\n    ProxyEnable    REG_DWORD    0x0\r\n    MigrateProxy    REG_DWORD    0x1\r\n    LockDatabase    REG_QWORD    0x1dced907c779e11\r\n\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\5.0\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Cache\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Connections\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Http Filters\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\P3P\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Passport\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\TemplatePolicies\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Wpad\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\r\n--- MACHINE PROXY POLICY --- \r\n\r\nHKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\r\n    CallLegacyWCMPolicies    REG_DWORD    0x0\r\n\r\nHKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Cache\r\n--- WPAD SERVICE --- \r\n\r\nSERVICE_NAME: WinHttpAutoProxySvc \r\n        TYPE               : 10  WIN32_OWN_PROCESS  \r\n        STATE              : 4  RUNNING \r\n                                (NOT_STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)\r\n        WIN32_EXIT_CODE    : 0  (0x0)\r\n        SERVICE_EXIT_CODE  : 0  (0x0)\r\n        CHECKPOINT         : 0x0\r\n        WAIT_HINT          : 0x0\r\n--- WPAD DNS RESOLUTION --- \r\nServer:  Unit\r\nAddress:  192.168.254.254\r\n\r\n",
+    "Stderr": "*** Unit can't find wpad.corp.contoso.com: Non-existent domain\r\r\n",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_8295a263eb6449cd9a0287c53d3f989e",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Operator analysis**\n\n**STORY:** The machine-context WinHTTP stack reports \"Direct access (no proxy server)\", and the per-user WinINET stack shows `ProxyEnable REG_DWORD 0x0` — so today both stacks are configured identically (no proxy), which means there is *no* current explicit/PAC mismatch between the browser and a WinHTTP-based agent. The decisive items are instead: (1) the `WinHttpAutoProxySvc` service is `RUNNING`, meaning any application that calls the WinHTTP auto-detect APIs at runtime can still attempt WPAD discovery regardless of what `netsh winhttp show proxy` reports as the static fallback; (2) the DNS lookup for `wpad.corp.contoso.com` came back \"Non-existent domain\"; and (3) no `ProxyOverride`, `AutoConfigURL`, or `ProxyServer` values were captured anywhere in the dump. Together these mean WPAD discovery is primed to run, corporate WPAD resolution is broken on whatever network this host is currently attached to, and no bypass list or PAC exists to show intent either way.\n\n**KNOWN-GOOD:** `WinHttpAutoProxySvc` running is normal — it's the standard Windows WPAD/auto-proxy discovery service and ships enabled by default, not evidence of tampering on its own. `SecureProtocols 0x2800`, `CertificateRevocation 0x1`, `EnableNegotiate 0x1` are standard WinINET defaults, expected on any Windows host. The lookalike that would **not** be waved through: a `ProxyServer` value pointing at a local/unexpected IP, or an `AutoConfigURL` pointing off-domain — neither is present here, but their absence must be *verified*, not assumed, since this capture didn't expand those specific value names.\n\n**HYPOTHESES:**\n1. *WPAD DNS failure for `wpad.corp.contoso.com`* — Benign: host is off the corporate network segment (VPN split-tunnel, guest Wi-Fi) where that zone simply isn't reachable. Hostile: host is on an untrusted segment where failure of suffix-based WPAD resolution causes Windows to fall back to NetBIOS/LLMNR broadcast for \"WPAD\", which a rogue responder can answer to relay NTLM credentials (classic WPAD-spoofing, MITRE T1557.001). Settling evidence: capture of LLMNR/NBT-NS \"WPAD\" broadcast traffic on this segment, or confirmation via `ipconfig /all` of which network the host is actually on.\n2. *Both proxy stacks fully direct (no proxy anywhere)* — Benign: this host/segment is intentionally exempt from the inspection proxy by policy. Hostile: proxy was disabled (locally or by malware) specifically to evade egress inspection, letting traffic — including to cloud APIs — leave uninspected. Settling evidence: the org's GPO/Intune baseline for expected `ProxyEnable`/WinHTTP proxy state on this host class, plus registry key last-write/audit timestamp.\n3. *No `ProxyOverride`/PAC/`AutoConfigURL` values appeared in the dump* — most likely simply consistent with `ProxyEnable=0x0` (nothing configured because proxy is off). Cannot be hostile or benign conclusively — it's an information gap, not a finding.\n\n**PLAN:** 1) Cheap, non-invasive check first — confirm the host's actual network context (`ipconfig /all`, corporate DNS reachability) to determine whether the WPAD DNS failure is explained by being off-corp-network (refutes the worst case immediately). 2) If on a segment where WPAD fallback to broadcast is possible, check/disable LLMNR and NetBIOS-NS per hardening baseline (containment for the credential-relay risk). 3) Compare current `ProxyEnable=0x0` / WinHTTP direct-access state against the organization's expected baseline for this host to determine if this is a misconfiguration or deliberate exemption — this is very likely the actual root cause of \"works in browser, fails in agent\" tickets once a proxy *is* reintroduced inconsistently between the two stacks. 4) Cleanup: if a proxy is required, set it explicitly and identically for both stacks (`netsh winhttp set proxy` plus GPO/Intune WinINET proxy policy) with an explicit `ProxyOverride` list, and confirm deliberately whether the Vertex AI endpoint (`*.googleapis.com`) should traverse or bypass the inspection proxy rather than defaulting to bypass by omission.\n\nNo text inside the supplied telemetry addressed the analyst, claimed operator/SPLAT authority, or requested any action — I found no prompt-injection attempt in this capture.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"No proxy is enforced on either stack, and corporate WPAD resolution is failing — a precondition for WPAD-spoofing credential relay, with no bypass/PAC policy visible to confirm intended routing for destinations like Vertex AI\",\n  \"findings\": [\n    \"WinHTTP (machine context, used by services/agents) reports: 'Direct access (no proxy server).'\",\n    \"WinINET (per-user, used by the browser) shows 'ProxyEnable REG_DWORD 0x0', meaning the user proxy is also disabled — both stacks currently match on 'no proxy', so no explicit/PAC mismatch exists today between browser and agent\",\n    \"'SERVICE_NAME: WinHttpAutoProxySvc ... STATE : 4 RUNNING' confirms the WinHTTP auto-proxy/WPAD discovery service is active and can be invoked at runtime by any application independent of the static netsh fallback\",\n    \"WPAD DNS resolution failed: '*** Unit can't find wpad.corp.contoso.com: Non-existent domain', indicating the corporate WPAD record is unreachable from this host's current network position\",\n    \"No 'ProxyOverride', 'AutoConfigURL', or 'ProxyServer' registry values appear anywhere in the captured WinINET or machine-policy output, so the bypass list and PAC configuration cannot be confirmed from this evidence\",\n    \"HKLM Internet Settings policy hive contains only 'CallLegacyWCMPolicies REG_DWORD 0x0' — no enterprise proxy policy (explicit server, PAC URL, or WPAD enforcement) is present at machine policy level\"\n  ],\n  \"recommendedActions\": [\n    \"Run `ipconfig /all` and test corporate DNS reachability to determine whether the host is currently off the corporate network segment where wpad.corp.contoso.com would normally resolve (cheapest check, refutes/confirms the network-location hypothesis first)\",\n    \"Check whether LLMNR and NetBIOS-NS name resolution are disabled on this host/segment (GPO 'Turn off multicast name resolution') — if enabled, this is the containment priority given the failed WPAD DNS lookup, mapping to MITRE ATT&CK T1557.001 (LLMNR/NBT-NS Poisoning and Relay)\",\n    \"Compare current ProxyEnable=0x0 / WinHTTP direct-access state against the documented baseline for this host class (GPO/Intune proxy policy) to determine if disabling proxy was intentional or a deviation — knowledge: CIS Benchmark control for 'Configure use of proxy server for WinHTTP/WinINET' expects consistent enforcement across both stacks\",\n    \"Pull the registry audit/change history for HKCU...Internet Settings\\\\ProxyEnable to establish when and by what process it was last set to 0x0\",\n    \"Once network context is confirmed, explicitly configure and align both proxy stacks (`netsh winhttp set proxy` for machine context, GPO/Intune for per-user WinINET) including an explicit ProxyOverride bypass list, and verify whether the Vertex AI endpoint (*.googleapis.com) is intended to traverse or bypass the inspection proxy rather than leaving it to default to direct access by omission\"\n  ]\n}\n```",
+      "LatencyMs": 71244,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9749999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "43f85f7f47e5d9d19577fac311f943e70dda0ff4b748a6faa85e2bfa9802498d",
+    "Status": "Warning",
+    "Headline": "No proxy is enforced on either stack, and corporate WPAD resolution is failing — a precondition for WPAD-spoofing credential relay, with no bypass/PAC policy visible to confirm intended routing for destinations like Vertex AI",
+    "Findings": [
+      "⚠ WinHTTP (machine context, used by services/agents) reports: 'Direct access (no proxy server).'",
+      "⚠ WinINET (per-user, used by the browser) shows 'ProxyEnable REG_DWORD 0x0', meaning the user proxy is also disabled — both stacks currently match on 'no proxy', so no explicit/PAC mismatch exists today between browser and agent",
+      "⚠ 'SERVICE_NAME: WinHttpAutoProxySvc ... STATE : 4 RUNNING' confirms the WinHTTP auto-proxy/WPAD discovery service is active and can be invoked at runtime by any application independent of the static netsh fallback",
+      "⚠ WPAD DNS resolution failed: '* Unit can't find wpad.corp.contoso.com: Non-existent domain', indicating the corporate WPAD record is unreachable from this host's current network position",
+      "⚠ No 'ProxyOverride', 'AutoConfigURL', or 'ProxyServer' registry values appear anywhere in the captured WinINET or machine-policy output, so the bypass list and PAC configuration cannot be confirmed from this evidence",
+      "⚠ HKLM Internet Settings policy hive contains only 'CallLegacyWCMPolicies REG_DWORD 0x0' — no enterprise proxy policy (explicit server, PAC URL, or WPAD enforcement) is present at machine policy level"
+    ],
+    "RecommendedActions": [
+      "Run `ipconfig /all` and test corporate DNS reachability to determine whether the host is currently off the corporate network segment where wpad.corp.contoso.com would normally resolve (cheapest check, refutes/confirms the network-location hypothesis first)",
+      "Check whether LLMNR and NetBIOS-NS name resolution are disabled on this host/segment (GPO 'Turn off multicast name resolution') — if enabled, this is the containment priority given the failed WPAD DNS lookup, mapping to MITRE ATT&CK T1557.001 (LLMNR/NBT-NS Poisoning and Relay)",
+      "Compare current ProxyEnable=0x0 / WinHTTP direct-access state against the documented baseline for this host class (GPO/Intune proxy policy) to determine if disabling proxy was intentional or a deviation — knowledge: CIS Benchmark control for 'Configure use of proxy server for WinHTTP/WinINET' expects consistent enforcement across both stacks",
+      "Pull the registry audit/change history for HKCU...Internet Settings\\ProxyEnable to establish when and by what process it was last set to 0x0",
+      "Once network context is confirmed, explicitly configure and align both proxy stacks (`netsh winhttp set proxy` for machine context, GPO/Intune for per-user WinINET) including an explicit ProxyOverride bypass list, and verify whether the Vertex AI endpoint (*.googleapis.com) is intended to traverse or bypass the inspection proxy rather than leaving it to default to direct access by omission"
+    ],
+    "Grounded": 0,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 6,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

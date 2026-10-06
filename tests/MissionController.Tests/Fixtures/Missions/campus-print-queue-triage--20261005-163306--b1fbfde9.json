@@ -1,0 +1,73 @@
+{
+  "Schema": 1,
+  "MissionId": "b1fbfde9-debf-4116-b443-37dab54ffb07",
+  "RecordedAtUtc": "2026-10-05T16:33:06.1285582Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "campus-print-queue-triage",
+  "TemplateName": "Print Queue & Spooler Triage",
+  "TemplateSha256": "sha256:f32d90bb704acc9ad201ecabf88b39af8fa82de8565a7937928352877411268a",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "e04c5919efc02091b4db14804a2bed29f9438a34f1f916234aa4e9e18975d954",
+  "Sensor": {
+    "ExitCode": 1,
+    "TimedOut": false,
+    "Stdout": "--- INSTALLED PRINTERS ---\r\n\r\nName                              DriverName                           PortName                                        \r\n----                              ----------                           --------                                        \r\nAdobe PDF                         Adobe PDF Converter                  Documents\\*.pdf                                 \r\nHP8E128D (HP DeskJet 4100 series) HP DJ 4100 series PCL-3              WSD-55a133b4-32ff-47bf-81e2-ffdae6db21d5        \r\nMicrosoft Print to PDF            Microsoft Print To PDF               PORTPROMPT:                                     \r\nOneNote (Desktop) - Protected     Microsoft Virtual Print Class Driver Microsoft.Office.OneNoteVirtualPrinter_8wekyb...\r\nOneNote (Desktop)                 Send to Microsoft OneNote 16 Driver  nul:                                            \r\n\r\n\r\n--- PORT BINDINGS ---\r\n\r\nName                                                                                                                   \r\n----                                                                                                                   \r\nCOM1:                                                                                                                  \r\nCOM2:                                                                                                                  \r\nCOM3:                                                                                                                  \r\nDesktop\\*.pdf                                                                                                          \r\nCOM4:                                                                                                                  \r\nDocuments\\*.pdf                                                                                                        \r\nMicrosoft.Office.OneNoteVirtualPrinter_8wekyb3d8bbwe_onenote-psa:print-to-onenote_S-1-5-21-2721853200-1390957683-193...\r\nWSD-55a133b4-32ff-47bf-81e2-ffdae6db21d5                                                                               \r\nFILE:                                                                                                                  \r\nLPT1:                                                                                                                  \r\nLPT2:                                                                                                                  \r\nLPT3:                                                                                                                  \r\nnul:                                                                                                                   \r\nPORTPROMPT:                                                                                                            \r\n\r\n\r\n--- QUEUED JOBS ---\r\n--- SPOOLER SERVICE ---\r\n\r\n\r\nName      : Spooler\r\nStatus    : Running\r\nStartType : Automatic\r\n\r\n\r\n\r\n--- POINT AND PRINT RESTRICTIONS ---\r\n--- SPOOLER RPC HARDENING ---\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_b1fbfde9debf4116b44337dab54ffb07",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "## Analysis for Operator\n\nThis workstation has no active print jobs and the spooler service is running normally. All installed printers are local or virtual (PDF, OneNote); none are connected to a network print server. The printer configuration itself is healthy with no blocked queues or device faults to resolve. However, two security gaps are present: Point and Print Restrictions are not configured, and Spooler RPC Hardening settings are absent from the output—both of which should be checked on a shared or domain-joined machine to close the PrintNightmare driver-install path.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"No active queue issues, but Point and Print Restrictions and Spooler RPC hardening configuration are not visible\",\n  \"findings\": [\n    \"Spooler service is Running with StartType Automatic\",\n    \"No queued jobs present\",\n    \"All printers installed are local or virtual (Adobe PDF, Microsoft Print to PDF, OneNote, HP DeskJet via WSD): no network print server bindings detected\",\n    \"Point and Print Restrictions output is blank—policy state unknown\",\n    \"Spooler RPC Hardening output is blank—hardening configuration unknown\"\n  ],\n  \"recommendedActions\": [\n    \"Verify Point and Print Restrictions policy is configured (esp. on domain or shared machines) to restrict driver installation from untrusted sources\",\n    \"Verify Spooler RPC hardening is enabled to mitigate PrintNightmare (CVE-2021-1675) driver-installation vulnerability\",\n    \"If this is a shared campus machine, confirm RestrictDriverInstallationToAdministrators is set to 1 via Group Policy or Registry\"\n  ]\n}\n```",
+      "LatencyMs": 4713,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9749999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "9ecd5ab56bcce2faf3fb0014bdf0555dfed5bc493fdda791a59101d290c21174",
+    "Status": "Warning",
+    "Headline": "No active queue issues, but Point and Print Restrictions and Spooler RPC hardening configuration are not visible",
+    "Findings": [
+      "⚠ Spooler service is Running with StartType Automatic",
+      "⚠ No queued jobs present",
+      "⚠ All printers installed are local or virtual (Adobe PDF, Microsoft Print to PDF, OneNote, HP DeskJet via WSD): no network print server bindings detected",
+      "⚠ Point and Print Restrictions output is blank—policy state unknown",
+      "⚠ Spooler RPC Hardening output is blank—hardening configuration unknown"
+    ],
+    "RecommendedActions": [
+      "Verify Point and Print Restrictions policy is configured (esp. on domain or shared machines) to restrict driver installation from untrusted sources",
+      "Verify Spooler RPC hardening is enabled to mitigate PrintNightmare (CVE-2021-1675) driver-installation vulnerability",
+      "If this is a shared campus machine, confirm RestrictDriverInstallationToAdministrators is set to 1 via Group Policy or Registry"
+    ],
+    "Grounded": 0,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 5,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

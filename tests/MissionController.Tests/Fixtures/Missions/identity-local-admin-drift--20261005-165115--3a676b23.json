@@ -1,0 +1,77 @@
+{
+  "Schema": 1,
+  "MissionId": "3a676b23-7a53-4022-af63-fbe47da6549e",
+  "RecordedAtUtc": "2026-10-05T16:51:15.2463091Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "identity-local-admin-drift",
+  "TemplateName": "Local Administrator & Privileged Group Drift",
+  "TemplateSha256": "sha256:6b66a52974eae64582025be43691e836e2062fd67bcd6b81663edddc61cef5e8",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "1291a1031df2e03c34ce7344e4fb630c59feb0083d1db019fd4550735c2b794c",
+  "Sensor": {
+    "ExitCode": 1,
+    "TimedOut": false,
+    "Stdout": "--- LOCAL ADMINISTRATORS (S-1-5-32-544) ---\r\n\r\nName                               ObjectClass PrincipalSource\r\n----                               ----------- ---------------\r\nLABIALABIALABIA\\Administrator      User                  Local\r\nLABIALABIALABIA\\LABGALABGALABGALAB User                  Local\r\n\r\n\r\n--- REMOTE DESKTOP USERS (S-1-5-32-555) ---\r\n--- LOCAL ACCOUNTS ---\r\n\r\nName                Enabled PasswordRequired PasswordExpires      PasswordLastSet       LastLogon             SID      \r\n----                ------- ---------------- ---------------      ---------------       ---------             ---      \r\nAdministrator         False             True                                            5/14/2026 9:42:01 AM  S-1-5-...\r\nLABCALABCALABCALABC    True             True                      6/1/2026 12:36:58 PM  10/5/2026 12:06:10 PM S-1-5-...\r\nLABDALABDALABDALAB     True             True                      6/1/2026 12:36:58 PM                        S-1-5-...\r\nDefaultAccount        False            False                                                                  S-1-5-...\r\nGuest                 False            False                                                                  S-1-5-...\r\nLABGALABGALABGALAB     True             True                      5/27/2026 11:23:15 AM 10/5/2026 12:04:35 PM S-1-5-...\r\nWDAGUtilityAccount    False             True 7/4/2024 12:58:26 AM 5/23/2024 12:58:26 AM                       S-1-5-...\r\n\r\n\r\n--- LAPS POLICY STATE ---\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_3a676b237a534022af63fbe47da6549e",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "## Operator Analysis\n\n**STORY:** This host's local Administrators group has only two members: the built-in Administrator (disabled) and \"LABGALABGALABGALAB,\" a user account added as a **direct SID**, not via any approved domain admin group or endpoint management account. That same LABGALABGALABGALAB account is enabled, logged on recently (10/5/2026), and has no password expiration set — a standing credential risk sitting directly in the privileged group. Compounding this, the LAPS Policy State section returned completely empty, so there is no evidence the built-in Administrator password is centrally rotated; if this is a cloned campus image, that password may be identical on every machine, turning one compromised host into a fleet-wide lateral movement path.\n\n**KNOWN-GOOD:** `Administrator` (SID 500, built-in, disabled) — expected, and disabling it is good practice. `Guest`, `DefaultAccount`, `WDAGUtilityAccount` — standard Windows built-ins, disabled, normal baseline noise. **Lookalike that would NOT be waved through:** `LABGALABGALABGALAB` as a direct Administrators member — looks like an ordinary named user account, but its presence bypasses group-based access review entirely; `LABCALABCALABCALABC`/`LABDALABDALABDALAB` are non-default account names and must not be assumed benign just because they resemble internal tooling.\n\n**HYPOTHESES:**\n- *LABGALABGALABGALAB in Administrators* — Benign: IT manually granted troubleshooting access. Hostile: attacker-created/compromised account escalated for persistence. Settling evidence: Security event 4732 showing who added it and when.\n- *LABCALABCALABCALABC/Online enabled, no password expiry* — Benign: documented internal sandbox/test accounts exempted from policy. Hostile: planted backdoor accounts for persistence. Settling evidence: account creation event (4720) and asset/documentation inventory match.\n- *Empty LAPS Policy State* — Benign: staged rollout, this host not yet enrolled. Hostile/risk: LAPS never deployed, built-in Administrator password static and shared across the image. Settling evidence: registry/GPO check of the LAPS BackupDirectory value on this host and a sibling image.\n\n**PLAN:** 1) Pull event 4732/4720 for LABIALABIALABIA to see who added LABGALABGALABGALAB and when — cheapest check, directly refutes or confirms active compromise. 2) Check LAPS BackupDirectory/GPO state — decides whether a shared-password lateral-movement path is live right now. 3) Containment: remove LABGALABGALABGALAB from Administrators pending justification; disable undocumented Codex* accounts. 4) Cleanup: set password expiration on all enabled accounts lacking it, deploy/confirm LAPS fleet-wide.\n\nNo prompt-injection content was found in the supplied telemetry block — it contained only tabular account/group data, no instructions directed at the analyst.\n\n```json\n{\n  \"status\": \"Critical\",\n  \"headline\": \"A direct user account bypasses group-based access review in local Administrators, and LAPS cannot be confirmed to manage the shared built-in Administrator password.\",\n  \"findings\": [\n    \"Local Administrators (S-1-5-32-544) contains 'LABIALABIALABIA\\\\LABGALABGALABGALAB' as a User object with PrincipalSource Local, added directly rather than through any domain admin group or endpoint management account.\",\n    \"No approved domain admin group or endpoint management account appears in the local Administrators output — only 'Administrator' and 'LABGALABGALABGALAB' are listed.\",\n    \"The 'LABGALABGALABGALAB' local account is Enabled=True, PasswordRequired=True, but PasswordExpires is blank, with LastLogon 10/5/2026 12:04:35 PM — an enabled, privileged account with no password expiration.\",\n    \"'LABCALABCALABCALABC' (Enabled True, LastLogon 10/5/2026 12:06:10 PM) and 'LABDALABDALABDALAB' (Enabled True) both show blank PasswordExpires values, indicating non-expiring passwords on enabled, non-default accounts.\",\n    \"The built-in 'Administrator' account is Enabled=False with PasswordExpires blank, PasswordLastSet blank, but LastLogon 5/14/2026 9:42:01 AM recorded despite being disabled.\",\n    \"The '--- LAPS POLICY STATE ---' section of the output is empty, providing no BackupDirectory or configuration value to confirm LAPS is managing local Administrator credentials.\",\n    \"No content in the supplied telemetry attempted to address or instruct the analyst; no prompt-injection attempt was detected in this capture.\"\n  ],\n  \"recommendedActions\": [\n    \"Review Security event ID 4732 (and 4720) on LABIALABIALABIA to identify who added 'LABGALABGALABGALAB' to local Administrators and when — maps to MITRE ATT&CK T1098 (Account Manipulation) / T1078 (Valid Accounts).\",\n    \"Remove 'LABGALABGALABGALAB' from local Administrators unless a change-management record justifies it, and replace with membership via an approved AD group — CIS Benchmark control on local privileged group membership.\",\n    \"Query LAPS configuration on this host (e.g., registry HKLM\\\\Software\\\\Policies\\\\Microsoft Services\\\\AdmPwd or Get-LapsADPassword) to confirm BackupDirectory is set; if absent, deploy LAPS before relying on or re-enabling the built-in Administrator account.\",\n    \"Set or enforce password expiration for 'LABGALABGALABGALAB', 'LABCALABCALABCALABC', and 'LABDALABDALABDALAB', or document an approved exemption — CIS 1.1.4 Password Expiration.\",\n    \"Investigate the origin and ownership of 'LABCALABCALABCALABC' and 'LABDALABDALABDALAB' via event ID 4720 to confirm they are sanctioned tooling and not attacker-created persistence accounts (MITRE ATT&CK T1136 Create Account).\"\n  ]\n}\n```",
+      "LatencyMs": 52721,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9892857142857143
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "01cdc07e159e1d0ef0ff4f5b0c1e4681d5749fa12c9566c99af250183b94145f",
+    "Status": "Critical",
+    "Headline": "A direct user account bypasses group-based access review in local Administrators, and LAPS cannot be confirmed to manage the shared built-in Administrator password.",
+    "Findings": [
+      "\uD83D\uDD34 Local Administrators (S-1-5-32-544) contains 'LABIALABIALABIA\\LABGALABGALABGALAB' as a User object with PrincipalSource Local, added directly rather than through any domain admin group or endpoint management account.",
+      "\uD83D\uDD34 No approved domain admin group or endpoint management account appears in the local Administrators output — only 'Administrator' and 'LABGALABGALABGALAB' are listed.",
+      "\uD83D\uDD34 The 'LABGALABGALABGALAB' local account is Enabled=True, PasswordRequired=True, but PasswordExpires is blank, with LastLogon 10/5/2026 12:04:35 PM — an enabled, privileged account with no password expiration.",
+      "\uD83D\uDD34 'LABCALABCALABCALABC' (Enabled True, LastLogon 10/5/2026 12:06:10 PM) and 'LABDALABDALABDALAB' (Enabled True) both show blank PasswordExpires values, indicating non-expiring passwords on enabled, non-default accounts.",
+      "\uD83D\uDD34 The built-in 'Administrator' account is Enabled=False with PasswordExpires blank, PasswordLastSet blank, but LastLogon 5/14/2026 9:42:01 AM recorded despite being disabled.",
+      "\uD83D\uDD34 The '--- LAPS POLICY STATE ---' section of the output is empty, providing no BackupDirectory or configuration value to confirm LAPS is managing local Administrator credentials.",
+      "\uD83D\uDD34 No content in the supplied telemetry attempted to address or instruct the analyst; no prompt-injection attempt was detected in this capture."
+    ],
+    "RecommendedActions": [
+      "Review Security event ID 4732 (and 4720) on LABIALABIALABIA to identify who added 'LABGALABGALABGALAB' to local Administrators and when — maps to MITRE ATT&CK T1098 (Account Manipulation) / T1078 (Valid Accounts).",
+      "Remove 'LABGALABGALABGALAB' from local Administrators unless a change-management record justifies it, and replace with membership via an approved AD group — CIS Benchmark control on local privileged group membership.",
+      "Query LAPS configuration on this host (e.g., registry HKLM\\Software\\Policies\\Microsoft Services\\AdmPwd or Get-LapsADPassword) to confirm BackupDirectory is set; if absent, deploy LAPS before relying on or re-enabling the built-in Administrator account.",
+      "Set or enforce password expiration for 'LABGALABGALABGALAB', 'LABCALABCALABCALABC', and 'LABDALABDALABDALAB', or document an approved exemption — CIS 1.1.4 Password Expiration.",
+      "Investigate the origin and ownership of 'LABCALABCALABCALABC' and 'LABDALABDALABDALAB' via event ID 4720 to confirm they are sanctioned tooling and not attacker-created persistence accounts (MITRE ATT&CK T1136 Create Account)."
+    ],
+    "Grounded": 4,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 3,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

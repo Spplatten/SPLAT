@@ -1,0 +1,75 @@
+{
+  "Schema": 1,
+  "MissionId": "818f84a4-e81d-4cac-ac08-9752da5b5229",
+  "RecordedAtUtc": "2026-10-05T17:06:47.8612779Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "sysops-boot-performance",
+  "TemplateName": "Boot & Logon Performance Degradation",
+  "TemplateSha256": "sha256:5732e83a7317dade8c0bd5768219c31a1d47d8e3a732ef66c461fdf044dd48c6",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "5baa316437ba276aaf05acd2d5e6493a9bde76e7e15aab4c423b19da7995e6dc",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "--- BOOT PERFORMANCE EVENTS ---\r\n--- LAST BOOT / UPTIME ---\r\n\r\n\r\nLastBootUpTime : 9/22/2026 5:40:26 PM\r\nLocalDateTime  : 10/5/2026 1:06:06 PM\r\n\r\n\r\n\r\n--- STARTUP COMMANDS ---\r\n\r\nName                                                     Command                                                       \r\n----                                                     -------                                                       \r\nSend to OneNote                                          Send to OneNote.lnk                                           \r\nOneDrive                                                 \"C:\\Program Files\\Microsoft OneDrive\\OneDrive.exe\" /background\r\nSmartConnect                                             \"C:\\Program Files\\Lenovo\\Ready For Assistant\\SmartConnect.e...\r\nCanvaAutoLaunchAvailabilityCheckAgent                    \"C:\\Users\\LABKA\\AppData\\Local\\Programs\\Canva\\Canva.exe\" --s...\r\nFigma Agent                                              \"C:\\Users\\LABKA\\AppData\\Local\\FigmaAgent\\figma_agent.exe\"     \r\nAdobe Acrobat Synchronizer                               \"C:\\Program Files\\Adobe\\Acrobat DC\\Acrobat\\AdobeCollabSync....\r\nDocker Desktop                                           C:\\Users\\LABKA\\AppData\\Local\\Programs\\DockerDesktop\\Docker ...\r\nMicrosoftEdgeAutoLaunch_238C804DAE92B300D49BE94626632D5F \"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.e...\r\nSecurityHealth                                           %windir%\\system32\\SecurityHealthSystray.exe                   \r\nRtkAudUService                                           \"C:\\Windows\\System32\\DriverStore\\FileRepository\\realtekserv...\r\nLogitech Download Assistant                              C:\\Windows\\system32\\rundll32.exe C:\\Windows\\System32\\LogiLD...\r\nLogi Download Assistant                                  \"C:\\Program Files\\LogiDownloadAssistant\\bin\\logi_download_a...\r\n\r\n\r\n--- FAST STARTUP ---\r\n\r\n\r\nHiberbootEnabled : 1\r\n\r\n\r\n\r\n",
+    "Stderr": "Get-WinEvent : Attempted to perform an unauthorized operation.\r\nAt line:1 char:49\r\n+ ... VENTS ---'; Get-WinEvent -LogName Microsoft-Windows-Diagnostics-Perfo ...\r\n+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : NotSpecified: (:) [Get-WinEvent], UnauthorizedAccessException\r\n    + FullyQualifiedErrorId : System.UnauthorizedAccessException,Microsoft.PowerShell.Commands.GetWinEventCommand\r\n \r\n",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_818f84a4e81d4cacac089752da5b5229",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**STORY:** This machine shows no true restart in roughly 13 days by clock math (LastBootUpTime 9/22/2026 5:40:26 PM vs LocalDateTime 10/5/2026 1:06:06 PM), and `HiberbootEnabled : 1` confirms Fast Startup is active — meaning that \"boot\" timestamp likely reflects a hybrid resume from hibernation, not a cold boot, so the system may not have undergone a full kernel/driver reload or applied pending reboot-required patches in that window. The Diagnostics-Performance event channel returned an `UnauthorizedAccessException` rather than any events, so boot-duration (Event 100) and slow-component attribution (101 app / 102 driver / 109 service) cannot be read at all — this is a data-access failure, not evidence of a fast or slow boot. The startup command list shows a typical heavy lab/creative-workstation load (OneDrive, Figma Agent, Canva, Docker Desktop, Adobe sync, Logitech tools, Edge auto-launch) but without readable event data there is no way to rank which of these actually drains logon seconds.\n\n**KNOWN-GOOD:** `SecurityHealthSystray.exe` from `%windir%\\system32` — stock Windows Security component, expected on every machine. `RtkAudUService` from `C:\\Windows\\System32\\DriverStore\\FileRepository\\...` — standard Realtek audio driver service path. `OneDrive.exe` and the Edge auto-launch entry from `Program Files` — Microsoft-signed, standard. Duplicate \"Logitech Download Assistant\" / \"Logi Download Assistant\" entries are benign but redundant — likely install-reinstall residue, not malicious, since both resolve to legitimate Logitech paths. The one item worth a second look rather than an automatic wave-through: **SmartConnect** (Lenovo path) — verify the signer, since Lenovo utility names are occasionally impersonated.\n\n**HYPOTHESES:**\n- *Stale LastBootUpTime / Fast Startup*: Benign — laptop configured for quick resume, normal for a lab machine. Hostile — used to disguise a system that hasn't fully rebooted in weeks, leaving kernel-mode patches unapplied. Settling evidence: `systeminfo` \"System Boot Time\" cross-checked with Windows Update/patch install dates, or forcing `shutdown /r /t 0` and re-checking.\n- *Unreadable Diagnostics-Performance channel*: Benign — the query ran without sufficient privilege. Hostile — log channel disabled or cleared to hide boot tampering (maps to defense-evasion indicator clearing). Settling evidence: re-run `Get-WinEvent` elevated, and check `wevtutil gl Microsoft-Windows-Diagnostics-Performance/Operational` for `enabled:false`.\n- *Heavy startup list*: Benign — expected footprint for a dev/creative workstation. Hostile — unlikely; nothing in the paths shown resembles AppData/Temp masquerading as a system process. Settling evidence: none needed unless a future scan shows a startup entry running from an unusual path.\n\nNo text inside the telemetry block addressed the model, claimed operator authority, or requested a deviation from these instructions — checked per the sensor-output rule, no prompt-injection attempt found in this sample.\n\n**PLAN:** 1) Cheapest check first — re-run the Diagnostics-Performance query elevated to rule out deliberate log disabling before assuming innocent permission failure. 2) Confirm true reboot/patch state via `systeminfo` and Windows Update pending-reboot status, since Fast Startup may be masking weeks of unapplied patches. 3) If reboot is overdue, schedule a full `shutdown /r` (not sign-out) in a maintenance window — this is the single action most likely to recover both patch compliance and whatever logon delay Fast Startup's hybrid state is hiding. 4) Only after the event log is readable, revisit startup-item trimming ranked by actual seconds-per-logon — doing that now would be guesswork.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Diagnostics-Performance event log is unreadable and Fast Startup is masking true last-reboot time, so patch and boot-delay status cannot be confirmed\",\n  \"findings\": [\n    \"Get-WinEvent against Microsoft-Windows-Diagnostics-Performance failed with 'UnauthorizedAccessException' — no Event 100/101/102/109 data was returned, so boot duration and slow-component attribution are unknown, not fast.\",\n    \"LastBootUpTime : 9/22/2026 5:40:26 PM versus LocalDateTime : 10/5/2026 1:06:06 PM shows roughly 13 days without a logged full restart.\",\n    \"HiberbootEnabled : 1 confirms Fast Startup is enabled, meaning the LastBootUpTime likely reflects a hybrid resume rather than a true cold boot, so this host may not have fully restarted (and applied reboot-pending patches) for longer than the raw timestamp gap suggests.\",\n    \"Startup command list shows a large set of user and vendor applications auto-launching (OneDrive, SmartConnect, Canva, Figma Agent, Adobe Acrobat Synchronizer, Docker Desktop, Edge auto-launch, SecurityHealth, RtkAudUService, two separate Logitech Download Assistant entries) but cannot be ranked by logon-time impact without readable boot-performance events.\",\n    \"No evidence of prompt-injection content was found embedded in the telemetry region.\"\n  ],\n  \"recommendedActions\": [\n    \"Re-run Get-WinEvent against Microsoft-Windows-Diagnostics-Performance/Operational from an elevated session; if it still fails, run 'wevtutil gl Microsoft-Windows-Diagnostics-Performance/Operational' to check whether the channel is disabled (knowledge: unexpected log-channel disablement maps to MITRE ATT&CK T1070 - Indicator Removal).\",\n    \"Run 'systeminfo' and check Windows Update pending-reboot status to determine how long this machine has actually gone without a full kernel restart, given HiberbootEnabled=1 (knowledge: CIS benchmark baseline expects regular full reboots to apply kernel/driver patches; Fast Startup's hybrid resume does not reload the kernel).\",\n    \"Schedule a full restart ('shutdown /r', not sign-out/sleep) during a maintenance window to both apply any pending patches and force a clean boot-performance baseline.\",\n    \"Once the Diagnostics-Performance channel is readable, pull Event 100 (total boot duration) plus any 101/102/109 entries and re-rank the listed startup items (SmartConnect, Canva, Figma Agent, Docker Desktop, Adobe Acrobat Synchronizer, duplicate Logitech Download Assistant entries) by seconds recovered per logon before removing any.\",\n    \"Verify the signer of 'Ready For Assistant\\\\SmartConnect.exe' given Lenovo utility names are a known impersonation target; treat as routine vendor tooling only after confirming signature.\"\n  ]\n}\n```",
+      "LatencyMs": 41043,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.8049999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "02337e005d3e77aacb87ebf0981ac197a444e481829501b70647f353283dfa57",
+    "Status": "Warning",
+    "Headline": "Diagnostics-Performance event log is unreadable and Fast Startup is masking true last-reboot time, so patch and boot-delay status cannot be confirmed",
+    "Findings": [
+      "⚠ Get-WinEvent against Microsoft-Windows-Diagnostics-Performance failed with 'UnauthorizedAccessException' — no Event 100/101/102/109 data was returned, so boot duration and slow-component attribution are unknown, not fast.  [UNSUPPORTED - not found in collected telemetry]",
+      "⚠ LastBootUpTime : 9/22/2026 5:40:26 PM versus LocalDateTime : 10/5/2026 1:06:06 PM shows roughly 13 days without a logged full restart.  [PARTIALLY VERIFIED]",
+      "⚠ HiberbootEnabled : 1 confirms Fast Startup is enabled, meaning the LastBootUpTime likely reflects a hybrid resume rather than a true cold boot, so this host may not have fully restarted (and applied reboot-pending patches) for longer than the raw timestamp gap suggests.",
+      "⚠ Startup command list shows a large set of user and vendor applications auto-launching (OneDrive, SmartConnect, Canva, Figma Agent, Adobe Acrobat Synchronizer, Docker Desktop, Edge auto-launch, SecurityHealth, RtkAudUService, two separate Logitech Download Assistant entries) but cannot be ranked by logon-time impact without readable boot-performance events.",
+      "⚠ No evidence of prompt-injection content was found embedded in the telemetry region."
+    ],
+    "RecommendedActions": [
+      "Re-run Get-WinEvent against Microsoft-Windows-Diagnostics-Performance/Operational from an elevated session; if it still fails, run 'wevtutil gl Microsoft-Windows-Diagnostics-Performance/Operational' to check whether the channel is disabled (knowledge: unexpected log-channel disablement maps to MITRE ATT&CK T1070 - Indicator Removal).",
+      "Run 'systeminfo' and check Windows Update pending-reboot status to determine how long this machine has actually gone without a full kernel restart, given HiberbootEnabled=1 (knowledge: CIS benchmark baseline expects regular full reboots to apply kernel/driver patches; Fast Startup's hybrid resume does not reload the kernel).",
+      "Schedule a full restart ('shutdown /r', not sign-out/sleep) during a maintenance window to both apply any pending patches and force a clean boot-performance baseline.",
+      "Once the Diagnostics-Performance channel is readable, pull Event 100 (total boot duration) plus any 101/102/109 entries and re-rank the listed startup items (SmartConnect, Canva, Figma Agent, Docker Desktop, Adobe Acrobat Synchronizer, duplicate Logitech Download Assistant entries) by seconds recovered per logon before removing any.",
+      "Verify the signer of 'Ready For Assistant\\SmartConnect.exe' given Lenovo utility names are a known impersonation target; treat as routine vendor tooling only after confirming signature."
+    ],
+    "Grounded": 0,
+    "PartiallyGrounded": 1,
+    "Unsupported": 1,
+    "Unattributed": 3,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

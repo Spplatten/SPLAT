@@ -1,0 +1,77 @@
+{
+  "Schema": 1,
+  "MissionId": "7701548b-7da7-4c10-a987-701603a6b86d",
+  "RecordedAtUtc": "2026-10-05T16:53:07.6005024Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "linux-process-snapshot",
+  "TemplateName": "Linux Process Snapshot",
+  "TemplateSha256": "sha256:adf825969187ae8a6d9d4b3c8b953aeed6ed56d0f1482e864c0bc554efd30af7",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "b4c95f5107abc609c8925072f8217789bd3ee067924161a77a272d0cd93005ec",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "    PID    PPID USER     STAT     ELAPSED %CPU %MEM COMMAND\n   8588    8449 nobody   R          00:00  100  0.0 /bin/ps -eo pid,ppid,user,stat,etime,pcpu,pmem,args --sort=-pcpu\n     85       1 root     Ss      14:06:10  0.1  0.1 /usr/lib/systemd/systemd-udevd\n   8523       1 root     Ssl        06:47  0.0  0.1 /usr/libexec/wsl-pro-service\n   8449       1 root     Ssl        14:19  0.0  0.1 /opt/splat/splat-agent --listen 127.0.0.1:50051\n     46       1 root     S<s     14:06:10  0.0  0.2 /usr/lib/systemd/systemd-journald\n      1       0 root     Ss      14:06:11  0.0  0.1 /sbin/init\n   6998    6997 root     Ssl+       34:24  0.0  0.3 /run/docker-desktop/docker-desktop-user-distro proxy --distro-name Ubuntu --docker-desktop-root /mnt/wsl/docker-desktop C:\\Users\\LABKA\\AppData\\Local\\Programs\\DockerDesktop\\resources\n   1489       1 polkitd  Ssl     08:13:07  0.0  0.1 /usr/lib/polkit-1/polkitd --no-debug --log-level=notice\n    248     166 _chrony  S       14:06:09  0.0  0.1 /usr/sbin/chronyd -n -F 1 -x\n    581       1 root     Ss      14:02:07  0.0  0.1 /usr/lib/systemd/systemd --user\n    168       1 root     Ss      14:06:09  0.0  0.0 /usr/sbin/cron -f -P\n   2110    2104 platten+ Ss      07:22:32  0.0  0.0 -bash\n   2104    2103 root     S       07:22:32  0.0  0.0 /init\n   6917    6916 platten+ Ss+        34:30  0.0  0.0 sh\n   2768    2110 platten+ Sl+     07:05:59  0.0  1.1 gdb bomb\n    170       1 message+ Ss      14:06:09  0.0  0.0 @dbus-daemon --system --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only\n    201       1 syslog   Ssl     14:06:09  0.0  0.0 /usr/sbin/rsyslogd -n -iNONE\n   6915       2 root     Ss         34:30  0.0  0.0 /init\n     78       1 systemd+ Ss      14:06:10  0.0  0.1 /usr/lib/systemd/systemd-resolved\n    181       1 root     Ss      14:06:09  0.0  0.1 /usr/lib/systemd/systemd-logind\n   2859    2857 platten+ Ss+     06:52:20  0.0  0.0 -bash\n    399       1 platten+ Ss      14:06:08  0.0  0.1 /usr/lib/systemd/systemd --user\n   2857    2856 root     S       06:52:20  0.0  0.0 /init\n    176       1 root     Ss      14:06:09  0.0  0.3 /usr/bin/python3 /usr/bin/networkd-dispatcher --run-startup-triggers\n      2       1 root     Sl      14:06:11  0.0  0.0 /init\n    804     800 platten+ Ss+     13:44:00  0.0  0.0 -bash\n    249       1 root     Ssl     14:06:09  0.0  0.4 /usr/bin/python3 /usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal\n    615     530 root     Ss+     14:02:07  0.0  0.0 -bash\n    355     354 platten+ Ss+     14:06:08  0.0  0.0 -bash\n    166       1 root     Ss      14:06:09  0.0  0.0 /bin/sh /usr/lib/systemd/scripts/chronyd-starter.sh -n -F 1\n    530       2 root     Ss      14:02:09  0.0  0.0 login -- root\n    430     356 platten+ Ss+     14:06:07  0.0  0.0 -bash\n    800     799 root     S       13:44:00  0.0  0.0 /init\n   2780    2768 platten+ t       07:05:53  0.0  0.0 /mnt/c/users/LABKA/cmu_labs/bomb/bomb pass.txt\n    356       2 root     Ss      14:06:08  0.0  0.0 login -- LABGALABGALABGALAB\n    262     248 _chrony  S       14:06:09  0.0  0.0 /usr/sbin/chronyd -n -F 1 -x\n      6       2 root     Sl      14:06:10  0.0  0.0 plan9 --control-socket 7 --log-level 4 --server-fd 8 --pipe-fd 10 --log-truncate\n    210       1 root     Ss+     14:06:09  0.0  0.0 /usr/sbin/agetty --noreset --noclear --issue-file=/etc/issue:/etc/issue.d:/run/issue.d:/usr/lib/issue.d - linux\n    353       2 root     Ss      14:06:08  0.0  0.0 /init\n    354     353 root     S       14:06:08  0.0  0.0 /init\n    402     399 platten+ S       14:06:08  0.0  0.0 (sd-pam)\n    583     581 root     S       14:02:07  0.0  0.0 (sd-pam)\n    799       2 root     Ss      13:44:00  0.0  0.0 /init\n   2103       2 root     Ss      07:22:32  0.0  0.0 /init\n   2856       2 root     Ss      06:52:20  0.0  0.0 /init\n   6916    6915 root     S          34:30  0.0  0.0 /init\n   6997    6915 root     S          34:24  0.0  0.0 /init\n   8587      85 root     S          00:00  0.0  0.0 (udev-worker)\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "lease:enforcing",
+      "cgroup:/sys/fs/cgroup/splat_leases/mission_7701548b-7da7-4c10-a987-701603a6b86d",
+      "jail:mount-namespace",
+      "workload:uid=65534",
+      "workspace:/var/lib/splat/missions/7701548b7da74c10a987701603a6b86d (created by the daemon)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "## Operator Analysis\n\n**STORY** — This is a WSL2 Ubuntu guest running Docker Desktop integration (`docker-desktop-user-distro`) and the Microsoft `wsl-pro-service`, with a `LABGALABGALABGALAB` user holding several interactive bash sessions. The one item that stands out is PID 2768/2780: `gdb bomb` attached to `/mnt/c/users/LABKA/cmu_labs/bomb/bomb pass.txt` — a binary being debugged from a Windows user-profile path (functionally a home directory) rather than a system location. No reverse shells, base64 payloads, or download-and-execute strings appear anywhere in the table, and no process shows a stuck Z/D state. The only \"100% CPU\" entry (PID 8588) is the `ps` command that produced this very listing — a self-measurement artifact, not a real finding.\n\n**KNOWN-GOOD** — `/usr/libexec/wsl-pro-service` (Microsoft's WSL integration agent — expected on this platform); `docker-desktop-user-distro proxy` (Docker Desktop's WSL bridge, expected given the `C:\\Users\\...\\DockerDesktop` path); `/opt/splat/splat-agent --listen 127.0.0.1:50051` (this sensor's own agent, loopback-only, as expected); systemd family units (`systemd-udevd`, `systemd-journald`, `systemd-resolved`, `systemd-logind`), `chronyd`, `polkitd`, `rsyslogd`, `dbus-daemon`, `networkd-dispatcher`, `unattended-upgrade-shutdown` — all standard Ubuntu/WSL boot services. A lookalike that would **not** be waved through: any of these binaries running from `/tmp`, with a non-loopback listener, or with abnormal parent PIDs.\n\n**HYPOTHESES**\n- PID 2768/2780 `gdb bomb` / `bomb pass.txt` — Benign: this matches the well-known CMU CS:APP \"binary bomb\" course exercise (file named `bomb`, takes a `pass.txt` argument, run under `cmu_labs/bomb`). Hostile: a disguised malicious binary using an innocuous name to evade attention. Settling evidence: hash/inspect the `bomb` file and check for outbound network connections from PID 2780 (none visible in this table).\n- PID 530 `login -- root`, elapsed 14:02:09 — Benign: long-lived local/console admin session. Hostile: unauthorized persistent root session. Settling evidence: correlate with `last`/`auth.log` for session source (tty/ip).\n- PID 8588 `ps ... 100% CPU` — Not a real anomaly: it is the sensor's own invocation capturing this snapshot.\n\n**PLAN** — 1) Cheap check first: identify/hash the `bomb` binary and confirm it matches the known CS:APP lab artifact (refutes the costliest hypothesis quickly). 2) Check for active network sockets tied to PID 2768/2780 (`ss`/`lsof`, not available from this sensor as an unprivileged user — flag as a visibility gap). 3) Review auth logs for PID 530/356 login origins. 4) No containment action needed unless network evidence surfaces; otherwise close as benign coursework with documentation.\n\nNo text inside the telemetry addressed this analyst or attempted to alter instructions — no prompt-injection attempt detected in this capture.\n\n```json\n{\n  \"status\": \"Critical\",\n  \"headline\": \"A debugged binary is executing from a user-profile path outside standard system directories; all other activity is accounted-for WSL/Docker infrastructure\",\n  \"findings\": [\n    \"PID 2780, user platten+, command '/mnt/c/users/LABKA/cmu_labs/bomb/bomb pass.txt' — running from a Windows user-profile path (home-directory-equivalent), matching the home-directory execution criterion.\",\n    \"PID 2768, user platten+, command 'gdb bomb' is the parent debugger attached to PID 2780, confirming an active debugging session on that binary rather than a hidden background process.\",\n    \"PID 530, user root, command 'login -- root' has been running for ELAPSED 14:02:09, an unusually long-lived root login session with no further context available from this sensor.\",\n    \"PID 8588, user nobody, command '/bin/ps -eo pid,ppid,user,stat,etime,pcpu,pmem,args --sort=-pcpu' shows 100% CPU, but this is the sensor's own ps invocation capturing this snapshot, not a sustained workload.\",\n    \"No process command line in the table contains reverse-shell syntax, base64-encoded payloads, or download-and-execute patterns.\",\n    \"No process shows state Z (zombie) or D (uninterruptible sleep) in this capture.\",\n    \"No shell owned by a recognizable service account (e.g. nobody, _chrony, syslog, message+) was found; only standard daemons and user 'platten+' shells are present.\",\n    \"No text within the telemetry block addressed the analyst or attempted to redirect analysis instructions — no prompt-injection attempt detected.\"\n  ],\n  \"recommendedActions\": [\n    \"Verify the identity of /mnt/c/users/LABKA/cmu_labs/bomb/bomb (hash, file origin, expected course artifact) before treating as hostile — knowledge: ATT&CK T1036 (Masquerading) is the technique this check rules out.\",\n    \"Check outbound/listening network sockets for PID 2768 and PID 2780 using ss/lsof with elevated privilege, since this unprivileged sensor cannot see them — knowledge: ATT&CK T1071 (Application Layer Protocol) / T1059 (Command and Scripting Interpreter) would be the concern if connections exist.\",\n    \"Correlate PID 530 ('login -- root', elapsed 14:02:09) against system auth logs (/var/log/auth.log or `last`) to confirm session origin and legitimacy — knowledge: CIS Benchmark control on restricting/monitoring direct root logins.\",\n    \"Treat the 100% CPU reading on PID 8588 as expected self-measurement noise from this ps invocation; no action required.\",\n    \"Document that visibility into other users' environment variables and open file descriptors is outside this sensor's privilege level — report as not visible rather than clean for any user other than the invoking account.\"\n  ]\n}\n```",
+      "LatencyMs": 52701,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9875
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "a1fabd9c7b81ef97ef0d24e69c8ed90c91bebbd70250b6e90efffae0585a4cef",
+    "Status": "Critical",
+    "Headline": "A debugged binary is executing from a user-profile path outside standard system directories; all other activity is accounted-for WSL/Docker infrastructure",
+    "Findings": [
+      "\uD83D\uDD34 PID 2780, user platten+, command '/mnt/c/users/LABKA/cmu_labs/bomb/bomb pass.txt' — running from a Windows user-profile path (home-directory-equivalent), matching the home-directory execution criterion.",
+      "\uD83D\uDD34 PID 2768, user platten+, command 'gdb bomb' is the parent debugger attached to PID 2780, confirming an active debugging session on that binary rather than a hidden background process.",
+      "\uD83D\uDD34 PID 530, user root, command 'login -- root' has been running for ELAPSED 14:02:09, an unusually long-lived root login session with no further context available from this sensor.",
+      "\uD83D\uDD34 PID 8588, user nobody, command '/bin/ps -eo pid,ppid,user,stat,etime,pcpu,pmem,args --sort=-pcpu' shows 100% CPU, but this is the sensor's own ps invocation capturing this snapshot, not a sustained workload.",
+      "\uD83D\uDD34 No process command line in the table contains reverse-shell syntax, base64-encoded payloads, or download-and-execute patterns.",
+      "\uD83D\uDD34 No process shows state Z (zombie) or D (uninterruptible sleep) in this capture.",
+      "\uD83D\uDD34 No shell owned by a recognizable service account (e.g. nobody, _chrony, syslog, message+) was found; only standard daemons and user 'platten+' shells are present.",
+      "\uD83D\uDD34 No text within the telemetry block addressed the analyst or attempted to redirect analysis instructions — no prompt-injection attempt detected."
+    ],
+    "RecommendedActions": [
+      "Verify the identity of /mnt/c/users/LABKA/cmu_labs/bomb/bomb (hash, file origin, expected course artifact) before treating as hostile — knowledge: ATT&CK T1036 (Masquerading) is the technique this check rules out.",
+      "Check outbound/listening network sockets for PID 2768 and PID 2780 using ss/lsof with elevated privilege, since this unprivileged sensor cannot see them — knowledge: ATT&CK T1071 (Application Layer Protocol) / T1059 (Command and Scripting Interpreter) would be the concern if connections exist.",
+      "Correlate PID 530 ('login -- root', elapsed 14:02:09) against system auth logs (/var/log/auth.log or `last`) to confirm session origin and legitimacy — knowledge: CIS Benchmark control on restricting/monitoring direct root logins.",
+      "Treat the 100% CPU reading on PID 8588 as expected self-measurement noise from this ps invocation; no action required.",
+      "Document that visibility into other users' environment variables and open file descriptors is outside this sensor's privilege level — report as not visible rather than clean for any user other than the invoking account."
+    ],
+    "Grounded": 4,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 4,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

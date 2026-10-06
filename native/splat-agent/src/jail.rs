@@ -23,6 +23,7 @@
 use std::ffi::CString;
 use std::fs;
 use std::io;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{symlink, MetadataExt};
 use std::path::{Component, Path, PathBuf};
@@ -69,6 +70,7 @@ pub struct JailPlan {
     new_root: CString,
     overlay_bind: Option<OverlayBind>,
     overlay_workspace: Option<crate::cow::OverlayWorkspace>,
+    scratch_exec: Option<(OwnedFd, u64)>,
     old_root: CString,
     /// The system directories, read-only, mounted first.
     system_binds: Vec<Bind>,
@@ -104,6 +106,7 @@ impl JailPlan {
             new_root: c_path(&root),
             overlay_bind: None,
             overlay_workspace: None,
+            scratch_exec: None,
             old_root: c_path(&root.join(".oldroot")),
             system_binds: Vec::new(),
             workdir_bind: None,
@@ -197,6 +200,14 @@ impl JailPlan {
         plan.mkdir(&root.join("proc"))?;
         plan.mkdir(&root.join(".oldroot"))?;
         Ok(plan)
+    }
+
+    pub fn authorize_scratch_exec(&mut self, map: OwnedFd, cgroup_id: u64) -> Result<()> {
+        if self.overlay_bind.is_none() {
+            bail!("scratch execution requires the child's overlay mount");
+        }
+        self.scratch_exec = Some((map, cgroup_id));
+        Ok(())
     }
 
     fn mkdir(&mut self, path: &Path) -> Result<()> {
@@ -332,6 +343,20 @@ pub unsafe fn enter(plan: &JailPlan) -> io::Result<()> {
             libc::MS_NOSUID | libc::MS_NODEV,
             overlay.options.as_ptr().cast(),
         ))?;
+        if let Some((map, cgroup_id)) = &plan.scratch_exec {
+            // Only the child can observe this superblock. Stack storage and raw syscalls keep
+            // the post-fork path allocation-free; failure aborts spawn before any workload runs.
+            let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+            check(libc::stat(overlay.target.as_ptr(), stat.as_mut_ptr()))?;
+            let dev = crate::lease::kernel_dev_from_st_dev(stat.assume_init().st_dev);
+            let mut attr: libbpf_rs::libbpf_sys::bpf_attr = std::mem::zeroed();
+            attr.__bindgen_anon_2.map_fd = map.as_raw_fd() as u32;
+            attr.__bindgen_anon_2.key = cgroup_id as *const u64 as u64;
+            attr.__bindgen_anon_2.__bindgen_anon_1.value = &dev as *const u32 as u64;
+            attr.__bindgen_anon_2.flags = libbpf_rs::libbpf_sys::BPF_NOEXIST as u64;
+            check(libc::syscall(libc::SYS_bpf, libbpf_rs::libbpf_sys::BPF_MAP_UPDATE_ELEM,
+                &attr, std::mem::size_of_val(&attr)) as libc::c_int)?;
+        }
     }
     if let Some(bind) = &plan.workdir_bind {
         bind_mount(bind)?;

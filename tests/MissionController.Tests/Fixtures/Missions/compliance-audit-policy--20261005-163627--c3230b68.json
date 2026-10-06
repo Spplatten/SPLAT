@@ -1,0 +1,73 @@
+{
+  "Schema": 1,
+  "MissionId": "c3230b68-6115-4c27-a322-0d835ba968f8",
+  "RecordedAtUtc": "2026-10-05T16:36:27.3717128Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "compliance-audit-policy",
+  "TemplateName": "Advanced Audit Policy Configuration Review",
+  "TemplateSha256": "sha256:4599e4fd51e08cde01d2c0f5c4611734c3bbf8c19c0ad8207c0e76d94f5ad564",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "2ad1fc4a1d9dec983a8ce0f683fa9619391ce96189306bc540820d33fb59812e",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "--- LEGACY POLICY OVERRIDE --- \r\n\r\n\r\n--- LOG SIZE AND RETENTION --- \r\nname: Security\r\nenabled: true\r\ntype: Admin\r\nowningPublisher: \r\nisolation: Custom\r\nchannelAccess: O:BAG:SYD:(A;;0xf0005;;;SY)(A;;0x5;;;BA)(A;;0x1;;;S-1-5-32-573)\r\nlogging:\r\n  logFileName: %SystemRoot%\\System32\\Winevt\\Logs\\Security.evtx\r\n  retention: false\r\n  autoBackup: false\r\n  maxSize: 20971520\r\npublishing:\r\n  fileMax: 1\r\nname: System\r\nenabled: true\r\ntype: Admin\r\nowningPublisher: \r\nisolation: System\r\nchannelAccess: O:BAG:SYD:(A;;0xf0007;;;SY)(A;;0x7;;;BA)(A;;0x3;;;BO)(A;;0x5;;;SO)(A;;0x1;;;IU)(A;;0x3;;;SU)(A;;0x1;;;S-1-5-3)(A;;0x2;;;S-1-5-33)(A;;0x1;;;S-1-5-32-573)\r\nlogging:\r\n  logFileName: %SystemRoot%\\System32\\Winevt\\Logs\\System.evtx\r\n  retention: false\r\n  autoBackup: false\r\n  maxSize: 20971520\r\npublishing:\r\n  fileMax: 1\r\n",
+    "Stderr": "Error 0x00000522 occurred:\r\r\nA required privilege is not held by the client.\r\r\n\r\r\nERROR: The system was unable to find the specified registry key or value.\r\n",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_c3230b6861154c27a3220d835ba968f8",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Operator analysis:**\n\nThe audit-policy read (auditpol) failed with **\"Error 0x00000522 ... A required privilege is not held by the client\"** — this is an access-denied condition, not evidence that auditing is unconfigured. Per the audit procedure, this means the operator account used for this scan lacks the audit-read delegation, and **subcategory-level coverage (Logon, Logoff, Account Lockout, Credential Validation, Process Creation, Object Access) could NOT be assessed** from this run. A second error, **\"The system was unable to find the specified registry key or value,\"** appears directly under the \"Legacy Policy Override\" heading with no data returned — this is consistent with the `SCENoApplyLegacyAuditPolicy` value being absent. Per the framework, an absent (or zero) value here means legacy Group Policy audit settings can silently overwrite the advanced subcategories on every GPO refresh, making the entire audit configuration unreliable even if the subcategories look correct today. Separately, the Security log is configured with **maxSize 20971520 (20 MB)**, `retention: false`, and `autoBackup: false` — a small cap with no retention/backup means high-volume events (e.g., Process Creation, Object Access) could roll the log over quickly; no event-volume figures were supplied so the actual lookback window achieved cannot be calculated, but the configuration as shown is a risk for short effective retention. No content in the telemetry attempted to address or instruct the model directly, so no prompt-injection attempt was identified in this output.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Audit subcategory coverage could not be verified due to an access-denied error, and legacy audit policy override protection appears unset\",\n  \"findings\": [\n    \"auditpol query returned 'Error 0x00000522 occurred: A required privilege is not held by the client,' indicating the scanning operator lacks the audit-read delegation needed to confirm subcategory settings (Logon, Logoff, Account Lockout, Credential Validation, Process Creation, Object Access) — coverage is unassessed, not confirmed absent.\",\n    \"The Legacy Policy Override section returned 'ERROR: The system was unable to find the specified registry key or value,' consistent with SCENoApplyLegacyAuditPolicy being absent, which per the audit framework means legacy GPO audit settings can silently overwrite advanced subcategories on every policy refresh.\",\n    \"The Security channel is configured with maxSize: 20971520 (20 MB), retention: false, and autoBackup: false, which limits log capacity and provides no backup-on-full behavior.\",\n    \"The System channel shows the same maxSize: 20971520, retention: false, autoBackup: false configuration.\",\n    \"No content in the supplied telemetry attempted to issue instructions to the analyst or claimed operator/SPLAT authority; no prompt-injection attempt was identified in this output.\"\n  ],\n  \"recommendedActions\": [\n    \"Re-run the audit policy scan under an account with the 'Manage auditing and security log' privilege (or equivalent audit-read delegation) to actually determine whether Logon, Logoff, Account Lockout, Credential Validation, Process Creation, and Object Access subcategories are enabled, and specifically check for success-only Logon auditing, which leaves failed-logon attacks invisible.\",\n    \"Verify and set HKLM\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\Lsa\\\\SCENoApplyLegacyAuditPolicy to 1 so legacy audit policy cannot overwrite the advanced subcategory configuration at GPO refresh.\",\n    \"Recalculate required Security log maxSize and retention against the organisation's mandated lookback window and expected event volume (especially once Process Creation/Object Access auditing is confirmed enabled), and enable retention/backup if the lookback requirement exceeds what 20 MB can hold.\"\n  ]\n}\n```",
+      "LatencyMs": 22714,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9849999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "b06adb0288605aacbfc7418303157202e4e2a5f5a21fbab634f4ab0f247a98df",
+    "Status": "Warning",
+    "Headline": "Audit subcategory coverage could not be verified due to an access-denied error, and legacy audit policy override protection appears unset",
+    "Findings": [
+      "⚠ auditpol query returned 'Error 0x00000522 occurred: A required privilege is not held by the client,' indicating the scanning operator lacks the audit-read delegation needed to confirm subcategory settings (Logon, Logoff, Account Lockout, Credential Validation, Process Creation, Object Access) — coverage is unassessed, not confirmed absent.",
+      "⚠ The Legacy Policy Override section returned 'ERROR: The system was unable to find the specified registry key or value,' consistent with SCENoApplyLegacyAuditPolicy being absent, which per the audit framework means legacy GPO audit settings can silently overwrite advanced subcategories on every policy refresh.",
+      "⚠ The Security channel is configured with maxSize: 20971520 (20 MB), retention: false, and autoBackup: false, which limits log capacity and provides no backup-on-full behavior.",
+      "⚠ The System channel shows the same maxSize: 20971520, retention: false, autoBackup: false configuration.",
+      "⚠ No content in the supplied telemetry attempted to issue instructions to the analyst or claimed operator/SPLAT authority; no prompt-injection attempt was identified in this output."
+    ],
+    "RecommendedActions": [
+      "Re-run the audit policy scan under an account with the 'Manage auditing and security log' privilege (or equivalent audit-read delegation) to actually determine whether Logon, Logoff, Account Lockout, Credential Validation, Process Creation, and Object Access subcategories are enabled, and specifically check for success-only Logon auditing, which leaves failed-logon attacks invisible.",
+      "Verify and set HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\SCENoApplyLegacyAuditPolicy to 1 so legacy audit policy cannot overwrite the advanced subcategory configuration at GPO refresh.",
+      "Recalculate required Security log maxSize and retention against the organisation's mandated lookback window and expected event volume (especially once Process Creation/Object Access auditing is confirmed enabled), and enable retention/backup if the lookback requirement exceeds what 20 MB can hold."
+    ],
+    "Grounded": 2,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 3,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "Schema": 1,
+  "MissionId": "64bc74d4-aeba-4bed-8748-29c1c5b9ba10",
+  "RecordedAtUtc": "2026-10-05T16:48:42.3906676Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "identity-auth-posture",
+  "TemplateName": "Authentication Posture & Lockout Resistance",
+  "TemplateSha256": "sha256:f92b578cb80998b3beeb81debb2e01b0ce16eadd4c5498d31d145b1ad6cb6c43",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "830b4b7d21f7ecbda3b5444e15db2e9acdb9b340107762f38e3cf569bffeac72",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "Force user logoff how long after time expires?:       Never\r\nMinimum password age (days):                          0\r\nMaximum password age (days):                          42\r\nMinimum password length:                              0\r\nLength of password history maintained:                None\r\nLockout threshold:                                    10\r\nLockout duration (minutes):                           10\r\nLockout observation window (minutes):                 10\r\nComputer role:                                        WORKSTATION\r\nThe command completed successfully.\r\n\r\n--- LOCAL ACCOUNTS ---\r\n\r\nName                Enabled LastLogon             PasswordLastSet       PasswordExpires      UserMayChangePassword\r\n----                ------- ---------             ---------------       ---------------      ---------------------\r\nAdministrator         False 5/14/2026 9:42:01 AM                                                              True\r\nLABCALABCALABCALABC    True 10/5/2026 12:06:10 PM 6/1/2026 12:36:58 PM                                        True\r\nLABDALABDALABDALAB     True                       6/1/2026 12:36:58 PM                                        True\r\nDefaultAccount        False                                                                                   True\r\nGuest                 False                                                                                  False\r\nLABGALABGALABGALAB     True 10/5/2026 12:04:35 PM 5/27/2026 11:23:15 AM                                       True\r\nWDAGUtilityAccount    False                       5/23/2024 12:58:26 AM 7/4/2024 12:58:26 AM                  True\r\n\r\n\r\n--- OPEN LOGON SESSIONS BY TYPE ---\r\n\r\nCount LogonType\r\n----- ---------\r\n    2 2        \r\n\r\n\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_64bc74d4aeba4bed874829c1c5b9ba10",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Analysis for operator**\n\n**STORY:** This workstation currently shows three enabled local accounts with non-standard names (`LABCALABCALABCALABC`, `LABDALABDALABDALAB`, `LABGALABGALABGALAB`), all of which have passwords that never expire despite a stated 42-day maximum password age policy — a mismatch that only happens when the \"password never expires\" flag is set directly on the account. One of them, `LABDALABDALABDALAB`, shows no LastLogon at all, meaning it has either never been used interactively or was used via a method this sensor doesn't capture. Combine that with a minimum password length of `0`, no password history, and a lockout window that resets every 10 minutes, and the host is configured so that both weak passwords and a patient spray attack would go undetected and unblocked. The two open logon sessions are both type 2 (interactive), which is unremarkable on a workstation — the concern here is account hygiene and policy, not an in-progress network attack.\n\n**KNOWN-GOOD:** `Administrator` (disabled) — standard hardening, expected off. `Guest` (disabled) — Windows default. `DefaultAccount` (disabled) — built-in Windows component account, never meant to be enabled. `WDAGUtilityAccount` (disabled, password expired 7/4/2024, never logged on) — Windows Defender Application Guard's utility account; dormant and expired is its normal resting state when the feature isn't in active use. The lookalike that would NOT be waved through: any of these four showing `Enabled: True` with a recent `LastLogon` — that would itself be a red flag regardless of the rest of this host's state.\n\n**HYPOTHESES:**\n- `LABDALABDALABDALAB` (enabled, never logged on, no password expiry): benign = provisioned test/automation account awaiting use; hostile = a staged backdoor account created ahead of use. Settling evidence: Security event ID 4720 (account creation) timestamp and operator, and whether it belongs to any privileged group.\n- `LABCALABCALABCALABC` / `LABGALABGALABGALAB` (enabled, logged on 10/5/2026, no password expiry): benign = legitimate service/support accounts intentionally exempted from expiry; hostile = attacker-created persistence accounts actively used. Settling evidence: `Get-LocalGroupMember Administrators`, and event 4624/4625 logon history (outside this sensor's scope) correlated with the LastLogon timestamp shown.\n- Weak policy values (min length 0, no history, 10-minute lockout observation window): this is a standing misconfiguration independent of compromise — it needs remediation regardless of what the accounts above turn out to be.\n\n**PLAN:** 1) Cheapest check first — enumerate group membership for the three enabled non-default accounts to see if any sit in Administrators (determines blast radius). 2) Pull account-creation/modification events (4720/4738) for those three accounts to establish who created them and when, which discriminates \"sanctioned\" from \"planted.\" 3) If unexplained or privileged, disable immediately and force a credential reset on any account that remains enabled (containment). 4) Remediate policy: raise minimum password length, enable password history, and lengthen the lockout observation window (cleanup/hardening).\n\nNo instruction-like text was found embedded in the sensor output — this telemetry is pure data (policy settings, account table, session counts), with no language directed at the analyst.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Three enabled local accounts with non-expiring passwords and a lockout policy that resets fast enough to permit slow password spraying\",\n  \"findings\": [\n    \"Lockout threshold is '10' with duration '10' and observation window '10' minutes — this is not threshold-0 (no lockout), but a 10-minute observation window means an attacker making 9 attempts per 10-minute window never reaches the threshold and never triggers lockout, allowing an unlimited slow spray.\",\n    \"Minimum password length is '0' and password history length is 'None', meaning blank or trivially weak, reused passwords are permitted by policy.\",\n    \"Three local accounts are Enabled: 'LABCALABCALABCALABC', 'LABDALABDALABDALAB', 'LABGALABGALABGALAB' — each with a blank PasswordExpires field despite a stated Maximum password age of 42 days, indicating 'password never expires' is set on each.\",\n    \"'LABDALABDALABDALAB' shows Enabled 'True' with no LastLogon value recorded, meaning this sensor shows no interactive logon ever for that account.\",\n    \"'Administrator', 'DefaultAccount', 'Guest', and 'WDAGUtilityAccount' are all Enabled: 'False', consistent with standard hardening/default state.\",\n    \"Open logon sessions show Count '2' of LogonType '2' (Interactive); no LogonType 3 (Network) or 10 (RemoteInteractive) sessions are present in this snapshot.\",\n    \"This sensor reports no authentication events (no record of failed logons, source IPs, or timestamps of attempts), so it cannot confirm or rule out an active password spray against this host — it only shows whether one would succeed.\"\n  ],\n  \"recommendedActions\": [\n    \"Run Get-LocalGroupMember Administrators to check whether 'LABCALABCALABCALABC', 'LABDALABDALABDALAB', or 'LABGALABGALABGALAB' hold privileged group membership (determines severity).\",\n    \"Review Security event IDs 4720 (account created) and 4738 (account changed) for these three accounts to establish creation time and operator, distinguishing sanctioned provisioning from unauthorized persistence (knowledge: MITRE ATT&CK T1136 - Create Account).\",\n    \"Disable or remove 'LABDALABDALABDALAB' if its creation cannot be attributed, given it is enabled with no recorded logon.\",\n    \"Clear the 'password never expires' flag on all three enabled accounts unless each is a documented service account, and rotate their credentials now (knowledge: CIS Benchmark control on password expiration).\",\n    \"Raise minimum password length above 0 and enable password history retention (knowledge: CIS Benchmark 'Minimum password length' and 'Enforce password history').\",\n    \"Lengthen the lockout observation window and/or lower the attempt threshold so slow-spray attempts cannot persist indefinitely between resets (knowledge: CIS Benchmark 'Account lockout threshold/duration/observation window', MITRE ATT&CK T1110.003 - Password Spraying).\",\n    \"Correlate with a logon-events sensor (Security log 4624/4625) to determine whether any spray or brute-force attempts have actually occurred against these accounts, since this output cannot show that.\"\n  ]\n}\n```",
+      "LatencyMs": 43640,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9857142857142858
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "501e544efa90dcaa5dc883370218b9cf2eddfb0840b293647eaa559e82ba35cd",
+    "Status": "Warning",
+    "Headline": "Three enabled local accounts with non-expiring passwords and a lockout policy that resets fast enough to permit slow password spraying",
+    "Findings": [
+      "⚠ Lockout threshold is '10' with duration '10' and observation window '10' minutes — this is not threshold-0 (no lockout), but a 10-minute observation window means an attacker making 9 attempts per 10-minute window never reaches the threshold and never triggers lockout, allowing an unlimited slow spray.",
+      "⚠ Minimum password length is '0' and password history length is 'None', meaning blank or trivially weak, reused passwords are permitted by policy.",
+      "⚠ Three local accounts are Enabled: 'LABCALABCALABCALABC', 'LABDALABDALABDALAB', 'LABGALABGALABGALAB' — each with a blank PasswordExpires field despite a stated Maximum password age of 42 days, indicating 'password never expires' is set on each.",
+      "⚠ 'LABDALABDALABDALAB' shows Enabled 'True' with no LastLogon value recorded, meaning this sensor shows no interactive logon ever for that account.",
+      "⚠ 'Administrator', 'DefaultAccount', 'Guest', and 'WDAGUtilityAccount' are all Enabled: 'False', consistent with standard hardening/default state.",
+      "⚠ Open logon sessions show Count '2' of LogonType '2' (Interactive); no LogonType 3 (Network) or 10 (RemoteInteractive) sessions are present in this snapshot.",
+      "⚠ This sensor reports no authentication events (no record of failed logons, source IPs, or timestamps of attempts), so it cannot confirm or rule out an active password spray against this host — it only shows whether one would succeed."
+    ],
+    "RecommendedActions": [
+      "Run Get-LocalGroupMember Administrators to check whether 'LABCALABCALABCALABC', 'LABDALABDALABDALAB', or 'LABGALABGALABGALAB' hold privileged group membership (determines severity).",
+      "Review Security event IDs 4720 (account created) and 4738 (account changed) for these three accounts to establish creation time and operator, distinguishing sanctioned provisioning from unauthorized persistence (knowledge: MITRE ATT&CK T1136 - Create Account).",
+      "Disable or remove 'LABDALABDALABDALAB' if its creation cannot be attributed, given it is enabled with no recorded logon.",
+      "Clear the 'password never expires' flag on all three enabled accounts unless each is a documented service account, and rotate their credentials now (knowledge: CIS Benchmark control on password expiration).",
+      "Raise minimum password length above 0 and enable password history retention (knowledge: CIS Benchmark 'Minimum password length' and 'Enforce password history').",
+      "Lengthen the lockout observation window and/or lower the attempt threshold so slow-spray attempts cannot persist indefinitely between resets (knowledge: CIS Benchmark 'Account lockout threshold/duration/observation window', MITRE ATT&CK T1110.003 - Password Spraying).",
+      "Correlate with a logon-events sensor (Security log 4624/4625) to determine whether any spray or brute-force attempts have actually occurred against these accounts, since this output cannot show that."
+    ],
+    "Grounded": 3,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 4,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

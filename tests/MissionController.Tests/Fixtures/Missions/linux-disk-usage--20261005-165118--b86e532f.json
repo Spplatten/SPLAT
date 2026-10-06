@@ -1,0 +1,66 @@
+{
+  "Schema": 1,
+  "MissionId": "b86e532f-79f8-4847-b4a5-1391bed14bab",
+  "RecordedAtUtc": "2026-10-05T16:51:18.8138823Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "linux-disk-usage",
+  "TemplateName": "Linux Filesystem Usage",
+  "TemplateSha256": "sha256:a5f099412ef32a33843bd3517191ffcc8fd9a5c170a0532d4b00ca0ea6af79b8",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "0695b8df357f5f5d2210b58a7ee253859dbd419c29859cbd5ebceb231f11a4ae",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "Filesystem      Size  Used Avail Use% Mounted on\nnone            3.8G   24M  3.8G   1% /\n/dev/sdd       1007G   13G  944G   2% /usr\ntmpfs           3.8G     0  3.8G   0% /tmp\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "lease:enforcing",
+      "cgroup:/sys/fs/cgroup/splat_leases/mission_b86e532f-79f8-4847-b4a5-1391bed14bab",
+      "jail:mount-namespace",
+      "workload:uid=65534",
+      "workspace:/var/lib/splat/missions/b86e532f79f84847b4a51391bed14bab (created by the daemon)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# Storage Analysis\n\nThis diagnostic is running inside a read-only jail and reports three mounted filesystems: the jail root itself (none), a bind mount of `/usr` from the host (`/dev/sdd`), and a temporary RAM disk. All filesystems show very healthy utilization with comfortable headroom. The largest filesystem, `/usr` at 1007G total, is only 2% full with 944G available. No warnings or critical conditions are present.\n\n```json\n{\n  \"status\": \"Healthy\",\n  \"headline\": \"All filesystems have abundant free space and low utilization.\",\n  \"findings\": [\n    \"Root filesystem (none): 24M used of 3.8G, 1% utilization\",\n    \"/dev/sdd mounted at /usr: 13G used of 1007G, 2% utilization, 944G available\",\n    \"tmpfs at /tmp: 0M used of 3.8G, 0% utilization (memory-backed, not escalated)\"\n  ]\n}\n```",
+      "LatencyMs": 3034,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 1
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "119ee0f38458802fe3521d16c7c6b8c3b70433e141acf27cf8067ab42a6cd713",
+    "Status": "Healthy",
+    "Headline": "All filesystems have abundant free space and low utilization.",
+    "Findings": [
+      "✓ Root filesystem (none): 24M used of 3.8G, 1% utilization",
+      "✓ /dev/sdd mounted at /usr: 13G used of 1007G, 2% utilization, 944G available",
+      "✓ tmpfs at /tmp: 0M used of 3.8G, 0% utilization (memory-backed, not escalated)"
+    ],
+    "RecommendedActions": [],
+    "Grounded": 3,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 0,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

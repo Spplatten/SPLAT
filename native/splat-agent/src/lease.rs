@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -80,7 +81,7 @@ const _: () = assert!(std::mem::size_of::<LeaseIpv4Key>() == 16);
 /// (dev, ino) lookup miss. That is not a symmetric failure - exec falls closed and is obvious,
 /// but `protected_inodes` falls OPEN, because a missed lookup there reads as "not protected".
 /// Caught by the canary on 2026-09-02, where the kernel denied exec of an allow-listed /bin/sh.
-fn kernel_dev_from_st_dev(st_dev: u64) -> u32 {
+pub(crate) fn kernel_dev_from_st_dev(st_dev: u64) -> u32 {
     let major = ((st_dev >> 8) & 0xfff) | ((st_dev >> 32) & !0xfffu64);
     let minor = (st_dev & 0xff) | ((st_dev >> 12) & !0xffu64);
     (((major << 20) | (minor & 0xf_ffff)) & 0xffff_ffff) as u32
@@ -169,6 +170,10 @@ pub trait BpfMapSync: Send + Sync {
     fn add_lease(&self, lease: &ActiveLease) -> Result<()>;
     fn remove_lease(&self, lease: &ActiveLease) -> Result<()>;
 
+    fn scratch_exec_map(&self) -> Result<OwnedFd> {
+        bail!("scratch execution requires a live kernel map")
+    }
+
     /// How many denials the kernel could not record because the ring buffer was full, since the
     /// program was loaded. Global, not per lease: the counter lives in the program, and a lease can
     /// only report the difference across its own lifetime.
@@ -215,6 +220,10 @@ impl LeaseManager {
     /// warning and then executed anyway.
     pub fn is_enforcing(&self) -> bool {
         self.bpf_sync.is_some()
+    }
+
+    pub fn scratch_exec_map(&self) -> Result<OwnedFd> {
+        self.bpf_sync.as_ref().context("scratch execution requires kernel enforcement")?.scratch_exec_map()
     }
 
     pub fn register_lease(

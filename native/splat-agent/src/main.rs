@@ -1,5 +1,6 @@
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
+use std::os::fd::{AsFd, OwnedFd};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Stdio;
@@ -224,6 +225,7 @@ struct LiveBpfSync {
     leased_cgroups: MapHandle,
     protected_inodes: MapHandle,
     allowed_exec_inodes: MapHandle,
+    scratch_exec_devs: MapHandle,
     allowed_connect_ipv4: MapHandle,
     /// The program's two counters: the next sequence number, and the denials it could not record.
     counters: MapHandle,
@@ -237,6 +239,11 @@ const COUNTER_DROPPED: u32 = 1;
 
 impl BpfMapSync for LiveBpfSync {
     fn add_lease(&self, lease: &lease::ActiveLease) -> Result<()> {
+        // A failed earlier cleanup must refuse a recycled cgroup, including a new lease that
+        // did NOT opt in. Otherwise a recycled overlay device number could inherit permission.
+        if self.scratch_exec_devs.lookup(&lease.cgroup_id.to_ne_bytes(), MapFlags::ANY)?.is_some() {
+            bail!("stale scratch execution grant for cgroup {}", lease.cgroup_id);
+        }
         let one: u8 = 1;
         self.leased_cgroups
             .update(&lease.cgroup_id.to_ne_bytes(), &[one], MapFlags::ANY)
@@ -268,6 +275,7 @@ impl BpfMapSync for LiveBpfSync {
     }
 
     fn remove_lease(&self, lease: &lease::ActiveLease) -> Result<()> {
+        let _ = self.scratch_exec_devs.delete(&lease.cgroup_id.to_ne_bytes());
         // Teardown is best-effort by design: a key that is already gone is the desired end state,
         // and a revoke must not abort partway and leave the rest of the lease live in the kernel.
         // Scoped deletes: another lease holding the same resource keeps its own entry. The bare
@@ -284,6 +292,10 @@ impl BpfMapSync for LiveBpfSync {
             let _ = self.allowed_connect_ipv4.delete(bytes_of(key));
         }
         Ok(())
+    }
+
+    fn scratch_exec_map(&self) -> Result<OwnedFd> {
+        self.scratch_exec_devs.as_fd().try_clone_to_owned().context("duplicate scratch execution map")
     }
 
     fn dropped_events(&self) -> u64 {
@@ -385,6 +397,7 @@ async fn main() -> Result<()> {
                     MapHandle::try_from(&skel.maps.leased_cgroups),
                     MapHandle::try_from(&skel.maps.protected_inodes),
                     MapHandle::try_from(&skel.maps.allowed_exec_inodes),
+                    MapHandle::try_from(&skel.maps.scratch_exec_devs),
                     MapHandle::try_from(&skel.maps.allowed_connect_ipv4),
                     MapHandle::try_from(&skel.maps.counters),
                     MapHandle::try_from(&skel.maps.violation_counts),
@@ -393,6 +406,7 @@ async fn main() -> Result<()> {
                         Ok(leased_cgroups),
                         Ok(protected_inodes),
                         Ok(allowed_exec_inodes),
+                        Ok(scratch_exec_devs),
                         Ok(allowed_connect_ipv4),
                         Ok(counters),
                         Ok(violation_counts),
@@ -401,6 +415,7 @@ async fn main() -> Result<()> {
                             leased_cgroups,
                             protected_inodes,
                             allowed_exec_inodes,
+                            scratch_exec_devs,
                             allowed_connect_ipv4,
                             counters,
                             violation_counts,
@@ -1032,6 +1047,14 @@ async fn handle_client(
                         "overlayFs.enableCow: this daemon is not enforcing, so no workload mount namespace is established",
                     );
                 }
+                let scratch_exec_value = parsed.get("overlayFs").and_then(|v| v.get("allowScratchExec"));
+                let allow_scratch_exec = scratch_exec_value.and_then(|v| v.as_bool()).unwrap_or(false);
+                if scratch_exec_value.is_some_and(|v| !v.is_boolean()) {
+                    unsupported.push("overlayFs.allowScratchExec: must be a boolean");
+                }
+                if allow_scratch_exec && !enable_cow {
+                    unsupported.push("overlayFs.allowScratchExec: requires overlayFs.enableCow");
+                }
                 if enable_cow && !Path::new(work_dir).is_dir() && !ephemeral_workspace {
                     unsupported.push("overlayFs.enableCow: workingDirectory must exist; no fallback lowerdir is permitted");
                 }
@@ -1109,7 +1132,7 @@ async fn handle_client(
                         egress_ips: &egress_ip_list,
                         egress_ports: &egress_port_list,
                     };
-                    if let Err(reason) = c.check(&ask) {
+                    if let Err(reason) = c.check(&ask).and_then(|_| c.check_scratch_exec(allow_scratch_exec)) {
                         error!("Refusing to execute for mission {mission_id}: outside the lease ceiling: {reason}");
                         let err_chunk = serde_json::json!({
                             "type": "STDERR",
@@ -1339,7 +1362,12 @@ async fn handle_client(
                         read_only_fs,
                         enable_cow,
                         Path::new("/"),
-                    ) {
+                    ).and_then(|mut plan| {
+                        if allow_scratch_exec {
+                            plan.authorize_scratch_exec(lease_mgr.scratch_exec_map()?, cg.cgroup_id)?;
+                        }
+                        Ok(plan)
+                    }) {
                         Ok(plan) => Some(Arc::new(plan)),
                         Err(e) => {
                             error!("Refusing to execute for mission {mission_id}: the jail root could not be prepared: {e:#}");

@@ -1,0 +1,66 @@
+{
+  "Schema": 1,
+  "MissionId": "4481f494-65b5-44a1-8aef-998e75f9cb79",
+  "RecordedAtUtc": "2026-10-05T17:06:56.8396614Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "sysops-disk-space",
+  "TemplateName": "System Storage & Drive Volume Health",
+  "TemplateSha256": "sha256:ce5aa10b7fffc1d5efc6cdfb7c480331c2cfc1a8aac9845a5eb120a4012294e5",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "8c6c78656b3050bb6449eaf47af12901a43b42d3f9b8d815250de4e68f5b272a",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "\r\nDriveLetter FileSystemLabel FileSystem DriveType HealthStatus OperationalStatus SizeRemaining         Size\r\n----------- --------------- ---------- --------- ------------ ----------------- -------------         ----\r\n          C Windows-SSD     NTFS       Fixed     Healthy      OK                 150652395520 509722226688\r\n\r\n\r\n--- PERCENT FREE ---\r\n\r\nName PercentFreeSpace FreeMegabytes\r\n---- ---------------- -------------\r\nC:                 29        143673\r\n\r\n\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_4481f49465b544a18aef998e75f9cb79",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# Storage Volume Analysis\n\nThe C: drive reports 29% free space (143,673 MB remaining of ~509 GB total), which exceeds the 15% threshold for concern. The file system is reporting Healthy status with OK operational status, indicating no underlying file system faults. No remediation is required at this time.\n\n```json\n{\n  \"status\": \"Healthy\",\n  \"headline\": \"C: drive has adequate free space with no file system faults reported.\",\n  \"findings\": [\n    \"C: drive (Windows-SSD, NTFS) has 143,673 MB (29%) free space remaining out of 509 GB total capacity\",\n    \"HealthStatus is Healthy and OperationalStatus is OK; no file system faults detected\"\n  ]\n}\n```",
+      "LatencyMs": 2082,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9875
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "d6659e56969b8c27b2ed0afce4a2ceb39dc23c59a9874728a6f0af7c76032b1e",
+    "Status": "Healthy",
+    "Headline": "C: drive has adequate free space with no file system faults reported.",
+    "Findings": [
+      "✓ C: drive (Windows-SSD, NTFS) has 143,673 MB (29%) free space remaining out of 509 GB total capacity",
+      "✓ HealthStatus is Healthy and OperationalStatus is OK; no file system faults detected"
+    ],
+    "RecommendedActions": [],
+    "Grounded": 1,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 1,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

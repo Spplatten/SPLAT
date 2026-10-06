@@ -1,0 +1,72 @@
+{
+  "Schema": 1,
+  "MissionId": "793f5cf4-1770-41ef-88e5-a37c8b68e7cb",
+  "RecordedAtUtc": "2026-10-05T17:04:36.0983563Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "source-dataset-catalog-search",
+  "TemplateName": "Public Dataset Catalog Search",
+  "TemplateSha256": "sha256:e07bede3882a1f6ca569cbce172adaa2dbbd3051bbd24cbfbcf96253e10c03e5",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "758635ce73b30c8b260ba381ef32d59cbef37b9157519b6c405d23c2c3f4a938",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "=== SPLAT SOURCE PROBE: DATASET CATALOG SEARCH ===\r\nEndpoint: https://api.census.gov/data.json (the publisher's own catalog of what it offers)\r\nTopic: Housing | Max results: 8\r\n--- GOVERNANCE POSTURE ---\r\nRead-only. No credential is presented and none is required. Nothing is downloaded but the catalog.\r\nDeclared tool egress: api.census.gov:443.\r\n--- SEARCH ---\r\nCATALOG_SIZE: 1809 datasets published\r\nMATCHING_DATASETS: 364\r\nORDER: newest vintage first - the catalog lists in its own order, which put 2000 at the top of a search for current data\r\n---\r\nTITLE: Planning Database Block Group Level\r\nVINTAGE: 2026\r\nAPI_ENDPOINT: http://api.census.gov/data/2026/pdb/blockgroup\r\nGEOGRAPHY: http://api.census.gov/data/2026/pdb/blockgroup/geography.json\r\nVARIABLES: http://api.census.gov/data/2026/pdb/blockgroup/variables.json\r\n---\r\nTITLE: Planning Database Tract Level\r\nVINTAGE: 2026\r\nAPI_ENDPOINT: http://api.census.gov/data/2026/pdb/tract\r\nGEOGRAPHY: http://api.census.gov/data/2026/pdb/tract/geography.json\r\nVARIABLES: http://api.census.gov/data/2026/pdb/tract/variables.json\r\n---\r\nTITLE: Planning Database Block Group Level\r\nVINTAGE: 2025\r\nAPI_ENDPOINT: http://api.census.gov/data/2025/pdb/blockgroup\r\nGEOGRAPHY: http://api.census.gov/data/2025/pdb/blockgroup/geography.json\r\nVARIABLES: http://api.census.gov/data/2025/pdb/blockgroup/variables.json\r\n---\r\nTITLE: Planning Database Tract Level\r\nVINTAGE: 2025\r\nAPI_ENDPOINT: http://api.census.gov/data/2025/pdb/tract\r\nGEOGRAPHY: http://api.census.gov/data/2025/pdb/tract/geography.json\r\nVARIABLES: http://api.census.gov/data/2025/pdb/tract/variables.json\r\n---\r\nTITLE: ACS 1-Year Subject Tables\r\nVINTAGE: 2024\r\nAPI_ENDPOINT: http://api.census.gov/data/2024/acs/acs1/subject\r\nGEOGRAPHY: http://api.census.gov/data/2024/acs/acs1/subject/geography.json\r\nVARIABLES: http://api.census.gov/data/2024/acs/acs1/subject/variables.json\r\n---\r\nTITLE: ACS 1-Year Selected Population Profiles\r\nVINTAGE: 2024\r\nAPI_ENDPOINT: http://api.census.gov/data/2024/acs/acs1/spp\r\nGEOGRAPHY: http://api.census.gov/data/2024/acs/acs1/spp/geography.json\r\nVARIABLES: http://api.census.gov/data/2024/acs/acs1/spp/variables.json\r\n---\r\nTITLE: 2024 American Community Survey: 1-Year Estimates - Public Use Microdata Sample Puerto Rico\r\nVINTAGE: 2024\r\nAPI_ENDPOINT: http://api.census.gov/data/2024/acs/acs1/pumspr\r\nGEOGRAPHY: http://api.census.gov/data/2024/acs/acs1/pumspr/geography.json\r\nVARIABLES: http://api.census.gov/data/2024/acs/acs1/pumspr/variables.json\r\n---\r\nTITLE: 2024 American Community Survey: 1-Year Estimates - Public Use Microdata Sample\r\nVINTAGE: 2024\r\nAPI_ENDPOINT: http://api.census.gov/data/2024/acs/acs1/pums\r\nGEOGRAPHY: http://api.census.gov/data/2024/acs/acs1/pums/geography.json\r\nVARIABLES: http://api.census.gov/data/2024/acs/acs1/pums/variables.json\r\nTRUNCATED: 8 of 364 shown\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_793f5cf4177041ef88e5a37c8b68e7cb",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# ANALYSIS: Census.gov Housing Data Catalog Search\n\nThe catalog search returned 364 matches from 1,809 total datasets, indicating a reasonably targeted result set rather than a broad miss. The top results are current: Planning Database 2026 and 2025 vintages, followed by American Community Survey 2024 1-Year products. All returned datasets carry complete API endpoints and geography/variables documentation pointers. No credential requirement and read-only access to the catalog endpoint reduce operational risk.\n\n## Structured Findings\n\n**Coverage match:** The search returned housing-focused datasets across multiple geographies and collection methods. The Planning Database products (block group and tract level, 2025–2026) are current and offer sub-county granularity. ACS 1-Year Subject Tables (2024) provide detailed housing attributes. PUMS microdata (2024) enables custom tabulation but requires more sophisticated analysis.\n\n**Recency:** The newest vintages in the result set are 2026 (Planning Database), which is forward-dated and likely represents projected or staged data. The most recent actual-year release visible is 2024 ACS. No 2025 ACS 1-Year is shown in the top 8, suggesting it may not yet be published.\n\n**Vintage ordering anomaly:** The catalog is ordered \"newest vintage first\" per the tool report, yet the results show 2026, 2025, then 2024—a logical ordering that happens to align with recency. This is expected behavior and does not indicate a search problem.\n\n**What this search does NOT establish:** These are catalog entries only. No row has been fetched; the actual variable names, data quality, or whether housing-specific fields (rent, occupancy, unit count, tenure) are present in each product remain unconfirmed. The geography.json and variables.json endpoints are pointers, not inspections. Only fetching one dataset (recommended: ACS 1-Year Subject Tables 2024) will confirm whether the variables needed for the operator's use case exist and are current.\n\n---\n\n```json\n{\n  \"status\": \"Healthy\",\n  \"headline\": \"Housing data catalog search returned 364 matches; current vintages (2024–2026) present with documented API endpoints and multi-level geography support.\",\n  \"findings\": [\n    \"CATALOG_SIZE: 1809 datasets; MATCHING_DATASETS: 364 (20% of catalog returned for housing topic, indicating targeted search rather than false positive)\",\n    \"Newest matches are Planning Database Block Group (2026) and Tract Level (2026), both with complete API endpoints and geography/variables documentation\",\n    \"ACS 1-Year Subject Tables (2024) and ACS 1-Year PUMS (2024) present as secondary current sources\",\n    \"All 8 results shown carry complete API endpoint, geography metadata URL, and variables metadata URL\",\n    \"Catalog search is read-only and requires no credentials; egress limited to api.census.gov:443\"\n  ],\n  \"recommendedActions\": [\n    \"Fetch the variables.json endpoint for ACS 1-Year Subject Tables 2024 to confirm housing-specific variables (units, rent, occupancy, tenure) are present and populated\",\n    \"If Planning Database 2026 is production data rather than forecast, inspect its variables to determine whether it is suitable for the intended use case\"\n  ]\n}\n```",
+      "LatencyMs": 9922,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9949999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "b7eb2bc9a6f146fd60fd5ee7858074bfd8399834665dd0460644377ad7fed280",
+    "Status": "Healthy",
+    "Headline": "Housing data catalog search returned 364 matches; current vintages (2024–2026) present with documented API endpoints and multi-level geography support.",
+    "Findings": [
+      "✓ CATALOG_SIZE: 1809 datasets; MATCHING_DATASETS: 364 (20% of catalog returned for housing topic, indicating targeted search rather than false positive)",
+      "✓ Newest matches are Planning Database Block Group (2026) and Tract Level (2026), both with complete API endpoints and geography/variables documentation",
+      "✓ ACS 1-Year Subject Tables (2024) and ACS 1-Year PUMS (2024) present as secondary current sources",
+      "✓ All 8 results shown carry complete API endpoint, geography metadata URL, and variables metadata URL",
+      "✓ Catalog search is read-only and requires no credentials; egress limited to api.census.gov:443"
+    ],
+    "RecommendedActions": [
+      "Fetch the variables.json endpoint for ACS 1-Year Subject Tables 2024 to confirm housing-specific variables (units, rent, occupancy, tenure) are present and populated",
+      "If Planning Database 2026 is production data rather than forecast, inspect its variables to determine whether it is suitable for the intended use case"
+    ],
+    "Grounded": 4,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 1,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

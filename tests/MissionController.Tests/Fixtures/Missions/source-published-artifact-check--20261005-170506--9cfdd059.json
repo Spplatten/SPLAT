@@ -1,0 +1,69 @@
+{
+  "Schema": 1,
+  "MissionId": "9cfdd059-7fae-4d63-b3d5-d6f0d4b2c169",
+  "RecordedAtUtc": "2026-10-05T17:05:06.9087895Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "source-published-artifact-check",
+  "TemplateName": "Published Data Artifact Check",
+  "TemplateSha256": "sha256:5cebd768b5706e3f8f2d269496a65278cd4c267e59c78dd89b40da14d79e0fc0",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "89cee54b0ff345208f59a900d6789ff19534343d5a178544966c00b78cce73ee",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "=== SPLAT SOURCE PROBE: PUBLISHED ARTIFACT ===\r\nEndpoint: https://rareresources.net/data/trends.json\r\n--- GOVERNANCE POSTURE ---\r\nRead-only GET of a public artifact. Nothing is published, and no credential is presented.\r\nDeclared tool egress: rareresources.net:443 - audited declaration on Windows, kernel-pinned under a Linux lease.\r\n--- FETCH ---\r\nHTTP_STATUS: 200\r\nCONTENT_TYPE: application/json\r\nBYTES: 71056\r\nSERVED_SHA256: 039e78855fa169c913467b1d51760ffdad33de157bf2ecf0a2053955b3a41dbc\r\nSCHEMA_VERSION: 1\r\nOBSERVATION_DAY: 2026-10-04\r\nGENERATED_AT: 2026-10-04T01:49:27.446179+00:00\r\nMEASURED_METRICS: 25\r\nMETRIC: clothing-attention | DISPLAY: 16,466 | SOURCE: Wikimedia monthly pageviews, en.wikipedia/Clothing | AS_OF: 2026-09\r\nMETRIC: clothing-before-after | DISPLAY: CPI 132.0 -> 136.8 | SOURCE: BLS CPI, apparel (CUUR0000SAA) index level, 2025-08 to 2026-08 - an index, not an amount paid | AS_OF: 2026-08\r\nMETRIC: clothing-index-change | DISPLAY: +3.6% | SOURCE: BLS CPI, apparel (CUUR0000SAA), 12-month change | AS_OF: 2026-08\r\nMETRIC: clothing-most-popular | DISPLAY: Haute couture 24,424 | SOURCE: Wikimedia monthly pageviews, most-read of 10 clothing topics - encyclopedia attention, not sales | AS_OF: 2026-09\r\nMETRIC: clothing-mover | DISPLAY: Athleisure +18.6% | SOURCE: Wikimedia monthly pageviews, 12-month change across 10 clothing topics | AS_OF: 2026-09\r\nMETRIC: do-places-ranked | DISPLAY: 0 of 14 | SOURCE: Tracked places reaching the 1000 most-read English Wikipedia articles for 2026-10-02 | AS_OF: 2026-10-02\r\nMETRIC: energy-attention | DISPLAY: 16,270 | SOURCE: Wikimedia monthly pageviews, en.wikipedia/Solar panel | AS_OF: 2026-09\r\nMETRIC: energy-before-after | DISPLAY: Electricity $0.19 -> $0.20 | SOURCE: BLS average price, Electricity per kWh (APU000072610), 2025-08 to 2026-08, U.S. city average | AS_OF: 2026-08\r\nMETRIC: energy-index-change | DISPLAY: +16.3% | SOURCE: BLS CPI, energy (CUUR0000SA0E), 12-month change | AS_OF: 2026-08\r\nMETRIC: energy-most-popular | DISPLAY: Solar panel 16,270 | SOURCE: Wikimedia monthly pageviews, most-read of 4 energy topics - encyclopedia attention, not sales | AS_OF: 2026-09\r\nMETRIC: energy-mover | DISPLAY: Electric vehicle -21.8% | SOURCE: Wikimedia monthly pageviews, 12-month change across 4 energy topics | AS_OF: 2026-09\r\nMETRIC: energy-price | DISPLAY: Electricity $0.20/kWh | SOURCE: BLS average price, Electricity per kWh (APU000072610), U.S. city average | AS_OF: 2026-08\r\nMETRIC: feel-gathering-places | DISPLAY: 166 places | SOURCE: OpenStreetMap: community centres, places of worship, libraries, cafes, restaurants, social facilities, parks, sports centres and pitches within (34.55, -85.45, 34.85, -85.1) (ODbL) | AS_OF: 2026-10-04\r\nMETRIC: feel-most-common | DISPLAY: Places of worship 102 | SOURCE: OpenStreetMap, most numerous kind of gathering place in that box (ODbL) | AS_OF: 2026-10-04\r\nMETRIC: food-attention | DISPLAY: 8,587 | SOURCE: Wikimedia monthly pageviews, en.wikipedia/Grocery store | AS_OF: 2026-09\r\nMETRIC: food-before-after | DISPLAY: Eggs $3.59 -> $2.27 | SOURCE: BLS average price, Eggs, grade A large per doz (APU0000708111), 2025-08 to 2026-08, U.S. city average | AS_OF: 2026-08\r\nMETRIC: food-index-change | DISPLAY: +2.7% | SOURCE: BLS CPI, food (CUUR0000SAF1), 12-month change | AS_OF: 2026-08\r\nMETRIC: food-most-popular | DISPLAY: Fast food 14,998 | SOURCE: Wikimedia monthly pageviews, most-read of 4 food topics - encyclopedia attention, not sales | AS_OF: 2026-09\r\nMETRIC: food-mover | DISPLAY: Grocery store -0.9% | SOURCE: Wikimedia monthly pageviews, 12-month change across 4 food topics | AS_OF: 2026-09\r\nMETRIC: food-price | DISPLAY: Eggs $2.27/doz | SOURCE: BLS average price, Eggs, grade A large per doz (APU0000708111), U.S. city average | AS_OF: 2026-08\r\nMETRIC: shelter-attention | DISPLAY: 2,586 | SOURCE: Wikimedia monthly pageviews, en.wikipedia/Renting | AS_OF: 2026-09\r\nMETRIC: shelter-before-after | DISPLAY: CPI 417.9 -> 430.6 | SOURCE: BLS CPI, shelter (CUUR0000SAH1) index level, 2025-08 to 2026-08 - an index, not an amount paid | AS_OF: 2026-08\r\nMETRIC: shelter-index-change | DISPLAY: +3.0% | SOURCE: BLS CPI, shelter (CUUR0000SAH1), 12-month change | AS_OF: 2026-08\r\nMETRIC: shelter-most-popular | DISPLAY: Apartment 9,200 | SOURCE: Wikimedia monthly pageviews, most-read of 4 shelter topics - encyclopedia attention, not sales | AS_OF: 2026-09\r\nMETRIC: shelter-mover | DISPLAY: Renting -10.7% | SOURCE: Wikimedia monthly pageviews, 12-month change across 4 shelter topics | AS_OF: 2026-09\r\nARTIFACT_AGE_DAYS: 2\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_9cfdd0597fae4d63b3d5d6f0d4b2c169",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# Publication Integrity Analysis\n\nThe artifact was successfully retrieved with HTTP 200 status, `application/json` content type, 71,056 bytes, and SHA-256 digest `039e78855fa169c913467b1d51760ffdad33de157bf2ecf0a2053955b3a41dbc`. The dashboard schema version is 1, observation date 2026-10-04, and the tool computed the artifact age as 2 days old.\n\nAll 25 metrics in the artifact carry named sources and measurement dates. The freshness profile is mixed: most metrics derive from Wikimedia monthly pageviews as of 2026-09 and BLS price/index data as of 2026-08, making them 1–2 months old relative to the observation day. The most recent data point is the OpenStreetMap gathering-places count from 2026-10-04 itself (today). The `do-places-ranked` metric reports \"0 of 14\" with a source date of 2026-10-02, indicating that tracked places currently hold no position in the top 1000 English Wikipedia articles—this is a valid state, not a fault. No metric lacks a source name, and no figures are unprovenance. The artifact parses cleanly with all expected fields present.\n\n```json\n{\n  \"status\": \"Healthy\",\n  \"headline\": \"Dashboard artifact retrieved successfully with complete metric provenance and reasonable data age for mixed sources.\",\n  \"findings\": [\n    \"HTTP 200, application/json, 71,056 bytes, SHA-256 039e78855fa169c913467b1d51760ffdad33de157bf2ecf0a2053955b3a41dbc\",\n    \"Schema version 1, observation day 2026-10-04, artifact age 2 days\",\n    \"25 metrics measured; all 25 carry named sources with 'AS_OF' dates\",\n    \"Most metrics sourced from Wikimedia monthly pageviews (2026-09) or BLS averages/indices (2026-08); one metric from OpenStreetMap as of 2026-10-04\",\n    \"Metric 'do-places-ranked' displays '0 of 14' with source date 2026-10-02—correct state indicating no tracked places currently in top 1000 Wikipedia articles\"\n  ]\n}\n```",
+      "LatencyMs": 6916,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 1
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "5d86d2fa5c492a5e5a677c5d75dad65c7afbf0b930cdf365503aa44a011634b2",
+    "Status": "Healthy",
+    "Headline": "Dashboard artifact retrieved successfully with complete metric provenance and reasonable data age for mixed sources.",
+    "Findings": [
+      "✓ HTTP 200, application/json, 71,056 bytes, SHA-256 039e78855fa169c913467b1d51760ffdad33de157bf2ecf0a2053955b3a41dbc",
+      "✓ Schema version 1, observation day 2026-10-04, artifact age 2 days",
+      "✓ 25 metrics measured; all 25 carry named sources with 'AS_OF' dates",
+      "✓ Most metrics sourced from Wikimedia monthly pageviews (2026-09) or BLS averages/indices (2026-08); one metric from OpenStreetMap as of 2026-10-04",
+      "✓ Metric 'do-places-ranked' displays '0 of 14' with source date 2026-10-02—correct state indicating no tracked places currently in top 1000 Wikipedia articles"
+    ],
+    "RecommendedActions": [],
+    "Grounded": 5,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 0,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

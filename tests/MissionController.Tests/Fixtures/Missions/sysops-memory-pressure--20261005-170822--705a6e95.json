@@ -1,0 +1,71 @@
+{
+  "Schema": 1,
+  "MissionId": "705a6e95-67b6-4f6f-b38d-d85068b1d3b8",
+  "RecordedAtUtc": "2026-10-05T17:08:22.2245813Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "sysops-memory-pressure",
+  "TemplateName": "Memory Pressure & Handle Leak Analysis",
+  "TemplateSha256": "sha256:230a3d277a1b0f55d03d2c2dfcdb861044a60f7088f52c2fcacd662304e2ac43",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "d3404a17191a23aaa047eede4879d5af97fe012f9252527e1a9ceb792c82d735",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "\r\n\r\nTotalVisibleMemorySize  : 16308380\r\nFreePhysicalMemory      : 2512764\r\nTotalVirtualMemorySize  : 34570756\r\nFreeVirtualMemory       : 3994548\r\nSizeStoredInPagingFiles : 18262376\r\nFreeSpaceInPagingFiles  : 15306292\r\n\r\n\r\n\r\n--- PAGEFILE ---\r\n\r\n\r\nName              : C:\\pagefile.sys\r\nAllocatedBaseSize : 17834\r\nCurrentUsage      : 2886\r\nPeakUsage         : 5513\r\n\r\n\r\n\r\n--- TOP MEMORY CONSUMERS ---\r\n\r\nName                  Id WorkingSet64 PrivateMemorySize64 Handles Threads                        \r\n----                  -- ------------ ------------------- ------- -------                        \r\nvmmemWSL           30436    811343872          1928790016       1 {15216, 32572, 22596, 33388...}\r\nclaude             21716    649334784          1012838400     740 {9028, 14632, 10744, 8132...}  \r\nMemory Compression  4068    448733184             7188480       0 {4072, 4088, 4092, 3232...}    \r\nChatGPT            10376    371806208           524509184     363 {22696, 26180, 42244, 41496...}\r\nlanguage_server    10536    367071232           443637760     957 {22208, 7732, 36508, 24148...} \r\nAntigravity        23812    364015616           453623808     479 {26680, 23308, 26892, 13916...}\r\nAntigravity IDE     9000    337551360           497754112     693 {36204, 28200, 3344, 21160...} \r\nAntigravity IDE     8080    326111232           482959360     641 {30124, 39800, 12380, 26944...}\r\nMsMpEng             5820    295297024           526118912    1324 {5824, 6940, 6536, 15680...}   \r\nexplorer           10312    232697856           898035712   11641 {10660, 10884, 12148, 12164...}\r\nclaude             23512    228814848           496873472     301 {28724, 18128, 32832, 37608...}\r\nChatGPT            41672    224235520           374587392    2054 {20052, 37216, 32728, 35892...}\r\nclaude              9108    223608832           283959296    1943 {17840, 8656, 19380, 38512...} \r\nchrome             23368    187101184           159948800    1964 {22992, 36792, 32272, 42748...}\r\nAntigravity IDE    31388    184328192           271998976     509 {24532, 24196, 38196, 10168...}\r\n\r\n\r\n--- TOP HANDLE CONSUMERS ---\r\n\r\nName                    Id Handles\r\n----                    -- -------\r\nexplorer             10312   11641\r\nSystem                   4    9649\r\ndwm                   2056    6806\r\nsvchost               5768    4958\r\nLenovoVantageService  5568    3745\r\nlsass                 1728    2363\r\nclaude               38024    2247\r\nsvchost               2044    2111\r\nChatGPT              41672    2055\r\nchrome               23368    1964\r\nclaude                9108    1942\r\nNotepad              11268    1923\r\nchrome                4856    1813\r\ncsrss                 1564    1756\r\nM365Copilot          24800    1714\r\n\r\n\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_705a6e9567b64f6fb38dd85068b1d3b8",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# Windows Performance Analysis\n\n## Plain-English Assessment\n\nThe system is experiencing **memory pressure with a handle leak in explorer.exe**. Free physical memory stands at 15.4 GB (94% of total), which is healthy, but the Windows Explorer process has accumulated 11,641 handles—substantially above the ~10,000 threshold that suggests a leak. The pagefile shows modest current usage (2,886 MB) well below its peak (5,513 MB), indicating past pressure that has since eased. However, the high handle count in a user-facing process warrants immediate investigation, as handle exhaustion can degrade system responsiveness and prevent new resource allocation.\n\n## Detailed Findings\n\n**Memory Utilization (Healthy):**\n- Total visible memory: 16,308 MB (≈ 15.9 GB); free physical memory: 2,512 MB (≈ 2.4 GB, or 15.4% free). This leaves ample headroom.\n- Pagefile current usage of 2,886 MB is well below peak usage of 5,513 MB, indicating past memory pressure that has resolved.\n\n**Handle Leak in explorer.exe (Critical):**\n- explorer.exe (PID 10312) holds 11,641 handles, exceeding the ~10,000 threshold for a handle leak in a user application. This is the most concerning finding.\n- No other single process approaches this threshold; the next highest is System (9,649 handles).\n\n**Memory Consumers:**\n- vmmemWSL (1.8 GB working set, 1.8 GB private) and claude (649 MB working set, 1.0 GB private) are the top consumers but show no signs of being paged out.\n- MsMpEng (Windows Defender) holds a moderate 1,324 handles and 295 MB working set—normal for an antimalware agent.\n\n---\n\n```json\n{\n  \"status\": \"Critical\",\n  \"headline\": \"Handle leak detected in explorer.exe with 11,641 handles; physical memory currently adequate but process degradation risk is high\",\n  \"findings\": [\n    \"explorer.exe (PID 10312) holds 11,641 handles, well above the ~10,000 threshold indicating a handle leak in a user application\",\n    \"Free physical memory is 2,512 MB (15.4% of 16,308 MB total), which is healthy; pagefile current usage (2,886 MB) is below peak (5,513 MB), indicating past pressure has cleared\",\n    \"vmmemWSL is the top memory consumer at 1,928 MB private memory; no process shows signs of severe paging or memory leakage\"\n  ],\n  \"recommendedActions\": [\n    \"Restart explorer.exe to clear the accumulated handles: open Task Manager, find explorer.exe, end the process, then restart it via File > Run or tasklist\",\n    \"If handle count does not recover after restart, investigate for third-party shell extensions or explorer add-ons that may be leaking handles; check Event Viewer for related warnings\",\n    \"Monitor handle count in explorer.exe over the next 24–48 hours to confirm the leak does not recur; a persistent leak may indicate malware or a faulty driver\"\n  ]\n}\n```",
+      "LatencyMs": 9415,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9333333333333333
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "d1722e999d03a1427c2cf9bce22a305686ccda52548faad396207e7861ba1598",
+    "Status": "Critical",
+    "Headline": "Handle leak detected in explorer.exe with 11,641 handles; physical memory currently adequate but process degradation risk is high",
+    "Findings": [
+      "\uD83D\uDD34 explorer.exe (PID 10312) holds 11,641 handles, well above the ~10,000 threshold indicating a handle leak in a user application  [PARTIALLY VERIFIED]",
+      "\uD83D\uDD34 Free physical memory is 2,512 MB (15.4% of 16,308 MB total), which is healthy; pagefile current usage (2,886 MB) is below peak (5,513 MB), indicating past pressure has cleared",
+      "\uD83D\uDD34 vmmemWSL is the top memory consumer at 1,928 MB private memory; no process shows signs of severe paging or memory leakage"
+    ],
+    "RecommendedActions": [
+      "Restart explorer.exe to clear the accumulated handles: open Task Manager, find explorer.exe, end the process, then restart it via File > Run or tasklist",
+      "If handle count does not recover after restart, investigate for third-party shell extensions or explorer add-ons that may be leaking handles; check Event Viewer for related warnings",
+      "Monitor handle count in explorer.exe over the next 24–48 hours to confirm the leak does not recur; a persistent leak may indicate malware or a faulty driver"
+    ],
+    "Grounded": 2,
+    "PartiallyGrounded": 1,
+    "Unsupported": 0,
+    "Unattributed": 0,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

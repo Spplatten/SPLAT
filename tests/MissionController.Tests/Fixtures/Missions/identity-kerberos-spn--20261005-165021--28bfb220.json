@@ -1,0 +1,75 @@
+{
+  "Schema": 1,
+  "MissionId": "28bfb220-9f12-42c0-8c6a-8338e90c7a8c",
+  "RecordedAtUtc": "2026-10-05T16:50:21.7939705Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "identity-kerberos-spn",
+  "TemplateName": "Kerberos Ticket & Duplicate SPN Auditor",
+  "TemplateSha256": "sha256:a0b4a9360a019ac4bc294e6dd56a8b6911e7f83421b742501560a2831001e746",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "244c2bb631d5d59f1251edf6649681b31d38da9c7db969d04cc0f365c8a1135a",
+  "Sensor": {
+    "ExitCode": 1,
+    "TimedOut": false,
+    "Stdout": "\r\nCurrent LogonId is 0:0x3000e\r\n\r\nCached Tickets: (0)\r\n--- DOMAIN DUPLICATE SPN SCAN --- \r\n--- COMPUTER ACCOUNT SPNs --- \r\n",
+    "Stderr": "Ldap Error(0x51 -- Server Down): ldap_connect\r\nFailed to retrieve DN for domain \"\" : 0x00000051\r\nWarning: No valid targets specified, reverting to current domain.\r\nLdap Error(0x51 -- Server Down): ldap_connect\r\nFindDomainForAccount: Call to DsGetDcNameWithAccountW failed with return value 0x0000054B\r\nCould not find account LABIALABIALABIA\r\n",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_28bfb2209f1242c08c6a8338e90c7a8c",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**STORY** – The ticket cache is empty (`Cached Tickets: (0)`), so there is nothing to grade for encryption-type downgrade or renew-until expiry on this host right now. The SPN duplicate scan never ran to completion: LDAP connect failed twice with \"Server Down\" (0x51), the domain controller lookup failed (`DsGetDcNameWithAccountW` returned 0x0000054B), and the account `LABIALABIALABIA` could not be found. The decisive facts are: no tickets to analyze, and a non-functional connection to the domain — this is a data-collection failure, not a clean bill of health.\n\n**KNOWN-GOOD** – Nothing in this output constitutes a recognizable, waveable artifact (no vendor agent, no normal service ticket, no SPN list) — there is simply no telemetry to evaluate. A lookalike that would NOT be waved through: if this same \"Server Down\"/DC-unreachable pattern appeared repeatedly right after a password or trust change, or coincided with a host being isolated from the network by an attacker to block detection tooling, that would be suspicious rather than benign.\n\n**HYPOTHESES**\n- *Empty ticket cache*: Benign explanation — user/service not currently logged on interactively, or ran immediately after logoff/reboot. Hostile explanation — ticket cache was deliberately purged to cover tracks after lateral movement. Evidence that would settle it: Security event log 4634/4647 (logoff) timing and 4624 logon history correlated with this capture time.\n- *LDAP/DC unreachable (0x51, 0x054B)*: Benign explanation — transient network issue, DC maintenance, or this host is off-domain-network (VPN split, isolated VLAN). Hostile explanation — DNS/host file tampering redirecting DC lookups, or attacker-induced network isolation to block AD-based detection. Evidence that would settle it: `nltest /dsgetdc:` and `nslookup` for the domain's SRV records run independently, plus checking local DNS/hosts file integrity.\n- *\"Could not find account LABIALABIALABIA\"*: Benign explanation — computer account name mismatch/typo in the query tool, or the machine account was recently renamed/rejoined. Hostile explanation — the computer account was deleted/disabled (e.g., after being flagged compromised) or never properly joined, suggesting an unmanaged/rogue host impersonating a domain member. Evidence that would settle it: `Get-ADComputer LABIALABIALABIA` from a working DC connection, or dsquery against a reachable DC.\n\n**PLAN**\n1. Cheapest check first: verify basic connectivity and name resolution to a domain controller from this host (`nltest /dsgetdc:<domain>`, `ping`/`Test-NetConnection` to DC on 389/636) — this refutes or confirms the \"network/DC genuinely down\" hypothesis before assuming anything adversarial.\n2. If DC is reachable from elsewhere but not from this host, treat as containment priority: check for local DNS/hosts tampering and recent firewall/network changes on this endpoint (T1565/T1070-adjacent concerns around log/config tampering).\n3. Once connectivity is restored, re-run `klist` and `setspn -X` to get real ticket and SPN data — only then can etype/downgrade and duplicate-SPN analysis be performed.\n4. Separately confirm the computer account `LABIALABIALABIA` exists and is enabled in AD; if missing, open a cleanup/investigation ticket for that account.\n\nNo prompt-injection attempt is present in this telemetry — the captured text is limited to LDAP/DC error messages and contains no instructions directed at the analyst, so there is nothing to flag on that front.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Kerberos diagnostics could not run: domain controller unreachable and ticket cache is empty, leaving encryption-type and duplicate-SPN checks unverified\",\n  \"findings\": [\n    \"Output shows 'Cached Tickets: (0)' — no Kerberos tickets were present to evaluate for encryption type (RC4/DES downgrade) or renew-until expiry\",\n    \"The SPN duplicate scan failed before producing results: 'Ldap Error(0x51 -- Server Down): ldap_connect' occurred twice\",\n    \"Domain controller location failed: 'FindDomainForAccount: Call to DsGetDcNameWithAccountW failed with return value 0x0000054B'\",\n    \"The tool reports 'Could not find account LABIALABIALABIA', meaning the target computer account could not be resolved against AD\",\n    \"No duplicate SPNs, encryption types, or ticket details are present anywhere in the output — the scan did not reach that stage\"\n  ],\n  \"recommendedActions\": [\n    \"Run 'nltest /dsgetdc:<domain>' and verify DNS SRV resolution for the domain to confirm whether the DC is actually unreachable from this host or only from this tool (knowledge: baseline AD connectivity check)\",\n    \"Check local DNS resolver settings and hosts file for tampering if connectivity to known-good DCs works from other hosts but not this one (knowledge: MITRE ATT&CK T1565 - possible data manipulation / defense evasion via redirection)\",\n    \"Confirm the computer account 'LABIALABIALABIA' exists and is enabled in Active Directory using a working DC connection (e.g., Get-ADComputer); if absent, investigate why\",\n    \"Once connectivity is restored, re-run 'klist' and 'setspn -X' to obtain actual cached ticket encryption types and duplicate SPN listings before drawing any conclusion about RC4/DES downgrade risk or stale renew-until windows\",\n    \"Treat this result as inconclusive, not healthy, until the above checks confirm whether the failure is environmental (DC outage) or indicative of host-level tampering\"\n  ]\n}\n```",
+      "LatencyMs": 23732,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9749999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "55ef6e336760dd739b25eb20a50647f356af17f542327c7e0edcb43d559f7ffc",
+    "Status": "Warning",
+    "Headline": "Kerberos diagnostics could not run: domain controller unreachable and ticket cache is empty, leaving encryption-type and duplicate-SPN checks unverified",
+    "Findings": [
+      "⚠ Output shows 'Cached Tickets: (0)' — no Kerberos tickets were present to evaluate for encryption type (RC4/DES downgrade) or renew-until expiry",
+      "⚠ The SPN duplicate scan failed before producing results: 'Ldap Error(0x51 -- Server Down): ldap_connect' occurred twice",
+      "⚠ Domain controller location failed: 'FindDomainForAccount: Call to DsGetDcNameWithAccountW failed with return value 0x0000054B'",
+      "⚠ The tool reports 'Could not find account LABIALABIALABIA', meaning the target computer account could not be resolved against AD",
+      "⚠ No duplicate SPNs, encryption types, or ticket details are present anywhere in the output — the scan did not reach that stage"
+    ],
+    "RecommendedActions": [
+      "Run 'nltest /dsgetdc:<domain>' and verify DNS SRV resolution for the domain to confirm whether the DC is actually unreachable from this host or only from this tool (knowledge: baseline AD connectivity check)",
+      "Check local DNS resolver settings and hosts file for tampering if connectivity to known-good DCs works from other hosts but not this one (knowledge: MITRE ATT&CK T1565 - possible data manipulation / defense evasion via redirection)",
+      "Confirm the computer account 'LABIALABIALABIA' exists and is enabled in Active Directory using a working DC connection (e.g., Get-ADComputer); if absent, investigate why",
+      "Once connectivity is restored, re-run 'klist' and 'setspn -X' to obtain actual cached ticket encryption types and duplicate SPN listings before drawing any conclusion about RC4/DES downgrade risk or stale renew-until windows",
+      "Treat this result as inconclusive, not healthy, until the above checks confirm whether the failure is environmental (DC outage) or indicative of host-level tampering"
+    ],
+    "Grounded": 0,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 5,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

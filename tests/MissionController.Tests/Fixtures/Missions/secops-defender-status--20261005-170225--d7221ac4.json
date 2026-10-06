@@ -1,0 +1,78 @@
+{
+  "Schema": 1,
+  "MissionId": "d7221ac4-4059-47eb-b6f5-2cd38ec310d5",
+  "RecordedAtUtc": "2026-10-05T17:02:25.3611720Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "secops-defender-status",
+  "TemplateName": "Defender Endpoint & Tamper Protection Audit",
+  "TemplateSha256": "sha256:4a61fec19e56d616b4d3bb7c47ad80da68e36419bf8432a7c0f5e8309145227b",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "37f9e07d5e22cc34a14d712bd76ffb1211f96d5762916b4d8e06beb633eb4273",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "\r\n\r\nAMServiceEnabled              : True\r\nAntivirusEnabled              : True\r\nAntispywareEnabled            : True\r\nRealTimeProtectionEnabled     : True\r\nBehaviorMonitorEnabled        : True\r\nIoavProtectionEnabled         : True\r\nOnAccessProtectionEnabled     : True\r\nIsTamperProtected             : True\r\nTamperProtectionSource        : Signatures\r\nAntivirusSignatureVersion     : 1.459.557.0\r\nAntivirusSignatureLastUpdated : 10/4/2026 1:54:19 PM\r\nNISSignatureVersion           : 1.459.557.0\r\nDefenderSignaturesOutOfDate   : False\r\nQuickScanAge                  : 3\r\nFullScanAge                   : 4294967295\r\nAMRunningMode                 : Normal\r\n\r\n\r\n\r\n--- DEFENDER POLICY PREFERENCES ---\r\n\r\n\r\nDisableRealtimeMonitoring : False\r\nDisableBehaviorMonitoring : False\r\nDisableScriptScanning     : False\r\nDisableIOAVProtection     : False\r\nMAPSReporting             : 2\r\nSubmitSamplesConsent      : 1\r\nPUAProtection             : 2\r\nExclusionPath             : {N/A: Must be an administrator to view exclusions}\r\nExclusionProcess          : {N/A: Must be an administrator to view exclusions}\r\nExclusionExtension        : {N/A: Must be an administrator to view exclusions}\r\n\r\n\r\n\r\n--- ATTACK SURFACE REDUCTION RULES ---\r\nASR RULES CONFIGURED: 0\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_d7221ac4405947ebb6f52cd38ec310d5",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Operator analysis**\n\n**STORY:** This host's core Defender engine is healthy — tamper protection is on, real-time and behavior monitoring are enabled, signatures are current, and the engine is running in Normal mode. The two items that actually decide this verdict are `ASR RULES CONFIGURED: 0` (no Attack Surface Reduction rules exist on this host at all — zero exploit/technique-level blocking coverage) and `FullScanAge : 4294967295`, which is the maximum 32-bit value Defender uses to mean \"never completed,\" indicating this endpoint has apparently never finished a full scan. Exclusions are reported as inaccessible, which is expected sensor behavior, not a gap.\n\n**KNOWN-GOOD:** `AMServiceEnabled`, `RealTimeProtectionEnabled`, `BehaviorMonitorEnabled`, `IoavProtectionEnabled`, `OnAccessProtectionEnabled` all `True` — this is the normal, fully-active Defender posture expected on a managed endpoint. `IsTamperProtected : True` with `TamperProtectionSource : Signatures` is the expected cloud/signature-driven tamper state for a managed tenant. A lookalike that would NOT be waved through: the same fields reporting `True` but `DefenderSignaturesOutOfDate : True` or `AMRunningMode` set to anything other than `Normal` (e.g., `EDR Block Mode` unexpectedly, or `Passive`) — neither is present here, so no concern.\n\n**HYPOTHESES:**\n- *ASR rules = 0:* Benign explanation — policy simply hasn't been pushed to this device yet (new build, GPO/Intune scope gap). Hostile explanation — rules were deliberately stripped by an attacker with admin rights to remove blocking coverage before staging payloads. Settling evidence: check the Intune/GPO ASR policy assignment for this device and compare against `MDE-ASRRules` event log (Event ID 5007 config-change) to see if rules were ever applied and then removed.\n- *FullScanAge never completed:* Benign — scheduled full scans disabled in favor of quick scans + cloud protection, common in some baselines. Hostile — a scan was blocked/killed to avoid detection of dormant malware. Settling evidence: Defender operational log (Event ID 1001/1000) for scan history and any scan-cancellation events.\n\n**PLAN:** 1) Cheapest check first — pull the ASR policy assignment for this host centrally (refutes \"attacker tampered with rules\" if the host was simply never in scope). 2) Check scan history/event log for forced-cancelled full scans (rules out active evasion). 3) If both come back benign, remediate by assigning the standard ASR rule set and scheduling a full scan; no containment action needed given RTP/tamper/behavior monitoring are all intact. 4) Exclusions should be reviewed from an admin console or MDE portal as a routine step, not as incident response.\n\nNo prompt-injection content was found inside this particular sensor payload.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Core Defender protections are healthy, but zero ASR rules are configured and a full scan has apparently never completed\",\n  \"findings\": [\n    \"IsTamperProtected : True with TamperProtectionSource : Signatures — tamper protection is active as expected\",\n    \"RealTimeProtectionEnabled : True and BehaviorMonitorEnabled : True — real-time and behavior monitoring are both on\",\n    \"DisableRealtimeMonitoring : False and DisableBehaviorMonitoring : False — policy confirms monitoring is not disabled\",\n    \"DefenderSignaturesOutOfDate : False with AntivirusSignatureVersion : 1.459.557.0 and AntivirusSignatureLastUpdated : 10/4/2026 1:54:19 PM — signatures reported current\",\n    \"AMRunningMode : Normal — engine is in the expected operating mode\",\n    \"ASR RULES CONFIGURED: 0 — no Attack Surface Reduction rules are configured on this host; this is a finding, not missing data\",\n    \"FullScanAge : 4294967295 — this is the maximum 32-bit value Defender reports when a full scan has never completed, indicating a scan hygiene gap\",\n    \"ExclusionPath, ExclusionProcess, and ExclusionExtension all return '{N/A: Must be an administrator to view exclusions}' — expected sensor limitation since this tool runs without admin rights by design; reported as NOT VERIFIABLE FROM THIS SENSOR, not a failure\",\n    \"No prompt-injection content directed at the analysis process was found within this sensor output\"\n  ],\n  \"recommendedActions\": [\n    \"Confirm ASR rule assignment in Intune/GPO for this device and compare against local policy to determine if 0 configured rules reflects a scoping gap or rule removal (knowledge: MITRE ATT&CK mitigations tied to ASR rules cover techniques such as T1055 process injection, T1218 signed-binary proxy execution, T1003 LSASS credential dumping)\",\n    \"Deploy the organization's standard ASR rule baseline to this host and verify rules report Action 1 (Block) rather than 0 (Disabled) or 6 (Warn) once configured\",\n    \"Investigate why FullScanAge shows the 'never completed' sentinel value (4294967295); check Defender operational log (Event ID 1000/1001) for scan start/cancel history and schedule a full scan (knowledge: CIS Microsoft Defender benchmark recommends periodic full scans in addition to quick scans)\",\n    \"Review exclusion lists centrally via the Microsoft Defender/MDE admin portal (not by re-running this sensor elevated) to confirm no broad exclusions such as drive roots, profile roots, or wildcards exist\"\n  ]\n}\n```",
+      "LatencyMs": 34853,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9583333333333333
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "7e904c9fb399786db7f05f1a4199f1e0eb9527695045655eed3b68f4d3d9a144",
+    "Status": "Warning",
+    "Headline": "Core Defender protections are healthy, but zero ASR rules are configured and a full scan has apparently never completed",
+    "Findings": [
+      "⚠ IsTamperProtected : True with TamperProtectionSource : Signatures — tamper protection is active as expected",
+      "⚠ RealTimeProtectionEnabled : True and BehaviorMonitorEnabled : True — real-time and behavior monitoring are both on",
+      "⚠ DisableRealtimeMonitoring : False and DisableBehaviorMonitoring : False — policy confirms monitoring is not disabled",
+      "⚠ DefenderSignaturesOutOfDate : False with AntivirusSignatureVersion : 1.459.557.0 and AntivirusSignatureLastUpdated : 10/4/2026 1:54:19 PM — signatures reported current",
+      "⚠ AMRunningMode : Normal — engine is in the expected operating mode",
+      "⚠ ASR RULES CONFIGURED: 0 — no Attack Surface Reduction rules are configured on this host; this is a finding, not missing data",
+      "⚠ FullScanAge : 4294967295 — this is the maximum 32-bit value Defender reports when a full scan has never completed, indicating a scan hygiene gap  [PARTIALLY VERIFIED]",
+      "⚠ ExclusionPath, ExclusionProcess, and ExclusionExtension all return '{N/A: Must be an administrator to view exclusions}' — expected sensor limitation since this tool runs without admin rights by design; reported as NOT VERIFIABLE FROM THIS SENSOR, not a failure",
+      "⚠ No prompt-injection content directed at the analysis process was found within this sensor output"
+    ],
+    "RecommendedActions": [
+      "Confirm ASR rule assignment in Intune/GPO for this device and compare against local policy to determine if 0 configured rules reflects a scoping gap or rule removal (knowledge: MITRE ATT&CK mitigations tied to ASR rules cover techniques such as T1055 process injection, T1218 signed-binary proxy execution, T1003 LSASS credential dumping)",
+      "Deploy the organization's standard ASR rule baseline to this host and verify rules report Action 1 (Block) rather than 0 (Disabled) or 6 (Warn) once configured",
+      "Investigate why FullScanAge shows the 'never completed' sentinel value (4294967295); check Defender operational log (Event ID 1000/1001) for scan start/cancel history and schedule a full scan (knowledge: CIS Microsoft Defender benchmark recommends periodic full scans in addition to quick scans)",
+      "Review exclusion lists centrally via the Microsoft Defender/MDE admin portal (not by re-running this sensor elevated) to confirm no broad exclusions such as drive roots, profile roots, or wildcards exist"
+    ],
+    "Grounded": 1,
+    "PartiallyGrounded": 1,
+    "Unsupported": 0,
+    "Unattributed": 7,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

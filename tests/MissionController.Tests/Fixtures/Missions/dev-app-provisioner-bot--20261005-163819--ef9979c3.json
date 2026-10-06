@@ -1,0 +1,76 @@
+{
+  "Schema": 1,
+  "MissionId": "ef9979c3-5105-4922-aa62-5b799e0ad0ee",
+  "RecordedAtUtc": "2026-10-05T16:38:19.3983676Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "dev-app-provisioner-bot",
+  "TemplateName": "Developer Application & Webhook Configuration Review",
+  "TemplateSha256": "sha256:a4849ab6dcc75a21c02015b0000d53aceeafa5f1e1729931a2ee6c4939f7076d",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "f484a3bc5e2ca0984c396edf446360bd93784050be27853e515c0d6db42a797c",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "=== SPLAT DEVELOPER APP CONFIGURATION REVIEW ===\r\nApplication: SplatAgentGateway\r\nEnvironment: Staging\r\nOAuth Callback: https://api.platten.io/auth/callback\r\nWebhook Target: https://api.platten.io/webhooks/agent-events\r\nRequested Scopes: read:telemetry,write:leases\r\n--- WHAT THIS TOOL DID ---\r\nRestated the declared configuration above. The callback and webhook targets were not contacted, no application was registered, and no HMAC secret exists: judge the configuration on its own terms, not on any reachability this run established.\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_ef9979c351054922aa625b799e0ad0ee",
+      "token:integrity=Low",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=0-capabilities",
+      "winsta:WinSta0\\Default (the container could already attach)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Operator Analysis:**\n\nThe supplied telemetry is a restated developer-application configuration for `SplatAgentGateway` (Staging) — it is not a live scan result, and the tool explicitly notes no endpoint was contacted and no HMAC secret currently exists. No prompt-injection attempt was detected inside the telemetry region; it contains only declarative configuration fields and an explicit disclaimer, with no text addressed to me or instructing a change in behavior.\n\nReviewing the four required controls against what was actually provided: the OAuth callback (`https://api.platten.io/auth/callback`) and webhook target (`https://api.platten.io/webhooks/agent-events`) are both HTTPS and host-consistent, but the output contains no field indicating PKCE is enforced, no redirect-URI allow-list/exact-match configuration, no webhook retry/backoff/dead-letter-queue policy, and no HMAC-SHA256 signing secret or verification setting. The requested scopes (`read:telemetry`, `write:leases`) are narrow and plausibly aligned with an agent-gateway's function, but no scope-justification or usage mapping was provided to confirm least-privilege beyond their names. Because core security controls (PKCE, HMAC signing, webhook delivery guarantees) are unverified/absent in this configuration rather than confirmed present, this cannot be certified for production and should not yet receive a signed provisioning manifest.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Application configuration lacks evidence of PKCE enforcement, HMAC signing, and webhook retry/DLQ policy required before provisioning\",\n  \"findings\": [\n    \"OAuth Callback is listed as 'https://api.platten.io/auth/callback' with no accompanying PKCE flag or redirect-URI allow-list entry in the output.\",\n    \"Webhook Target is listed as 'https://api.platten.io/webhooks/agent-events' with no retry policy, exponential backoff, or dead-letter-queue configuration present.\",\n    \"The tool output explicitly states 'no HMAC secret exists', meaning payload signature verification is not yet configured.\",\n    \"Requested Scopes are 'read:telemetry,write:leases' — narrow in name, but no usage justification or least-privilege mapping is included in the output to confirm this is the minimal required set.\",\n    \"The tool output explicitly states the callback and webhook endpoints 'were not contacted' and 'no application was registered', so this is a declared-configuration review, not a live security test.\"\n  ],\n  \"recommendedActions\": [\n    \"Before issuing a signed provisioning manifest, require explicit confirmation that PKCE (code_challenge/code_verifier, S256) is enforced on the authorization code flow for this client.\",\n    \"Require the exact redirect URI to be registered with strict exact-match validation (no wildcard/path-prefix matching) to prevent open-redirect abuse.\",\n    \"Require a documented webhook delivery policy specifying retry count, exponential backoff intervals, and a dead-letter queue destination before enabling the webhook target.\",\n    \"Generate and securely provision an HMAC-SHA256 signing secret, and require the receiving endpoint to verify the signature header on every webhook delivery.\",\n    \"Document the business justification for each requested scope ('read:telemetry', 'write:leases') to confirm alignment with least-privilege before approval.\"\n  ]\n}\n```",
+      "LatencyMs": 16228,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9749999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "e6e753fb3f4176c785d0dcec158c68951c0e8fa0fea805b8a723140516dcdd39",
+    "Status": "Warning",
+    "Headline": "Application configuration lacks evidence of PKCE enforcement, HMAC signing, and webhook retry/DLQ policy required before provisioning",
+    "Findings": [
+      "⚠ OAuth Callback is listed as 'https://api.platten.io/auth/callback' with no accompanying PKCE flag or redirect-URI allow-list entry in the output.",
+      "⚠ Webhook Target is listed as 'https://api.platten.io/webhooks/agent-events' with no retry policy, exponential backoff, or dead-letter-queue configuration present.",
+      "⚠ The tool output explicitly states 'no HMAC secret exists', meaning payload signature verification is not yet configured.",
+      "⚠ Requested Scopes are 'read:telemetry,write:leases' — narrow in name, but no usage justification or least-privilege mapping is included in the output to confirm this is the minimal required set.",
+      "⚠ The tool output explicitly states the callback and webhook endpoints 'were not contacted' and 'no application was registered', so this is a declared-configuration review, not a live security test."
+    ],
+    "RecommendedActions": [
+      "Before issuing a signed provisioning manifest, require explicit confirmation that PKCE (code_challenge/code_verifier, S256) is enforced on the authorization code flow for this client.",
+      "Require the exact redirect URI to be registered with strict exact-match validation (no wildcard/path-prefix matching) to prevent open-redirect abuse.",
+      "Require a documented webhook delivery policy specifying retry count, exponential backoff intervals, and a dead-letter queue destination before enabling the webhook target.",
+      "Generate and securely provision an HMAC-SHA256 signing secret, and require the receiving endpoint to verify the signature header on every webhook delivery.",
+      "Document the business justification for each requested scope ('read:telemetry', 'write:leases') to confirm alignment with least-privilege before approval."
+    ],
+    "Grounded": 0,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 5,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

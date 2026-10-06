@@ -132,6 +132,16 @@ struct {
     __type(value, __u8);
 } allowed_exec_inodes SEC(".maps");
 
+// Opt-in execution in ONE child-mounted overlay, never the host's backing filesystem. The
+// privileged pre-exec child registers its fresh superblock before dropping privilege; the
+// descriptor is close-on-exec. A cgroup cannot borrow another lease's scratch permission.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 256);
+    __type(key, __u64);
+    __type(value, __u32);
+} scratch_exec_devs SEC(".maps");
+
 // The only IPv4 destinations (network byte order, /32) a given lease may connect() to.
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -263,6 +273,11 @@ int BPF_PROG(splat_bprm_check, struct linux_binprm *bprm, int ret)
     struct lease_inode_key k = lease_inode_key_of(cgid, inode);
     if (bpf_map_lookup_elem(&allowed_exec_inodes, &k) != NULL)
         return 0; // On this lease's allow-list: permit.
+
+    __u32 *scratch_dev = bpf_map_lookup_elem(&scratch_exec_devs, &cgid);
+    if (scratch_dev && *scratch_dev == k.dev &&
+        BPF_CORE_READ(inode, i_sb, s_magic) == 0x794c7630) // OVERLAYFS_SUPER_MAGIC
+        return 0;
 
     report(cgid, HOOK_EXEC, (__u32)k.ino);
     return -EPERM;

@@ -1,0 +1,80 @@
+{
+  "Schema": 1,
+  "MissionId": "67451fcf-4a61-4238-8849-f7d17be58b9c",
+  "RecordedAtUtc": "2026-10-05T16:37:30.6116702Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "compliance-legacy-protocols",
+  "TemplateName": "Legacy Protocol & Credential Exposure Sweep",
+  "TemplateSha256": "sha256:ca9345bb69ed2d57f386d3685c8b976a82f1fa377650d368db3bc5e0db5fd208",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "c84713aad1dc94bfcffad53dce6cfcd1e1198143b9ebe9e312b913bd3de5f5e5",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "--- LLMNR ---\r\n--- NBT-NS PER INTERFACE ---\r\n\r\nPSChildName                                  NetbiosOptions\r\n-----------                                  --------------\r\nTcpip_{028eb180-1b8d-4978-8f26-c0898b8ce1f7}              0\r\nTcpip_{05174d7d-4dc2-4ffb-9dca-1b7c11de032a}              0\r\nTcpip_{1e29a8c0-1cdc-41d1-bc95-ada499952cce}              0\r\nTcpip_{61ba2d46-375d-4da3-aa34-48ffcac3b3df}              0\r\nTcpip_{676e1157-6c6e-4737-b5bd-2a1d62286f4f}              0\r\nTcpip_{1a11a1a1-a1aa-1111-a111-11aa11a111aa}              0\r\nTcpip_{6e8b7f73-1ccb-4c7d-994f-73d992f7cfcf}              0\r\nTcpip_{b50bbf6b-e484-44b6-aa69-9bc6ad829529}              0\r\nTcpip_{f2854109-3938-46ca-a89f-fea86a0682b1}              0\r\n\r\n\r\n--- WPAD SERVICE ---\r\n\r\n\r\nName      : WinHttpAutoProxySvc\r\nStatus    : Running\r\nStartType : \r\n\r\n\r\n\r\n--- WDIGEST ---\r\n\r\n\r\nUseLogonCredential : \r\n\r\n\r\n\r\n--- NTLM / LM COMPATIBILITY ---\r\n\r\n\r\nLmCompatibilityLevel         : 0\r\nNoLmHash                     : 1\r\nRestrictSendingNTLMTraffic   : \r\nRestrictReceivingNTLMTraffic : \r\n\r\n\r\n\r\n--- SMB1 CLIENT DRIVER ---\r\n--- MDNS ---\r\n\r\n\r\nEnableMDNS : \r\n\r\n\r\n\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_67451fcf4a6142388849f7d17be58b9c",
+      "token:integrity=Low",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=0-capabilities",
+      "winsta:WinSta0\\Default (the container could already attach)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**STORY**\nThis host's telemetry shows three separate gaps that together form a single credential-harvesting attack path: the LLMNR registry value is absent (section returned empty, meaning `EnableMulticast` defaults to enabled), and all nine network interfaces report `NetbiosOptions : 0` (not the disabled value of `2`), so both legacy broadcast-based name-resolution protocols are live on every adapter. On top of that, `LmCompatibilityLevel : 0` is the single most permissive NTLM setting Windows offers — it sends LM and NTLMv1 responses, both of which are crackable in minutes. `WDigest UseLogonCredential` returned blank rather than an explicit `0` or `1`, so plaintext-credential caching in LSASS cannot be confirmed or ruled out from this output alone. Combined, an attacker on this VLAN has a live LLMNR/NBT-NS poisoning surface to harvest NetNTLMv2 (and, given the LM compat level, even weaker) hashes from any mistyped hostname, with no indication that NTLM traffic auditing (`RestrictSendingNTLMTraffic`/`RestrictReceivingNTLMTraffic` are blank) is in place to detect it.\n\n**KNOWN-GOOD**\n- `WinHttpAutoProxySvc` running — this is the standard Windows WPAD/auto-proxy-detection service, present and running by default on most builds; expected here. The lookalike that would *not* be waved through is a third-party or scheduled task binary impersonating this service name running from a non-system path — not seen here.\n- `NoLmHash : 1` — this is the correct, secure default (prevents LM hash storage in SAM) and is expected on any reasonably current build; it partially offsets but does not eliminate the `LmCompatibilityLevel 0` risk.\n\n**HYPOTHESES**\n- *LLMNR/NBT-NS enabled*: Benign explanation — default-out-of-box config never hardened post-build. Hostile explanation — an attacker (or the consultant's own test) is actively running Responder/Inveigh against this subnet. Settling evidence: Windows Defender/Sysmon or DNS Client event log entries (Event ID 4015, or network capture showing multicast UDP 5355/137 poisoned responses from an unexpected MAC).\n- `LmCompatibilityLevel 0`: Benign — inherited GPO baseline never updated for legacy lab gear. Hostile — deliberately weakened by an attacker with prior admin access to downgrade auth for later cracking. Settling evidence: GPO history/change log (gpresult /h) and an AD change-audit entry for the GPO object modifying this registry value.\n- `WDigest UseLogonCredential` blank: Benign — current OS build defaults this off and the key is simply unset. Concerning — older build where blank means legacy default (enabled) is in effect. Settling evidence: OS build number plus `reg query` confirmation of the literal value, not just presence/absence.\n\n**PLAN**\n1. Cheap check first: query `winver`/build number and re-run `reg query HKLM\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\WDigest` and `HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa` to get literal values — this refutes or confirms the worst-case (plaintext creds in memory) cheaply.\n2. Containment: push the LLMNR/NBT-NS/LmCompat GPOs below in a pilot OU first, monitor DNS Client and NTLM auditing event logs for failures from legacy lab subnets before full rollout.\n3. Cleanup: once confirmed safe, enforce domain-wide, then retire any lab devices still forced to fall back to NTLMv1/broadcast resolution by migrating them to static DNS/hosts entries or an isolated legacy VLAN.\n\nNo text inside the sensor output addressed the model, claimed operator/SPLAT authority, or requested a deviation from this task — no prompt-injection attempt is present in this telemetry.\n\n```json\n{\n  \"status\": \"Critical\",\n  \"headline\": \"LLMNR/NBT-NS poisoning surface is open on all interfaces and NTLM is configured at its weakest level (LmCompatibilityLevel 0), exposing crackable credentials network-wide.\",\n  \"findings\": [\n    \"LLMNR section returned no EnableMulticast value, meaning the key is absent and LLMNR defaults to enabled on this host.\",\n    \"All nine interfaces report 'NetbiosOptions : 0' (e.g. Tcpip_{028eb180-1b8d-4978-8f26-c0898b8ce1f7} = 0), not the disabled value of 2, so NBT-NS broadcast resolution remains active.\",\n    \"LmCompatibilityLevel is explicitly set to '0', the most permissive setting, which sends LM and NTLMv1 responses that are trivially crackable.\",\n    \"NoLmHash is set to '1', which is a correct secure default and prevents LM hash storage, partially mitigating but not resolving the LmCompatibilityLevel risk.\",\n    \"WDigest UseLogonCredential returned blank with no explicit value, so it cannot be confirmed whether plaintext credentials are being cached in LSASS.\",\n    \"RestrictSendingNTLMTraffic and RestrictReceivingNTLMTraffic are both blank, indicating no NTLM auditing/restriction policy is configured to detect abuse of the weak NTLM level.\",\n    \"SMB1 Client Driver and MDNS sections returned no data, so SMB1 exposure and mDNS-based poisoning risk cannot be assessed from this output.\"\n  ],\n  \"recommendedActions\": [\n    \"Disable LLMNR via GPO: Computer Configuration > Administrative Templates > Network > DNS Client > 'Turn off multicast name resolution' = Enabled (sets EnableMulticast=0). Knowledge: this is the standard LLMNR-poisoning mitigation (MITRE ATT&CK T1557.001).\",\n    \"Disable NBT-NS on every interface in the same change window as LLMNR (remediating only one leaves the attack path open): push NetbiosOptions=2 via Group Policy Preferences > Windows Settings > Registry targeting HKLM\\\\SYSTEM\\\\CurrentControlSet\\\\Services\\\\NetBT\\\\Parameters\\\\Interfaces\\\\<Tcpip_{iface}>\\\\NetbiosOptions, or set DHCP scope option 046 (WINS/NBT node type) to 0x2 (P-node) where devices obtain NetBT settings via DHCP. Knowledge: combined LLMNR+NBT-NS mitigation closes the Responder/Inveigh NetNTLMv2 capture path (MITRE ATT&CK T1557.001).\",\n    \"Compatibility risk for the above: legacy lab instruments and older workgroup-mode devices that rely on broadcast name resolution instead of DNS registration may lose \\\\\\\\hostname\\\\\\\\share and ping-by-name functionality; pilot on a test OU/subnet first and add static DNS/hosts entries for any legacy gear before domain-wide rollout.\",\n    \"Confirm and set WDigest explicitly: Computer Configuration > Administrative Templates > MS Security Guide > 'WDigest Authentication' = Disabled (requires the MS Security Guide ADMX/KB2871997 baseline), enforcing HKLM\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\SecurityProviders\\\\WDigest\\\\UseLogonCredential=0. Knowledge: mitigates LSASS plaintext credential harvesting (MITRE ATT&CK T1003.001); compatibility risk is low, confirm no legacy RADIUS/802.1x deployment depends on Digest auth.\",\n    \"Raise LmCompatibilityLevel: Computer Configuration > Windows Settings > Security Settings > Local Policies > Security Options > 'Network security: LAN Manager authentication level' set to 'Send NTLMv2 response only. Refuse LM & NTLM' (level 5). Knowledge: eliminates NTLMv1/LM downgrade (CIS Benchmark 2.3.11.7). Compatibility risk: any legacy lab equipment (older Windows NT4/2000, embedded SMB1-only controllers) that cannot negotiate NTLMv2 will fail authentication outright; stage via level 3 first and audit Event ID 4624 authentication package for legacy clients before enforcing level 5, or isolate unremediated devices on a segmented VLAN.\",\n    \"Enable NTLM auditing (RestrictSendingNTLMTraffic/RestrictReceivingNTLMTraffic currently blank) in audit-only mode first to inventory which hosts still rely on NTLM before any blocking policy is applied.\",\n    \"Collect the missing SMB1 Client Driver and EnableMDNS values on a follow-up pass; both are additional name-resolution/legacy-protocol attack surfaces not covered by this output and should not be assumed healthy.\"\n  ]\n}\n```",
+      "LatencyMs": 59101,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9785714285714284
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "f98622c7a71c47e4c94c24b4c6a4d1b5ad7200ad3a71080dbeb5132c946131ce",
+    "Status": "Critical",
+    "Headline": "LLMNR/NBT-NS poisoning surface is open on all interfaces and NTLM is configured at its weakest level (LmCompatibilityLevel 0), exposing crackable credentials network-wide.",
+    "Findings": [
+      "\uD83D\uDD34 LLMNR section returned no EnableMulticast value, meaning the key is absent and LLMNR defaults to enabled on this host.",
+      "\uD83D\uDD34 All nine interfaces report 'NetbiosOptions : 0' (e.g. Tcpip_{028eb180-1b8d-4978-8f26-c0898b8ce1f7} = 0), not the disabled value of 2, so NBT-NS broadcast resolution remains active.",
+      "\uD83D\uDD34 LmCompatibilityLevel is explicitly set to '0', the most permissive setting, which sends LM and NTLMv1 responses that are trivially crackable.",
+      "\uD83D\uDD34 NoLmHash is set to '1', which is a correct secure default and prevents LM hash storage, partially mitigating but not resolving the LmCompatibilityLevel risk.",
+      "\uD83D\uDD34 WDigest UseLogonCredential returned blank with no explicit value, so it cannot be confirmed whether plaintext credentials are being cached in LSASS.",
+      "\uD83D\uDD34 RestrictSendingNTLMTraffic and RestrictReceivingNTLMTraffic are both blank, indicating no NTLM auditing/restriction policy is configured to detect abuse of the weak NTLM level.",
+      "\uD83D\uDD34 SMB1 Client Driver and MDNS sections returned no data, so SMB1 exposure and mDNS-based poisoning risk cannot be assessed from this output."
+    ],
+    "RecommendedActions": [
+      "Disable LLMNR via GPO: Computer Configuration > Administrative Templates > Network > DNS Client > 'Turn off multicast name resolution' = Enabled (sets EnableMulticast=0). Knowledge: this is the standard LLMNR-poisoning mitigation (MITRE ATT&CK T1557.001).",
+      "Disable NBT-NS on every interface in the same change window as LLMNR (remediating only one leaves the attack path open): push NetbiosOptions=2 via Group Policy Preferences > Windows Settings > Registry targeting HKLM\\SYSTEM\\CurrentControlSet\\Services\\NetBT\\Parameters\\Interfaces\\<Tcpip_{iface}>\\NetbiosOptions, or set DHCP scope option 046 (WINS/NBT node type) to 0x2 (P-node) where devices obtain NetBT settings via DHCP. Knowledge: combined LLMNR+NBT-NS mitigation closes the Responder/Inveigh NetNTLMv2 capture path (MITRE ATT&CK T1557.001).",
+      "Compatibility risk for the above: legacy lab instruments and older workgroup-mode devices that rely on broadcast name resolution instead of DNS registration may lose \\\\hostname\\\\share and ping-by-name functionality; pilot on a test OU/subnet first and add static DNS/hosts entries for any legacy gear before domain-wide rollout.",
+      "Confirm and set WDigest explicitly: Computer Configuration > Administrative Templates > MS Security Guide > 'WDigest Authentication' = Disabled (requires the MS Security Guide ADMX/KB2871997 baseline), enforcing HKLM\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\WDigest\\UseLogonCredential=0. Knowledge: mitigates LSASS plaintext credential harvesting (MITRE ATT&CK T1003.001); compatibility risk is low, confirm no legacy RADIUS/802.1x deployment depends on Digest auth.",
+      "Raise LmCompatibilityLevel: Computer Configuration > Windows Settings > Security Settings > Local Policies > Security Options > 'Network security: LAN Manager authentication level' set to 'Send NTLMv2 response only. Refuse LM & NTLM' (level 5). Knowledge: eliminates NTLMv1/LM downgrade (CIS Benchmark 2.3.11.7). Compatibility risk: any legacy lab equipment (older Windows NT4/2000, embedded SMB1-only controllers) that cannot negotiate NTLMv2 will fail authentication outright; stage via level 3 first and audit Event ID 4624 authentication package for legacy clients before enforcing level 5, or isolate unremediated devices on a segmented VLAN.",
+      "Enable NTLM auditing (RestrictSendingNTLMTraffic/RestrictReceivingNTLMTraffic currently blank) in audit-only mode first to inventory which hosts still rely on NTLM before any blocking policy is applied.",
+      "Collect the missing SMB1 Client Driver and EnableMDNS values on a follow-up pass; both are additional name-resolution/legacy-protocol attack surfaces not covered by this output and should not be assumed healthy."
+    ],
+    "Grounded": 1,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 6,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

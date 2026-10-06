@@ -1,0 +1,75 @@
+{
+  "Schema": 1,
+  "MissionId": "8e6357aa-704e-4e75-8cd8-b2083fdc4b1e",
+  "RecordedAtUtc": "2026-10-05T16:39:07.2274337Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "endpoint-applocker-wdac",
+  "TemplateName": "AppLocker & WDAC Application Control Audit",
+  "TemplateSha256": "sha256:aba0cfc16eca88e4dca61f7bab5cad3325a474bebf104b9aa8b463b502c10373",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "9e1aa0e951ea6e2d252339cf9b78574c3a0c7f34481c645d01abf5e6c0fe26c5",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "--- APPLOCKER RULE COLLECTIONS ---\r\n--- APPLICATION IDENTITY SERVICE ---\r\n\r\n\r\nName      : AppIDSvc\r\nStatus    : Stopped\r\nStartType : Manual\r\n\r\n\r\n\r\n--- WDAC CODE INTEGRITY ---\r\n\r\n\r\nCodeIntegrityPolicyEnforcementStatus         : 2\r\nUsermodeCodeIntegrityPolicyEnforcementStatus : 0\r\n\r\n\r\n\r\n--- SMART APP CONTROL ---\r\n\r\n\r\nVerifiedAndReputablePolicyState : 0\r\n\r\n\r\n\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_8e6357aa704e4e758cd8b2083fdc4b1e",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Operator summary**\n\nSTORY — Read together, the four sections describe a host with no working usermode application control: AppLocker rule collections are absent from the output, the service that actually enforces any AppLocker policy (AppIDSvc) is **Stopped**, WDAC is only enforcing kernel-mode code integrity (driver signing) while usermode code integrity is **off**, and Smart App Control is **off**. The decisive items are: AppIDSvc Stopped/Manual, UsermodeCodeIntegrityPolicyEnforcementStatus = 0, and VerifiedAndReputablePolicyState = 0 — together they mean any arbitrary usermode executable can run unchecked right now, regardless of whether an AppLocker policy is defined somewhere.\n\nKNOWN-GOOD — CodeIntegrityPolicyEnforcementStatus = 2 (kernel-mode WDAC enforced) is expected baseline on most modern Windows 10/11 builds (driver signing/HVCI) and isn't itself a sign of deliberate hardening or tampering. The lookalike that would NOT be waved through: someone citing \"WDAC is Enforced\" as proof of application control — it only covers drivers/kernel code here, not the usermode .exe/.dll/script surface, so it is not equivalent to AppLocker or usermode WDAC protection.\n\nHYPOTHESES —\n- *No AppLocker rule collections shown*: benign = policy was simply never configured on this host; hostile = policy existed and was removed/tampered with to disable control (T1562.001). Settling evidence: run `Get-AppLockerPolicy -Effective -Xml` and `gpresult /h` with admin/SYSTEM rights to see if a policy is actually present but just unreadable at current privilege.\n- *AppIDSvc Stopped*: benign = never started because no policy ever required it; hostile = deliberately stopped to neuter an existing policy, a very common defeat technique. Settling evidence: Service Control Manager events 7036/7040 for AppIDSvc state changes.\n- *Usermode WDAC off / SAC off*: benign = never enabled on this device (common default); hostile explanation is less likely since disabling these is a less common attacker move, but it still removes a layer of coverage.\n\nPLAN — (1) Cheapest, most decisive check first: query AppLocker policy with elevated rights to resolve \"no policy\" vs \"can't read it\" — this refutes or confirms the worst-case hypothesis. (2) Containment: if a policy is found to exist, immediately set AppIDSvc to Automatic/Running and investigate why it was stopped (event log). (3) Cleanup/hardening: build or restore an AppLocker/usermode-WDAC policy (audit first, then enforce), and consider enabling Smart App Control, since right now there is no usermode control layer active at all.\n\n```json\n{\n  \"status\": \"Critical\",\n  \"headline\": \"No effective usermode application control: AppLocker service stopped, no rule collections returned, WDAC enforces kernel-mode only, Smart App Control off\",\n  \"findings\": [\n    \"No AppLocker rule collections were returned in the output; it cannot be determined from this evidence alone whether this means no policy is applied or the policy is not readable at this privilege level - both remain possible.\",\n    \"AppIDSvc (Application Identity Service) Status is 'Stopped' with StartType 'Manual' - without this service running, any AppLocker policy, even if configured, enforces nothing.\",\n    \"WDAC CodeIntegrityPolicyEnforcementStatus is '2' (kernel-mode code integrity enforced) but UsermodeCodeIntegrityPolicyEnforcementStatus is '0' (usermode code integrity not enforced) - only driver/kernel-level integrity is protected, not usermode applications.\",\n    \"Smart App Control VerifiedAndReputablePolicyState is '0', indicating Smart App Control is off and providing no reputation-based execution control.\"\n  ],\n  \"recommendedActions\": [\n    \"Re-run policy query with elevated/SYSTEM privileges (Get-AppLockerPolicy -Effective -Xml, gpresult /h) to determine definitively whether no AppLocker policy exists or it is merely unreadable at the current privilege level - knowledge: this distinguishes 'no policy' from 'visibility gap' per diagnostic requirements.\",\n    \"Set AppIDSvc StartType to Automatic and start the service immediately; any configured AppLocker policy is non-functional while it is Stopped - knowledge: maps to MITRE ATT&CK T1562.001 (Impair Defenses: Disable or Modify Tools).\",\n    \"Review Service Control Manager event log (Event IDs 7036/7040) for AppIDSvc to check whether it was recently and unexpectedly stopped, which would indicate tampering rather than default inactivity.\",\n    \"If an AppLocker policy is later found to exist, check each rule collection's EnforcementMode and rule count - a collection with zero rules while others are set to Enabled causes an implicit deny for that file type and is a likely outage source.\",\n    \"Deploy or restore a usermode WDAC policy or AppLocker policy (start in Audit mode, then move to Enforced) to close the usermode code-integrity gap - current status '2'/'0' means only kernel-mode integrity is protected.\",\n    \"Evaluate enabling Smart App Control (requires a clean/eligible OS install state) as an additional usermode control layer, currently reported Off (state 0).\"\n  ]\n}\n```",
+      "LatencyMs": 46705,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9749999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "293250a21c4cd84374d60e10ee05e86d74c51305e102ca05b2b4ae970571febf",
+    "Status": "Critical",
+    "Headline": "No effective usermode application control: AppLocker service stopped, no rule collections returned, WDAC enforces kernel-mode only, Smart App Control off",
+    "Findings": [
+      "\uD83D\uDD34 No AppLocker rule collections were returned in the output; it cannot be determined from this evidence alone whether this means no policy is applied or the policy is not readable at this privilege level - both remain possible.",
+      "\uD83D\uDD34 AppIDSvc (Application Identity Service) Status is 'Stopped' with StartType 'Manual' - without this service running, any AppLocker policy, even if configured, enforces nothing.",
+      "\uD83D\uDD34 WDAC CodeIntegrityPolicyEnforcementStatus is '2' (kernel-mode code integrity enforced) but UsermodeCodeIntegrityPolicyEnforcementStatus is '0' (usermode code integrity not enforced) - only driver/kernel-level integrity is protected, not usermode applications.",
+      "\uD83D\uDD34 Smart App Control VerifiedAndReputablePolicyState is '0', indicating Smart App Control is off and providing no reputation-based execution control."
+    ],
+    "RecommendedActions": [
+      "Re-run policy query with elevated/SYSTEM privileges (Get-AppLockerPolicy -Effective -Xml, gpresult /h) to determine definitively whether no AppLocker policy exists or it is merely unreadable at the current privilege level - knowledge: this distinguishes 'no policy' from 'visibility gap' per diagnostic requirements.",
+      "Set AppIDSvc StartType to Automatic and start the service immediately; any configured AppLocker policy is non-functional while it is Stopped - knowledge: maps to MITRE ATT&CK T1562.001 (Impair Defenses: Disable or Modify Tools).",
+      "Review Service Control Manager event log (Event IDs 7036/7040) for AppIDSvc to check whether it was recently and unexpectedly stopped, which would indicate tampering rather than default inactivity.",
+      "If an AppLocker policy is later found to exist, check each rule collection's EnforcementMode and rule count - a collection with zero rules while others are set to Enabled causes an implicit deny for that file type and is a likely outage source.",
+      "Deploy or restore a usermode WDAC policy or AppLocker policy (start in Audit mode, then move to Enforced) to close the usermode code-integrity gap - current status '2'/'0' means only kernel-mode integrity is protected.",
+      "Evaluate enabling Smart App Control (requires a clean/eligible OS install state) as an additional usermode control layer, currently reported Off (state 0)."
+    ],
+    "Grounded": 0,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 4,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

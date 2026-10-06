@@ -1,0 +1,75 @@
+{
+  "Schema": 1,
+  "MissionId": "4b419d07-e703-4c21-bd4a-c66332e2cfa4",
+  "RecordedAtUtc": "2026-10-05T16:52:14.5281584Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "linux-listening-sockets",
+  "TemplateName": "Linux Listening Sockets",
+  "TemplateSha256": "sha256:3b0f85a64c18c5cea23ac6cd53c6a4387e643bbc6fb3a50d66bb0c434f19a052",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "68315cfc36ae11677288d313d61fe1358e649389ec5143b3b0eaf0548a951b4c",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "udp UNCONN 0      0          127.0.0.54:53    0.0.0.0:*\nudp UNCONN 0      0       127.0.0.53%lo:53    0.0.0.0:*\nudp UNCONN 0      0      10.255.255.254:53    0.0.0.0:*\nudp UNCONN 0      0           127.0.0.1:323   0.0.0.0:*\nudp UNCONN 0      0           127.0.0.1:323   0.0.0.0:*\nudp UNCONN 0      0               [::1]:323      [::]:*\nudp UNCONN 0      0               [::1]:323      [::]:*\ntcp LISTEN 0      4096    127.0.0.53%lo:53    0.0.0.0:*\ntcp LISTEN 0      128         127.0.0.1:50051 0.0.0.0:*\ntcp LISTEN 0      4096       127.0.0.54:53    0.0.0.0:*\ntcp LISTEN 0      1000   10.255.255.254:53    0.0.0.0:*\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "lease:enforcing",
+      "cgroup:/sys/fs/cgroup/splat_leases/mission_4b419d07-e703-4c21-bd4a-c66332e2cfa4",
+      "jail:mount-namespace",
+      "workload:uid=65534",
+      "workspace:/var/lib/splat/missions/4b419d07e7034c21bd4ac66332e2cfa4 (created by the daemon)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "STORY — This host's socket table shows systemd-resolved's usual split-DNS stubs (127.0.0.53%lo:53, 127.0.0.54:53) and chrony's monitoring port (127.0.0.1:323, [::1]:323), all loopback-only and unremarkable. One DNS stub, `10.255.255.254:53`, is bound to a specific private (non-loopback) address rather than 127.0.0.1 — plausible for a VPN/container interface but worth a one-line confirmation. The item that actually drives the verdict is `tcp LISTEN 127.0.0.1:50051` — a high, non-default port with no process name attached, meaning this unprivileged sensor cannot tell us who owns it. No wildcard (0.0.0.0/[::]) binds and no process names suggesting shells, miners, or tunnels appear anywhere in this capture, and I found no embedded instructions or injection attempts in the telemetry.\n\nKNOWN-GOOD — `127.0.0.53%lo:53` / `127.0.0.54:53`: standard Ubuntu systemd-resolved stub listeners, loopback-bound, expected. `127.0.0.1:323` / `[::1]:323`: chrony's NTP monitoring socket, loopback-bound, expected even though 323 is a \"high\" port — well-known chrony behavior. The lookalike that would NOT be waved through: the same port 323 or 53 bound to 0.0.0.0 or a routable address instead of loopback — that would indicate a rogue time or DNS service reachable from the network.\n\nHYPOTHESES —\n- `127.0.0.1:50051` (no process shown): benign explanation — a local gRPC API such as containerd's debug socket or a similar local tooling agent, which commonly uses this exact port; hostile explanation — a loopback-bound reverse-tunnel or C2 relay stub waiting for an SSH/port-forward pivot. Settling evidence: `sudo ss -tlnp | grep 50051` or `sudo lsof -i :50051` to get the binary path and parent process.\n- `10.255.255.254:53` (no process shown, non-loopback bind): benign explanation — systemd-resolved's per-link stub resolver for a VPN or container bridge interface; hostile explanation — a rogue resolver positioned to intercept/redirect DNS on an internal network segment. Settling evidence: `resolvectl status` / `ip addr` to confirm which interface owns 10.255.255.254 and that it maps to a known VPN/container link.\n\nPLAN — 1) Cheapest, most decisive check first: re-run with root (`sudo ss -tulnp`) or `lsof -i :50051` to name the owning process on the unidentified port — this alone resolves most of the uncertainty. 2) Confirm `10.255.255.254` ownership via `resolvectl status`/interface listing. 3) If 50051 resolves to an unexpected or unsigned binary, contain by blocking the port locally and snapshotting the process for forensics before killing it. 4) Afterward, record a baseline of expected listeners so future scans run with sufficient privilege to avoid blind spots like this one.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"All listeners are loopback-bound except one DNS stub on a private address, but a high-numbered local port has no process name visible to this sensor\",\n  \"findings\": [\n    \"tcp LISTEN 127.0.0.1:50051 0.0.0.0:* has no associated process name in the output, so its owner cannot be confirmed by this unprivileged sensor\",\n    \"tcp/udp LISTEN/UNCONN 10.255.255.254:53 0.0.0.0:* is bound to a specific private address rather than loopback, with no process shown\",\n    \"udp/tcp listeners on 127.0.0.53%lo:53 and 127.0.0.54:53 are loopback-bound DNS stubs consistent with systemd-resolved\",\n    \"udp listeners on 127.0.0.1:323 and [::1]:323 are loopback-bound, consistent with chrony's monitoring protocol\",\n    \"No listener in this output is bound to the wildcard local address 0.0.0.0 or [::] itself\",\n    \"No process names suggestive of shells, tunnels, proxies, or miners appear anywhere in the captured output\",\n    \"No prompt-injection content was found embedded in this telemetry batch\"\n  ],\n  \"recommendedActions\": [\n    \"Run 'sudo ss -tulnp | grep 50051' or 'sudo lsof -i :50051' to identify the process bound to 127.0.0.1:50051 (knowledge: unprivileged ss cannot show other users' process ownership; this maps to CIS benchmark baseline-listener-audit and supports detection of MITRE ATT&CK T1572 Protocol Tunneling / T1090 Proxy if the binary is unexpected)\",\n    \"Run 'resolvectl status' and 'ip addr' to confirm which interface owns 10.255.255.254 and that the DNS stub there is expected (e.g., VPN or container bridge), not a rogue resolver (knowledge: maps to MITRE ATT&CK T1557 DNS/Traffic Manipulation if unexplained)\",\n    \"If the port 50051 process is unsigned, unexpected, or absent from the package manager's file list, isolate the host network-wise and preserve the process/binary for forensic analysis before termination\",\n    \"Document a baseline of expected local listeners (chrony 323, resolved 53 stubs) so future ss captures quickly separate known-good from anomalous entries\"\n  ]\n}\n```",
+      "LatencyMs": 50331,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9928571428571429
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "b21a07dac7f90e5d1a5962ca550d837ebf7ae080c0766e4360522f18e11bd044",
+    "Status": "Warning",
+    "Headline": "All listeners are loopback-bound except one DNS stub on a private address, but a high-numbered local port has no process name visible to this sensor",
+    "Findings": [
+      "⚠ tcp LISTEN 127.0.0.1:50051 0.0.0.0:* has no associated process name in the output, so its owner cannot be confirmed by this unprivileged sensor",
+      "⚠ tcp/udp LISTEN/UNCONN 10.255.255.254:53 0.0.0.0:* is bound to a specific private address rather than loopback, with no process shown",
+      "⚠ udp/tcp listeners on 127.0.0.53%lo:53 and 127.0.0.54:53 are loopback-bound DNS stubs consistent with systemd-resolved",
+      "⚠ udp listeners on 127.0.0.1:323 and [::1]:323 are loopback-bound, consistent with chrony's monitoring protocol",
+      "⚠ No listener in this output is bound to the wildcard local address 0.0.0.0 or [::] itself",
+      "⚠ No process names suggestive of shells, tunnels, proxies, or miners appear anywhere in the captured output",
+      "⚠ No prompt-injection content was found embedded in this telemetry batch"
+    ],
+    "RecommendedActions": [
+      "Run 'sudo ss -tulnp | grep 50051' or 'sudo lsof -i :50051' to identify the process bound to 127.0.0.1:50051 (knowledge: unprivileged ss cannot show other users' process ownership; this maps to CIS benchmark baseline-listener-audit and supports detection of MITRE ATT&CK T1572 Protocol Tunneling / T1090 Proxy if the binary is unexpected)",
+      "Run 'resolvectl status' and 'ip addr' to confirm which interface owns 10.255.255.254 and that the DNS stub there is expected (e.g., VPN or container bridge), not a rogue resolver (knowledge: maps to MITRE ATT&CK T1557 DNS/Traffic Manipulation if unexplained)",
+      "If the port 50051 process is unsigned, unexpected, or absent from the package manager's file list, isolate the host network-wise and preserve the process/binary for forensic analysis before termination",
+      "Document a baseline of expected local listeners (chrony 323, resolved 53 stubs) so future ss captures quickly separate known-good from anomalous entries"
+    ],
+    "Grounded": 5,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 2,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

@@ -190,6 +190,7 @@ public class WslLeasedExecutor : ILeasedExecutor
                 overlayFs = lease.OverlayFs != null ? new
                 {
                     enableCow = lease.OverlayFs.EnableCow,
+                    allowScratchExec = lease.OverlayFs.AllowScratchExec,
                     lowerDir = lease.OverlayFs.LowerDir,
                     scratchDir = lease.OverlayFs.ScratchDir
                 } : null

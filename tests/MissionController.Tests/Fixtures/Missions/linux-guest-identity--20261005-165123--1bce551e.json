@@ -1,0 +1,68 @@
+{
+  "Schema": 1,
+  "MissionId": "1bce551e-0516-40f4-8364-ec3294757e10",
+  "RecordedAtUtc": "2026-10-05T16:51:23.8108465Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "linux-guest-identity",
+  "TemplateName": "Linux Guest Identity & Load",
+  "TemplateSha256": "sha256:faa34827f3dcfdc3a0cb8d5f7bfa5bcd6603f3dac9d79c19fbede0f86561d048",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "8ad4d42221085e14bc164c6306a5b24fb7b31e2c1d0d7985e98007182b3b8b15",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "PRETTY_NAME=\"Ubuntu 26.04 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"26.04\"\nVERSION=\"26.04 (Resolute Raccoon)\"\nVERSION_CODENAME=resolute\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=resolute\nLOGO=ubuntu-logo\nLinux version 6.18.33.2-microsoft-standard-WSL2 (root@f1bbfb02316b) (gcc (GCC) 13.2.0, GNU ld (GNU Binutils) 2.41) #1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026\n73656.38 1176641.42\n0.00 0.04 0.07 1/504 8564\nMemTotal:        7896732 kB\nMemFree:         6413388 kB\nMemAvailable:    6854228 kB\nBuffers:            5184 kB\nCached:           578896 kB\nSwapCached:            0 kB\nActive:           108828 kB\nInactive:         855120 kB\nActive(anon):      18832 kB\nInactive(anon):   411820 kB\nActive(file):      89996 kB\nInactive(file):   443300 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:       2097152 kB\nSwapFree:        2097152 kB\nDirty:               192 kB\nWriteback:             0 kB\nAnonPages:        380160 kB\nMapped:           382096 kB\nShmem:             50876 kB\nKReclaimable:      93920 kB\nSlab:             190936 kB\nSReclaimable:      93920 kB\nSUnreclaim:        97016 kB\nKernelStack:        8288 kB\nPageTables:        10656 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     6045516 kB\nCommitted_AS:    2742116 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       41244 kB\nVmallocChunk:          0 kB\nPercpu:             7808 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      128000 kB\nDirectMap2M:     5926912 kB\nDirectMap1G:    10485760 kB\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "lease:enforcing",
+      "cgroup:/sys/fs/cgroup/splat_leases/mission_1bce551e-0516-40f4-8364-ec3294757e10",
+      "jail:mount-namespace",
+      "workload:uid=65534",
+      "workspace:/var/lib/splat/missions/1bce551e051640f48364ec3294757e10 (created by the daemon)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "**Analysis**\n\nThis host is running Ubuntu 26.04 LTS with kernel 6.18.33.2-microsoft-standard-WSL2, indicating it is a Windows Subsystem for Linux 2 environment. The system has been uptime for approximately 20.4 hours (73656.38 seconds). With one CPU visible (inferred from load context showing \"1/504\"), the one-minute load of 0.00 is well below saturation. Memory is healthy: 6.8 GB of 7.9 GB is available, representing 86.8% of total capacity—well above concerning thresholds. No critical resource exhaustion is present.\n\n```json\n{\n  \"status\": \"Healthy\",\n  \"headline\": \"Ubuntu 26.04 LTS WSL2 host with adequate memory and low load\",\n  \"findings\": [\n    \"Distribution: Ubuntu 26.04 LTS (Resolute Raccoon), kernel 6.18.33.2-microsoft-standard-WSL2\",\n    \"Uptime: 20.4 hours (73656.38 seconds)\",\n    \"Load averages: 0.00, 0.04, 0.07 against 1 CPU (inferred from '1/504' task count), well below saturation\",\n    \"Memory: MemTotal 7896732 kB, MemAvailable 6854228 kB (86.8% available)\",\n    \"No swap pressure: SwapFree equals SwapTotal at 2097152 kB\"\n  ]\n}\n```",
+      "LatencyMs": 4578,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 1
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "35800b52a8eb1d6905820e605330fb5e2e1fe3750613b4c1ccde1abfe857cbe9",
+    "Status": "Healthy",
+    "Headline": "Ubuntu 26.04 LTS WSL2 host with adequate memory and low load",
+    "Findings": [
+      "✓ Distribution: Ubuntu 26.04 LTS (Resolute Raccoon), kernel 6.18.33.2-microsoft-standard-WSL2",
+      "✓ Uptime: 20.4 hours (73656.38 seconds)",
+      "✓ Load averages: 0.00, 0.04, 0.07 against 1 CPU (inferred from '1/504' task count), well below saturation",
+      "✓ Memory: MemTotal 7896732 kB, MemAvailable 6854228 kB (86.8% available)",
+      "✓ No swap pressure: SwapFree equals SwapTotal at 2097152 kB"
+    ],
+    "RecommendedActions": [],
+    "Grounded": 5,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 0,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

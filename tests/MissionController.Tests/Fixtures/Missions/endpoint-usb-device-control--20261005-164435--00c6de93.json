@@ -1,0 +1,75 @@
+{
+  "Schema": 1,
+  "MissionId": "00c6de93-d90f-478a-88a6-e0d087e8ac3c",
+  "RecordedAtUtc": "2026-10-05T16:44:35.7242134Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "endpoint-usb-device-control",
+  "TemplateName": "Removable Media History & Device Control Policy",
+  "TemplateSha256": "sha256:ecc4cc2381d3e7fbb626c42a720ea132a1479cabdad99ca4b73aab9f8f8b97dc",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "e444902933f816821c91c124d8b8a40e4d1345ec86197104baddb02aa060aceb",
+  "Sensor": {
+    "ExitCode": 1,
+    "TimedOut": false,
+    "Stdout": "--- PRESENT STORAGE / USB DEVICES ---\r\n\r\nStatus Class     FriendlyName                                                    InstanceId                            \r\n------ -----     ------------                                                    ----------                            \r\nOK     USB       USB Composite Device                                            USB\\VID_25A7&PID_FA23\\1&1AA1A1A1&1&1  \r\nOK     USB       USB Root Hub (USB 3.0)                                          USB\\ROOT_HUB30\\1&111A11A1&1&1         \r\nOK     USB       Intel(R) USB 3.20 eXtensible Host Controller - 1.20 (Microsoft) PCI\\VEN_8086&DEV_A71E&SUBSYS_383C17...\r\nOK     USB       USB4 Root Router (1.0)                                          USB4\\ROOT_DEVICE_ROUTER&VID_8086&PI...\r\nOK     USB       USB Root Hub (USB 3.0)                                          USB\\ROOT_HUB30\\1&1A111A1A&1&1         \r\nOK     USB       Intel(R) USB 3.10 eXtensible Host Controller - 1.20 (Microsoft) PCI\\VEN_8086&DEV_51ED&SUBSYS_386F17...\r\nOK     USB       USB Composite Device                                            USB\\VID_5986&PID_1198\\1111            \r\nOK     DiskDrive WD PC SN5000S SDEPMSJ-512G-1101                                 SCSI\\DISK&VEN_NVME&PROD_WD_PC_SN500...\r\nOK     USB       USB4(TM) Host Router (Microsoft)                                PCI\\VEN_8086&DEV_A73E&SUBSYS_727080...\r\n\r\n\r\n--- USBSTOR HISTORICAL ENUMERATION ---\r\nDisk&Ven_PNY&Prod_USB_3.2.1_FD&Rev_PMAP\r\nDisk&Ven_VendorCo&Prod_ProductCode&Rev_2.00\r\n--- REMOVABLE STORAGE POLICY ---\r\n--- DEFENDER DEVICE CONTROL ---\r\n\r\n\r\nEnableDeviceControl             : \r\nDeviceControlDefaultEnforcement : \r\n\r\n\r\n\r\n--- BITLOCKER TO GO POLICY ---\r\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_00c6de93d90f478a88a6e0d087e8ac3c",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**STORY:** This endpoint's internal storage is a fixed NVMe drive (WD PC SN5000S); none of the other enumerated devices are removable mass storage today. USBSTOR history, however, shows two mass-storage identities that were connected at some prior point: a \"PNY USB 3.2.1 FD\" flash drive and a second entry with placeholder-looking vendor/product strings (\"VendorCo\"/\"ProductCode\"). Decisively, the Removable Storage Policy, Defender Device Control (`EnableDeviceControl`, `DeviceControlDefaultEnforcement`), and BitLocker To Go Policy sections are all blank — meaning no write-blocking, execution-blocking, or encryption-mandate is configured for removable media on this host, so if either historical drive (or a future one) holds regulated data, there is no technical control preventing free read/write or unencrypted use.\n\n**KNOWN-GOOD:** USB Root Hubs, the Intel eXtensible Host Controllers, and the USB4 Root Router are standard Windows-enumerated controller infrastructure, not devices — expected on any modern laptop. USB Composite Device `VID_5986&PID_1198` maps to Bison Electronics, a common integrated-webcam vendor — expected as a built-in peripheral. `WD PC SN5000S` under `DiskDrive` is the OEM internal boot/storage NVMe — expected as fixed, not removable, storage. A lookalike that would **not** be waved through: a DiskDrive-class entry with an unfamiliar VID/PID and placeholder strings — which is exactly the shape of the second USBSTOR entry below.\n\n**HYPOTHESES:**\n- *PNY USB 3.2.1 FD flash drive* — benign: ordinary personal/work file transfer; hostile: historical exfiltration vector for regulated data. Settling evidence: USBSTOR key LastWrite time and matching Event ID 21111/10000 mount events cross-referenced with any DLP/file-copy logs for that time window.\n- *\"Disk&Ven_VendorCo&Prod_ProductCode&Rev_2.00\"* — benign: a cheap/generic flash drive or card reader with an unpopulated firmware descriptor (this pattern is known from some low-cost OEM controllers); hostile: a spoofed/crafted USB descriptor consistent with a BadUSB-style implant. Settling evidence: resolve the actual VID/PID via `Get-PnpDevice`/`usbview` against the USB-IF vendor registry — if it doesn't resolve to a real vendor, treat as suspicious.\n- *Blank Device Control / Removable Storage / BitLocker To Go settings* — benign: policy simply never deployed to this image/role; hostile: policy was deliberately disabled to permit exfiltration. Settling evidence: GPO deployment history / Intune-Defender console assignment record and registry key modification timestamps under the DeviceControl path.\n\n**PLAN:** 1) Cheap refutation first — run `Get-PnpDevice -Class DiskDrive,USB -PresentOnly:$false | fl *` and inspect the USBSTOR registry key timestamps plus VID/PID vendor lookup for the \"VendorCo\" entry, to rule out BadUSB cheaply before anything else. 2) Containment — if that VID/PID doesn't resolve to a legitimate vendor, isolate the host and pull `setupapi.dev.log` / Event IDs 2003/2010 for forensic USB history. 3) Cleanup — independent of the above, close the standing exfiltration path: enable Defender Device Control with Deny_Write/Deny_Execute enforcement, configure Removable Storage Access Policy (`RDVDenyWriteAccess`), and mandate BitLocker To Go for any removable media touching regulated data, scoped to the host's actual role.\n\nNo instructions-to-the-analyst or prompt-injection content was found embedded in this telemetry; it is pure device-inventory text.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"USB write/execute controls are unconfigured while historical USBSTOR records show removable media, including one entry with anomalous placeholder vendor strings\",\n  \"findings\": [\n    \"USBSTOR historical enumeration lists 'Disk&Ven_PNY&Prod_USB_3.2.1_FD&Rev_PMAP', a PNY USB flash drive that was connected to this host at some point but is not in the current present-device list\",\n    \"USBSTOR historical enumeration also lists 'Disk&Ven_VendorCo&Prod_ProductCode&Rev_2.00' — vendor and product strings that read as generic placeholder text rather than a real manufacturer identity, warranting VID/PID verification\",\n    \"Defender Device Control values are blank: 'EnableDeviceControl :' and 'DeviceControlDefaultEnforcement :' show no configured state, meaning no enforcement policy is active\",\n    \"The 'REMOVABLE STORAGE POLICY' and 'BITLOCKER TO GO POLICY' sections returned no data, indicating no write-restriction or mandatory-encryption policy is present for removable media on this endpoint\",\n    \"Only one DiskDrive-class device is currently present, 'WD PC SN5000S SDEPMSJ-512G-1101', an internal NVMe disk, not removable media — no mass-storage USB device is attached right now\"\n  ],\n  \"recommendedActions\": [\n    \"Resolve the VID/PID behind the 'VendorCo/ProductCode' USBSTOR entry via Get-PnpDevice/usbview against the USB-IF registry to confirm it is a legitimate device and not a spoofed descriptor (knowledge: BadUSB pattern, MITRE ATT&CK T1200/T1091)\",\n    \"Correlate the PNY flash drive's USBSTOR LastWrite timestamp and Event ID 21111/10000 mount events with DLP/file-access logs to determine what data, if any, was copied to it\",\n    \"Configure and enforce Defender Device Control (or Removable Storage Access Policy GPO) with Deny_Write and Deny_Execute for unauthorized removable storage, i.e. set RDVDenyWriteAccess=1 (knowledge: CIS Benchmark 18.x Removable Storage controls)\",\n    \"Require BitLocker To Go encryption enforcement for any removable media permitted to hold regulated data, scoped to this host's role\",\n    \"Verify via GPO/Intune deployment history whether a device-control policy was ever assigned and removed from this machine, to rule out tampering rather than simple non-deployment\"\n  ]\n}\n```",
+      "LatencyMs": 48042,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9849999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "c2ec0275b8a5a7c4b1e4f54e52e82dfba83b7d247ec7893cb12bd4e82485c6e9",
+    "Status": "Warning",
+    "Headline": "USB write/execute controls are unconfigured while historical USBSTOR records show removable media, including one entry with anomalous placeholder vendor strings",
+    "Findings": [
+      "⚠ USBSTOR historical enumeration lists 'Disk&Ven_PNY&Prod_USB_3.2.1_FD&Rev_PMAP', a PNY USB flash drive that was connected to this host at some point but is not in the current present-device list",
+      "⚠ USBSTOR historical enumeration also lists 'Disk&Ven_VendorCo&Prod_ProductCode&Rev_2.00' — vendor and product strings that read as generic placeholder text rather than a real manufacturer identity, warranting VID/PID verification",
+      "⚠ Defender Device Control values are blank: 'EnableDeviceControl :' and 'DeviceControlDefaultEnforcement :' show no configured state, meaning no enforcement policy is active",
+      "⚠ The 'REMOVABLE STORAGE POLICY' and 'BITLOCKER TO GO POLICY' sections returned no data, indicating no write-restriction or mandatory-encryption policy is present for removable media on this endpoint",
+      "⚠ Only one DiskDrive-class device is currently present, 'WD PC SN5000S SDEPMSJ-512G-1101', an internal NVMe disk, not removable media — no mass-storage USB device is attached right now"
+    ],
+    "RecommendedActions": [
+      "Resolve the VID/PID behind the 'VendorCo/ProductCode' USBSTOR entry via Get-PnpDevice/usbview against the USB-IF registry to confirm it is a legitimate device and not a spoofed descriptor (knowledge: BadUSB pattern, MITRE ATT&CK T1200/T1091)",
+      "Correlate the PNY flash drive's USBSTOR LastWrite timestamp and Event ID 21111/10000 mount events with DLP/file-access logs to determine what data, if any, was copied to it",
+      "Configure and enforce Defender Device Control (or Removable Storage Access Policy GPO) with Deny_Write and Deny_Execute for unauthorized removable storage, i.e. set RDVDenyWriteAccess=1 (knowledge: CIS Benchmark 18.x Removable Storage controls)",
+      "Require BitLocker To Go encryption enforcement for any removable media permitted to hold regulated data, scoped to this host's role",
+      "Verify via GPO/Intune deployment history whether a device-control policy was ever assigned and removed from this machine, to rule out tampering rather than simple non-deployment"
+    ],
+    "Grounded": 2,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 3,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}

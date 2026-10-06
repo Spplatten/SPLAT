@@ -1,0 +1,79 @@
+{
+  "Schema": 1,
+  "MissionId": "fdecf425-8631-4f21-bf17-0a729bd51d60",
+  "RecordedAtUtc": "2026-10-05T17:06:05.2602851Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "Note": "Live sequential catalog recording on 2026-10-05, replayed before promotion. Machine/account names, profile and Wi-Fi identities, host device identifiers, account SID prefixes and hardware addresses were replaced consistently with synthetic values of the same width in sensor and answers; expectations re-derived after redaction. Template and historical prompt hashes are unchanged.",
+  "TemplateId": "sysops-ad-dc-health",
+  "TemplateName": "AD / Domain Controller Locator & DNS SRV Health",
+  "TemplateSha256": "sha256:292bfbe457e1f1f1beee8612ec23890ab44013d6ed17505154d0bc41487a3495",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "a7818c04c90243d401e9aa5a1246a31ae79b253b61922420719369654fdaa05b",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "--- SECURE CHANNEL --- \r\n--- LDAP SRV RECORDS --- \r\nServer:  Unit\r\nAddress:  192.168.254.254\r\n\r\n--- KERBEROS SRV RECORDS --- \r\nServer:  Unit\r\nAddress:  192.168.254.254\r\n\r\n--- SITE-AWARE DC LIST --- \r\nThe command completed successfully\r\n",
+    "Stderr": "Getting DC name failed: Status = 1355 0x54b ERROR_NO_SUCH_DOMAIN\r\nI_NetLogonControl failed: Status = 1722 0x6ba RPC_S_SERVER_UNAVAILABLE\r\n*** Unit can't find _ldap._tcp.dc._msdcs.corp.contoso.com: Non-existent domain\r\r\n*** Unit can't find _kerberos._tcp.dc._msdcs.corp.contoso.com: Non-existent domain\r\r\nCannot find DC to get DC list from.Status = 1355 0x54b ERROR_NO_SUCH_DOMAIN\r\n",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_fdecf42586314f21bf170a729bd51d60",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**STORY:** This host ran nltest DC-location and SRV-lookup diagnostics against `corp.contoso.com` and came back empty-handed on every front: the DC locator returned `Status = 1355 0x54b ERROR_NO_SUCH_DOMAIN`, both `_ldap._tcp.dc._msdcs.corp.contoso.com` and `_kerberos._tcp.dc._msdcs.corp.contoso.com` resolved as \"Non-existent domain,\" and the logon-control call failed with `Status = 1722 0x6ba RPC_S_SERVER_UNAVAILABLE`. The three decisive items are: (1) the dclist banner claims \"The command completed successfully\" yet lists zero DCs — a self-contradiction indicating the summary line is misleading or the output was truncated before any DC entries printed; (2) the DNS resolver identified itself as `Server: Unit` at `Address: 192.168.254.254`, an unusual, non-FQDN resolver identity that doesn't match a typical internal DC/DNS naming pattern; (3) the secure-channel section is completely blank — no `nltest /sc_query` result was captured at all, so trust health cannot be confirmed either way. Taken together this looks like total loss of domain-controller locatability rather than a simple cross-site referral or stale-record issue, because there is no DC name to even check SRV consistency against.\n\n**KNOWN-GOOD:** The `Server:`/`Address:` banner lines are the normal first two lines nslookup always prints — expected formatting, not inherently suspicious. The error codes `1355` and `1722` are standard, unmodified Microsoft error text — expected to appear verbatim when DC location fails, not evidence of tampering by themselves. The lookalike that would **not** be waved through: a DNS server identifying as `Unit` at `192.168.254.254` — a legitimate internal DNS/DC resolver should present a corporate FQDN (e.g., `dc01.corp.contoso.com`) and an address in the known internal range; this one should be verified, not assumed benign.\n\n**HYPOTHESES:**\n- *Dead/misdirected DNS resolver* — Benign: host lost VPN/LAN connectivity and fell back to a local router's DNS (`192.168.254.254`) which obviously can't resolve the AD zone. Hostile: DHCP/DNS hijack redirecting the host to an attacker resolver to blind it to the real domain. Settles with: `ipconfig /all` on the host compared against the known corporate DNS server IPs.\n- *_msdcs zone genuinely missing SRV records (scavenging/failed dynamic registration)* — Benign: aging/scavenging removed stale records, or a real outage. Hostile: records deliberately deleted to isolate the host pre-attack. Settles with: querying the *real* corporate DNS server directly for the same SRV names from a known-healthy host.\n- *Secure channel status suppressed* — Benign: the collection tool simply didn't capture `/sc_query` output this run. Hostile: broken secure channel (`1787`) deliberately hidden/omitted. Settles with: re-running `nltest /sc_query:corp.contoso.com` and capturing full stdout.\n\n**PLAN:** 1) Cheapest first — `ipconfig /all` on the affected host to see what DNS servers it's actually configured with; this immediately refutes or confirms the \"wrong resolver\" hypothesis. 2) From a known-healthy machine, query the corporate DNS server directly for `_ldap._tcp.dc._msdcs.corp.contoso.com` and `_kerberos._tcp.dc._msdcs.corp.contoso.com` to determine if the problem is server-side (real data loss) or client-side (bad resolver only). 3) If client-side, contain by correcting DNS/network config (or isolating the host if DHCP/DNS hijack is confirmed) before trusting any further output from it. 4) Once a DC is reachable, re-run `nltest /dsgetdc:corp.contoso.com`, `nltest /dsgetsite`, and `nltest /sc_query:corp.contoso.com` to get real site/secure-channel data. 5) Remediate per actual code found — `1787` → `nltest /sc_reset:corp.contoso.com` or `Reset-ComputerMachinePassword`; missing SRV records → `ipconfig /registerdns` plus `nltest /dsregdns` on the real DC.\n\nNote: no instruction-like text was embedded in this telemetry sample — only garbled diagnostic output — so no prompt-injection finding is raised here, but the empty secure-channel section is flagged as a data gap, not assumed malicious.\n\n```json\n{\n  \"status\": \"Critical\",\n  \"headline\": \"DC locator totally failed for corp.contoso.com (1355 ERROR_NO_SUCH_DOMAIN) with no SRV records found and secure-channel status unverifiable\",\n  \"findings\": [\n    \"DC name resolution failed: 'Getting DC name failed: Status = 1355 0x54b ERROR_NO_SUCH_DOMAIN'\",\n    \"Logon server control call failed: 'I_NetLogonControl failed: Status = 1722 0x6ba RPC_S_SERVER_UNAVAILABLE'\",\n    \"LDAP SRV record lookup failed: '*** Unit can't find _ldap._tcp.dc._msdcs.corp.contoso.com: Non-existent domain'\",\n    \"Kerberos SRV record lookup failed: '*** Unit can't find _kerberos._tcp.dc._msdcs.corp.contoso.com: Non-existent domain'\",\n    \"DC list retrieval failed despite a success banner: ''The command completed successfully' is immediately followed by 'Cannot find DC to get DC list from. Status = 1355 0x54b ERROR_NO_SUCH_DOMAIN'\",\n    \"Resolver used for the SRV queries identifies as 'Server: Unit' at 'Address: 192.168.254.254', an unusual, non-FQDN DNS server identity that does not match a typical internal DC/DNS naming pattern\",\n    \"The SECURE CHANNEL section of the output contains no data at all, so secure-channel health (nltest /sc_query result) cannot be confirmed from this output\"\n  ],\n  \"recommendedActions\": [\n    \"Run 'ipconfig /all' on the host to confirm the actual configured DNS server addresses and compare against known corporate DNS/DC IPs (knowledge: rules out DHCP/DNS hijack vs. simple misconfiguration)\",\n    \"From a known-healthy host, query the real corporate DNS server for '_ldap._tcp.dc._msdcs.corp.contoso.com' and '_kerberos._tcp.dc._msdcs.corp.contoso.com' to determine whether the records are genuinely missing (DNS scavenging/zone failure) or only unreachable from this client\",\n    \"Re-run 'nltest /sc_query:corp.contoso.com' on the host and capture full output, since the current capture is empty and secure-channel status (code 1787) cannot otherwise be ruled in or out\",\n    \"Once a DC is reachable, re-run 'nltest /dsgetdc:corp.contoso.com' and 'nltest /dsgetsite' to confirm site-aware DC assignment and check for a cross-site referral (subnet-to-site mapping gap)\",\n    \"If the secure channel is confirmed broken, remediate with 'nltest /sc_reset:corp.contoso.com' or 'Reset-ComputerMachinePassword -Credential <domain admin>'\",\n    \"If SRV records are confirmed missing on the authoritative DNS server, force re-registration with 'ipconfig /registerdns' followed by 'nltest /dsregdns' on the DC (knowledge: maps to CIS benchmark item on DNS dynamic registration and MITRE ATT&CK T1562 defense evasion via service disruption if deletion appears deliberate)\",\n    \"Investigate why '192.168.254.254'/'Unit' is being returned as the DNS resolver for this host before trusting any further diagnostics from it\"\n  ]\n}\n```",
+      "LatencyMs": 57663,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9892857142857143
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "b8f9f6287efe57b4f2f9377deab6f10e861b2292517d0c493eb85cf34ba16c5d",
+    "Status": "Critical",
+    "Headline": "DC locator totally failed for corp.contoso.com (1355 ERROR_NO_SUCH_DOMAIN) with no SRV records found and secure-channel status unverifiable",
+    "Findings": [
+      "\uD83D\uDD34 DC name resolution failed: 'Getting DC name failed: Status = 1355 0x54b ERROR_NO_SUCH_DOMAIN'",
+      "\uD83D\uDD34 Logon server control call failed: 'I_NetLogonControl failed: Status = 1722 0x6ba RPC_S_SERVER_UNAVAILABLE'",
+      "\uD83D\uDD34 LDAP SRV record lookup failed: '* Unit can't find _ldap._tcp.dc._msdcs.corp.contoso.com: Non-existent domain'",
+      "\uD83D\uDD34 Kerberos SRV record lookup failed: '* Unit can't find _kerberos._tcp.dc._msdcs.corp.contoso.com: Non-existent domain'",
+      "\uD83D\uDD34 DC list retrieval failed despite a success banner: ''The command completed successfully' is immediately followed by 'Cannot find DC to get DC list from. Status = 1355 0x54b ERROR_NO_SUCH_DOMAIN'",
+      "\uD83D\uDD34 Resolver used for the SRV queries identifies as 'Server: Unit' at 'Address: 192.168.254.254', an unusual, non-FQDN DNS server identity that does not match a typical internal DC/DNS naming pattern",
+      "\uD83D\uDD34 The SECURE CHANNEL section of the output contains no data at all, so secure-channel health (nltest /sc_query result) cannot be confirmed from this output"
+    ],
+    "RecommendedActions": [
+      "Run 'ipconfig /all' on the host to confirm the actual configured DNS server addresses and compare against known corporate DNS/DC IPs (knowledge: rules out DHCP/DNS hijack vs. simple misconfiguration)",
+      "From a known-healthy host, query the real corporate DNS server for '_ldap._tcp.dc._msdcs.corp.contoso.com' and '_kerberos._tcp.dc._msdcs.corp.contoso.com' to determine whether the records are genuinely missing (DNS scavenging/zone failure) or only unreachable from this client",
+      "Re-run 'nltest /sc_query:corp.contoso.com' on the host and capture full output, since the current capture is empty and secure-channel status (code 1787) cannot otherwise be ruled in or out",
+      "Once a DC is reachable, re-run 'nltest /dsgetdc:corp.contoso.com' and 'nltest /dsgetsite' to confirm site-aware DC assignment and check for a cross-site referral (subnet-to-site mapping gap)",
+      "If the secure channel is confirmed broken, remediate with 'nltest /sc_reset:corp.contoso.com' or 'Reset-ComputerMachinePassword -Credential <domain admin>'",
+      "If SRV records are confirmed missing on the authoritative DNS server, force re-registration with 'ipconfig /registerdns' followed by 'nltest /dsregdns' on the DC (knowledge: maps to CIS benchmark item on DNS dynamic registration and MITRE ATT&CK T1562 defense evasion via service disruption if deletion appears deliberate)",
+      "Investigate why '192.168.254.254'/'Unit' is being returned as the DNS resolver for this host before trusting any further diagnostics from it"
+    ],
+    "Grounded": 4,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 3,
+    "LedgerActions": [
+      "MISSION_INITIATED",
+      "TOOL_EXECUTION_COMPLETED",
+      "AI_MODEL_ENGAGED",
+      "CHECK_ESCALATE_EVALUATION",
+      "CHECK_ESCALATE_QUADRANT_PASSED",
+      "AI_ANALYSIS_COMPLETED",
+      "MISSION_RUN_FACTS"
+    ]
+  }
+}
