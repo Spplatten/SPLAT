@@ -354,6 +354,35 @@ def write_icon(emblem, path):
                     append_images=frames[:-1])
 
 
+INSTALLER = BRAND.parent / "packaging" / "installer-brand"
+# Inno Setup's own bitmap sizes: the first of each list is the 100% DPI size, the rest the scaled
+# variants it picks from at runtime. A single bitmap would be stretched by the wizard; these are
+# rendered at each size so the crystal keeps its edges on a 150% or 200% display.
+WIZARD_LARGE = [(164, 314), (192, 386), (246, 459), (273, 556), (328, 604)]
+WIZARD_SMALL = [(55, 58), (64, 68), (83, 80), (92, 97), (110, 106), (119, 123), (138, 140)]
+WIZARD_PANEL = (11, 18, 32)   # the left panel of the welcome and finished pages
+WIZARD_HEADER = (255, 255, 255)  # WizardStyle=modern draws the header white, so the small mark sits on it
+
+
+def flattened(art, size, backdrop, fill):
+    """BMP carries no alpha, so the art is composited onto the colour the wizard will show around it."""
+    canvas = Image.new("RGBA", size, backdrop + (255,))
+    canvas.alpha_composite(centred(art, size, fill=fill))
+    return canvas.convert("RGB")
+
+
+def write_wizard_bitmaps(lockup, emblem):
+    INSTALLER.mkdir(parents=True, exist_ok=True)
+    for w, h in WIZARD_LARGE:
+        path = INSTALLER / f"wizard-large-{w}x{h}.bmp"
+        flattened(lockup, (w, h), WIZARD_PANEL, fill=0.82).save(path, format="BMP")
+        print(f"  {path.name:<32} {w}x{h}  {path.stat().st_size / 1024:6.1f} KB")
+    for w, h in WIZARD_SMALL:
+        path = INSTALLER / f"wizard-small-{w}x{h}.bmp"
+        flattened(emblem, (w, h), WIZARD_HEADER, fill=0.9).save(path, format="BMP")
+        print(f"  {path.name:<32} {w}x{h}  {path.stat().st_size / 1024:6.1f} KB")
+
+
 def save(img, name):
     path = ASSETS / name
     img.save(path, optimize=True)
@@ -409,6 +438,11 @@ def main():
     save(centred(p_emblem, (150, 150)), "Square150x150Logo.png")
     save(centred(p_emblem, (50, 50)), "StoreLogo.png")
     save(centred(cut(primary, 118, 652), (310, 150), fill=0.86), "Wide310x150Logo.png")
+
+    # The community installer's wizard: packaging/splat-community.iss names these by wildcard, so a
+    # size added here is picked up without touching the script.
+    print("installer wizard bitmaps ...")
+    write_wizard_bitmaps(p_lockup, p_emblem)
 
 
 if __name__ == "__main__":
