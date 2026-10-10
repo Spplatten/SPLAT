@@ -44,7 +44,7 @@ Typical fits:
 A commercial licence can also carry things the public project does not promise: a support
 commitment, a security contact with a response time, and a say in the roadmap.
 
-**Contact:** info@plattenindustries.com — say what you are building and how it would be delivered.
+**Contact:** plattenindustries@gmail.com — say what you are building and how it would be delivered.
 
 ## Contributions
 

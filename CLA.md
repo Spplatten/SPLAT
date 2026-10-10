@@ -66,7 +66,7 @@ You will not be paid for your contribution unless a separate written agreement s
 ## 6. Keeping it accurate
 
 If anything you represented above stops being true, tell the Project at
-**info@plattenindustries.com**.
+**plattenindustries@gmail.com**.
 
 ## 7. Governing law
 
@@ -77,7 +77,7 @@ to change on legal review.
 
 ## Signing it
 
-Email **info@plattenindustries.com** with the subject `CLA`, containing:
+Email **plattenindustries@gmail.com** with the subject `CLA`, containing:
 
 ```
 I have read CLA.md at commit <the commit you read> and I agree to it.

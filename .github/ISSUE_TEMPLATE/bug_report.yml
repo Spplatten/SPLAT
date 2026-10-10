@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         **Not for security problems.** If a lease failed to hold, or something got out of
-        containment, that goes to info@plattenindustries.com — see
+        containment, that goes to plattenindustries@gmail.com — see
         [SECURITY.md](https://github.com/Spplatten/SPLAT/blob/main/SECURITY.md).
 
         Keep real tokens, keys and host details out of this form. It is public.

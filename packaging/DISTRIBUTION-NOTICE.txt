@@ -6,11 +6,11 @@ Licensor and publisher:
   Sean Patrick Platten
   27 Pledger Pkwy, LaFayette, GA
   706-239-7969
-  info@plattenindustries.com
+  plattenindustries@gmail.com
 
 SPLAT is available under the GNU Affero General Public License v3.0 (AGPL-3.0).
 Separate commercial licensing is available from Platten Industries under a
-separate agreement. Contact: info@plattenindustries.com. See COMMERCIAL.md.
+separate agreement. Contact: plattenindustries@gmail.com. See COMMERCIAL.md.
 
 The full AGPL-3.0 text follows in the installer license page and is supplied as
 LICENSE. Distributing covered binaries requires the corresponding source under

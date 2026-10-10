@@ -33,7 +33,7 @@ representing the project.
 
 ## Reporting
 
-**info@plattenindustries.com.** Reports go to one person, Sean Patrick Platten, who maintains this
+**plattenindustries@gmail.com.** Reports go to one person, Sean Patrick Platten, who maintains this
 project. You will get an acknowledgement within 7 days.
 
 If your report concerns the maintainer, say so plainly; there is no committee to escalate to, and it

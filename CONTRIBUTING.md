@@ -32,7 +32,7 @@ necessary rights in every line it ships, so:
 - **Every commit needs a `Signed-off-by` line**, certifying the Developer Certificate of Origin —
   that you wrote it, or have the right to submit it. `git commit -s` adds the line.
 
-Email **info@plattenindustries.com** to sign the CLA before opening a pull request for code. For
+Email **plattenindustries@gmail.com** to sign the CLA before opening a pull request for code. For
 typo fixes, a `Signed-off-by` line alone is enough.
 
 > The CLA is a draft pending review by counsel. If you would rather not sign one, bug reports,

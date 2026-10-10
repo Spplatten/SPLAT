@@ -7,7 +7,7 @@ rediscovering something that is on the roadmap.
 
 ## Where to send it
 
-**info@plattenindustries.com**, with `SECURITY` in the subject.
+**plattenindustries@gmail.com**, with `SECURITY` in the subject.
 
 Include the version or commit, the platform (Windows build, WSL version, kernel version), what you
 expected the lease to prevent, and what happened instead. A reproduction beats a description. If you
