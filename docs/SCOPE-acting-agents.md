@@ -66,10 +66,10 @@ Claude and Gemini run in their providers' data centres. Through `splat-mcp` the 
 agent calling in, which is outside for the same reason. The only way to put a model inside a lease is
 to run a local one there.
 
-**Every tool runs in a sandbox, but only four run under the kernel lease.** Of 58 templates, 4 run
-their tool in the WSL2 guest under the eBPF lease. The other 54 run on Windows under a restricted
-token, a locked-down folder and a job object (counted by evaluating `GovernedTemplateCatalog.All`).
-They fall into three groups:
+**Every tool runs in a sandbox, and twelve run under the kernel lease.** Of 58 templates, 12 run
+their tool in the WSL2 guest under the eBPF lease: the four Linux readers and, since 2026-10-10, the
+eight web probes below. The other 46 run on Windows under a restricted token, a locked-down folder
+and a job object (counted by evaluating `GovernedTemplateCatalog.All`). By what they do:
 
 - **41 read Windows itself**: services, event logs, the registry, Defender, the network stack. They
   stay on Windows. The eBPF program polices the guest's Linux kernel, which belongs to a separate
@@ -77,9 +77,12 @@ They fall into three groups:
   `powershell.exe` from inside the guest does not change that, because WSL interop starts it on
   Windows, outside the lease. Never route a Windows tool through the guest and call it leased.
 - **8 fetch public data from one web API each** (grants.gov, BLS, EIA, Census, Wikimedia,
-  rareresources.net) and read nothing on Windows. On Windows their destination is a declaration,
-  because an AppContainer offers network or none, not a host. Under the lease the kernel would hold
-  it. They can move.
+  rareresources.net) and read nothing on Windows. On Windows their destination was a declaration,
+  because an AppContainer offers network or none, not a host. On 2026-10-10 they moved under the
+  lease: each runs a Python sensor whose publisher's IPv4 addresses are compiled into the lease and
+  handed to it, so it needs no DNS
+  ([`LeasedWebProbe`](../src/MissionController.Infrastructure.Data/Catalog/LeasedWebProbe.cs)). None
+  has run under a real lease yet.
 - **5 work from their parameters and touch nothing.** Two are the actors made honest in §2, two are
   grants assessments, and one is `web-autonomous-site-deploy`. Its description still says it checks
   out, builds and deploys a site, while its tool prints its parameters and three version numbers.
@@ -104,14 +107,16 @@ that cannot forget, and away from instructions planted in the platform responses
   guarantee. The leased child also inherits the daemon's own
   environment, because the daemon sets neither an environment nor stdin for it
   ([`main.rs`](../native/splat-agent/src/main.rs)). Roadmap 5.2.
-- **The console does not own its substrate yet.** Until 2026-10-10, provisioning and `doctor` lived only
-  in `splat-mcp`, and the console used whichever daemon answered on `127.0.0.1:50051`. They now live in
-  [`MissionController.Host`](../src/MissionController.Host), and the console's Kernel Lease page checks,
-  mounts and unmounts through them. What remains is the managed guest: it belongs to another Windows
-  account and answers only through the bridge's pipe
-  ([`ManagedBridgeHost.cs`](../src/splat-mcp/ManagedBridgeHost.cs)), so the console cannot reach it,
-  although the community installer already ships the console, the daemon and a SPLAT-owned Linux image
-  together ([`splat-community.iss`](../packaging/splat-community.iss)). Roadmap 5.0.
+- **The console owns its substrate in code, not yet in use.** Until 2026-10-10, provisioning and
+  `doctor` lived only in `splat-mcp`, and the console used whichever daemon answered on
+  `127.0.0.1:50051`. They now live in [`MissionController.Host`](../src/MissionController.Host), the
+  console's Kernel Lease page checks, mounts and unmounts through them, and where a managed
+  configuration exists the console leases through the bridge's pipe instead, refusing rather than
+  falling back when the bridge is down
+  ([`ManagedBridgeClient.cs`](../src/MissionController.Host/ManagedBridgeClient.cs)). What remains is
+  live: nobody has mounted from the console, and no managed bridge has run. The community installer
+  already ships the console, the daemon and a SPLAT-owned Linux image together
+  ([`splat-community.iss`](../packaging/splat-community.iss)). Roadmap 5.0.
 
 ## 5. Two kinds of action
 

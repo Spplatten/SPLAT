@@ -173,7 +173,10 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
   template catalog split by domain, plus the project and crew catalogs;
   [`Compliance/`](../src/MissionController.Infrastructure.Data/Compliance),
   [`Retention/`](../src/MissionController.Infrastructure.Data/Retention),
-  [`Vector/`](../src/MissionController.Infrastructure.Data/Vector).
+  [`Vector/`](../src/MissionController.Infrastructure.Data/Vector). Since 2026-10-10
+  [`Catalog/LeasedWebProbe.cs`](../src/MissionController.Infrastructure.Data/Catalog/LeasedWebProbe.cs) moves
+  the eight web-fetching templates under the Linux lease, running the embedded
+  [`LeasedWebProbe.py`](../src/MissionController.Infrastructure.Data/Catalog/LeasedWebProbe.py) in the guest.
 - **Constructed by neither host:** `DataRetentionService`, `SqliteGovernedCrewRegistry`.
 - **Tests:** `AuditAndSecurityTests`, `DataRetentionTests`, `GovernedCrewRegistryTests`,
   `GovernedProjectCatalogTests`, `HmacAuditLedgerAndAstValidatorTests`,
@@ -206,10 +209,15 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
   [`McpEgressPolicy.cs`](../src/MissionController.Host/McpEgressPolicy.cs) — the egress endpoints a lease may
   name; [`SubstrateOptions.cs`](../src/MissionController.Host/SubstrateOptions.cs) — what each host passes in,
   in its own operator's words; [`SubstrateLifecycle.cs`](../src/MissionController.Host/SubstrateLifecycle.cs)
-  — the console's plan-then-apply machine over all three. The daemon `provision` installs is embedded
-  here when `SplatAgentBinary` is passed, so it reaches `splat-mcp.exe` through the reference.
+  — the console's plan-then-apply machine over all three;
+  [`ManagedBridgeClient.cs`](../src/MissionController.Host/ManagedBridgeClient.cs) — the console's leases
+  through a managed bridge's pipe, failing closed when one is configured and unavailable, with
+  [`ManagedBridgeConfiguration.cs`](../src/MissionController.Host/ManagedBridgeConfiguration.cs) and
+  [`ManagedLeaseRequest.cs`](../src/MissionController.Host/ManagedLeaseRequest.cs). The daemon `provision`
+  installs is embedded here when `SplatAgentBinary` is passed, so it reaches `splat-mcp.exe` through the
+  reference.
 - **Tests:** `SubstrateDoctorTests`, `SubstrateProvisionerTests`, `SubstrateUnmountTests`,
-  `SubstrateLifecycleTests`.
+  `SubstrateLifecycleTests`, `ManagedBridgeTests`.
 
 ## MissionController.UI
 
@@ -251,7 +259,12 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 - **Owns:** [`Program.cs`](../src/splat-mcp/Program.cs) — composition and the stdio loop;
   [`McpServerCommand.cs`](../src/splat-mcp/McpServerCommand.cs) — the command line, decided before
   anything is built;
-  [`McpServerHandler.cs`](../src/splat-mcp/McpServerHandler.cs) — dispatch and the thirteen tools;
+  [`McpServerHandler.cs`](../src/splat-mcp/McpServerHandler.cs) — dispatch and the thirteen tools, with
+  [`McpServerHandler.ManagedLease.cs`](../src/splat-mcp/McpServerHandler.ManagedLease.cs) serving the
+  console's managed leases;
+  [`ManagedBridgeHost.cs`](../src/splat-mcp/ManagedBridgeHost.cs) and
+  [`ManagedBridgeCommand.cs`](../src/splat-mcp/ManagedBridgeCommand.cs) — the managed bridge service and
+  its deployment;
   [`McpProtocol.cs`](../src/splat-mcp/McpProtocol.cs) — the JSON-RPC and MCP records;
   [`McpOperatorIdentityProvider.cs`](../src/splat-mcp/McpOperatorIdentityProvider.cs);
   [`WorkspaceGuard.cs`](../src/splat-mcp/WorkspaceGuard.cs).
@@ -274,7 +287,10 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 
 - **Target:** `net10.0-windows`. **Packages:** `xunit`, `xunit.runner.visualstudio`,
   `Microsoft.NET.Test.Sdk`, `coverlet.collector`.
-- **References:** Core, Windows, Network, Data, Linux, `splat-mcp`.
+- **References:** Core, Windows, Network, Data, Linux, Host, `splat-mcp`.
+- **Beside it:** [`MissionController.SubstrateProbe`](../tests/MissionController.SubstrateProbe), an exe
+  outside the solution that plans (`--plan`) or runs (`--execute`) the eight leased web probes against
+  a real daemon. It is the live acceptance run for roadmap 5.0, never part of `dotnet test`.
 - **Constraint:** data-driven tests use `[InlineData]` only. `NoDataSourceEscapesTheTestCounter`
   fails on `[MemberData]` or `[ClassData]`, because the documentation's test count is computed by
   reflection and could not see them.
