@@ -22,9 +22,9 @@ changes a codebase and proves its tests still pass, with one approval for the wh
 is the reason that is safe to allow. It is not the destination on its own.
 
 This page used to describe only the kit and the leases, which is how the destination came to read
-as a cage with nothing in it. As of 2026-10-09 no template in the catalogue declares an action, and
-every one reads. The pieces that would let an agent act, which of them already **exist**, and the
-order to build the rest are in [SCOPE-acting-agents.md](SCOPE-acting-agents.md) and
+as a cage with nothing in it. As of 2026-10-09 one template declares an action, and an unelevated
+console cannot run it; every other template reads. The pieces that would let an agent act, which of
+them already **exist**, and the order to build the rest are in [SCOPE-acting-agents.md](SCOPE-acting-agents.md) and
 [roadmap P5](ROADMAP.md).
 
 ## Way in 1: the SPLAT drive
