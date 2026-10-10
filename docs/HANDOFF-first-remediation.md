@@ -1,11 +1,17 @@
 # Handoff — the first template that changes something
 
+> **Deprioritised 2026-10-09.** Read [SCOPE-acting-agents.md](SCOPE-acting-agents.md) and roadmap P5
+> first. Starting a Windows service needs SPLAT itself to run elevated (§5 below). Workspace changes and
+> external actions don't need that: the agent writes a copy-on-write layer or calls one pinned API, and
+> never writes to the host. This page stays because its findings still hold. The builder blocker (§2),
+> the JSON trap for delegate postconditions, and the SDDL evidence all apply to P5 as well.
+
 **Written 2026-10-08.** For whoever declares the catalogue's first `RemediationAction`. Every fact
 below was measured on 2026-10-08 by evaluating the code or running the probe named beside it, not
 recalled from a document; where a number is quoted, the command that produced it is quoted with it.
 
 The product's claim is that an agent's actions are contained and provable. Today no agent takes an
-action: **0 of 58 templates declare a remediation**, counted by evaluating
+action: **no template in the catalogue declares a remediation**, counted by evaluating
 `GovernedTemplateCatalog.All` through a compiled reference, never by grepping the partial classes.
 The containment is real and nothing exercises it. This page closes that, once, for one template.
 

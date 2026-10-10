@@ -14,6 +14,19 @@ kernel-enforced leases for the AI agents that run there, both SPLAT's own specia
 agents through MCP, and it keeps a ledger of what they did. When you unmount it, the machine goes
 back to how it was, except for the evidence you chose to keep.
 
+## What the leases are for
+
+A lease is worth what it costs only when the agent inside it can change something. SPLAT was designed
+for AI orchestration: an agent that sets up an app on Meta, TikTok or X and wires its webhooks, or
+changes a codebase and proves its tests still pass, with one approval for the whole job. Containment
+is the reason that is safe to allow. It is not the destination on its own.
+
+This page used to describe only the kit and the leases, which is how the destination came to read
+as a cage with nothing in it. As of 2026-10-09 no template in the catalogue declares an action, and
+every one reads. The pieces that would let an agent act, which of them already **exist**, and the
+order to build the rest are in [SCOPE-acting-agents.md](SCOPE-acting-agents.md) and
+[roadmap P5](ROADMAP.md).
+
 ## Way in 1: the SPLAT drive
 
 ### What is on the drive

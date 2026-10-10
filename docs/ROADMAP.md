@@ -143,6 +143,28 @@ was. The design, with what each step needs, is [END-GOAL.md](END-GOAL.md).
 
 ---
 
+## P5: SPLAT that acts
+
+**Exit:** one button provisions webhooks across several platforms at once, each platform in its own
+lease with its own egress pin and its own secret, and the job ends in one signed record of exactly
+what changed. The scope, what already exists and the platform hypothesis are in
+[SCOPE-acting-agents.md](SCOPE-acting-agents.md). As of 2026-10-09 no template in the catalogue declares
+an action: every one reads. This phase sits after P4 by position only. Whether it goes ahead of P2 to P4
+is your decision, and the scope makes the case.
+
+| # | Item | Owner | State | Done when |
+| --- | --- | --- | --- | --- |
+| 5.1 | Platform capability matrix | agent | Not started. The scope's table is a hypothesis with no sources | Each platform's app creation, webhook registration, verification handshake and payload signature cites the platform's current documentation, and every cell that says "by API" has been exercised once |
+| 5.2 | `GovernedHttp` carries traffic | agent | Not started. The node returns `[GOVERNED_HTTP:NOT_IMPLEMENTED]` ([`WorkflowExecutionEngine.cs`](../src/MissionController.Core/Workflow/WorkflowExecutionEngine.cs)); [`EgressFirewallHandler`](../src/MissionController.Infrastructure.Network/EgressFirewallHandler.cs) and [`DpapiCredentialVault`](../src/MissionController.Infrastructure.Windows/DpapiCredentialVault.cs) exist, and nothing on this path calls them | A request to any host other than the node's declared one is refused before it leaves. The host attaches the credential after the model has finished, and neither the model's context nor the ledger ever contains it |
+| 5.3 | External actions declare what "done" means | agent | Not started. `RemediationAction` has the contract, but `GovernedTemplateCatalog.Template(...)` passes `Array.Empty<RemediationAction>()` and has no parameter to pass one | An action whose request succeeds while its read-back disagrees is `PostconditionFailed`, and its rollback is measured the same way |
+| 5.4 | Workspace changes ship as a signed diff | agent | Not started. The copy-on-write layer and execution inside it are proven under root (`cow_overlay_in_child`, `cow_host_unchanged`, `scratch_exec_inside` in [`daemon-probe.json`](../native/splat-agent/evidence/daemon-probe.json)), and no template uses them | An agent's change to a scratch copy of a repository, with that repository's own tests as the postcondition, arrives as a diff in the signed run record, and the real checkout stays unchanged until a person applies it |
+| 5.5 | First platform end to end: GitHub | agent; the token is yours | Not started | One run deploys a receiver by workspace change, registers a repository webhook by external action, receives GitHub's ping, and proves the delivery in the record |
+| 5.6 | Meta | agent builds it; the developer app, its credentials and any App Review are yours | Not started; waits on 5.1 | One run registers a Meta webhook against the receiver, passes the `hub.challenge` handshake as its postcondition, and verifies a signed test delivery |
+| 5.7 | One button across platforms | agent | Not started; waits on 5.5 and 5.6 | One approval covers the whole plan, each platform runs in its own lease holding only its own secret, and one run record verifies the result |
+| 5.8 | `OAuthExchange` for user-granted tokens | agent; each provider's redirect registration is yours | Not started. The node throws: "a fabricated token must not enter the credential vault" | A provider's code exchange stores a real token in the vault without it ever reaching the model, and a failed exchange stores nothing |
+
+---
+
 ## Open, not scheduled
 
 Real, known, and not blocking the phases above. Each needs a decision or a slot before it is work.
