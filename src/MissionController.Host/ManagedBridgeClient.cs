@@ -96,7 +96,7 @@ public sealed class ManagedBridgeClient(ManagedBridgeConfiguration configuration
             ?? throw new InvalidDataException("The managed service returned no result.");
     }
 
-    private static async Task<string> ReadResponseAsync(Stream stream, CancellationToken ct)
+    internal static async Task<string> ReadResponseAsync(Stream stream, CancellationToken ct)
     {
         using var text = new MemoryStream();
         var buffer = new byte[4096];

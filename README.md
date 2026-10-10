@@ -54,7 +54,7 @@ Technical evaluations of agent sandboxes tend to blur together into generic "iso
 | Component | State |
 | :--- | :--- |
 | Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
-| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Built, unproven beyond the reviewed corpus** — 953 automated tests; all 58 current templates have accepted live recordings and offline replays |
+| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Built, unproven beyond the reviewed corpus** — 953 automated tests; current-definition live corpus coverage is incomplete after template changes (see verification below) |
 | Zero-warning build gate | **Enforced** — [`src`](src/Directory.Build.props) and [`tests`](tests/Directory.Build.props) compile with `TreatWarningsAsErrors`, so a cold solution build reports 0 warnings and 0 errors. No project is exempt: the console joined on 2026-09-18, when it moved to Windows App SDK 2.5.1 on .NET 10 and built without a warning, and `WarningGateTests` fails if an exemption appears |
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented; the hop is Demonstrated end to end against the program that ships** — stdio JSON-RPC, 12 tools. Re-recorded PASS on 2026-09-26 against kernel program `496cc634`, which is the source in this tree ([evidence](native/splat-agent/evidence/last-hop-probe.json)): a client's command travelled to the kernel and was refused there, the permitted one ran as `uid=65534`, an undeclared exec and a connect outside the lease each returned `-EPERM`, and a destination outside the host's egress policy was refused before any lease was requested. This claim was withdrawn twice before, on 2026-09-20 and again on 2026-09-25, each time because the kernel program changed hours after a passing run - once by our own edit. A proof cannot outlive the program it tested, including when the change is ours and the same day; what is new is that the hash comparison now runs on a schedule instead of waiting to be noticed. `packaging\reprove-substrate.ps1` restores it. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining ten run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
@@ -197,12 +197,12 @@ Every call lands in the audit ledger attributed to a resolved principal — the 
 $ dotnet test tests/MissionController.Tests/MissionController.Tests.csproj
 ```
 
-All 58 shipped templates have accepted live-model recordings of their current definitions from
-the 2026-10-05 sitting, including the four Linux templates run through the real guest lease.
-The recordings were replayed, identities redacted consistently in sensor and answer, and the
-privacy guard and current-definition corpus gate pass. Replaying an old answer cannot validate a changed prompt.
-The published Field Guide also trails its source after the catalog retirement; regenerate its
-publication body with `packaging/build-field-guide-artifact.ps1`, publish it, then record that publication.
+The 2026-10-05 recordings remain historical evidence, including the four original Linux templates
+run through the guest lease. On 2026-10-10, `MissionCorpusTests` reports stale recordings for the
+eight public probes moved into Linux and for `sysops-time-sync`. Those current definitions require
+fresh live recordings, review and redaction before promotion; the coverage gate remains failing.
+Replaying an old answer cannot validate a changed template. The Field Guide's separate publication
+record is checked by `DocumentationDriftTests.ThePublishedFieldGuide_IsTheSourceAsItStandsToday`.
 The [recording guide](tests/MissionController.Tests/Fixtures/Missions/README.md) describes promotion
 and the adversarial checks. These recordings hold observed pipeline behaviour; diagnosis accuracy
 beyond this reviewed corpus remains **built, unproven**. The test count below is an inventory.
