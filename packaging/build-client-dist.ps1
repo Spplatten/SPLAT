@@ -238,6 +238,8 @@ if ($SkipSmokeTest) {
 Write-Host '[6/8] staging launcher, config template and guides' -ForegroundColor Cyan
 Copy-Item "$PSScriptRoot\run.bat" (Join-Path $stage 'run.bat') -Force
 Copy-Item "$PSScriptRoot\README_CLIENT.md" (Join-Path $stage 'README_CLIENT.md') -Force
+& "$PSScriptRoot\write-distribution-license.ps1" -Destination $stage
+& "$PSScriptRoot\write-distribution-license.ps1" -Destination $appDir
 New-Item -ItemType Directory -Path (Join-Path $stage 'config') -Force | Out-Null
 Copy-Item "$PSScriptRoot\splat.env.example" (Join-Path $stage 'config\splat.env.example') -Force
 New-Item -ItemType Directory -Path (Join-Path $stage 'docs') -Force | Out-Null
@@ -268,6 +270,7 @@ $fileCount = (Get-ChildItem $appDir -Recurse -File).Count
 $sizeMb = [math]::Round(((Get-ChildItem $appDir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)
 [System.IO.File]::WriteAllText((Join-Path $stage 'VERSION.txt'), @"
 SPLAT client package
+license       : AGPL-3.0-only; separate commercial licensing available from Platten Industries (COMMERCIAL.md)
 commit        : $commit$(if ($dirty) { ' (built from a tree with uncommitted src changes)' })
 built         : $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')) UTC
 configuration : $Configuration / $Runtime, self-contained, unpackaged (WindowsPackageType=None)

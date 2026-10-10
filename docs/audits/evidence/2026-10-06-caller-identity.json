@@ -1,0 +1,166 @@
+{
+  "schema": 1,
+  "verdict": "PARTIAL",
+  "local_date": "2026-10-06",
+  "timezone": "America/New_York",
+  "repository_commit": "9086eec78057a7556d459688225224ff499045c9",
+  "roadmap_2_4_closed": false,
+  "wsl_version_output": "WSL version: 2.7.12.0\r\nKernel version: 6.18.33.2-2\r\nWSLg version: 1.0.73.2\r\nMSRDC version: 1.2.7214\r\nDirect3D version: 1.611.1-81528511\r\nDXCore version: 10.0.26100.1-240331-1435.ge-release\r\nWindows version: 10.0.26200.9457",
+  "run_probe_sha256": "7881e10a1c071cafb44d7e8c46c64edcc19ccf8659baf27d50cc1005dbc23163",
+  "current_probe_sha256": "6bb9f04f3189ae04a689c497a76ec837693aa38364eab83aa9fc23be0ab89e8c",
+  "probe_change_after_run": "Suppressed an unused Task result that serialized as empty objects, verified using a real same-account listener, added usage comments, and bounded output-pipe draining after cancellation. A 40-second command timed out in 30.4742233 seconds under Windows PowerShell 5.1.",
+  "rootfs_sha256": "c2fd1e3661ac6d7d17e71a0af3f3beb7aaf7f963c1c51c09166214d1e0ab79d1",
+  "fixture_source": "packaging/caller-identity-listener.c",
+  "fixture_source_sha256": "80cf6741a584bf3af75afadee0690449e74bc7408422be5edc5c79908a9c740e",
+  "actors": {
+    "owner_non_admin": true,
+    "operator_elevated": false,
+    "operator_local_administrator": true,
+    "different_sids": true
+  },
+  "registration": {
+    "verdict": "LOOKUP_REFUSED",
+    "target_listed": false,
+    "target_exit": -1,
+    "target_timed_out": false,
+    "target_output": "There is no distribution with the supplied name.\r\nError code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND",
+    "owner_root_before_and_after": true
+  },
+  "observations": [
+    {
+      "phase": "owner_before",
+      "recorded_utc": "2026-10-07T03:04:50.4735488+00:00",
+      "own_distro_root_exit": 0,
+      "own_distro_uid": "0",
+      "windows_loopback": [
+        {
+          "port": 50051,
+          "connected": true,
+          "markerMatches": false,
+          "reply": "",
+          "error": "Exception calling \"Read\" with \"3\" argument(s): \"Unable to read data from the transport connection: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.\""
+        },
+        {
+          "port": 58541,
+          "connected": true,
+          "markerMatches": true,
+          "reply": "SPLAT_IDENTITY_PROBE_849cc815cb84414fa5e7d7f031c836a3\n",
+          "error": null
+        }
+      ]
+    },
+    {
+      "phase": "operator",
+      "recorded_utc": "2026-10-07T03:04:57.0695359+00:00",
+      "own_distro_root_exit": 0,
+      "own_distro_uid": "0",
+      "windows_loopback": [
+        {
+          "port": 50051,
+          "connected": true,
+          "markerMatches": false,
+          "reply": "",
+          "error": "Exception calling \"Read\" with \"3\" argument(s): \"Unable to read data from the transport connection: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.\""
+        },
+        {
+          "port": 58541,
+          "connected": true,
+          "markerMatches": false,
+          "reply": "",
+          "error": "Exception calling \"Read\" with \"3\" argument(s): \"Unable to read data from the transport connection: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.\""
+        }
+      ]
+    },
+    {
+      "phase": "owner_after",
+      "recorded_utc": "2026-10-07T03:05:06.9996799+00:00",
+      "own_distro_root_exit": 0,
+      "own_distro_uid": "0",
+      "windows_loopback": [
+        {
+          "port": 50051,
+          "connected": true,
+          "markerMatches": false,
+          "reply": "",
+          "error": "Exception calling \"Read\" with \"3\" argument(s): \"Unable to read data from the transport connection: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.\""
+        },
+        {
+          "port": 58541,
+          "connected": true,
+          "markerMatches": true,
+          "reply": "SPLAT_IDENTITY_PROBE_849cc815cb84414fa5e7d7f031c836a3\n",
+          "error": null
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "Owner and operator obtained different results from a disposable loopback fixture; no SPLAT daemon credentials or leases were used.",
+    "Port 50051 was already bound by the operator WSL relay; its owner-side Windows marker control failed, so its isolation result is inconclusive.",
+    "Operator TCP connect succeeded on the control port; no fixture marker arrived within the bounded three-second read.",
+    "The operator is an unelevated local administrator. Standard-operator deployment, token-file exclusion and service authorization remain unmeasured."
+  ],
+  "cleanup": {
+    "distro_unregistered": true,
+    "install_directory_removed": true,
+    "account_absent": true,
+    "profile_registration_absent": true,
+    "profile_directory_absent": true,
+    "verified_utc": "2026-10-07T03:56:43.3116139+00:00",
+    "pending": null
+  },
+  "raw_observations_private": [
+    {
+      "path": "private/caller-identity/owner-before.json",
+      "sha256": "ff478a8d19741a9ff4a7bd8c6095acdddbc5aa838770dd2ff75649a8a14ba0ee"
+    },
+    {
+      "path": "private/caller-identity/operator-comparison.json",
+      "sha256": "e898a6f9377af2e8f5595cf399b0d4c1b62cc79ddc61326e647d1ebde8ad35fe"
+    },
+    {
+      "path": "private/caller-identity/owner-after.json",
+      "sha256": "028c2e805bb4c7a5ef6f7da3a5b695c83e0bfb82d7a9f05f7eed755f62b7ff7d"
+    },
+    {
+      "path": "private/caller-identity/cleanup-verification.json",
+      "sha256": "d5cfac67452444c7d0b0e5e9cdd7afca09e40633f3fb814bd554b9b3558d17da"
+    },
+    {
+      "path": "private/caller-identity/network/owner-before.json",
+      "sha256": "31fd962a478e2234ebc3406225b0235e77de38fd3e6235c3cc27044ba7457f71"
+    },
+    {
+      "path": "private/caller-identity/network/operator-comparison.json",
+      "sha256": "62d8d68acf4e63327727e3c34e4cfc3b430be28230d1a6a96624a832207b83e5"
+    },
+    {
+      "path": "private/caller-identity/network/owner-after.json",
+      "sha256": "2e9a156ae6c971e6504a20a8618bf610b153a2e29486897ef7b0ef4d1f467a0a"
+    },
+    {
+      "path": "private/caller-identity/network/guest-before.json",
+      "sha256": "b4340edb1789d7008b4cfab757d580d6a01c5b4aa9cfe714eb03a6696e06d9cb"
+    },
+    {
+      "path": "private/caller-identity/network/guest-after.json",
+      "sha256": "210d165a297f6ebe511813ac196238053b30880d86a5725b3d94c2b0dbde673d"
+    },
+    {
+      "path": "private/caller-identity/network/owner-finished.json",
+      "sha256": "8df9e3f0ce7fcab14847f95338618748aeaeb4858f5b494ca07ed025b0ef3ee6"
+    },
+    {
+      "path": "private/caller-identity/network/setup-finished.json",
+      "sha256": "22fc24b71afd6786000e829410f9d74ec209e9ea23ba6e3c1e66933d7f500db6"
+    },
+    {
+      "path": "private/caller-identity/serialization-control.json",
+      "sha256": "487a86bed60f1914e520f86e44afc59c96c4e4310ffaccbd8d6cadbcfed67260"
+    },
+    {
+      "path": "private/caller-identity/network/cleanup-verification.json",
+      "sha256": "e26ca4e506b1059e3ed5208c867d5efeb891194ce1d41c5dc2e40bbb7f2702b8"
+    }
+  ]
+}

@@ -1,0 +1,242 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('Install','Remove','GuestInstall','GuestRemove')][string]$Mode,
+    [ValidatePattern('^Splat[A-Za-z0-9]{0,14}$')][string]$Instance = 'SplatManaged',
+    [string]$Executable, [string]$Rootfs, [string]$RootfsSha256,
+    [string]$OperatorSid, [string]$Egress = ''
+)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$root = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) $Instance
+$manifestPath = Join-Path $root 'deployment.json'
+$configPath = Join-Path $root 'bridge.json'
+$state = Join-Path $root 'state'
+$installedExe = Join-Path $root 'bin\splat-mcp.exe'
+$installedScript = Join-Path $root 'bin\managed-deployment.ps1'
+$wsl = Join-Path $env:SystemRoot 'System32\wsl.exe'
+$adminSid = [Security.Principal.SecurityIdentifier]'S-1-5-32-544'
+$systemSid = [Security.Principal.SecurityIdentifier]'S-1-5-18'
+
+function Write-Json($Path, $Value) {
+    [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+}
+function Set-ProtectedDirectory($Path, [string[]]$Readers, [string]$Writer = '') {
+    $acl = [Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.SetOwner($adminSid)
+    foreach ($sid in @($adminSid, $systemSid)) {
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
+    }
+    foreach ($sid in $Readers) {
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]$sid, 'ReadAndExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
+    }
+    if ($Writer) {
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]$Writer, 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
+function New-Password {
+    $bytes = New-Object byte[] 48
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    # Never serialize the credential. SCM stores its own service logon secret.
+    ConvertTo-SecureString ('aA1!' + [Convert]::ToBase64String($bytes)) -AsPlainText -Force
+}
+function Invoke-Guest([string]$Script) {
+    $start = [Diagnostics.ProcessStartInfo]::new($wsl, "-d $Instance -u root -e /bin/sh -s")
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::Start($start)
+    try {
+        $out = $process.StandardOutput.ReadToEndAsync()
+        $err = $process.StandardError.ReadToEndAsync()
+        $process.StandardInput.WriteLine($Script.Replace("`r", ''))
+        $process.StandardInput.Close()
+        if (-not $process.WaitForExit(120000)) { $process.Kill(); throw 'Managed guest command timed out.' }
+        $output = $out.GetAwaiter().GetResult() + $err.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) { throw "Managed guest command failed: $output" }
+        if ($output) { Write-Output $output }
+    } finally { $process.Dispose() }
+}
+
+if ($Mode -in @('GuestInstall', 'GuestRemove')) {
+    # Only the provisioned account may operate this registration. Parent directories and the
+    # manifest are admin-owned; guest output is never interpreted as a Windows command.
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne $manifest.AccountSid) { throw 'Wrong guest owner.' }
+    if ($manifest.Instance -ne $Instance -or $manifest.Root -ne $root) { throw 'Foreign deployment manifest.' }
+    try {
+        if ($Mode -eq 'GuestInstall') {
+            if ((& $wsl --list --quiet | Out-String).Replace([string][char]0, '').Trim()) { throw 'The new service account already has a distro.' }
+            [IO.File]::WriteAllText((Join-Path $env:USERPROFILE '.wslconfig'), "[wsl2]`nkernelCommandLine=lsm=landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,apparmor,tomoyo,bpf`n", [Text.UTF8Encoding]::new($false))
+            & $wsl --import $Instance (Join-Path $state 'distro') (Join-Path $root 'rootfs.tar.xz') --version 2
+            if ($LASTEXITCODE -ne 0) { throw 'WSL import failed.' }
+            # Host drive access is temporarily needed to copy the embedded daemon. Mode 0700 and
+            # disabled Windows interop keep leased uid 65534 away from it during bootstrap.
+            Invoke-Guest @'
+set -eu
+printf '[boot]\nsystemd=true\n[automount]\noptions="umask=077"\n[interop]\nenabled=false\nappendWindowsPath=false\n' > /etc/wsl.conf
+'@
+            & $wsl --terminate $Instance
+            if ($LASTEXITCODE -ne 0) { throw 'Could not restart the newly imported distro.' }
+            Invoke-Guest 'test "$(cat /proc/1/comm)" = systemd'
+            & $installedExe bridge-bootstrap --configuration $configPath > (Join-Path $state 'bootstrap.log') 2>&1
+            if ($LASTEXITCODE -ne 0) { throw 'Managed daemon bootstrap did not prove enforcement.' }
+            Invoke-Guest @'
+set -eu
+printf '[boot]\nsystemd=true\n[automount]\nenabled=false\n[interop]\nenabled=false\nappendWindowsPath=false\n' > /etc/wsl.conf
+'@
+            & $wsl --terminate $Instance
+            if ($LASTEXITCODE -ne 0) { throw 'Could not apply final guest isolation.' }
+        } else {
+            $names = @((& $wsl --list --quiet | Out-String).Replace([string][char]0, '').Split("`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            if (@($names | Where-Object { $_ -ne $Instance }).Count) { throw 'Foreign distros under service account; refusing removal.' }
+            if ($names -contains $Instance) {
+                & $wsl --terminate $Instance
+                & $wsl --unregister $Instance
+                if ($LASTEXITCODE -ne 0) { throw 'Managed distro removal failed.' }
+            }
+            # There can be no unrelated guest in this account. This releases its swap/profile;
+            # it never invokes shutdown in the operator account.
+            & $wsl --shutdown
+            if ($LASTEXITCODE -ne 0) { throw 'Managed account VM did not stop.' }
+        }
+        Write-Json (Join-Path $state "$Mode.json") @{ Success = $true; AccountSid = $manifest.AccountSid; At = [DateTimeOffset]::UtcNow.ToString('o') }
+        exit 0
+    } catch {
+        Write-Json (Join-Path $state "$Mode.json") @{ Success = $false; Error = $_.Exception.Message }
+        throw
+    }
+}
+
+$principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Managed deployment requires an elevated Windows terminal.' }
+
+function Start-Owner([PSCredential]$Credential, [string]$Action) {
+    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Mode {1} -Instance {2}' -f $installedScript, $Action, $Instance
+    $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -Credential $Credential -LoadUserProfile -WindowStyle Hidden -PassThru
+    if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'Service-account bootstrap timed out; deployment retained for managed unmount.' }
+    $receiptPath = Join-Path $state "$Action.json"
+    if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $receiptPath)) { throw "Service-account $Action failed; inspect $state." }
+    $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+    if (-not $receipt.Success) { throw "Service-account $Action failed: $($receipt.Error)" }
+}
+function Assert-Manifest {
+    if ((Get-Item -LiteralPath $root).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Deployment root is a reparse point.' }
+    $script:manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($manifest.Schema -ne 1 -or $manifest.Instance -ne $Instance -or $manifest.Root -ne $root) { throw 'Foreign deployment manifest.' }
+    $acl = Get-Acl -LiteralPath $manifestPath
+    if ($acl.Owner -notin @($adminSid.Translate([Security.Principal.NTAccount]).Value, $systemSid.Translate([Security.Principal.NTAccount]).Value)) { throw 'Manifest is not administrator-owned.' }
+    foreach ($rule in $acl.Access) {
+        if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band 0xD0156) -and
+            $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin @($adminSid.Value, $systemSid.Value)) { throw 'Manifest is writable by an untrusted principal.' }
+    }
+}
+
+if ($Mode -eq 'Remove') {
+    Assert-Manifest
+    $account = Get-LocalUser -Name $Instance -ErrorAction SilentlyContinue
+    if ($account -and $account.SID.Value -ne $manifest.AccountSid) { throw 'Account was substituted; refusing removal.' }
+    $service = Get-CimInstance Win32_Service -Filter "Name='$Instance'"
+    if ($service) {
+        if ($service.PathName -ne $manifest.ServiceCommand -or $service.StartName -ne ".\$Instance") { throw 'Service was substituted; refusing removal.' }
+        Stop-Service -Name $Instance -ErrorAction Stop
+    }
+    if ($account) {
+        # Rotate only this manifest-owned account. No password is kept in a file for uninstall.
+        $password = New-Password
+        Set-LocalUser -SID $account.SID -Password $password
+        Start-Owner ([PSCredential]::new(".\$Instance", $password)) 'GuestRemove'
+    }
+    if ($service) {
+        $result = Invoke-CimMethod -InputObject $service -MethodName Delete
+        if ($result.ReturnValue -ne 0) { throw 'Service deletion failed.' }
+    }
+    if ($account) { Remove-LocalUser -SID $account.SID }
+    $profile = Get-CimInstance Win32_UserProfile | Where-Object SID -EQ $manifest.AccountSid
+    if ($profile) { $profile | Remove-CimInstance }
+    # Preserve the keyed audit ledger and receipts. Dropping an endpoint must not erase evidence.
+    Set-ProtectedDirectory $state @()
+    $manifest.Status = 'Removed; audit state retained'
+    Write-Json $manifestPath $manifest
+    Write-Output "Removed $Instance service/account/distro; protected audit state retained at $state."
+    exit 0
+}
+
+if ($Mode -ne 'Install') { throw 'Specify Install or Remove.' }
+if (-not (Test-Path -LiteralPath $Rootfs -PathType Leaf) -or $RootfsSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
+    (Get-FileHash -LiteralPath $Rootfs -Algorithm SHA256).Hash -ne $RootfsSha256) { throw 'Rootfs must match its independently obtained publisher SHA-256.' }
+if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw 'Published executable is missing.' }
+$operators = @($OperatorSid.Split(',') | Select-Object -Unique)
+foreach ($sid in $operators) {
+    if ($sid -notmatch '^S-1-5-21-\d+-\d+-\d+-\d+$') { throw 'Explicit Windows account SIDs are required.' }
+    $null = [Security.Principal.SecurityIdentifier]$sid
+}
+if (Test-Path -LiteralPath $root) { throw 'Deployment directory exists; refusing to adopt or overwrite it.' }
+if (Get-LocalUser -Name $Instance -ErrorAction SilentlyContinue) { throw 'Account exists; refusing to adopt it.' }
+if (Get-Service -Name $Instance -ErrorAction SilentlyContinue) { throw 'Service exists; refusing to adopt it.' }
+if (Test-Path -LiteralPath (Join-Path $env:SystemDrive "Users\$Instance")) { throw 'An account profile path already exists.' }
+
+# LSA changes only the new account's service-logon right; no machine-wide policy import is used.
+Add-Type @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+public static class SplatServiceLogon {
+    [StructLayout(LayoutKind.Sequential)] struct Attributes { public uint Length; public IntPtr Root, Name; public uint Flags; public IntPtr Descriptor, Qos; }
+    [StructLayout(LayoutKind.Sequential)] struct Unicode { public ushort Length, MaximumLength; public IntPtr Buffer; }
+    [DllImport("advapi32.dll")] static extern uint LsaOpenPolicy(IntPtr system, ref Attributes attributes, uint access, out IntPtr handle);
+    [DllImport("advapi32.dll")] static extern uint LsaAddAccountRights(IntPtr handle, byte[] sid, Unicode[] rights, uint count);
+    [DllImport("advapi32.dll")] static extern uint LsaNtStatusToWinError(uint status);
+    [DllImport("advapi32.dll")] static extern uint LsaClose(IntPtr handle);
+    public static void Grant(string value) {
+        var attributes = new Attributes { Length = (uint)Marshal.SizeOf(typeof(Attributes)) };
+        IntPtr policy; uint status = LsaOpenPolicy(IntPtr.Zero, ref attributes, 0x810, out policy);
+        if (status != 0) throw new Win32Exception((int)LsaNtStatusToWinError(status));
+        var right = "SeServiceLogonRight"; IntPtr buffer = Marshal.StringToHGlobalUni(right);
+        try {
+            var sid = new SecurityIdentifier(value); var bytes = new byte[sid.BinaryLength]; sid.GetBinaryForm(bytes, 0);
+            status = LsaAddAccountRights(policy, bytes, new[] { new Unicode { Length = (ushort)(right.Length * 2), MaximumLength = (ushort)((right.Length + 1) * 2), Buffer = buffer } }, 1);
+            if (status != 0) throw new Win32Exception((int)LsaNtStatusToWinError(status));
+        } finally { Marshal.FreeHGlobal(buffer); LsaClose(policy); }
+    }
+}
+'@
+$null = New-Item -ItemType Directory -Path $root
+Set-ProtectedDirectory $root @()
+$password = New-Password
+$account = New-LocalUser -Name $Instance -Password $password -PasswordNeverExpires -UserMayNotChangePassword -Description 'SPLAT managed endpoint; do not use interactively'
+$manifest = [ordered]@{ Schema = 1; Instance = $Instance; Root = $root; AccountSid = $account.SID.Value; Status = 'Installing'; ServiceCommand = ('"{0}" bridge-service --configuration "{1}"' -f $installedExe, $configPath) }
+Write-Json $manifestPath $manifest
+Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $account
+Set-ProtectedDirectory $root (@($account.SID.Value) + $operators)
+$null = New-Item -ItemType Directory -Path (Join-Path $root 'bin'), $state, (Join-Path $root 'workspace')
+Set-ProtectedDirectory $state @() $account.SID.Value
+Set-ProtectedDirectory (Join-Path $root 'workspace') @() $account.SID.Value
+Copy-Item -LiteralPath $Executable -Destination $installedExe
+Copy-Item -LiteralPath $PSCommandPath -Destination $installedScript
+Copy-Item -LiteralPath $Rootfs -Destination (Join-Path $root 'rootfs.tar.xz')
+if ((Get-FileHash -LiteralPath (Join-Path $root 'rootfs.tar.xz')).Hash -ne $RootfsSha256) { throw 'Copied rootfs hash changed.' }
+$listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+$listener.Start()
+$port = $listener.LocalEndpoint.Port
+$listener.Stop()
+Write-Json $configPath @{ Schema = 1; ServiceName = $Instance; ServiceSid = $account.SID.Value; PipeName = "$Instance-bridge"; Distribution = $Instance;
+    Port = $port; StateDirectory = $state; WorkspaceDirectory = (Join-Path $root 'workspace'); OperatorSids = $operators; Egress = $Egress }
+$key = New-Object byte[] 64
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+try { $rng.GetBytes($key); [IO.File]::WriteAllBytes((Join-Path $state 'ledger.key'), $key) } finally { [Array]::Clear($key, 0, $key.Length); $rng.Dispose() }
+[SplatServiceLogon]::Grant($account.SID.Value)
+$credential = [PSCredential]::new(".\$Instance", $password)
+Start-Owner $credential 'GuestInstall'
+# Only this exact newly created staging file is removed. The guest's disk is never the input image.
+Remove-Item -LiteralPath (Join-Path $root 'rootfs.tar.xz')
+$null = New-Service -Name $Instance -BinaryPathName $manifest.ServiceCommand -Credential $credential -StartupType Automatic -Description 'SPLAT Windows caller boundary and private policy/audit host'
+Start-Service -Name $Instance
+$manifest.Status = 'Installed; requires managed boundary probe'
+Write-Json $manifestPath $manifest
+Write-Output "Installed $Instance. Client: splat-mcp managed --configuration `"$configPath`"."

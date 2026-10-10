@@ -1,0 +1,27 @@
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright (C) 2026 Platten Industries.
+
+Licensor and publisher:
+  Platten Industries
+  Sean Patrick Platten
+  27 Pledger Pkwy, LaFayette, GA
+  706-239-7969
+  info@plattenindustries.com
+
+SPLAT is available under the GNU Affero General Public License v3.0 (AGPL-3.0).
+Separate commercial licensing is available from Platten Industries under a
+separate agreement. Contact: info@plattenindustries.com. See COMMERCIAL.md.
+
+The full AGPL-3.0 text follows in the installer license page and is supplied as
+LICENSE. Distributing covered binaries requires the corresponding source under
+the license's terms. Modified versions used for remote network interaction must
+offer their corresponding source to those users as specified in section 13.
+Enterprise use alone does not require purchasing a commercial license.
+
+Independent programs and third-party dependencies retain their own licenses;
+packaging them here does not relicense them. The AGPL does not require patches
+to be submitted to Platten Industries, nor does it automatically cover every
+program communicating with SPLAT. A contributor agreement is separate.
+
+This package grants no separate commercial license and makes no warranty of
+security. Installation does not establish the Row 2.4 caller-identity boundary.

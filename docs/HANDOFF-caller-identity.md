@@ -109,6 +109,12 @@ is the buyer, but it must be written down rather than discovered by a licensee's
 
 ## 5. Step 0 — the ten-minute measurement that can kill option 1
 
+**Measured 2026-10-06, partial:** the second account's registration refused the operator's root
+attempt while owner controls succeeded before and after. The control-port listener answered its
+owner but not the operator; TCP connect alone still succeeded. Port 50051 was occupied, so that
+port's result is inconclusive. See the [recorded scope and limits](THREAT-MODEL.md#separate-principal-measurement--2026-10-06-americanew_york)
+and [probe](../packaging/probe-caller-identity.ps1). No service or caller authorization is proven.
+
 Do this before any code. It is the same shape as the measurement that created this row.
 
 1. Create a second local Windows account, not an administrator.
@@ -118,8 +124,9 @@ Do this before any code. It is the same shape as the measurement that created th
 
 **What is being measured:** whether a distro registered to another account is invisible and
 unreachable to the operator — WSL keeps its registrations per user — and whether the daemon's
-`127.0.0.1:50051` inside that distro is reachable from the operator's own Windows session, since WSL2
-localhost forwarding is per user session.
+`127.0.0.1:50051` inside that distro is reachable from the operator's own Windows session. Require
+an owner-side application response on the same port before interpreting an operator failure;
+registration isolation and a successful TCP connect do not establish application reachability.
 
 **If the distro is reachable, option 1 collapses and the answer is option 3.** Record the result in
 the threat model either way; a negative result is worth as much here as a positive one and costs the
@@ -142,7 +149,10 @@ Each step is separately testable. Stop at any boundary and the tree is still gre
 4. **Identity moves up to the MCP layer**, where
    [`McpOperatorIdentityProvider`](../src/splat-mcp/McpOperatorIdentityProvider.cs) already lives.
    It already takes a token validator and an API-key validator; the pipe's answer becomes a third
-   source of identity, and the ledger row records which one spoke.
+   source of identity, and the ledger row records which one spoke. Policy checks, lease construction
+   and audit writes must execute in the service's trust boundary before launch. An operator-only
+   pipe ACL admits every process under that operator SID; relaying caller-supplied leases would
+   preserve the ungoverned execution path.
 5. **`unmount` removes all of it** — service, distro registration, account — the same way it removes
    the boot line. A deployment mode that cannot be undone is not one this product ships.
 

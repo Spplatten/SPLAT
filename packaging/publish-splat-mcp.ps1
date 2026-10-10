@@ -31,20 +31,19 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
 if (-not $OutputDir) { $OutputDir = Join-Path $root 'dist' }
+. "$PSScriptRoot\community-integrity.ps1"
+$buildStartedUtc = [DateTimeOffset]::UtcNow.ToString('o')
+$sourceInputs = @(Get-SplatSourceInventory -Root $root -BuildInputsOnly)
 
 $dotnet = "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe"
 if (-not (Test-Path $dotnet)) { $dotnet = (Get-Command dotnet -ErrorAction SilentlyContinue).Source }
 if (-not $dotnet) { Write-Error 'No dotnet found: this machine cannot build the artifact.'; exit 1 }
 
-$publishDir = Join-Path $root "src\splat-mcp\bin\$Configuration\net10.0-windows\$Runtime\publish"
-$daemonStage = Join-Path $root 'src\splat-mcp\obj\publish-daemon\splat-agent'
-
-# Cleared first, because the check below - "nothing beside the executable" - is only meaningful
-# against a directory this run produced. A symbol file left by an earlier publish would otherwise
-# either fail the run or, worse, be copied out as part of the artifact. The staged daemon goes too:
-# an embed that quietly picked up an earlier binary would defeat the build that follows.
-if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
-if (Test-Path $daemonStage) { Remove-Item $daemonStage -Force }
+# Isolate managed outputs and the embedded daemon from another build in this shared checkout.
+# A fresh directory also makes the single-file check meaningful without deleting prior artifacts.
+$buildRoot = Join-Path $root ('dist\build\splat-mcp-' + [guid]::NewGuid().ToString('N'))
+$publishDir = Join-Path $buildRoot 'publish'
+$daemonStage = Join-Path $buildRoot 'splat-agent'
 
 function Invoke-Guest([string]$script) {
     # Run from a file rather than passed to `sh -c`: Windows PowerShell 5.1 does not escape quotes inside
@@ -121,8 +120,14 @@ Write-Host "[2/6] publishing splat-mcp ($Configuration, $Runtime, self-contained
     -c $Configuration `
     -r $Runtime `
     --self-contained true `
+    --artifacts-path (Join-Path $buildRoot 'dotnet') `
+    --output $publishDir `
     -p:PublishSingleFile=true `
     -p:DebugType=none `
+    '-p:Company=Platten Industries' `
+    '-p:Product=SPLAT (AGPL-3.0 / Platten Industries commercial licensing)' `
+    '-p:Copyright=Copyright (C) 2026 Platten Industries. AGPL-3.0 / separate commercial licensing.' `
+    '-p:PackageLicenseExpression=AGPL-3.0-only' `
     "-p:SplatAgentBinary=$daemonStage" `
     --nologo
 if ($LASTEXITCODE -ne 0) { Write-Error "publish failed with exit code $LASTEXITCODE"; exit 1 }
@@ -154,10 +159,25 @@ if ($latin1.GetString([System.IO.File]::ReadAllBytes($published)).IndexOf($needl
 }
 
 Write-Host "[6/6] staging the artifact and its hash" -ForegroundColor Cyan
+Assert-SplatSourceInventory -Expected $sourceInputs -Actual @(Get-SplatSourceInventory -Root $root -BuildInputsOnly)
 if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null }
 $artifact = Join-Path $OutputDir 'splat-mcp.exe'
 Copy-Item $published $artifact -Force
+& "$PSScriptRoot\write-distribution-license.ps1" -Destination $OutputDir
 $hash = (Get-FileHash $artifact -Algorithm SHA256).Hash
+$daemonArtifact = Join-Path $OutputDir 'splat-agent'
+Copy-Item -LiteralPath $daemonStage -Destination $daemonArtifact -Force
+$manifest = [ordered]@{
+    schema = 1; buildStartedUtc = $buildStartedUtc; builtUtc = [DateTimeOffset]::UtcNow.ToString('o')
+    license = 'AGPL-3.0-only'; publisher = 'Platten Industries'
+    commercialLicense = 'Separate agreement; see COMMERCIAL.md.'
+    artifact = 'splat-mcp.exe'; sha256 = $hash.ToLowerInvariant()
+    daemonSha256 = (Get-FileHash -LiteralPath $daemonArtifact -Algorithm SHA256).Hash.ToLowerInvariant()
+    daemonBuildId = $buildId; minimumGlibc = $floor; runtime = $Runtime
+    managedBridge = if (Test-Path -LiteralPath (Join-Path $root 'packaging\managed-deployment.ps1')) { 'BUILT_UNPROVEN' } else { 'NOT_INCLUDED' }
+    sourceInputs = $sourceInputs
+}
+[IO.File]::WriteAllText((Join-Path $OutputDir 'MCP-BUILD-MANIFEST.json'), ($manifest | ConvertTo-Json -Depth 6) + "`n", [Text.UTF8Encoding]::new($false))
 $commit = (& git -C $root rev-parse --short HEAD 2>$null)
 # Without a byte order mark: Set-Content -Encoding utf8 in Windows PowerShell 5.1 writes one, and a checksum
 # file whose first bytes are not the hash breaks whatever parses it.

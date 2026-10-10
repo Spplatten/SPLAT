@@ -85,6 +85,7 @@ New-Item -ItemType Directory -Path $PackageLayout -Force | Out-Null
 
 Copy-Item -Path "$PublishDir\*" -Destination $PackageLayout -Recurse -Force
 Copy-Item -Path "$ProjectRoot\src\MissionController.UI\Package.appxmanifest" -Destination "$PackageLayout\AppxManifest.xml" -Force
+& "$ScriptRoot\write-distribution-license.ps1" -Destination $PackageLayout
 
 # Create Assets directory with placeholder logos if not present
 $AssetsDir = "$PackageLayout\Assets"

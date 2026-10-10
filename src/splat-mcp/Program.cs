@@ -34,6 +34,7 @@ public static class Program
 {
     public static async Task<int> Main(string[] args)
     {
+        if (await ManagedBridgeCommand.TryRunAsync(args) is int managedExit) return managedExit;
         // Decided before anything is built: a bad invocation must not create the ledger database,
         // seed the catalog or reach for the daemon. stdout is the JSON-RPC channel, so everything that
         // is not a protocol message - errors, and the startup note - goes to stderr.
@@ -84,7 +85,13 @@ public static class Program
             return await RetentionSweep.RunAsync(retain, Console.Out);
         }
 
-        var serve = (McpServerCommand.Serve)command;
+        return await RunServerAsync((McpServerCommand.Serve)command);
+    }
+
+    internal static async Task<int> RunServerAsync(
+        McpServerCommand.Serve serve, ManagedBridgeConfiguration? managed = null, CancellationToken ct = default)
+    {
+        var pipeIdentity = managed is null ? null : new ManagedPipeIdentity();
         string? workspaceRoot = serve.WorkspaceRoot;
         Console.Error.WriteLine(workspaceRoot is null
             ? $"splat-mcp: no --workspace given; fs_read and fs_write are confined to {McpServerHandler.DefaultWorkspaceRoot}"
@@ -193,9 +200,13 @@ public static class Program
         // 3.5 Linux / WSL2 Substrate, built before the engine because the engine runs missions on it:
         // a catalog template whose tool names the Linux lease is handed to the daemon whole, with its
         // lease compiled from the template by the compiler that used to be constructed and never called.
-        var leasedExecutor = new WslLeasedExecutor();
+        var guest = managed is null ? null : new ManagedGuest(managed.Distribution);
+        var guestToken = guest is null ? null : new WslAgentToken(guest.ReadTokenAsync);
+        var leasedExecutor = guest is null ? new WslLeasedExecutor()
+            : new WslLeasedExecutor("127.0.0.1", managed!.Port, guestToken!, guest.StartDaemonAsync, guest.HoldAwake);
         var policyCompiler = new TemplatePolicyCompiler();
-        var healthChecker = new WslSubstrateHealthChecker();
+        var healthChecker = managed is null ? new WslSubstrateHealthChecker()
+            : new WslSubstrateHealthChecker("127.0.0.1", managed.Port, guestToken);
         var leaseSubstrate = new LinuxLeaseSubstrate(leasedExecutor, policyCompiler);
 
         // 4. Core Cognitive Engine
@@ -257,7 +268,7 @@ public static class Program
             // Ledger attribution. The Windows logon session this server runs under is the real
             // principal for a stdio transport; a configured SPLAT_MCP_CLIENT_CREDENTIAL overrides it
             // with a validated one and a bad credential refuses the call outright.
-            identityProvider: new McpOperatorIdentityProvider(
+            identityProvider: (IOperatorIdentityProvider?)pipeIdentity ?? new McpOperatorIdentityProvider(
                 new WindowsOperatorIdentityProvider(),
                 new JwtTokenValidator(),
                 new ApiKeyValidator()),
@@ -273,6 +284,11 @@ public static class Program
 
         using (runRecordSigner)
         {
+            if (managed is not null)
+            {
+                await ManagedBridgeHost.RunAsync(managed, handler, auditLedger, pipeIdentity!, ct);
+                return 0;
+            }
             return await ServeAsync(handler);
         }
     }
@@ -352,7 +368,7 @@ public static class Program
     /// which case the rest of it has been discarded - read past, never buffered - so the reader is
     /// positioned at the start of the next one.
     /// </returns>
-    private static async Task<(string? Line, bool Oversized)> ReadBoundedLineAsync(TextReader reader, CancellationToken ct)
+    internal static async Task<(string? Line, bool Oversized)> ReadBoundedLineAsync(TextReader reader, CancellationToken ct)
     {
         var frame = new StringBuilder();
         var one = new char[1];
@@ -385,7 +401,8 @@ public static class Program
     /// cancellation. It takes its streams so the bytes a client actually receives can be asserted,
     /// rather than inferred from what the handler returned.
     /// </summary>
-    public static async Task ServeAsync(TextReader reader, Stream output, McpServerHandler handler, CancellationToken ct)
+    public static async Task ServeAsync(TextReader reader, Stream output, McpServerHandler handler, CancellationToken ct,
+        Func<McpJsonRpcMessage, CancellationToken, Task<McpJsonRpcMessage>>? dispatch = null)
     {
         // UTF-8 WITHOUT a byte order mark. With Encoding.UTF8, StreamWriter writes EF BB BF at its first
         // flush, so every client's first response - the answer to `initialize` - began with three bytes
@@ -423,7 +440,7 @@ public static class Program
                 var message = JsonSerializer.Deserialize<McpJsonRpcMessage>(line);
                 if (message != null)
                 {
-                    var response = await handler.ProcessMessageAsync(message, ct);
+                    var response = await (dispatch is null ? handler.ProcessMessageAsync(message, ct) : dispatch(message, ct));
                     string jsonResponse = JsonSerializer.Serialize(response);
                     await writer.WriteLineAsync(jsonResponse);
                 }

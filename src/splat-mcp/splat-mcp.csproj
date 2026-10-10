@@ -34,6 +34,7 @@
   -->
   <ItemGroup>
     <InternalsVisibleTo Include="MissionController.Tests" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -53,6 +54,10 @@
   -->
   <ItemGroup Condition="'$(SplatAgentBinary)' != ''">
     <EmbeddedResource Include="$(SplatAgentBinary)" LogicalName="splat-agent" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\packaging\managed-deployment.ps1" LogicalName="managed-deployment.ps1" />
   </ItemGroup>
 
   <Target Name="RequireSplatAgentBinary" BeforeTargets="PrepareForBuild"

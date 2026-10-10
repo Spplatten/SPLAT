@@ -68,12 +68,14 @@ public static class SubstrateProvisioner
         string? wslConfigPath = null,
         string? agentBinaryPath = null,
         string? manifestPath = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        int daemonPort = 50051)
     {
         ArgumentNullException.ThrowIfNull(provision);
         ArgumentNullException.ThrowIfNull(output);
         wsl ??= SubstrateDoctor.RunWslAsync;
-        health ??= new WslSubstrateHealthChecker();
+        if (daemonPort is < 1024 or > 65535) throw new ArgumentOutOfRangeException(nameof(daemonPort));
+        health ??= new WslSubstrateHealthChecker(port: daemonPort);
         bool apply = provision.Apply;
 
         // Every change this run makes to the host, in the order it makes them, so that
@@ -242,7 +244,8 @@ public static class SubstrateProvisioner
 
             var (writeExit, writeOut) = await wsl(Root(
                 $"install -d /opt/splat && printf '%s' \"$SPLAT_UNIT\" > {UnitPath} && "
-                + "systemctl daemon-reload && " + StartCommand(reinstalled || ceilingChanged), ("SPLAT_UNIT", UnitFile)), ct);
+                + "systemctl daemon-reload && " + StartCommand(reinstalled || ceilingChanged),
+                ("SPLAT_UNIT", UnitFile.Replace("127.0.0.1:50051", $"127.0.0.1:{daemonPort}", StringComparison.Ordinal))), ct);
             if (writeExit != 0)
             {
                 Line(output, "FAIL", "service", $"could not install the unit: {Short(writeOut)}");

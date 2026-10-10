@@ -9,8 +9,10 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using MissionController.Core;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
+using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Linux;
 using SplatMcp;
 using Xunit;
@@ -374,6 +376,52 @@ public class DocumentationDriftTests
         }
 
         Assert.Empty(offenders);
+    }
+
+    [Fact]
+    public void TheWindowsNonEnforcementTable_MatchesTheCatalogAndOpenUiGap()
+    {
+        string root = RepositoryRoot();
+        string architecture = File.ReadAllText(Path.Combine(root, "docs", "ARCHITECTURE-windows-substrate.md"));
+        var section = Regex.Match(architecture, @"(?ms)^## What this substrate does not do\r?\n(?<body>.*?)(?=^## |\z)");
+        Assert.True(section.Success, "Windows must publish its non-enforcement boundary beside the Linux contract.");
+        string table = section.Groups["body"].Value;
+        Assert.Contains("| Gap | Consequence | Evidence", table, StringComparison.Ordinal);
+        foreach (string gap in new[] { "Destination pinning on Windows", "Network denial for local-subsystem templates",
+                     "Filesystem confinement outside AppContainer", "AppContainer filesystem proof",
+                     "Job objects as file/socket policy", "Resistance to the operator" })
+        {
+            var row = Regex.Match(table, @"(?m)^\| \*\*" + Regex.Escape(gap) + @"\*\* \|(?<rest>[^\r\n]+)\r?$");
+            Assert.True(row.Success, $"The Windows boundary is missing its {gap} row.");
+            Assert.Matches(@"\]\(\.\./(?:src|tests)/[^)]+\)", row.Groups["rest"].Value);
+        }
+
+        // Bind the published counts to the same catalog used at launch, not to another document
+        // that could be stale in exactly the same way.
+        var stated = Regex.Match(table, @"(?<all>\d+) templates: (?<denied>\d+) Windows network-denied, (?<open>\d+) Windows network-capable,\s*(?<leased>\d+) Linux-leased");
+        Assert.True(stated.Success, "The Windows table must state its measured catalog census.");
+        var census = CapabilityManifest.CensusOf(GovernedTemplateCatalog.All);
+        Assert.Equal(census.Templates, int.Parse(stated.Groups["all"].Value));
+        Assert.Equal(census.NetworkDenied, int.Parse(stated.Groups["denied"].Value));
+        Assert.Equal(census.Windows - census.NetworkDenied, int.Parse(stated.Groups["open"].Value));
+        Assert.Equal(census.Leased, int.Parse(stated.Groups["leased"].Value));
+        var connected = Regex.Match(table, @"The \d+ comprise (?<needs>\d+) that need network access and (?<local>\d+) that need local Windows");
+        Assert.True(connected.Success, "The network-capable census must name both exemption groups.");
+        Assert.Equal(census.NeedsNetwork, int.Parse(connected.Groups["needs"].Value));
+        Assert.Equal(census.LocalSubsystems, int.Parse(connected.Groups["local"].Value));
+
+        string roadmap = File.ReadAllText(Path.Combine(root, "docs", "ROADMAP.md"));
+        if (Regex.IsMatch(roadmap, @"(?m)^\| Job-object UI limits for tier A \|[^\r\n]*\| Open\b"))
+        {
+            var row = Regex.Match(table, @"(?m)^\| \*\*Job-object UI limits\*\* \|(?<rest>[^\r\n]+)\r?$");
+            Assert.True(row.Success, "UI limits remain open in the roadmap; their non-enforcement row cannot disappear.");
+            Assert.Contains("clipboard", row.Value, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("window-messaging", row.Value, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("JobObjectBasicUIRestrictions", row.Value, StringComparison.Ordinal);
+            Assert.Contains("Win32JobSandbox.cs", row.Value, StringComparison.Ordinal);
+        }
+        string linux = File.ReadAllText(Path.Combine(root, "native", "splat-agent", "SUPPORTED_POLICY.md"));
+        Assert.Contains("ARCHITECTURE-windows-substrate.md#what-this-substrate-does-not-do", linux, StringComparison.Ordinal);
     }
 
     private static IEnumerable<string> DocumentationFiles()
