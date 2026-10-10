@@ -188,7 +188,8 @@ public static partial class GovernedTemplateCatalog
         SingleToolDefinition tool,
         CatalogPrompt systemPrompt,
         Dictionary<string, string>? parameters = null,
-        EgressRule? egress = null) =>
+        EgressRule? egress = null,
+        IReadOnlyList<RemediationAction>? remediations = null) =>
         new(templateId,
             name,
             description,
@@ -197,7 +198,8 @@ public static partial class GovernedTemplateCatalog
             tool,
             egress ?? AiGatewayEgress,
             systemPrompt.Text,
-            parameters ?? new Dictionary<string, string>());
+            parameters ?? new Dictionary<string, string>(),
+            remediations);
 
     private static IReadOnlyList<SingleToolTemplate>? _all;
 

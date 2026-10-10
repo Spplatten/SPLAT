@@ -128,7 +128,7 @@ They fail the requirement the same way, and it is not that they identify the wro
 the caller they are meant to exclude sits on the far side of a wire neither of them can see across,
 and outranks the process that would be doing the excluding.
 
-**What would change the answer.** Three, and only the first excludes the stated caller:
+**What would change the answer.** Three; the first requires a non-administrator operator:
 
 1. **Move the principal.** Run the bridge, and own the distro, under a Windows identity that is not
    the operator's — a service or virtual account. A process running as the operator is then excluded
@@ -136,11 +136,17 @@ and outranks the process that would be doing the excluding.
    unreadable to it because `wsl.exe -u root` no longer reaches that distro. The cost is real: a
    service, a distro registered to that account, and the MCP server must then authenticate *its*
    callers, which moves the identity problem up a layer to where `McpOperatorIdentityProvider`
-   already lives. That is the right layer for it.
+   already lives. This does not exclude a local administrator: administrator-to-SYSTEM is not a
+   [Windows security boundary](https://www.microsoft.com/en-us/msrc/windows-security-servicing-criteria).
+   A [pipe ACL](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)
+   admitting the operator also admits other processes running as that operator. Policy
+   authorization and audit writes must therefore execute behind the service boundary before launch;
+   trusting a lease or an audit assertion supplied by the operator-side MCP process leaves the bypass.
 2. **Make the stolen capability worth less.** Refuse any lease not accompanied by a per-mission
    authorization signed by a key the operator holds and the bridge does not. A token taken from the
-   guest then buys nothing. This is the run record's signing, pointed the other way, and it
-   complements 1 rather than replacing it.
+   guest is insufficient on its own. This complements 1 rather than replacing it: another process
+   under the operator's identity can use an operator-held key, including one protected by DPAPI
+   CurrentUser. The signing authority must exclude that process, rather than only the bridge.
 3. **Accept it and record it.** Keep the shared secret and make every lease attributable, which is
    what the run record now does for the MCP path. The threat becomes detectable rather than
    prevented. This is the status quo, stated honestly, and it is a defensible position on a
@@ -155,6 +161,22 @@ establishes that the peer holds a secret every process running as the operator c
 **The decision is the operator's**, and it is really a decision about the product shape. On a
 workstation the operator already outranks everything here, and 3 is honest. On the OEM shape the
 daemon runs where no human is watching, and 3 is not.
+
+### Separate-principal measurement — 2026-10-06, America/New_York
+
+[`probe-caller-identity.ps1`](../packaging/probe-caller-identity.ps1) recorded owner/operator/owner
+controls on WSL 2.7.12.0; [the evidence summary](audits/evidence/2026-10-06-caller-identity.json)
+includes UTC timestamps and hashes of the private raw observations. A disposable non-admin owner
+could enter its distro as root before and after the operator received `WSL_E_DISTRO_NOT_FOUND`.
+The operator could still enter its own Ubuntu distro as root. Its account was a local administrator
+using an unelevated token; this is not proof against administrators or a standard-operator deployment.
+
+On unused control port 58541, a test listener returned its unique marker to the owner's Windows
+process before and after the operator test. The operator's TCP connection opened but returned no
+marker within three seconds. Port 50051 was already occupied on Windows and lacked an owner-side
+marker control, so its result is inconclusive. These are transport observations, not a daemon
+authentication test. Token-file exclusion, service authorization and an audited lease remain
+unmeasured; **roadmap 2.4 remains open**.
 
 ---
 
@@ -297,3 +319,23 @@ is the whole defence, and it is only as good as the habit of looking.
 **The enterprise considerations** — agents that run under an identity of their own, and a customer's
 own DLP rules on the output path — are product requirements rather than gaps in this model. They are
 on the roadmap as candidates.
+
+---
+
+## Remediation actions and privilege elevation
+
+Declared 2026-10-08 with the catalog's first `RemediationAction` (`sysops-time-sync-start-w32time`).
+
+**The mechanism today.** `SandboxedRemediationEngine` runs remediation actions and rollbacks inside a dedicated job object (256 MB, 80% CPU, 45s execution deadline, 30s validation probe) and launches processes with `dropAdminPrivileges: false`. That flag declines to strip administrative privileges. **It cannot grant them.**
+
+**The measured security descriptor.** Measured on 2026-10-08 with `sc.exe sdshow w32time`:
+
+```
+D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)...
+```
+
+`RP` is `SERVICE_START`. LocalSystem (`SY`) and Builtin Administrators (`BA`) possess it; Interactive Users (`IU`) holds `CCLCSWLOCRRC` (query/read rights only). When SPLAT runs in a standard unelevated user session (`WindowsPrincipal.IsInRole(Administrator) == false`), `sc start w32time` fails with Access Denied, and the engine correctly reports `ExecutionFailed`.
+
+**The open decision.** Making service-starting remediations land requires running `SPLAT.exe` elevated — a single process holding an elevated token, spawning restricted children for sensors and unstripped children for system repairs. Elevating the main process broadens the blast radius if the UI process or model synthesis is compromised. 
+
+Running elevated is a threat-model expansion and the operator's decision. Until an out-of-process elevated broker or elevation prompt is designed, unelevated SPLAT fails closed on repairs requiring administrative SCM access, preserving the principle that containment is not silently bypassed.

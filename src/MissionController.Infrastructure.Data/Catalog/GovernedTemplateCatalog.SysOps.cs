@@ -159,6 +159,32 @@ public static partial class GovernedTemplateCatalog
             {
                 { "TimeSourceHost", "time.windows.com" },
                 { "SampleCount", "5" }
+            },
+            remediations: new[]
+            {
+                new RemediationAction(
+                    ActionId: "sysops-time-sync-start-w32time",
+                    TemplateId: "sysops-time-sync",
+                    Title: "Start the Windows Time service",
+                    Description: "W32Time is stopped, so the time diagnostic cannot read status, peers or offset. "
+                               + "Starting it restores the sensor's ability to answer; it does not change the clock.",
+                    RiskLevel: RemediationRiskLevel.Safe,
+                    CanRollback: true,
+                    FixExecutable: CmdExe,
+                    // `sc start` is asynchronous and returns 1056 if the service is already running, so the exit
+                    // code of `sc` alone would report a false failure on a healthy host. The command ends on a
+                    // findstr whose exit code is 0 only once the service reports RUNNING, which makes the fix
+                    // idempotent and self-checking before the separate validation probe ever runs.
+                    FixArguments: "/c sc start w32time & ping -n 4 127.0.0.1 >nul & sc query w32time | findstr /C:\"RUNNING\"",
+                    RollbackExecutable: CmdExe,
+                    RollbackArguments: "/c sc stop w32time & ping -n 4 127.0.0.1 >nul & sc query w32time | findstr /C:\"STOPPED\"",
+                    ValidationExecutable: CmdExe,
+                    ValidationArguments: "/c sc query w32time",
+                    PostconditionDescription: "W32Time reports RUNNING, so the diagnostic's own sensor can answer",
+                    ValidationExpectedOutput: "RUNNING",
+                    RollbackValidationExecutable: CmdExe,
+                    RollbackValidationArguments: "/c sc query w32time",
+                    RollbackValidationExpectedOutput: "STOPPED")
             }),
 
         // --- Memory pressure -----------------------------------------------------------------------------------------

@@ -73,25 +73,9 @@ never reaches the operator as a dead stream.
 
 ## What each primitive does not do
 
-- **The job object** bounds CPU, memory and process count, and guarantees the whole tree dies with
-  the job. It has no concept of a socket or a file.
-- **The restricted token** keeps only `SeChangeNotifyPrivilege` (`DISABLE_MAX_PRIVILEGE`), marks
-  Administrators (`S-1-5-32-544`) `USE_FOR_DENY_ONLY`, and lowers integrity to Medium. It still
-  carries the operator's own user SID, so the tool reads and writes whatever the operator can,
-  short of what needed admin membership or High integrity.
-  [`EgressAndPrivilegeHardeningTests`](../tests/MissionController.Tests/EgressAndPrivilegeHardeningTests.cs)
-  asserts the result against `whoami` running inside the sandbox.
-- **The jail** keeps other principals out of the tool's scratch space. It is not a read boundary
-  for the tool: outside the AppContainer, the tool reaches whatever its de-privileged token
-  reaches.
-- **The AppContainer** removes the network stack — DNS and a raw-IP connect both fail inside it,
-  proven differentially in
-  [`SensorNetworkContainmentTests`](../tests/MissionController.Tests/SensorNetworkContainmentTests.cs).
-  It is also an RPC wall: WMI/CIM, the Event Log service, Defender and the SCM are unreachable from
-  inside it. Standard AppContainer semantics also limit file access to objects whose ACLs admit the
-  container — which is why the jail grants it an ACE — but that read confinement is not separately
-  measured in this repository. The profile, `SPLAT.Sensor.Contained`, is created once per machine
-  without privilege; renaming it strands the ACE every jail grants.
+The [non-enforcement table](#what-this-substrate-does-not-do) is the consolidated boundary: each
+gap names its consequence and the source or measurement that establishes its scope. Source review
+and a live negative probe are different evidence, and the table identifies where a probe is absent.
 
 ## Who gets the AppContainer
 
@@ -103,15 +87,14 @@ denyNetworkAccess: !template.EgressRule.ToolProcessNeedsNetwork && !template.Too
 
 | Template | Contained | Why |
 | --- | --- | --- |
-| Egress scope `ModelGateway`, no local-subsystem cmdlets | **Yes** | The sensor needs no network; SPLAT's own process makes the model call |
-| `ModelGateway`, but the command line uses `Get-CimInstance`, `Get-WinEvent`, `Get-MpComputerStatus`, `Get-Service` or a relative | No | The container would break the sensor. `Containment_AlsoBlocksWmi_WhichIsWhyWmiTemplatesAreExempt` fails if Windows ever lets an AppContainer through, so the exemption cannot outlive its reason |
+| Egress scope `ModelGateway`, with `NetworkDenialMeasuredHarmless` declared | **Yes** | The sensor needs no network, and its catalog entry opts in after a comparison inside and outside containment |
+| `ModelGateway`, without that measured opt-in | No | Denial could blind the sensor to local services. `Containment_AlsoBlocksWmi_WhichIsWhyWmiTemplatesAreExempt` measures one such failure; per-template comparisons decide the opt-in |
 | Egress scope `ToolProcess` | No | An AppContainer is network-or-none, so it cannot admit the one host this sensor needs. The declared FQDN stays an audited claim until a broker or WFP filter exists |
 
-The subsystem check is a text scan of the tool's own command line
-(`SingleToolTemplate.ToolNeedsLocalSubsystems` in [`Models.cs`](../src/MissionController.Core/Models.cs)).
-A false positive costs one template its containment; a false negative would fail in front of an
-operator as an unexplained sensor error. The scan is biased toward the survivable mistake, and
-per-template verification is the durable fix.
+`SingleToolTemplate.ToolNeedsLocalSubsystems` in [`Models.cs`](../src/MissionController.Core/Models.cs)
+is the inverse of `NetworkDenialMeasuredHarmless`. The earlier command-text scan was retired;
+[NetworkToolsUnderDenialTests](../tests/MissionController.Tests/NetworkToolsUnderDenialTests.cs)
+checks the catalog's opt-ins by running both paths. Linux-leased templates use the guest's policy.
 
 ## The run record
 
@@ -161,9 +144,26 @@ it is covered with the other entry points in
 
 ## What this substrate does not do
 
-- Pin **which** host a `ToolProcess`-scoped sensor reaches.
-- Deny the network to templates exempted for WMI, the Event Log, Defender or the SCM.
-- Confine a tool's reads outside the AppContainer.
-- Resist the operator. Everything runs as the operator's own account, so an administrator on the
-  machine can undo all of it — the same limit the
-  [ledger](ARCHITECTURE-control-plane.md#evidence-and-memory) states for its own integrity.
+This table is the Windows counterpart to the Linux [supported-policy contract](../native/splat-agent/SUPPORTED_POLICY.md#not-policed-and-not-claimed-to-be).
+It describes the operator-account Windows sensor path, not the in-progress managed WSL bridge.
+Source references establish implementation limits; named tests establish only the behavior their
+assertions exercise. None of these rows claims an independent security assessment.
+
+The catalog census is **58 templates: 8 Windows network-denied, 46 Windows network-capable,
+4 Linux-leased**. The 46 comprise 8 that need network access and 38 that need local Windows
+subsystems. These figures are checked against `CapabilityManifest.CensusOf` by
+`DocumentationDriftTests.TheWindowsNonEnforcementTable_MatchesTheCatalogAndOpenUiGap`.
+
+| Gap | Consequence | Evidence and limits of that evidence |
+| --- | --- | --- |
+| **Destination pinning on Windows** | A network-capable tool is not restricted to its declared FQDN or port by SPLAT. `IEgressFirewall` guards the control plane's model requests, not a child tool's sockets. | [MissionExecutionEngine](../src/MissionController.Core/MissionExecutionEngine.cs) passes a network-denial boolean to [SuspendedProcessLauncher](../src/MissionController.Infrastructure.Windows/SuspendedProcessLauncher.cs); neither installs a destination filter. [CapabilityManifestTests](../tests/MissionController.Tests/CapabilityManifestTests.cs) binds the census. Source-confirmed gap; no WFP/broker enforcement is claimed. |
+| **Network denial for local-subsystem templates** | The AppContainer is omitted where it prevents the sensor reading Windows services. Those tools retain a network stack even when their task needs no external connection. | [SensorNetworkContainmentTests](../tests/MissionController.Tests/SensorNetworkContainmentTests.cs), `Containment_AlsoBlocksWmi_WhichIsWhyWmiTemplatesAreExempt`, measures the WMI wall; [NetworkToolsUnderDenialTests](../tests/MissionController.Tests/NetworkToolsUnderDenialTests.cs) compares declared-denied templates inside and outside the container. A passing network test establishes only the endpoints and controls it actually exercised. |
+| **Filesystem confinement outside AppContainer** | The jail protects its scratch directory from other principals; it does not prevent the tool accessing other files allowed to its token. The restricted token retains the operator's user SID. | [NtAclJailManager](../src/MissionController.Infrastructure.Windows/NtAclJailManager.cs) grants the operator full control. [HardeningSubsystemTests](../tests/MissionController.Tests/HardeningSubsystemTests.cs) measures ACL inheritance removal, not read confinement. [RestrictedTokenProvider](../src/MissionController.Infrastructure.Windows/RestrictedTokenProvider.cs) reduces privileges, admin membership and integrity without creating a new user. |
+| **AppContainer filesystem proof** | The container's filesystem access depends on Windows ACLs and its shared `SPLAT.Sensor.Contained` SID; SPLAT does not claim a separately measured per-mission filesystem boundary for this path. | [SensorAppContainer](../src/MissionController.Infrastructure.Windows/SensorAppContainer.cs) reuses one profile; [NtAclJailManager](../src/MissionController.Infrastructure.Windows/NtAclJailManager.cs) grants that SID access to jails. Network-denial measurements do not prove filesystem isolation; a dedicated filesystem/cross-mission negative probe is absent. |
+| **Job-object UI limits** | SPLAT sets no clipboard or window-messaging restrictions for the operator's desktop. A job's resource limits do not establish those UI restrictions; other Windows access checks may still apply. | [Win32JobSandbox](../src/MissionController.Infrastructure.Windows/Win32JobSandbox.cs) sets extended and CPU limits, not `JobObjectBasicUIRestrictions`; [WindowStationAccess](../src/MissionController.Infrastructure.Windows/WindowStationAccess.cs) grants launch access to the current desktop. The [roadmap](ROADMAP.md#open-not-scheduled) leaves UI limits open. Source review only: no clipboard/window-message negative probe or UI-limit run-record readback is claimed. |
+| **Job objects as file/socket policy** | CPU, memory, process-count and lifetime clamps do not select files, executable identities or network destinations. Those require separate controls. | [Win32JobSandbox](../src/MissionController.Infrastructure.Windows/Win32JobSandbox.cs) shows the information classes applied and queried. [EgressAndPrivilegeHardeningTests](../tests/MissionController.Tests/EgressAndPrivilegeHardeningTests.cs), `JobSandbox_NeverPermitsBreakaway_SoChildrenCannotLeaveContainment`, checks job membership flags, not file/socket mediation. |
+| **Resistance to the operator** | A same-account process can access the operator's own files and user-scoped secrets; a local administrator is outside the containment boundary. Token reduction of a child does not isolate SPLAT from its host operator. | [DpapiCredentialVault](../src/MissionController.Infrastructure.Windows/DpapiCredentialVault.cs) uses `CurrentUser` protection; [EgressAndPrivilegeHardeningTests](../tests/MissionController.Tests/EgressAndPrivilegeHardeningTests.cs) checks the child's reduced token. The [threat model](THREAT-MODEL.md#who-may-drive-the-lease-daemon) separately records the owner-root WSL limit. These controls do not establish protection from a malicious operator. |
+
+The documentation test keeps this table and its evidence links present, derives the census from
+the current catalog, and requires the UI-limits row while that roadmap item remains open. Closing
+a row requires the implementation and a measurement that earns the narrower gap.

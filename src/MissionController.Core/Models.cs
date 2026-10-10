@@ -213,7 +213,8 @@ public record SingleToolTemplate(
         SingleToolDefinition tool,
         EgressRule egressRule,
         string systemPrompt,
-        IReadOnlyDictionary<string, string> parameterDefaults)
+        IReadOnlyDictionary<string, string> parameterDefaults,
+        IReadOnlyList<RemediationAction>? availableRemediations = null)
         : this(
             templateId,
             name,
@@ -225,7 +226,7 @@ public record SingleToolTemplate(
             systemPrompt,
             FieldsFromDefaults(parameterDefaults),
             parameterDefaults,
-            Array.Empty<RemediationAction>())
+            availableRemediations ?? Array.Empty<RemediationAction>())
     {
     }
 

@@ -11,6 +11,7 @@ using MissionController.Core.Models;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Catalog;
+using MissionController.Infrastructure.Data.Templates;
 using MissionController.Infrastructure.Windows.Jails;
 using MissionController.Infrastructure.Windows.JobObjects;
 using MissionController.Infrastructure.Windows.Process;
@@ -471,6 +472,168 @@ public class RemediationEngineTests
             .ToList();
 
         Assert.Empty(undeclared);
+    }
+
+    [Fact]
+    public void ExactlyOneTemplateInTheCatalog_DeclaresARemediation()
+    {
+        var withRemediations = GovernedTemplateCatalog.All
+            .Where(t => t.Remediations.Count > 0)
+            .ToList();
+
+        var single = Assert.Single(withRemediations);
+        Assert.Equal("sysops-time-sync", single.TemplateId);
+        var action = Assert.Single(single.Remediations);
+        Assert.Equal("sysops-time-sync-start-w32time", action.ActionId);
+        Assert.Equal(RemediationRiskLevel.Safe, action.RiskLevel);
+        Assert.True(action.CanRollback);
+        Assert.Equal("RUNNING", action.ValidationExpectedOutput);
+        Assert.Equal("STOPPED", action.RollbackValidationExpectedOutput);
+    }
+
+    [Fact]
+    public async Task SysopsTimeSyncRemediation_FailsClosed_WhenPostconditionStrippedOrOutputLacksToken()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), $"TimeSyncFailClosed_{Guid.NewGuid():N}.db");
+        try
+        {
+            var auditLedger = new SqliteChainedAuditLedger(new SqliteStorageContext(dbPath));
+            var template = GovernedTemplateCatalog.All.Single(t => t.TemplateId == "sysops-time-sync");
+            var originalAction = Assert.Single(template.Remediations);
+
+            // 1. Refusal when postcondition is stripped
+            var launcher = new MustNotRunLauncher();
+            var engine = new SandboxedRemediationEngine(
+                new NtAclJailManager(),
+                launcher,
+                auditLedger,
+                name => new Win32JobSandbox(name));
+
+            var stripped = originalAction with { ValidationExecutable = null, PostconditionCheck = null };
+            var refusedResult = await engine.ExecuteFixAsync(stripped, "Operator_SysOps");
+
+            Assert.False(refusedResult.Success);
+            Assert.Equal(RemediationVerdict.Refused, refusedResult.Verdict);
+            Assert.Equal(0, launcher.Calls);
+
+            // 2. PostconditionFailed when probe stdout lacks the required token
+            var stubLauncher = new FakeProbeLauncher(validationStdout: "STATE : 1  STOPPED");
+            var engineWithStub = new SandboxedRemediationEngine(
+                new NtAclJailManager(),
+                stubLauncher,
+                auditLedger,
+                name => new Win32JobSandbox(name));
+
+            var failedResult = await engineWithStub.ExecuteFixAsync(originalAction, "Operator_SysOps");
+
+            Assert.False(failedResult.Success);
+            Assert.Equal(RemediationVerdict.PostconditionFailed, failedResult.Verdict);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            if (File.Exists(dbPath))
+            {
+                try { File.Delete(dbPath); } catch { }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SqliteTemplateRegistry_RoundTrip_PreservesCommandRemediation_WhileDelegateCheckVanishes()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), $"RegistryRoundTrip_{Guid.NewGuid():N}.db");
+        try
+        {
+            var context = new SqliteStorageContext(dbPath);
+            var registry = new SqliteTemplateRegistry(context);
+
+            var templates = await registry.GetAllTemplatesAsync();
+            var timeSync = templates.Single(t => t.TemplateId == "sysops-time-sync");
+            var action = Assert.Single(timeSync.Remediations);
+
+            Assert.Equal("sysops-time-sync-start-w32time", action.ActionId);
+            Assert.True(action.HasFixPostcondition);
+            Assert.True(action.HasRollbackPostcondition);
+            Assert.Equal("RUNNING", action.ValidationExpectedOutput);
+            Assert.Equal("STOPPED", action.RollbackValidationExpectedOutput);
+
+            // Contrast with delegate: register a template whose fix relies solely on a code check
+            var delegateAction = new RemediationAction(
+                "temp-delegate-check",
+                "custom-diagnostic",
+                "Delegate Only",
+                "Check lives in code",
+                RemediationRiskLevel.Safe,
+                CanRollback: false,
+                FixExecutable: "cmd.exe",
+                FixArguments: "/c echo FIX",
+                PostconditionCheck: _ => Task.FromResult(true),
+                PostconditionDescription: "Delegate predicate");
+
+            var customTemplate = new SingleToolTemplate(
+                "custom-diagnostic",
+                "Custom Diagnostic",
+                "Test delegate postcondition persistence",
+                "Custom",
+                "claude-haiku-4-5",
+                new SingleToolDefinition("dummy", "Dummy", "cmd.exe", "/c echo 1", new[] { 0 }),
+                new EgressRule("localhost"),
+                "Prompt",
+                new Dictionary<string, string>(),
+                availableRemediations: new[] { delegateAction });
+
+            await registry.RegisterTemplateAsync(customTemplate);
+
+            var reloaded = (await registry.GetAllTemplatesAsync()).Single(t => t.TemplateId == "custom-diagnostic");
+            var reloadedAction = Assert.Single(reloaded.Remediations);
+
+            // The delegate vanished across JSON serialization
+            Assert.Null(reloadedAction.PostconditionCheck);
+            Assert.False(reloadedAction.HasFixPostcondition);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            if (File.Exists(dbPath))
+            {
+                try { File.Delete(dbPath); } catch { }
+            }
+        }
+    }
+
+    private sealed class FakeProbeLauncher : IProcessLauncher
+    {
+        private readonly string _validationStdout;
+
+        public FakeProbeLauncher(string validationStdout)
+        {
+            _validationStdout = validationStdout;
+        }
+
+        public Task<ProcessExecutionResult> LaunchSuspendedInJobAsync(
+            string executable,
+            string arguments,
+            string workingDirectory,
+            IJobSandbox jobSandbox,
+            bool dropAdminPrivileges,
+            int timeoutSeconds,
+            IProgress<string>? stdoutProgress = null,
+            IProgress<string>? stderrProgress = null,
+            CancellationToken cancellationToken = default,
+            bool denyNetworkAccess = false)
+        {
+            return Task.FromResult(new ProcessExecutionResult(
+                ExitCode: 0,
+                StandardOutput: _validationStdout,
+                StandardError: string.Empty,
+                TimedOut: false,
+                FinalMetrics: JobResourceMetrics.Unavailable));
+        }
     }
 
     private sealed class MustNotRunLauncher : IProcessLauncher

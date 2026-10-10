@@ -67,6 +67,10 @@ while the daemon is dead.
 
 These are reachable by a leased process. They are listed so nobody has to discover them.
 
+For Windows sensor tools, read the companion [Windows non-enforcement table](../../docs/ARCHITECTURE-windows-substrate.md#what-this-substrate-does-not-do),
+including destination filtering, filesystem scope, desktop UI limits and operator access. The
+Linux results below do not establish those Windows boundaries.
+
 | Gap | Consequence |
 | --- | --- |
 | **AF_UNIX / AF_NETLINK** | Local IPC is untouched. A per-socket allow-list keyed on the socket's inode is the real answer and does not exist. A leased tool can talk to any local daemon socket its uid can reach — including a resolver that answers over one, which is how a name lookup can still succeed on a host where `systemd-resolved` is reached that way rather than over UDP. |
