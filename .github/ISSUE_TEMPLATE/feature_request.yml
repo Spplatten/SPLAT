@@ -1,0 +1,58 @@
+name: Proposal
+description: Something SPLAT should do that it does not.
+labels: [proposal]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [`docs/ROADMAP.md`](https://github.com/Spplatten/SPLAT/blob/main/docs/ROADMAP.md)
+        first — it lists what is planned, what is open and what was decided against, with reasons.
+        A proposal that engages with a row already there is far more likely to go somewhere than one
+        that starts fresh.
+
+        Some things have been retired after being measured, and will not come back without a
+        measurement that earns it. The clearest: no document may go back to promising that a
+        different socket closes caller identity.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you were trying to do, and what stopped you. Not the solution yet.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+    validations:
+      required: true
+
+  - type: textarea
+    id: done-when
+    attributes:
+      label: How anyone would know it worked
+      description: >
+        Required, and the point of this form. Every roadmap row here has a "done when" that is a
+        measurement rather than an opinion. What command, probe or test would show that your
+        proposal is finished and holding?
+    validations:
+      required: true
+
+  - type: textarea
+    id: roadmap
+    attributes:
+      label: Related roadmap row
+      description: Optional. Row number, and whether this changes it or sits beside it.
+
+  - type: dropdown
+    id: offer
+    attributes:
+      label: Would you be building it
+      options:
+        - Just proposing
+        - Willing to build it if the approach is agreed
+        - Already have a patch (read CONTRIBUTING.md before opening the PR)
+    validations:
+      required: true

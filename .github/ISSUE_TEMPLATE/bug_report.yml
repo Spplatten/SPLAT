@@ -1,0 +1,92 @@
+name: Bug report
+description: Something behaves differently from what a document or a test says it does.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Not for security problems.** If a lease failed to hold, or something got out of
+        containment, that goes to info@plattenindustries.com — see
+        [SECURITY.md](https://github.com/Spplatten/SPLAT/blob/main/SECURITY.md).
+
+        Keep real tokens, keys and host details out of this form. It is public.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, and what you got instead of what you expected.
+      placeholder: |
+        I ran ... and expected ..., but got ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce it
+      description: >
+        Exact commands, in order. A reproduction is worth more than a description, and a
+        reproduction that fails on a clean machine is worth more again.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The commit SHA, or the installer version and its SHA-256.
+    validations:
+      required: true
+
+  - type: textarea
+    id: platform
+    attributes:
+      label: Platform
+      description: >
+        Windows build (`winver` or `[Environment]::OSVersion`), and for anything involving the
+        guest, the output of `wsl --version` and `uname -r`.
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it was installed
+      options:
+        - Built from source
+        - Community test candidate installer (unsigned)
+        - Client distribution package
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: claim
+    attributes:
+      label: Which document or test says otherwise
+      description: >
+        Optional, and the most useful box on this form. If a README row, a roadmap row, a policy
+        row or a test name claims the behaviour you did not get, name it. A measurement that
+        contradicts a document gets merged over the document.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: >
+        Error text, exit codes, the crash log at %LOCALAPPDATA%\SPLAT\crash.log if the console died.
+        Redact anything of yours first.
+      render: shell
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before submitting
+      options:
+        - label: This is not a security problem (those go to the address above, not here)
+          required: true
+        - label: I have removed tokens, keys, hostnames and anything else of mine I did not mean to publish
+          required: true

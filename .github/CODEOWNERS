@@ -1,0 +1,11 @@
+# One maintainer reviews everything here.
+*       @Spplatten
+
+# These carry commitments beyond the code: an exhibit attached to commercial agreements, the
+# licence and its commercial alternative, the contributor terms, and the disclosure channel.
+# Listing them separately is a reminder on the pull request, not a different reviewer.
+/native/splat-agent/SUPPORTED_POLICY.md   @Spplatten
+/LICENSE                                   @Spplatten
+/COMMERCIAL.md                             @Spplatten
+/CLA.md                                    @Spplatten
+/SECURITY.md                               @Spplatten

@@ -1,0 +1,64 @@
+name: A document claims more than the code does
+description: A README row, roadmap row, policy row or guide says something you measured to be untrue.
+labels: [claim-drift]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most valuable report this project takes, and it has its own form because it is
+        the project's own working rule turned outward: nothing is written as built unless it names
+        the evidence that it is. If you measured a claim and it did not hold, the document is wrong
+        until shown otherwise — including when the document is the one attached to commercial
+        agreements.
+
+        If the gap is a containment failure rather than an overstatement, send it to
+        info@plattenindustries.com instead — see
+        [SECURITY.md](https://github.com/Spplatten/SPLAT/blob/main/SECURITY.md).
+
+  - type: input
+    id: where
+    attributes:
+      label: Where the claim is
+      description: File and, if you can, the line or row.
+      placeholder: README.md, "Status at a glance", the Linux lease daemon row
+    validations:
+      required: true
+
+  - type: textarea
+    id: claim
+    attributes:
+      label: What it claims
+      description: Quote it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: measurement
+    attributes:
+      label: What you measured, and the command that produced it
+      description: >
+        The command and its output. If the claim names evidence — a probe file, a source hash, a
+        test — say whether you checked that evidence too, and whether it still matches what ships.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Commit you measured against
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of gap is it
+      options:
+        - The claim is false
+        - The claim is true but its evidence is stale (the thing it proved has changed since)
+        - A number is out of step with what the code computes
+        - A template's output describes work it did not do
+        - The claim is true but narrower than it reads
+    validations:
+      required: true

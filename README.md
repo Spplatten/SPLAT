@@ -286,6 +286,23 @@ closed or offer as a service.
 Third-party components (.NET Runtime, Windows App SDK, Win2D, Microsoft.Data.Sqlite,
 CommunityToolkit, SQLite, the libbpf ecosystem) remain under their own licences.
 
+"SPLAT" and "Platten Industries", and their logos, are marks of Platten Industries. The AGPL grants
+copyright and patent permissions, not trademark permissions, and none are granted here. Say your
+build is derived from SPLAT; do not call it SPLAT.
+
+## Found a problem, or want to send a patch
+
+- **A containment failure, or anything that gets out of a lease** — [SECURITY.md](SECURITY.md). Not
+  a public issue. Read the *already known* section first: several weaknesses here are measured,
+  published and open, so rediscovering one is a confirmation rather than a finding.
+- **A document that claims more than the code does** — the most valuable report this project takes,
+  and it has [its own issue form](.github/ISSUE_TEMPLATE/false_claim.yml). A measurement that
+  contradicts a document gets merged over the document.
+- **A patch** — [CONTRIBUTING.md](CONTRIBUTING.md) for the build commands, the rules the suite
+  enforces, and what is worth working on. Code needs a signed [CLA](CLA.md), because the same work
+  is offered commercially and both offers have to cover all of it.
+- **Conduct** — [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
 ---
 
 **Built by Sean Platten** ([GitHub](https://github.com/Spplatten) · [LinkedIn](https://www.linkedin.com/in/sean-platten-916686376/)) — systems engineer applying a decade of high-throughput line discipline to kernel-level agent containment: *mise en place before execution, no black boxes, zero wasted motion, and boundaries the hardware enforces.*
