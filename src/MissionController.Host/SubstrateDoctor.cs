@@ -11,7 +11,7 @@ using MissionController.Infrastructure.Data.Compliance;
 using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Linux;
 
-namespace SplatMcp;
+namespace MissionController.Host;
 
 /// <summary>
 /// What this host will and will not enforce, printed before anyone trusts it with an agent.
@@ -27,7 +27,7 @@ public static class SubstrateDoctor
     public delegate Task<(int ExitCode, string Output)> WslRunner(IReadOnlyList<string> args, CancellationToken ct);
 
     public static async Task<int> RunAsync(
-        McpServerCommand.Doctor doctor,
+        DoctorOptions doctor,
         TextWriter output,
         WslRunner? wsl = null,
         WslSubstrateHealthChecker? health = null,
@@ -43,7 +43,7 @@ public static class SubstrateDoctor
         output.WriteLine("SPLAT doctor - what this host will enforce");
         output.WriteLine();
 
-        string workspace = doctor.WorkspaceRoot ?? defaultWorkspace ?? McpServerHandler.DefaultWorkspaceRoot;
+        string workspace = doctor.WorkspaceRoot ?? defaultWorkspace ?? SplatDataRoot.Layout.McpWorkspace;
         bool exists = Directory.Exists(workspace);
         output.WriteLine("Windows control plane");
         var (dataMark, dataDetail) = DataRootLine(SplatDataRoot.Current);
@@ -73,7 +73,7 @@ public static class SubstrateDoctor
 
         // The kernel and its boot line are readable whether or not the daemon is up, and they are what
         // says whether this host could enforce at all - so they are probed separately from the daemon.
-        output.WriteLine("Linux lease substrate - run_command and run_code");
+        output.WriteLine($"Linux lease substrate - {doctor.LeasedWork}");
         var (wslExit, wslOutput) = await wsl(
             new[] { "-e", "sh", "-c", "uname -r; echo ---; cat /proc/cmdline" }, ct);
         bool wslPresent = wslExit == 0;
@@ -93,7 +93,7 @@ public static class SubstrateDoctor
 
         var status = await health.CheckHealthAsync(ct);
         Line(output, status.DaemonReachable, "daemon",
-            status.DaemonReachable ? "reachable" : "not reachable - run_command and run_code will fail, not fall back");
+            status.DaemonReachable ? "reachable" : $"not reachable - {doctor.LeasedWork} will fail, not fall back");
         if (status.DaemonReachable)
         {
             // Reported from the request that was actually made, not from `test -r` on the file. A
@@ -119,7 +119,7 @@ public static class SubstrateDoctor
                 Line(output, status.FramesProven ? "ok" : "--", "daemon frames",
                     status.FramesProven
                         ? "proven: every frame the daemon sends back is proven for its place on the connection"
-                        : "unproven: this daemon predates 2026-09-23 and answers unwrapped; `splat-mcp provision --apply` installs the one this executable carries");
+                        : $"unproven: this daemon predates 2026-09-23 and answers unwrapped; {doctor.DaemonRemedy}");
             }
 
             // Not a failure: a host without one is as it was before ceilings existed. It is the line
@@ -129,19 +129,29 @@ public static class SubstrateDoctor
                     ? "unknown: the daemon would not answer this host"
                     : status.CeilingPolicy
                         ? "the guest bounds every lease from /etc/splat/policy.json, whoever holds the token"
-                        : "none in the guest, so the token alone authorizes what a lease may name. `splat-mcp provision --apply` writes one; add --egress <list> to bound the network from there too");
+                        : $"none in the guest, so the token alone authorizes what a lease may name. {doctor.CeilingRemedy}");
         }
 
         output.WriteLine();
         output.WriteLine("Network for leases");
-        // Not a failure: no network is the safe end of this dial, and the only one that needs no
-        // trust in the operator getting a list right.
-        Line(output, doctor.Egress.IsEmpty ? "--" : "ok", "lease network",
-            doctor.Egress.IsEmpty
-                ? "no --egress given, so a lease gets no network at all"
-                : $"may connect only to {doctor.Egress}");
+        if (doctor.Egress is null)
+        {
+            // A host whose leases nobody authors: TemplatePolicyCompiler gives each one its template's
+            // own sensor destination or no network, so there is no operator list to report.
+            Line(output, "ok", "lease network",
+                "each lease is compiled from its template: the tool's own declared destination, or no network at all");
+        }
+        else
+        {
+            // Not a failure: no network is the safe end of this dial, and the only one that needs no
+            // trust in the operator getting a list right.
+            Line(output, doctor.Egress.IsEmpty ? "--" : "ok", "lease network",
+                doctor.Egress.IsEmpty
+                    ? "no --egress given, so a lease gets no network at all"
+                    : $"may connect only to {doctor.Egress}");
+        }
 
-        if (doctor.Egress.NamesNoResolver)
+        if (doctor.Egress?.NamesNoResolver == true)
         {
             Line(output, "--", "name lookups",
                 "this policy names no resolver on port 53, and the kernel refuses a leased tool's DNS "
@@ -159,8 +169,8 @@ public static class SubstrateDoctor
         bool enforcing = status.Enforcing;
         output.WriteLine();
         output.WriteLine(enforcing
-            ? "Verdict: a lease on this host reaches the kernel. run_command and run_code are enforced."
-            : "Verdict: NOT enforcing here. Nothing above changes what fs_read and fs_write do, but run_command and run_code cannot be trusted to contain anything on this host.");
+            ? $"Verdict: a lease on this host reaches the kernel. {doctor.LeasedWork} are enforced."
+            : $"Verdict: NOT enforcing here. Nothing above changes what fs_read and fs_write do, but {doctor.LeasedWork} cannot be trusted to contain anything on this host.");
         return enforcing ? 0 : 1;
     }
 
@@ -281,11 +291,12 @@ public static class SubstrateDoctor
     internal static readonly TimeSpan ProbeBudget = TimeSpan.FromSeconds(15);
 
     /// <summary>
-    /// The real runner, shared with the provisioner so both reach the guest the same way. Two
+    /// The real runner, shared with the provisioner, the unmounter and splat-mcp's managed bootstrap so
+    /// all of them reach the guest the same way. Two
     /// parameters, not three with a default: this signature is the one <see cref="WslRunner"/>
     /// names, and an optional parameter would stop it converting to that delegate.
     /// </summary>
-    internal static Task<(int, string)> RunWslAsync(IReadOnlyList<string> args, CancellationToken ct) =>
+    public static Task<(int, string)> RunWslAsync(IReadOnlyList<string> args, CancellationToken ct) =>
         RunWslAsync(args, ct, ProbeBudget);
 
     /// <summary>

@@ -11,6 +11,7 @@ using MissionController.Core.Brain;
 using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
+using MissionController.Host;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Data.Templates;

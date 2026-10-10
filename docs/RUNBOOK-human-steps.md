@@ -342,7 +342,7 @@ Start-Process C:\C_AGENT_BUILDER\dist\App\MissionController.UI.exe -WorkingDirec
 Get-Content "$env:LOCALAPPDATA\SPLAT\self-test.json"
 ```
 
-**Expect:** `ExitCode 0` and a report listing every page as `ok`. It opens all nine pages, waits for
+**Expect:** `ExitCode 0` and a report listing every page as `ok`. It opens all ten pages, waits for
 each to load, and exits: 2 names the page that failed, 1 means it failed before its window, 3 means
 it did not finish. `packaging\build-client-dist.ps1` runs exactly this on the published console and
 refuses to zip a package that returns anything but 0. Two pages that threw the moment they were

@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using MissionController.Infrastructure.Linux;
 
-namespace SplatMcp;
+namespace MissionController.Host;
 
 /// <summary>
 /// Gets this host from "WSL2 is installed" to "a lease reaches the kernel", with no shell step.
@@ -61,7 +61,7 @@ public static class SubstrateProvisioner
         "WantedBy=multi-user.target\n";
 
     public static async Task<int> RunAsync(
-        McpServerCommand.Provision provision,
+        ProvisionOptions provision,
         TextWriter output,
         SubstrateDoctor.WslRunner? wsl = null,
         WslSubstrateHealthChecker? health = null,

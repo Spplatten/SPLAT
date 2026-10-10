@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.ServiceProcess;
 using System.Text;
 using MissionController.Core;
+using MissionController.Host;
 
 namespace SplatMcp;
 
@@ -36,7 +37,7 @@ internal static class ManagedBridgeCommand
             {
                 var guest = new ManagedGuest(config.Distribution);
                 var token = new MissionController.Infrastructure.Linux.WslAgentToken(guest.ReadTokenAsync);
-                return await SubstrateProvisioner.RunAsync(new McpServerCommand.Provision(true,
+                return await SubstrateProvisioner.RunAsync(new ProvisionOptions(true,
                         string.IsNullOrEmpty(config.Egress) ? McpEgressPolicy.None : McpEgressPolicy.Parse(config.Egress)), Console.Out,
                     wsl: (arguments, ct) => SubstrateDoctor.RunWslAsync(new[] { "-d", config.Distribution }.Concat(arguments).ToArray(), ct),
                     health: new MissionController.Infrastructure.Linux.WslSubstrateHealthChecker("127.0.0.1", config.Port, token),

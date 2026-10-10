@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace SplatMcp;
+namespace MissionController.Host;
 
 /// <summary>
 /// Plays a mount manifest backwards, and says what it could not restore.
@@ -23,7 +23,7 @@ namespace SplatMcp;
 public static class SubstrateUnmounter
 {
     public static async Task<int> RunAsync(
-        McpServerCommand.Unmount unmount,
+        UnmountOptions unmount,
         TextWriter output,
         SubstrateDoctor.WslRunner? wsl = null,
         CancellationToken ct = default)

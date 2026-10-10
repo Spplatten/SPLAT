@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using MissionController.Host;
 using MissionController.Infrastructure.Linux;
 using SplatMcp;
 using Xunit;
@@ -127,7 +128,7 @@ public sealed class SubstrateDoctorTests
         var report = new StringWriter();
 
         int exit = await SubstrateDoctor.RunAsync(
-            new McpServerCommand.Doctor(null, McpEgressPolicy.None),
+            new DoctorOptions(null, McpEgressPolicy.None),
             report,
             wsl: (_, _) => Task.FromResult((-1, "wsl.exe not found")),
             health: NoDaemon,
@@ -157,7 +158,7 @@ public sealed class SubstrateDoctorTests
         var report = new StringWriter();
 
         await SubstrateDoctor.RunAsync(
-            new McpServerCommand.Doctor(null, McpEgressPolicy.None),
+            new DoctorOptions(null, McpEgressPolicy.None),
             report,
             wsl: (_, _) => Task.FromResult((-1, "wsl.exe not found")),
             health: NoDaemon,
@@ -176,7 +177,7 @@ public sealed class SubstrateDoctorTests
         var report = new StringWriter();
 
         await SubstrateDoctor.RunAsync(
-            new McpServerCommand.Doctor(null, McpEgressPolicy.None),
+            new DoctorOptions(null, McpEgressPolicy.None),
             report,
             wsl: (_, _) => Task.FromResult((0, "6.18.33.2-microsoft-standard-WSL2\n---\ninitrd=\\initrd.img lsm=landlock,yama,bpf\n")),
             health: NoDaemon);
@@ -192,7 +193,7 @@ public sealed class SubstrateDoctorTests
         var report = new StringWriter();
 
         await SubstrateDoctor.RunAsync(
-            new McpServerCommand.Doctor(null, McpEgressPolicy.None),
+            new DoctorOptions(null, McpEgressPolicy.None),
             report,
             wsl: (_, _) => Task.FromResult((0, "6.6.0-generic\n---\ninitrd=\\initrd.img lsm=landlock,yama\n")),
             health: NoDaemon);
@@ -218,7 +219,7 @@ public sealed class SubstrateDoctorTests
         var report = new StringWriter();
 
         int exit = await SubstrateDoctor.RunAsync(
-            new McpServerCommand.Doctor(null, McpEgressPolicy.None),
+            new DoctorOptions(null, McpEgressPolicy.None),
             report,
             wsl: (_, _) => Task.FromResult((0, "6.18.33.2\n---\nlsm=bpf\n")),
             health: new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
@@ -240,7 +241,7 @@ public sealed class SubstrateDoctorTests
         var report = new StringWriter();
 
         int exit = await SubstrateDoctor.RunAsync(
-            new McpServerCommand.Doctor(null, McpEgressPolicy.None),
+            new DoctorOptions(null, McpEgressPolicy.None),
             report,
             wsl: (_, _) => Task.FromResult((0, "6.18.33.2\n---\nlsm=bpf\n")),
             health: new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
@@ -265,7 +266,7 @@ public sealed class SubstrateDoctorTests
         var report = new StringWriter();
 
         int exit = await SubstrateDoctor.RunAsync(
-            new McpServerCommand.Doctor(null, McpEgressPolicy.None),
+            new DoctorOptions(null, McpEgressPolicy.None),
             report,
             wsl: (_, _) => Task.FromResult((0, "6.18.33.2\n---\nlsm=bpf\n")),
             health: new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
@@ -284,7 +285,7 @@ public sealed class SubstrateDoctorTests
     {
         var withoutResolver = new StringWriter();
         await SubstrateDoctor.RunAsync(
-            new McpServerCommand.Doctor(null, McpEgressPolicy.Parse("203.0.113.7:443")),
+            new DoctorOptions(null, McpEgressPolicy.Parse("203.0.113.7:443")),
             withoutResolver,
             wsl: (_, _) => Task.FromResult((0, "6.18.33.2\n---\nlsm=bpf\n")),
             health: new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
@@ -293,7 +294,7 @@ public sealed class SubstrateDoctorTests
 
         var withResolver = new StringWriter();
         await SubstrateDoctor.RunAsync(
-            new McpServerCommand.Doctor(null, McpEgressPolicy.Parse("203.0.113.7:443,203.0.113.53:53")),
+            new DoctorOptions(null, McpEgressPolicy.Parse("203.0.113.7:443,203.0.113.53:53")),
             withResolver,
             wsl: (_, _) => Task.FromResult((0, "6.18.33.2\n---\nlsm=bpf\n")),
             health: new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
@@ -307,7 +308,7 @@ public sealed class SubstrateDoctorTests
         var report = new StringWriter();
 
         await SubstrateDoctor.RunAsync(
-            new McpServerCommand.Doctor(null, McpEgressPolicy.Parse("203.0.113.7:443")),
+            new DoctorOptions(null, McpEgressPolicy.Parse("203.0.113.7:443")),
             report,
             wsl: (_, _) => Task.FromResult((-1, "no wsl")),
             health: NoDaemon);

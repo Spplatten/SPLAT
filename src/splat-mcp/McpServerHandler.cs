@@ -11,6 +11,7 @@ using MissionController.Core.Crew;
 using MissionController.Core.Enums;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
+using MissionController.Host;
 using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Data.Compliance;
 using MissionController.Infrastructure.Linux;
@@ -19,7 +20,7 @@ using MissionController.Infrastructure.Network.Identity;
 
 namespace SplatMcp;
 
-public class McpServerHandler
+public partial class McpServerHandler
 {
     private readonly ILeasedExecutor _leasedExecutor;
     private readonly ITemplatePolicyCompiler _policyCompiler;

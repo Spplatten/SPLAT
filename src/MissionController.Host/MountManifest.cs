@@ -4,7 +4,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace SplatMcp;
+namespace MissionController.Host;
 
 /// <summary>
 /// One change a mount made to a host, and what was there before it.

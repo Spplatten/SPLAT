@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using MissionController.Host;
 using SplatMcp;
 using Xunit;
 
@@ -70,7 +71,7 @@ public sealed class SubstrateUnmountTests
         guest = guest ?? new ScriptedGuest();
         var output = new StringWriter();
         int exit = await SubstrateUnmounter.RunAsync(
-            new McpServerCommand.Unmount(apply, manifestPath), output, guest.RunAsync, CancellationToken.None);
+            new UnmountOptions(apply, manifestPath), output, guest.RunAsync, CancellationToken.None);
         return (exit, output.ToString(), guest);
     }
 

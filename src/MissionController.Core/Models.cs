@@ -38,7 +38,11 @@ public record SingleToolDefinition(
     // Where the tool runs. The default is the Windows sensor sandbox every template used until
     // 2026-09-24; a template that names the Linux lease runs its tool inside the WSL2 guest under
     // the BPF-LSM lease compiled from this template, and never on the Windows side.
-    ToolSubstrate Substrate = ToolSubstrate.Windows);
+    ToolSubstrate Substrate = ToolSubstrate.Windows,
+    // A leased HTTPS sensor receives the compiler's IPv4 pins as its final argv value. It keeps TLS
+    // hostname verification while avoiding a DNS socket that the lease correctly does not allow.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    bool PassLeaseEgressAsArguments = false);
 
 /// <summary>
 /// The substrate a template's tool runs on. It decides which launcher, jail and job the mission

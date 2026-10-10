@@ -272,7 +272,7 @@ public static partial class GovernedTemplateCatalog
 
         for (int i = 0; i < all.Count; i++)
         {
-            all[i] = all[i] with
+            all[i] = LeasedWebProbe.MoveToLease(all[i]) with
             {
                 NetworkDenialMeasuredHarmless = DenialMeasuredHarmless.Contains(all[i].TemplateId)
             };

@@ -10,7 +10,7 @@ namespace MissionController.Tests;
 /// <summary>
 /// Reads the console's XAML for layout mistakes that WinUI accepts in silence.
 ///
-/// The suite opens all nine pages through the console's own self-test, and every page opened. That
+/// The suite opens all ten pages through the console's own self-test, and every page opened. That
 /// proves a page does not throw; it cannot see that six fields are stacked on top of one another.
 /// Project Studio shipped that way: its project-definition grid declared two columns and no rows,
 /// so <c>Grid.Row="1"</c> and <c>Grid.Row="2"</c> both resolved to row 0 and the operator read

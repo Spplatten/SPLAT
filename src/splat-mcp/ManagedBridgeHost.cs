@@ -6,6 +6,8 @@ using System.Text;
 using System.Text.Json;
 using MissionController.Core;
 using MissionController.Core.Interfaces;
+using MissionController.Host;
+using MissionController.Infrastructure.Linux;
 
 namespace SplatMcp;
 
@@ -23,8 +25,7 @@ internal static class ManagedBridgeHost
     // into a more privileged Windows account and must earn their own service-side authorization.
     internal static readonly HashSet<string> AllowedTools = new(StringComparer.Ordinal)
         { "run_command", "run_code", "get_substrate_health" };
-    internal const PipeAccessRights ClientRights = PipeAccessRights.ReadData | PipeAccessRights.WriteData |
-        PipeAccessRights.ReadPermissions | PipeAccessRights.Synchronize;
+    internal const PipeAccessRights ClientRights = ManagedBridgeClient.ClientRights;
 
     internal static PipeSecurity Security(ManagedBridgeConfiguration config)
     {
@@ -111,22 +112,42 @@ internal static class ManagedBridgeHost
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
         lifetime.CancelAfter(TimeSpan.FromMinutes(30));
         await Program.ServeAsync(reader, pipe, handler, lifetime.Token,
-            (request, token) => DispatchAsync(request, handler, ledger, identity, token));
+            (request, token) => DispatchAsync(request, handler, ledger, identity, token,
+                cancellation => CheckManagedAsync(config, cancellation)));
+    }
+
+    private static async Task<SubstrateReport> CheckManagedAsync(ManagedBridgeConfiguration config, CancellationToken ct)
+    {
+        var guest = new ManagedGuest(config.Distribution);
+        var token = new WslAgentToken(guest.ReadTokenAsync);
+        using var output = new StringWriter();
+        output.WriteLine($"Managed guest: {config.Distribution}; service: {config.ServiceName}");
+        int exit = await SubstrateDoctor.RunAsync(new DoctorOptions(config.WorkspaceDirectory,
+                string.IsNullOrEmpty(config.Egress) ? McpEgressPolicy.None : McpEgressPolicy.Parse(config.Egress),
+                Path.Combine(config.StateDirectory, "ledger.key")) { LeasedWork = "managed Linux leases" }, output,
+            wsl: (args, cancellation) => SubstrateDoctor.RunWslAsync(new[] { "-d", config.Distribution }.Concat(args).ToArray(), cancellation),
+            health: new WslSubstrateHealthChecker("127.0.0.1", config.Port, token),
+            ledgerPath: Path.Combine(config.StateDirectory, "ledger.db"), ct: ct);
+        return new SubstrateReport(exit, output.ToString());
     }
 
     internal static async Task<McpJsonRpcMessage> DispatchAsync(McpJsonRpcMessage request,
-        McpServerHandler handler, IAuditLedger ledger, IOperatorIdentityProvider identity, CancellationToken ct)
+        McpServerHandler handler, IAuditLedger ledger, IOperatorIdentityProvider identity, CancellationToken ct,
+        Func<CancellationToken, Task<SubstrateReport>>? checkManaged = null)
     {
-        if (request.Method == "tools/call")
+        bool executeLease = request.Method == ManagedLeaseRequest.ExecuteMethod;
+        bool checkSubstrate = request.Method == ManagedLeaseRequest.CheckMethod;
+        if (request.Method == "tools/call" || executeLease || checkSubstrate)
         {
-            string? tool = request.Params is { } parameters && parameters.TryGetProperty("name", out var name)
+            string? tool = executeLease ? "execute_lease" : checkSubstrate ? "check_substrate" :
+                request.Params is { } parameters && parameters.TryGetProperty("name", out var name)
                 && name.ValueKind == JsonValueKind.String ? name.GetString() : null;
-            if (tool is null || !AllowedTools.Contains(tool))
+            if (tool is null || (!executeLease && !checkSubstrate && !AllowedTools.Contains(tool)))
                 return new McpJsonRpcMessage { JsonRpc = "2.0", Id = request.Id,
                     Error = new McpError { Code = -32601, Message = "This managed service exposes Linux lease tools and substrate health only." } };
             var actor = await identity.ResolveAsync(ct);
             if (!actor.IsAttributable || actor.Transport != "mcp-managed-pipe") throw new UnauthorizedAccessException("Untrusted service caller.");
-            string digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Params!.Value.GetRawText()))).ToLowerInvariant();
+            string digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Params?.GetRawText() ?? "null"))).ToLowerInvariant();
             // Commit intent before calling any handler. A failed ledger write means no execution;
             // cancellation after execution still leaves a durable, SID-attributed admission record.
             try
@@ -139,6 +160,14 @@ internal static class ManagedBridgeHost
                 return new McpJsonRpcMessage { JsonRpc = "2.0", Id = request.Id,
                     Error = new McpError { Code = -32001, Message = "The managed audit admission could not be committed; no tool was run." } };
             }
+            if (executeLease)
+                return await handler.ExecuteManagedLeaseAsync(request, actor.ToLedgerIdentity(), ct);
+            if (checkSubstrate)
+                return checkManaged is null
+                    ? new McpJsonRpcMessage { JsonRpc = "2.0", Id = request.Id,
+                        Error = new McpError { Code = -32601, Message = "The managed substrate report is unavailable." } }
+                    : new McpJsonRpcMessage { JsonRpc = "2.0", Id = request.Id,
+                        Result = JsonSerializer.SerializeToElement(await checkManaged(ct)) };
         }
         var response = await handler.ProcessMessageAsync(request, ct);
         if (request.Method == "tools/list" && response.Result is { } result)
@@ -150,26 +179,8 @@ internal static class ManagedBridgeHost
         return response;
     }
 
-    internal static async Task<NamedPipeClientStream> ConnectAsync(string name, string expectedSid, CancellationToken ct)
-    {
-        var pipe = new NamedPipeClientStream(".", name, ClientRights, PipeOptions.Asynchronous,
-            TokenImpersonationLevel.Identification, HandleInheritability.None);
-        try
-        {
-            await pipe.ConnectAsync(10000, ct);
-            string owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier))!.Value;
-            if (owner != expectedSid) throw new UnauthorizedAccessException("The pipe server is not the configured service principal.");
-            // No request bytes, credentials or operator input cross the pipe before its owner check.
-            await pipe.WriteAsync(new byte[] { 1 }, ct);
-            using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            budget.CancelAfter(TimeSpan.FromSeconds(10));
-            var response = new byte[1];
-            if (await pipe.ReadAsync(response, budget.Token) != 1 || response[0] != 1)
-                throw new UnauthorizedAccessException("The managed bridge refused this client.");
-            return pipe;
-        }
-        catch { pipe.Dispose(); throw; }
-    }
+    internal static Task<NamedPipeClientStream> ConnectAsync(string name, string expectedSid, CancellationToken ct) =>
+        ManagedBridgeClient.ConnectAsync(name, expectedSid, ct);
 
     internal static async Task<int> ProxyAsync(ManagedBridgeConfiguration config, TextReader input, Stream output, CancellationToken ct)
     {

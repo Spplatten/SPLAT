@@ -49,6 +49,7 @@ public sealed partial class MainWindow : Window
         typeof(SecurityAuditView),
         typeof(SemanticSearchView),
         typeof(JailInspectorView),
+        typeof(KernelLeaseView),
         typeof(SettingsView),
     };
 
@@ -283,6 +284,7 @@ public sealed partial class MainWindow : Window
         if (pageType == typeof(SecurityAuditView)) return "Audit";
         if (pageType == typeof(SemanticSearchView)) return "Memory";
         if (pageType == typeof(JailInspectorView)) return "Jail";
+        if (pageType == typeof(KernelLeaseView)) return "Lease";
         return null;
     }
 
@@ -308,6 +310,7 @@ public sealed partial class MainWindow : Window
                 "Audit" => typeof(SecurityAuditView),
                 "Memory" => typeof(SemanticSearchView),
                 "Jail" => typeof(JailInspectorView),
+                "Lease" => typeof(KernelLeaseView),
                 _ => null
             };
 

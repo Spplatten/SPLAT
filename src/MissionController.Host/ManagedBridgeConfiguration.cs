@@ -2,14 +2,16 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Runtime.Versioning;
 
-namespace SplatMcp;
+namespace MissionController.Host;
 
-internal sealed record ManagedBridgeConfiguration(
+[SupportedOSPlatform("windows")]
+public sealed record ManagedBridgeConfiguration(
     int Schema, string ServiceName, string ServiceSid, string PipeName, string Distribution,
     int Port, string StateDirectory, string WorkspaceDirectory, string[] OperatorSids, string Egress = "")
 {
-    internal static ManagedBridgeConfiguration Load(string path, bool serving)
+    public static ManagedBridgeConfiguration Load(string path, bool serving = false)
     {
         path = Path.GetFullPath(path);
         // Read permission is harmless; a writable config, executable parent, or junction is not.

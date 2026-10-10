@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
+using MissionController.Host;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Compliance;
@@ -173,7 +174,7 @@ public sealed class RunRecordHostTests : IDisposable
     {
         var report = new StringWriter();
         await SubstrateDoctor.RunAsync(
-            new McpServerCommand.Doctor(null, McpEgressPolicy.None, null, keyPath),
+            new DoctorOptions(null, McpEgressPolicy.None, null, keyPath),
             report,
             wsl: (_, _) => Task.FromResult((0, "6.6.0-stub\n---\nBOOT_IMAGE=/vmlinux lsm=bpf\n")),
             health: new WslSubstrateHealthChecker("127.0.0.1", 1, new WslAgentToken(authToken: "0123456789abcdef")),

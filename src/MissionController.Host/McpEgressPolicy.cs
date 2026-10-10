@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 
-namespace SplatMcp;
+namespace MissionController.Host;
 
 /// <summary>
 /// Which IPv4 endpoints a <c>run_command</c> lease may name: the operator's decision, never the caller's.

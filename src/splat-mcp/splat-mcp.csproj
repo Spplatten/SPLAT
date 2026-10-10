@@ -43,26 +43,12 @@
     <ProjectReference Include="..\MissionController.Infrastructure.Data\MissionController.Infrastructure.Data.csproj" />
     <ProjectReference Include="..\MissionController.Infrastructure.Network\MissionController.Infrastructure.Network.csproj" />
     <ProjectReference Include="..\MissionController.Infrastructure.Windows\MissionController.Infrastructure.Windows.csproj" />
-  </ItemGroup>
-
-  <!--
-    The Linux daemon `splat-mcp provision` installs, carried inside the executable so a stranger needs
-    neither this repository nor a Rust toolchain (roadmap 1.9). packaging/publish-splat-mcp.ps1 builds it
-    in WSL and passes its path as SplatAgentBinary; an ordinary build passes nothing, embeds nothing, and
-    provision builds from the repository with cargo instead. Carried inside rather than shipped beside it,
-    so the executable and the daemon it installs cannot come from different builds.
-  -->
-  <ItemGroup Condition="'$(SplatAgentBinary)' != ''">
-    <EmbeddedResource Include="$(SplatAgentBinary)" LogicalName="splat-agent" />
+    <!-- Doctor, provision and unmount, shared with the console; the daemon they install is embedded there. -->
+    <ProjectReference Include="..\MissionController.Host\MissionController.Host.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="..\..\packaging\managed-deployment.ps1" LogicalName="managed-deployment.ps1" />
   </ItemGroup>
-
-  <Target Name="RequireSplatAgentBinary" BeforeTargets="PrepareForBuild"
-          Condition="'$(SplatAgentBinary)' != '' And !Exists('$(SplatAgentBinary)')">
-    <Error Text="SplatAgentBinary is '$(SplatAgentBinary)', which does not exist. Publishing would ship an executable that cannot install its daemon." />
-  </Target>
 
 </Project>

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Compliance;
+using MissionController.Host;
 
 namespace SplatMcp;
 
@@ -394,7 +395,10 @@ public abstract record McpServerCommand
             : new Serve(workspaceRoot, egress, ledgerKey, runRecordKey);
 
     /// <summary>Report what this host will and will not enforce, then exit. Serves nothing.</summary>
-    public sealed record Doctor(string? WorkspaceRoot, McpEgressPolicy Egress, string? LedgerKeyPath = null, string? RunRecordKeyPath = null) : McpServerCommand;
+    public sealed record Doctor(string? WorkspaceRoot, McpEgressPolicy Egress, string? LedgerKeyPath = null, string? RunRecordKeyPath = null) : McpServerCommand
+    {
+        public DoctorOptions Options => new(WorkspaceRoot, Egress, LedgerKeyPath, RunRecordKeyPath);
+    }
 
     /// <summary>Make a run record signing key at this path, print its fingerprint, and exit.</summary>
     public sealed record NewRunRecordKey(string Path) : McpServerCommand;
@@ -412,6 +416,8 @@ public abstract record McpServerCommand
     public sealed record Provision(bool Apply, McpEgressPolicy? Egress = null) : McpServerCommand
     {
         public McpEgressPolicy CeilingEgress => Egress ?? McpEgressPolicy.None;
+
+        public ProvisionOptions Options => new(Apply, Egress);
     }
 
     /// <summary>
@@ -420,7 +426,10 @@ public abstract record McpServerCommand
     /// say what it would do. <see cref="ManifestPath"/> is null for the manifest the mount wrote
     /// under the data root.
     /// </summary>
-    public sealed record Unmount(bool Apply, string? ManifestPath = null) : McpServerCommand;
+    public sealed record Unmount(bool Apply, string? ManifestPath = null) : McpServerCommand
+    {
+        public UnmountOptions Options => new(Apply, ManifestPath);
+    }
 
     /// <summary>
     /// Run the retention sweep. <see cref="Apply"/> is false by default for a stronger reason than

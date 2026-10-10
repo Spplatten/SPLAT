@@ -88,6 +88,13 @@
                 <NavigationViewItem Content="Cryptographic Audit" Tag="Audit" Icon="Permissions" />
                 <NavigationViewItem Content="Semantic Memory" Tag="Memory" Icon="Find" />
                 <NavigationViewItem Content="Sandbox Inspector" Tag="Jail" Icon="Folder" />
+                <!-- The Linux side of the sandbox: the daemon and its BPF-LSM program, checked, mounted and
+                     unmounted by the same code splat-mcp runs. Shield glyph, addressed directly as above. -->
+                <NavigationViewItem Content="Kernel Lease" Tag="Lease">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xEA18;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
 
             <Frame x:Name="ContentFrame" Margin="20,18,20,22">

@@ -72,9 +72,12 @@ Two things the picture says on purpose.
   like autonomy are policies over missions, not a second way to start a process. Three callers
   use the Windows launcher and job object *without* the mission sequence around them: remediation
   fixes, the workflow engine's `TransactionalScope` node, and the Copilot adapter.
-- **Only `splat-mcp` reaches Linux.** The console does not reference `Infrastructure.Linux` at
-  all, and no governed mission is routed through the daemon. `run_command` and `run_code` build a
-  lease and call the bridge directly.
+- **Both hosts reach Linux, through the same code.** Since 2026-09-24 a template whose tool names
+  the Linux lease runs through the daemon from either host
+  ([`LinuxLeaseSubstrate`](../src/MissionController.Infrastructure.Linux/LinuxLeaseSubstrate.cs)), and since
+  2026-10-10 both check, mount and unmount the guest through
+  [`MissionController.Host`](../src/MissionController.Host). Only `splat-mcp` lets a caller author a
+  lease: `run_command` and `run_code` build one and call the bridge directly.
 
 ## Who enforces what
 
@@ -94,7 +97,7 @@ Two things the picture says on purpose.
 | Linux lease lifetime | Daemon reaper — kill inside the policy, then withdraw it | Daemon | An overrunning workload |
 | Who may request a lease | Root-owned 0600 shared secret, loopback TCP | Daemon check | Unprivileged guest processes — **not** another Windows process running as the same user |
 | The most any lease may name | [`ceiling.rs`](../native/splat-agent/src/ceiling.rs) — root-owned `/etc/splat/policy.json` in the guest, written by `provision`, intersected with every request | Daemon check | A token holder asking for more than the operator allowed: executables outside the listed directories, endpoints outside the list, longer or larger than the file says |
-| Which endpoints a `run_command` / `run_code` lease names | [`McpEgressPolicy`](../src/splat-mcp/McpEgressPolicy.cs) — the operator's `--egress` list; a caller may request part of it, never more | Check in `splat-mcp` | An agent writing its own destinations into the lease the kernel then enforces |
+| Which endpoints a `run_command` / `run_code` lease names | [`McpEgressPolicy`](../src/MissionController.Host/McpEgressPolicy.cs) — the operator's `--egress` list; a caller may request part of it, never more | Check in `splat-mcp` | An agent writing its own destinations into the lease the kernel then enforces |
 | MCP `fs_read` / `fs_write` | [`WorkspaceGuard`](../src/splat-mcp/WorkspaceGuard.cs) — the final path of the opened handle | Check in `splat-mcp` | `..`, string-prefix tricks, junctions, symlinks, hard links |
 | Who acted | Windows logon session; in `splat-mcp`, optionally a validated credential | Check in SPLAT's process | Caller-supplied names |
 | The record of what happened | [`SqliteChainedAuditLedger`](../src/MissionController.Infrastructure.Data/SqliteChainedAuditLedger.cs) — SHA-256 chain over salted commitments; HMAC-SHA256 under the operator's key file once one is given (`SPLAT_LEDGER_KEY_FILE`, or `--ledger-key` on `splat-mcp`) | Tamper evidence | Unkeyed: editing a row in place, **not** a rewrite by anyone who can write the database file. Keyed: the rewrite too, since no one without the key can recompute a hash. Neither: the deletion of the newest rows, which only a saved anchor catches |

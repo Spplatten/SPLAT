@@ -104,12 +104,14 @@ that cannot forget, and away from instructions planted in the platform responses
   guarantee. The leased child also inherits the daemon's own
   environment, because the daemon sets neither an environment nor stdin for it
   ([`main.rs`](../native/splat-agent/src/main.rs)). Roadmap 5.2.
-- **The console does not own its substrate.** Provisioning, `doctor` and the managed guest live only
-  in `splat-mcp` ([`SubstrateProvisioner.cs`](../src/splat-mcp/SubstrateProvisioner.cs),
-  [`ManagedBridgeHost.cs`](../src/splat-mcp/ManagedBridgeHost.cs)), and the console uses whichever
-  daemon answers on `127.0.0.1:50051`. The community installer already ships the console, the daemon
-  and a SPLAT-owned Linux image together ([`splat-community.iss`](../packaging/splat-community.iss)).
-  The wiring has not caught up with the packaging. Roadmap 5.0.
+- **The console does not own its substrate yet.** Until 2026-10-10, provisioning and `doctor` lived only
+  in `splat-mcp`, and the console used whichever daemon answered on `127.0.0.1:50051`. They now live in
+  [`MissionController.Host`](../src/MissionController.Host), and the console's Kernel Lease page checks,
+  mounts and unmounts through them. What remains is the managed guest: it belongs to another Windows
+  account and answers only through the bridge's pipe
+  ([`ManagedBridgeHost.cs`](../src/splat-mcp/ManagedBridgeHost.cs)), so the console cannot reach it,
+  although the community installer already ships the console, the daemon and a SPLAT-owned Linux image
+  together ([`splat-community.iss`](../packaging/splat-community.iss)). Roadmap 5.0.
 
 ## 5. Two kinds of action
 

@@ -258,7 +258,7 @@ the `LeaseSpec` inline, in `McpServerHandler.ExecuteRunCommandAsync`
 | The ceiling on all of the above | **The operator, in the guest** — `/etc/splat/policy.json`, written by `splat-mcp provision --apply [--egress ...]` and read by the daemon at startup. Whatever the request and the MCP host agreed, the daemon refuses anything outside it, so a token that leaked buys at most what the file allows |
 
 The network half used to be written by the agent that asked for it: its addresses as sent, loopback
-when it named none, 80 and 443 for all of them. [`McpEgressPolicy`](../src/splat-mcp/McpEgressPolicy.cs)
+when it named none, 80 and 443 for all of them. [`McpEgressPolicy`](../src/MissionController.Host/McpEgressPolicy.cs)
 is the check that replaced that. It runs in the MCP host, so a refusal from it is SPLAT's policy and
 is labelled `[SPLAT POLICY]`, never reported as a kernel denial, and ledgered as
 `EGRESS_REQUEST_REFUSED`.

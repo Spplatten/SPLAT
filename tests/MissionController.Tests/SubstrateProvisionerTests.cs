@@ -1,3 +1,4 @@
+using MissionController.Host;
 using MissionController.Infrastructure.Linux;
 using SplatMcp;
 using Xunit;
@@ -25,7 +26,7 @@ public sealed class SubstrateProvisionerTests
     private static string LastManifestPath = string.Empty;
 
     private static Task<int> Provision(
-        McpServerCommand.Provision provision,
+        ProvisionOptions provision,
         TextWriter output,
         SubstrateDoctor.WslRunner wsl,
         WslSubstrateHealthChecker health,
@@ -144,7 +145,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         int exit = await Provision(
-            new McpServerCommand.Provision(Apply: false), report, guest.RunAsync,
+            new ProvisionOptions(Apply: false), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
 
         Assert.Equal(1, exit);
@@ -159,7 +160,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         int exit = await Provision(
-            new McpServerCommand.Provision(Apply: true), report,
+            new ProvisionOptions(Apply: true), report,
             (_, _) => Task.FromResult((-1, "wsl.exe not found")),
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
 
@@ -174,7 +175,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         int exit = await Provision(
-            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new ProvisionOptions(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
 
         // The fix is written, but it takes effect only after a restart that is the user's to take,
@@ -197,7 +198,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         await Provision(
-            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new ProvisionOptions(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
 
         Assert.Contains(guest.Commands, command => command.Contains("umask=077", StringComparison.Ordinal) && command.Contains(">> /etc/wsl.conf", StringComparison.Ordinal));
@@ -229,7 +230,7 @@ public sealed class SubstrateProvisionerTests
         using var shipped = new ShippedAgent();
 
         await Provision(
-            new McpServerCommand.Provision(Apply: true), new StringWriter(), guest.RunAsync,
+            new ProvisionOptions(Apply: true), new StringWriter(), guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget),
             agentBinaryPath: shipped.Path);
 
@@ -266,7 +267,7 @@ public sealed class SubstrateProvisionerTests
         using var shipped = new ShippedAgent();
 
         await Provision(
-            new McpServerCommand.Provision(Apply: true), new StringWriter(), guest.RunAsync,
+            new ProvisionOptions(Apply: true), new StringWriter(), guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget),
             agentBinaryPath: shipped.Path);
 
@@ -300,7 +301,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         await Provision(
-            new McpServerCommand.Provision(Apply: true, egress), report, guest.RunAsync,
+            new ProvisionOptions(Apply: true, egress), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
 
         string write = Assert.Single(guest.Commands, command => command.Contains("> /etc/splat/policy.json", StringComparison.Ordinal));
@@ -313,7 +314,7 @@ public sealed class SubstrateProvisionerTests
         // The same document already in place: nothing written, nothing restarted.
         var settled = new ScriptedGuest { CeilingFile = SubstrateProvisioner.CeilingDocument(egress) };
         await Provision(
-            new McpServerCommand.Provision(Apply: true, egress), new StringWriter(), settled.RunAsync,
+            new ProvisionOptions(Apply: true, egress), new StringWriter(), settled.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
         Assert.DoesNotContain(settled.Commands, command => command.Contains("> /etc/splat/policy.json", StringComparison.Ordinal));
         Assert.DoesNotContain(settled.Commands, command => command.Contains("systemctl restart", StringComparison.Ordinal));
@@ -328,7 +329,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         await Provision(
-            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new ProvisionOptions(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
 
         Assert.DoesNotContain(guest.Commands, command => command.Contains(">> /etc/wsl.conf", StringComparison.Ordinal));
@@ -343,7 +344,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         int exit = await Provision(
-            new McpServerCommand.Provision(Apply: false), report, guest.RunAsync,
+            new ProvisionOptions(Apply: false), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget));
 
         Assert.Equal(0, exit);
@@ -370,7 +371,7 @@ public sealed class SubstrateProvisionerTests
 
             var report = new StringWriter();
             int exit = await Provision(
-                new McpServerCommand.Provision(Apply: apply), report, new ScriptedGuest { BpfOnBootLine = false }.RunAsync,
+                new ProvisionOptions(Apply: apply), report, new ScriptedGuest { BpfOnBootLine = false }.RunAsync,
                 new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), path);
 
             return (exit, report.ToString(), File.Exists(path) ? await File.ReadAllTextAsync(path) : null);
@@ -442,7 +443,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         await Provision(
-            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new ProvisionOptions(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
         // The whole of 1.9: nothing is built and no toolchain is looked for, so a guest without one gets
@@ -464,7 +465,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         int exit = await Provision(
-            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new ProvisionOptions(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
         // The loader's own words, whole: the version it names is the thing a stranger has to act on, and a
@@ -482,7 +483,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         await Provision(
-            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new ProvisionOptions(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
         // Replacing the file is not enough on its own: the old process keeps running the old code until
@@ -504,7 +505,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         await Provision(
-            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new ProvisionOptions(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
         // Restarting on every --apply would drop the leases a running daemon holds, to replace a file with
@@ -522,7 +523,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         int exit = await Provision(
-            new McpServerCommand.Provision(Apply: false), report, guest.RunAsync,
+            new ProvisionOptions(Apply: false), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
         Assert.Equal(1, exit);
@@ -542,13 +543,13 @@ public sealed class SubstrateProvisionerTests
     {
         var building = new ScriptedGuest { HasAgent = false, HasCargo = true };
         await Provision(
-            new McpServerCommand.Provision(Apply: true), new StringWriter(), building.RunAsync,
+            new ProvisionOptions(Apply: true), new StringWriter(), building.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken));
 
         using var shipped = new ShippedAgent();
         var carrying = new ScriptedGuest { HasAgent = false };
         await Provision(
-            new McpServerCommand.Provision(Apply: true), new StringWriter(), carrying.RunAsync,
+            new ProvisionOptions(Apply: true), new StringWriter(), carrying.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
         Assert.DoesNotContain(building.Commands.Concat(carrying.Commands), command => command.Contains("/tmp", StringComparison.Ordinal));
@@ -571,7 +572,7 @@ public sealed class SubstrateProvisionerTests
         var report = new StringWriter();
 
         int exit = await Provision(
-            new McpServerCommand.Provision(Apply: true), report, guest.RunAsync,
+            new ProvisionOptions(Apply: true), report, guest.RunAsync,
             new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken), agentBinaryPath: shipped.Path);
 
         Assert.Equal(1, exit);

@@ -6,6 +6,7 @@ using MissionController.Core;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Models;
 using MissionController.Infrastructure.Linux;
+using MissionController.Host;
 using SplatMcp;
 
 namespace MissionController.Tests;
@@ -19,12 +20,12 @@ public sealed class ManagedBridgeTests
         JsonRpc = "2.0", Id = JsonSerializer.SerializeToElement(1), Method = "tools/call",
         Params = JsonSerializer.SerializeToElement(new { name = tool, arguments })
     };
-    private static (McpServerHandler Handler, ManagedPipeIdentity Identity, Executor Executor, Ledger Ledger) Host()
+    private static (McpServerHandler Handler, ManagedPipeIdentity Identity, Executor Executor, Ledger Ledger) Host(McpEgressPolicy? egress = null)
     {
         var identity = new ManagedPipeIdentity();
         var ledger = new Ledger();
         var executor = new Executor(ledger);
-        return (new McpServerHandler(executor, new TemplatePolicyCompiler(), ledger, identityProvider: identity), identity, executor, ledger);
+        return (new McpServerHandler(executor, new TemplatePolicyCompiler(), ledger, identityProvider: identity, egressPolicy: egress), identity, executor, ledger);
     }
 
     [Fact]
@@ -123,6 +124,91 @@ public sealed class ManagedBridgeTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => connect);
         // The owner check occurs before even the one-byte identity bootstrap is transmitted.
         Assert.Equal(0, await counterfeit.ReadAsync(new byte[1], cancellation.Token));
+    }
+
+    private static ManagedLeaseRequest DesktopLease()
+    {
+        var template = MissionController.Infrastructure.Data.Catalog.GovernedTemplateCatalog.All
+            .Single(t => t.TemplateId == "linux-guest-identity");
+        Guid mission = Guid.NewGuid();
+        LeaseSpec lease = new TemplatePolicyCompiler().CompileTemplatePolicy(template, mission,
+            $"{LinuxLeaseSubstrate.DefaultMissionsRoot}/{mission:N}");
+        return new ManagedLeaseRequest(lease, template.Tool.ExecutablePath, new[] { "/etc/os-release" });
+    }
+
+    private static McpJsonRpcMessage DesktopRequest(ManagedLeaseRequest request) => new()
+    {
+        JsonRpc = "2.0", Id = JsonSerializer.SerializeToElement("desktop"),
+        Method = ManagedLeaseRequest.ExecuteMethod, Params = JsonSerializer.SerializeToElement(request)
+    };
+
+    [Fact]
+    public async Task ADesktopLease_UsesTheSameAdmissionAndPreservesTheMeasuredResult()
+    {
+        var host = Host(); host.Identity.Set(Caller);
+        var request = DesktopLease();
+        var response = await ManagedBridgeHost.DispatchAsync(DesktopRequest(request), host.Handler, host.Ledger, host.Identity, default);
+
+        Assert.Null(response.Error);
+        var result = response.Result!.Value.Deserialize<ManagedLeaseResult>()!;
+        Assert.Equal("hi", result.Process.StandardOutput);
+        Assert.Null(result.Process.Lease); // No daemon measurement must remain unknown, never fabricated.
+        Assert.Equal(1, host.Executor.Calls);
+        Assert.Equal(request.Lease.MissionId, host.Ledger.Entries.Last().MissionId);
+        Assert.All(host.Ledger.Entries, entry => Assert.Equal(Caller.ToLedgerIdentity(), entry.OperatorIdentity));
+        Assert.Equal("MANAGED_CALL_ADMITTED", host.Ledger.Entries[0].Action);
+    }
+
+    [Fact]
+    public async Task ADesktopLease_CannotBypassFailedAuditAdmissionOrUseStdio()
+    {
+        var host = Host(); host.Identity.Set(Caller); host.Ledger.Fail = true;
+        var request = DesktopRequest(DesktopLease());
+        Assert.Equal(-32001, (await ManagedBridgeHost.DispatchAsync(request, host.Handler, host.Ledger, host.Identity, default)).Error?.Code);
+        Assert.Equal(-32601, (await host.Handler.ProcessMessageAsync(request)).Error?.Code);
+        Assert.Equal(0, host.Executor.Calls);
+    }
+
+    [Theory]
+    [InlineData("workspace")]
+    [InlineData("persistent")]
+    [InlineData("exec")]
+    [InlineData("overlay")]
+    [InlineData("duration")]
+    [InlineData("network")]
+    [InlineData("null-limits")]
+    public async Task ADesktopLease_CannotExpandTheServicePolicy(string change)
+    {
+        var host = Host(); host.Identity.Set(Caller);
+        var request = DesktopLease();
+        request = request with { Lease = change switch
+        {
+            "workspace" => request.Lease with { WorkingDirectory = "/etc/splat" },
+            "persistent" => request.Lease with { EphemeralWorkspace = false },
+            "exec" => request.Lease with { AllowedExecInodes = new[] { new InodeIdentifierModel(0, 0, "/bin/sh") } },
+            "overlay" => request.Lease with { OverlayFs = new OverlayFsSpec(true, "/etc", "/tmp/escape") },
+            "duration" => request.Lease with { LeaseDurationSeconds = 301 },
+            "network" => request.Lease with { AllowNetwork = true, AllowedEgressIps = new[] { "192.0.2.1" }, AllowedEgressPorts = new uint[] { 443 } },
+            _ => request.Lease with { Limits = null! }
+        } };
+        var response = await ManagedBridgeHost.DispatchAsync(DesktopRequest(request), host.Handler, host.Ledger, host.Identity, default);
+        Assert.Equal(-32602, response.Error?.Code);
+        Assert.Equal(0, host.Executor.Calls);
+    }
+
+    [Fact]
+    public async Task ADesktopLease_CannotExpandAnApprovedAddressToAnotherPort()
+    {
+        var host = Host(McpEgressPolicy.Parse("192.0.2.1:443")); host.Identity.Set(Caller);
+        var request = DesktopLease();
+        request = request with { Lease = request.Lease with { AllowNetwork = true,
+            AllowedEgressIps = new[] { "192.0.2.1" }, AllowedEgressPorts = new uint[] { 80 } } };
+        Assert.Equal(-32602, (await ManagedBridgeHost.DispatchAsync(DesktopRequest(request), host.Handler, host.Ledger, host.Identity, default)).Error?.Code);
+        Assert.Equal(0, host.Executor.Calls);
+
+        request = request with { Lease = request.Lease with { AllowedEgressPorts = new uint[] { 443 } } };
+        Assert.Null((await ManagedBridgeHost.DispatchAsync(DesktopRequest(request), host.Handler, host.Ledger, host.Identity, default)).Error);
+        Assert.Equal(1, host.Executor.Calls);
     }
 
     private sealed class Ledger : IAuditLedger

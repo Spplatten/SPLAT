@@ -26,7 +26,7 @@ before it builds anything ([`McpServerCommand`](../src/splat-mcp/McpServerComman
 `--workspace <dir>` names the one directory `fs_read` and `fs_write` may touch, which must already
 exist and is never created; without it the root is `%LOCALAPPDATA%\SPLAT\mcp-workspace`, named on
 stderr at startup. `--egress a.b.c.d:port,...` names the only endpoints a `run_command` or
-`run_code` lease may connect to, checked by [`McpEgressPolicy`](../src/splat-mcp/McpEgressPolicy.cs);
+`run_code` lease may connect to, checked by [`McpEgressPolicy`](../src/MissionController.Host/McpEgressPolicy.cs);
 without it neither tool gets network. A bad option or a malformed list exits 2 with nothing built, and stdout carries only JSON-RPC —
 written without the UTF-8 byte order mark it carried until 2026-09-11. `splat-mcp doctor` reports what this host will enforce — kernel, boot command line, daemon,
 token the daemon actually accepted, not merely one present on disk — and exits 0 only when a lease

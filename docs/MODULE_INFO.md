@@ -14,7 +14,8 @@
 | **MissionController.Infrastructure.Windows** | [`src/MissionController.Infrastructure.Windows`](../src/MissionController.Infrastructure.Windows) | C# · `net10.0-windows` | Yes | Jail, job object, restricted token, AppContainer launch, DPAPI vault, remediation, Copilot adapter |
 | **MissionController.Infrastructure.Network** | [`src/MissionController.Infrastructure.Network`](../src/MissionController.Infrastructure.Network) | C# · `net10.0` | Yes | Egress firewall, model clients, DLP, identity, SIEM and EDR, trigger listeners |
 | **MissionController.Infrastructure.Data** | [`src/MissionController.Infrastructure.Data`](../src/MissionController.Infrastructure.Data) | C# · `net10.0` | Yes | SQLite storage, chained ledger, Merkle proofs and compliance export, retention, memory, catalogs, registries |
-| **MissionController.Infrastructure.Linux** | [`src/MissionController.Infrastructure.Linux`](../src/MissionController.Infrastructure.Linux) | C# · `net10.0` | Yes, inside `splat-mcp` | The Windows-side bridge to `splat-agent` |
+| **MissionController.Infrastructure.Linux** | [`src/MissionController.Infrastructure.Linux`](../src/MissionController.Infrastructure.Linux) | C# · `net10.0` | Yes, inside `splat-mcp` and the console | The Windows-side bridge to `splat-agent` |
+| **MissionController.Host** | [`src/MissionController.Host`](../src/MissionController.Host) | C# · `net10.0` | Yes, inside `splat-mcp` and the console | What both hosts share: the substrate's doctor, mount and unmount, and the daemon they install |
 | **MissionController.UI** | [`src/MissionController.UI`](../src/MissionController.UI) | C# · WinUI 3 · `net10.0-windows10.0.19041.0` | As `dist\App`, self-contained | The operator console; composition root one |
 | **splat-mcp** | [`src/splat-mcp`](../src/splat-mcp) | C# · `net10.0-windows` · exe | Yes — the licensee-facing surface | The MCP server; composition root two |
 | **splat-bench** | [`src/splat-bench`](../src/splat-bench) | C# · `net10.0-windows` · exe | No | Measures the governed launch path against a bare one |
@@ -36,15 +37,21 @@ flowchart BT
     NET["Infrastructure.Network"] --> CORE
     DATA["Infrastructure.Data"] --> CORE
     LNX["Infrastructure.Linux"] --> CORE
+    HOST["Host"] --> CORE
+    HOST --> DATA
+    HOST --> LNX
     UI["UI"] --> CORE
     UI --> WIN
     UI --> NET
     UI --> DATA
+    UI --> LNX
+    UI --> HOST
     MCP["splat-mcp"] --> CORE
     MCP --> WIN
     MCP --> NET
     MCP --> DATA
     MCP --> LNX
+    MCP --> HOST
     BENCH["splat-bench"] --> CORE
     BENCH --> WIN
     TESTS["Tests"] --> MCP
@@ -52,12 +59,13 @@ flowchart BT
     TESTS --> NET
     TESTS --> DATA
     TESTS --> LNX
+    TESTS --> HOST
 ```
 
 Arrows point from a project to what it references; the tests also reference Core directly. The
-graph is a plain DAG: the infrastructure libraries reference only Core, and nothing references a
-host except the tests, which reference `splat-mcp`. The console does not reference
-`Infrastructure.Linux` — it has no Linux path at all. The Rust crates and the Python package sit
+graph is a plain DAG: the infrastructure libraries reference only Core, `Host` is the one library
+above them and both hosts share it, and nothing references a host except the tests, which reference
+`splat-mcp`. Both hosts reference `Infrastructure.Linux` and run Linux-lease templates through it. The Rust crates and the Python package sit
 outside the solution; the Python package reaches C# only by launching `splat-mcp`.
 
 ---
@@ -186,11 +194,28 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
   `WslLeasedExecutorWireTests`, `LeasedMissionTests`.
 - **Detail:** [ARCHITECTURE-linux-substrate.md](ARCHITECTURE-linux-substrate.md#the-bridge-on-windows).
 
+## MissionController.Host
+
+- **Target:** `net10.0`. **References:** Core, Data, Linux. **Packages:** none.
+- **Referenced by:** `splat-mcp`, the console and the tests. Added 2026-10-10, when the substrate code
+  moved out of `splat-mcp` so the desktop app could install, check and remove its own guest.
+- **Owns:** [`SubstrateDoctor.cs`](../src/MissionController.Host/SubstrateDoctor.cs) — what this host will
+  enforce; [`SubstrateProvisioner.cs`](../src/MissionController.Host/SubstrateProvisioner.cs) and
+  [`SubstrateUnmounter.cs`](../src/MissionController.Host/SubstrateUnmounter.cs) — mount and unmount, with
+  [`MountManifest.cs`](../src/MissionController.Host/MountManifest.cs) between them;
+  [`McpEgressPolicy.cs`](../src/MissionController.Host/McpEgressPolicy.cs) — the egress endpoints a lease may
+  name; [`SubstrateOptions.cs`](../src/MissionController.Host/SubstrateOptions.cs) — what each host passes in,
+  in its own operator's words; [`SubstrateLifecycle.cs`](../src/MissionController.Host/SubstrateLifecycle.cs)
+  — the console's plan-then-apply machine over all three. The daemon `provision` installs is embedded
+  here when `SplatAgentBinary` is passed, so it reaches `splat-mcp.exe` through the reference.
+- **Tests:** `SubstrateDoctorTests`, `SubstrateProvisionerTests`, `SubstrateUnmountTests`,
+  `SubstrateLifecycleTests`.
+
 ## MissionController.UI
 
 - **Target:** `net10.0-windows10.0.19041.0`, minimum platform `10.0.17763.0`, `win-x64`, unpackaged
   (`WindowsPackageType` `None`), with both .NET and the Windows App SDK self-contained in `dist\App`.
-- **References:** Core, Windows, Network, Data.
+- **References:** Core, Windows, Network, Data, Linux, Host.
 - **Packages:** `Microsoft.WindowsAppSDK` **2.5.1**, since 2026-09-18; `Microsoft.Graphics.Win2D`; `Microsoft.Windows.SDK.BuildTools`;
   `CommunityToolkit.Mvvm`; `CommunityToolkit.WinUI.Controls.Primitives`;
   `Microsoft.Extensions.DependencyInjection`.
@@ -198,7 +223,7 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
   every fatal path to `FatalErrorLog` and a message box, so a failed start leaves evidence.
 - **Screens,** from [`MainWindow.xaml.cs`](../src/MissionController.UI/MainWindow.xaml.cs):
   QuickDiagnostician (the start page), WelcomeOnboarding, LiveMissionMonitor, TemplateCatalog,
-  ProjectStudio, SecurityAudit, SemanticSearch, JailInspector and Settings — each a view under
+  ProjectStudio, SecurityAudit, SemanticSearch, JailInspector, KernelLease and Settings — each a view under
   `Views/` and a view model at the project root.
 - **Rendering:** `Effects/` — composition shaders, and Win2D HLSL whose bytecode is built only when
   the SDK's `fxc` is found; `Graphics/` — a Direct3D swap-chain host. The palette is
@@ -221,14 +246,13 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 ## splat-mcp
 
 - **Target:** `net10.0-windows`, exe, root namespace `SplatMcp`.
-- **References:** Core, Linux, Data, Network, Windows. **Packages:** none.
+- **References:** Core, Linux, Host, Data, Network, Windows. **Packages:** `System.ServiceProcess.ServiceController`.
 - **Referenced by:** the tests.
 - **Owns:** [`Program.cs`](../src/splat-mcp/Program.cs) — composition and the stdio loop;
   [`McpServerCommand.cs`](../src/splat-mcp/McpServerCommand.cs) — the command line, decided before
   anything is built;
   [`McpServerHandler.cs`](../src/splat-mcp/McpServerHandler.cs) — dispatch and the thirteen tools;
   [`McpProtocol.cs`](../src/splat-mcp/McpProtocol.cs) — the JSON-RPC and MCP records;
-  [`McpEgressPolicy.cs`](../src/splat-mcp/McpEgressPolicy.cs) — the operator's egress endpoints;
   [`McpOperatorIdentityProvider.cs`](../src/splat-mcp/McpOperatorIdentityProvider.cs);
   [`WorkspaceGuard.cs`](../src/splat-mcp/WorkspaceGuard.cs).
 - **Tests:** `AuditPayloadAndPreExecutionAuthTests`, `McpServerTests`, `McpTraceAnchorTests`,

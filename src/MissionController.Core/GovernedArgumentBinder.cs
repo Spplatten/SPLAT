@@ -143,7 +143,9 @@ public static class GovernedArgumentBinder
 
             // match.Index is an offset into the ORIGINAL template, so the quoting context is read
             // from author-controlled text and can never be influenced by an earlier substitution.
-            bool insideQuotedLiteral = isPowerShell && IsInsideSingleQuotedLiteral(argumentsTemplate, match.Index);
+            bool insideQuotedLiteral = template.Tool.Substrate == ToolSubstrate.LinuxLease
+                ? IsInsidePosixLiteral(argumentsTemplate, match.Index)
+                : isPowerShell && IsInsideSingleQuotedLiteral(argumentsTemplate, match.Index);
 
             declaredFields.TryGetValue(key, out var field);
             Validate(key, value, insideQuotedLiteral, field);
@@ -260,9 +262,10 @@ public static class GovernedArgumentBinder
             // The quoting context is read at the placeholder's offset in the AUTHOR's original
             // string, never at an offset into partially substituted text, so it cannot be moved by
             // any value screened earlier in this loop.
-            bool insideQuotedLiteral = isPowerShell &&
-                placeholderOffsets.TryGetValue(key, out int offset) &&
-                IsInsideSingleQuotedLiteral(argumentsTemplate, offset);
+            bool insideQuotedLiteral = placeholderOffsets.TryGetValue(key, out int offset) &&
+                (template.Tool.Substrate == ToolSubstrate.LinuxLease
+                    ? IsInsidePosixLiteral(argumentsTemplate, offset)
+                    : isPowerShell && IsInsideSingleQuotedLiteral(argumentsTemplate, offset));
 
             try
             {
@@ -464,6 +467,26 @@ public static class GovernedArgumentBinder
         }
 
         return inside;
+    }
+
+    private static bool IsInsidePosixLiteral(string template, int offset)
+    {
+        char quote = '\0';
+        for (int i = 0; i < offset; i++)
+        {
+            char current = template[i];
+            if (quote == '\'')
+            {
+                if (current == '\'') quote = '\0';
+            }
+            else if (current == '\\' && i + 1 < offset
+                && (quote == '\0' || "\"\\$`".Contains(template[i + 1]))) i++;
+            else if (current == quote) quote = '\0';
+            else if (quote == '\0' && current is '\'' or '"') quote = current;
+        }
+        // Values inside POSIX double quotes retain expansion syntax; only literal argv positions
+        // earn the permissive text policy. Apostrophes and control characters are still refused.
+        return quote == '\'';
     }
 
     private static bool IsPowerShell(string? executablePath)

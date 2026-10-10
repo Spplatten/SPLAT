@@ -7,6 +7,7 @@ using MissionController.Core.Crew;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Replay;
 using MissionController.Core.Workflow;
+using MissionController.Host;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Compliance;
@@ -252,9 +253,16 @@ public partial class App : Application
         // engine asks the selector for every mission; a Windows template gets null and runs as it
         // always has. A leased mission reaches the daemon the way run_command does, through the
         // same bridge, with its lease compiled from the template rather than authored by a caller.
-        services.AddSingleton<ILeasedExecutor>(_ => new WslLeasedExecutor());
+        var managedBridge = ManagedBridgeClient.FromEnvironment();
+        services.AddSingleton<ILeasedExecutor>(_ => managedBridge is not null ? managedBridge : new WslLeasedExecutor());
         services.AddSingleton<ITemplatePolicyCompiler, TemplatePolicyCompiler>();
         services.AddSingleton<IMissionSubstrateSelector, LinuxLeaseSubstrate>();
+        // The same doctor, mount and unmount splat-mcp runs, so the console can install, check and remove
+        // the daemon it leases through instead of trusting whatever answers on its port. An installed
+        // console mounts the daemon shipped beside it; a developer build has none and builds it with cargo.
+        services.AddSingleton(_ => new SubstrateLifecycle(
+            daemonBinary: SubstrateLifecycle.DaemonBesideApp(AppContext.BaseDirectory),
+            managedCheck: managedBridge is null ? null : managedBridge.CheckAsync));
 
         // Core Engine & Cognitive Brain
         services.AddSingleton<IDiagnosticFindingsExtractor, JsonFindingsExtractor>();
@@ -299,6 +307,7 @@ public partial class App : Application
         services.AddSingleton<SecurityAuditViewModel>();
         services.AddSingleton<SemanticSearchViewModel>();
         services.AddSingleton<JailInspectorViewModel>();
+        services.AddSingleton<KernelLeaseViewModel>();
         services.AddSingleton<SettingsViewModel>();
 
         Services = services.BuildServiceProvider();

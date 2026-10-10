@@ -11,6 +11,7 @@ using MissionController.Core.Brain;
 using MissionController.Core.Crew;
 using MissionController.Core.Interfaces;
 using MissionController.Core.Replay;
+using MissionController.Host;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Catalog;
@@ -62,12 +63,12 @@ public static class Program
 
         if (command is McpServerCommand.Provision provision)
         {
-            return await SubstrateProvisioner.RunAsync(provision, Console.Out);
+            return await SubstrateProvisioner.RunAsync(provision.Options, Console.Out);
         }
 
         if (command is McpServerCommand.Unmount unmount)
         {
-            return await SubstrateUnmounter.RunAsync(unmount, Console.Out);
+            return await SubstrateUnmounter.RunAsync(unmount.Options, Console.Out);
         }
 
         if (command is McpServerCommand.NewRunRecordKey newKey)
@@ -77,7 +78,7 @@ public static class Program
 
         if (command is McpServerCommand.Doctor doctor)
         {
-            return await SubstrateDoctor.RunAsync(doctor, Console.Out);
+            return await SubstrateDoctor.RunAsync(doctor.Options, Console.Out);
         }
 
         if (command is McpServerCommand.Retain retain)

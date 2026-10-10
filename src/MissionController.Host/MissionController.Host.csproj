@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    What both hosts share: the substrate's lifecycle - doctor, mount and unmount - and the egress
+    format a lease is bounded by. The console and splat-mcp are two doors onto one engine; until
+    2026-10-09 only splat-mcp could install, check or remove the guest that engine runs on, so the
+    desktop app ran Linux-lease templates against whatever daemon happened to answer.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The wsl.exe probe's budget is reachable from the suite so its timeout path runs in milliseconds. -->
+    <InternalsVisibleTo Include="MissionController.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MissionController.Core\MissionController.Core.csproj" />
+    <ProjectReference Include="..\MissionController.Infrastructure.Data\MissionController.Infrastructure.Data.csproj" />
+    <ProjectReference Include="..\MissionController.Infrastructure.Linux\MissionController.Infrastructure.Linux.csproj" />
+  </ItemGroup>
+
+  <!--
+    The Linux daemon `provision` installs, carried inside this assembly so a stranger needs neither the
+    repository nor a Rust toolchain (roadmap 1.9). packaging/publish-splat-mcp.ps1 builds it in WSL and
+    passes its path as SplatAgentBinary, a global property, so it lands here through splat-mcp's
+    reference; an ordinary build passes nothing, embeds nothing, and provision builds from the
+    repository with cargo instead. Carried inside rather than shipped beside it, so the executable and
+    the daemon it installs cannot come from different builds.
+  -->
+  <ItemGroup Condition="'$(SplatAgentBinary)' != ''">
+    <EmbeddedResource Include="$(SplatAgentBinary)" LogicalName="splat-agent" />
+  </ItemGroup>
+
+  <Target Name="RequireSplatAgentBinary" BeforeTargets="PrepareForBuild"
+          Condition="'$(SplatAgentBinary)' != '' And !Exists('$(SplatAgentBinary)')">
+    <Error Text="SplatAgentBinary is '$(SplatAgentBinary)', which does not exist. Publishing would ship an executable that cannot install its daemon." />
+  </Target>
+
+</Project>

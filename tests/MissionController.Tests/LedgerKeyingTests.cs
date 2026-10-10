@@ -5,6 +5,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using MissionController.Host;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Linux;
@@ -286,7 +287,7 @@ public sealed class LedgerKeyingTests : IDisposable
     {
         var report = new StringWriter();
         await SubstrateDoctor.RunAsync(
-            new McpServerCommand.Doctor(null, McpEgressPolicy.None, keyPath),
+            new DoctorOptions(null, McpEgressPolicy.None, keyPath),
             report,
             wsl: (_, _) => Task.FromResult((-1, "wsl.exe not found")),
             health: new WslSubstrateHealthChecker("127.0.0.1", 1, new WslAgentToken(authToken: "0123456789abcdef")),
