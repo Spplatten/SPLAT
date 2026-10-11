@@ -29,6 +29,7 @@ change the code rather than the plan, start with [CONTEXT.md](CONTEXT.md).
 | --- | --- |
 | [END-GOAL.md](END-GOAL.md) | **The destination.** SPLAT as a kit you mount from a drive or a download, and unmount cleanly: what it takes, what exists, and what is yours to decide. A design, never a claim. |
 | [SCOPE-acting-agents.md](SCOPE-acting-agents.md) | **What SPLAT is for.** Agents that act, not only read: where each part runs, why every action goes through the Linux lease, how a secret lives for one step, and the order of work. Roadmap P5 tracks it. |
+| [AYA.md](AYA.md) | Whether to replace `libbpf-rs` with Aya: what it would give and cost, the 2026-10-11 decision (not now), and the loader-only trial to run when the daemon is packaged for Linux hosts. A plan, not a claim. |
 | [DAEMON-PRODUCT-PLAN.md](DAEMON-PRODUCT-PLAN.md) | The 2026-10-10 daemon priorities and acceptance gates: step secrets, concurrent platforms, hostname enforcement, local inference and a licensed Linux service. Planned capabilities, with the current proof boundary retained. |
 | [audits/2026-10-10-desktop-substrate.md](audits/2026-10-10-desktop-substrate.md) | Local 5.0 verification, the remaining live proof and the exact external-data scope awaiting approval. |
 | [ROADMAP.md](ROADMAP.md) | **The status record.** Every open item, who can do it, what "done" means, and the evidence for its current state — checked against the tree, not carried forward from older plans. |
