@@ -85,6 +85,12 @@ pub struct JailPlan {
 }
 
 impl JailPlan {
+    pub fn cleanup_paths(&self) -> Vec<PathBuf> {
+        let mut paths = vec![PathBuf::from(std::ffi::OsStr::from_bytes(self.new_root.as_bytes()))];
+        if let Some(overlay) = &self.overlay_workspace { paths.push(overlay.scratch_dir.clone()); }
+        paths
+    }
+
     /// Builds the root's skeleton under `base` for `mission_id`, with `workdir` bound read-write, or
     /// read-only when `read_only_workdir`. `host` is `/` in the daemon; the tests point it at a
     /// directory of their own.

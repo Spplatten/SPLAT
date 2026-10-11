@@ -311,6 +311,10 @@ outside the solution; the Python package reaches C# only by launching `splat-mcp
 - **Owns:** [`src/main.rs`](../native/splat-agent/src/main.rs) — the daemon and its protocol;
   [`lease.rs`](../native/splat-agent/src/lease.rs), [`cgroup.rs`](../native/splat-agent/src/cgroup.rs),
   [`auth.rs`](../native/splat-agent/src/auth.rs), [`violation.rs`](../native/splat-agent/src/violation.rs),
+  [`secrets.rs`](../native/splat-agent/src/secrets.rs), [`secret_memory.rs`](../native/splat-agent/src/secret_memory.rs),
+  [`secret_recovery.rs`](../native/splat-agent/src/secret_recovery.rs), [`identities.rs`](../native/splat-agent/src/identities.rs),
+  and [`execution.rs`](../native/splat-agent/src/execution.rs) — the opt-in secret broker and child controls,
+  with their separate [5.2 contract and proof boundary](../native/splat-agent/SECRETS.md);
   [`cow.rs`](../native/splat-agent/src/cow.rs), which is parked;
   [`src/bpf/lease_lsm.bpf.c`](../native/splat-agent/src/bpf/lease_lsm.bpf.c); a generated
   `vmlinux.h` — never hand-edit it.

@@ -53,9 +53,8 @@ impl EphemeralCgroup {
         Self::delegate_controllers_to_children(base)?;
 
         let path = base.join(format!("mission_{mission_id}"));
-        if !path.exists() {
-            fs::create_dir(&path).with_context(|| format!("create mission cgroup {}", path.display()))?;
-        }
+        // Reusing a live mission ID must not overwrite a sibling's policy or kill its processes.
+        fs::create_dir(&path).with_context(|| format!("create exclusive mission cgroup {}", path.display()))?;
 
         // Read inode number as cgroup id (this matches bpf_get_current_cgroup_id in kernel)
         let md = fs::metadata(&path).with_context(|| format!("stat cgroup {}", path.display()))?;
@@ -233,18 +232,19 @@ impl EphemeralCgroup {
     }
 
     pub fn kill_tree(path: &Path) -> Result<usize> {
-        if !path.exists() {
-            return Ok(0);
+        match fs::symlink_metadata(path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            result => { result.context("inspect cgroup before drain")?; }
         }
 
-        let before = Self::member_pids(path).unwrap_or_default().len();
+        let before = Self::member_pids(path)?.len();
 
         let kill_file = path.join("cgroup.kill");
         if kill_file.exists() {
             fs::write(&kill_file, "1")
                 .with_context(|| format!("write cgroup.kill for {}", path.display()))?;
         } else {
-            for pid in Self::member_pids(path).unwrap_or_default() {
+            for pid in Self::member_pids(path)? {
                 // SAFETY: a pid read from this cgroup's own procs file; ESRCH is expected and fine.
                 unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
             }
@@ -254,22 +254,29 @@ impl EphemeralCgroup {
         // which is how the old teardown left orphan cgroups behind.
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline {
-            match Self::member_pids(path) {
-                Ok(pids) if pids.is_empty() => return Ok(before),
-                Ok(_) => thread::sleep(Duration::from_millis(20)),
-                Err(_) => return Ok(before),
-            }
+            // cgroup.procs covers only direct members. populated covers all descendants;
+            // a read failure is unknown, never evidence that an identity is safe to reuse.
+            if !Self::populated(path)? { return Ok(before); }
+            thread::sleep(Duration::from_millis(20));
         }
 
-        let survivors = Self::member_pids(path).unwrap_or_default();
-        if survivors.is_empty() {
+        if !Self::populated(path)? {
             Ok(before)
         } else {
-            bail!(
-                "{} process(es) still in {} two seconds after kill: {survivors:?}",
-                survivors.len(),
-                path.display()
-            )
+            bail!("{} is still populated two seconds after kill", path.display())
+        }
+    }
+
+    fn populated(path: &Path) -> Result<bool> {
+        let events = match fs::read_to_string(path.join("cgroup.events")) {
+            Ok(events) => events,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && !path.try_exists()? => return Ok(false),
+            Err(error) => return Err(error).context("read cgroup population after kill"),
+        };
+        match events.lines().find_map(|line| line.strip_prefix("populated ")) {
+            Some("0") => Ok(false),
+            Some("1") => Ok(true),
+            _ => bail!("cgroup.events has no valid populated state"),
         }
     }
 
@@ -335,6 +342,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_population_read_failure_or_descendant_is_not_a_proven_drain() {
+        let path = std::env::temp_dir().join(format!("splat-population-{}", std::process::id()));
+        std::fs::create_dir(&path).unwrap();
+        assert!(EphemeralCgroup::populated(&path).is_err());
+        std::fs::write(path.join("cgroup.procs"), "").unwrap();
+        for value in ["populated 1\n", "populated 0\n"] {
+            std::fs::write(path.join("cgroup.events"), value).unwrap();
+            assert_eq!(EphemeralCgroup::populated(&path).unwrap(), value.contains('1'));
+        }
+        std::fs::write(path.join("cgroup.events"), "populated unknown\n").unwrap();
+        assert!(EphemeralCgroup::populated(&path).is_err());
+        std::fs::remove_dir_all(&path).unwrap();
+        assert!(!EphemeralCgroup::populated(&path).unwrap());
+    }
+
+    #[test]
     fn delegation_names_the_controller_the_parent_withheld() {
         // A cgroup whose parent delegated nothing. The failure has to say WHICH controller is
         // missing, because the symptom without it is an ENOENT on memory.max several steps later.
@@ -369,23 +392,20 @@ mod tests {
     }
 
     #[test]
-    fn orphaned_lease_cgroups_are_drained_and_removed_and_nothing_else_is_touched() {
+    fn unverifiable_orphans_are_retained_and_unrelated_directories_are_untouched() {
         let base = std::env::temp_dir().join(format!("splat_cg_orphans_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
-        // Empty directories stand in for the lease cgroups: cgroupfs lets rmdir remove a cgroup
-        // that still shows its interface files, a plain directory does not, and kill_tree treats
-        // an unreadable cgroup.procs as already drained.
+        // Missing interface files used to be mistaken for proof of an empty cgroup. A plain
+        // directory cannot stand in for a successfully drained kernel cgroup.
         for name in ["mission_a", "mission_b"] {
             std::fs::create_dir_all(base.join(name)).unwrap();
         }
         std::fs::create_dir_all(base.join("not_a_lease")).unwrap();
         std::fs::write(base.join("not_a_lease").join("cgroup.procs"), "").unwrap();
 
-        let drained = EphemeralCgroup::reap_orphans(&base).expect("reap");
-
-        assert_eq!(drained.len(), 2);
-        assert!(!base.join("mission_a").exists());
-        assert!(!base.join("mission_b").exists());
+        assert!(EphemeralCgroup::reap_orphans(&base).is_err());
+        assert!(base.join("mission_a").exists());
+        assert!(base.join("mission_b").exists());
         assert!(base.join("not_a_lease").exists(), "only lease cgroups are the daemon's to remove");
 
         let _ = std::fs::remove_dir_all(&base);

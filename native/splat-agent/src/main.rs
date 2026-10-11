@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -22,10 +22,15 @@ mod auth;
 mod ceiling;
 mod cgroup;
 mod cow;
+mod execution;
+mod identities;
 mod jail;
 mod lease;
 mod outcome;
 mod pinning;
+mod secret_memory;
+mod secret_recovery;
+mod secrets;
 mod violation;
 mod workspace;
 
@@ -64,6 +69,7 @@ use violation::{RawViolationEvent, ViolationEvent};
 /// child of a multithreaded process. Returning Err fails the spawn, so a tool whose privilege could
 /// not be dropped never executes - the same fail-closed shape as the cgroup join above it.
 fn drop_privileges(uid: u32, gid: u32) -> std::io::Result<()> {
+    execution::no_new_privileges()?;
     unsafe {
         // A daemon that is not root forks a child that is not root, so the invariant already holds
         // and there is nothing to transition from - setgroups and setresuid would simply return
@@ -119,7 +125,7 @@ fn effective_uid_of(pid: u32) -> Result<Option<u32>> {
 fn string_list(v: &serde_json::Value, key: &str) -> Option<Vec<String>> {
     v.get(key)?
         .as_array()
-        .map(|a| a.iter().filter_map(|e| e.as_str().map(str::to_string)).collect())
+        .and_then(|a| a.iter().map(|e| e.as_str().map(str::to_string)).collect())
 }
 
 #[derive(Parser, Debug)]
@@ -180,6 +186,20 @@ struct Args {
     /// before the lease runs, and is removed when it ends. Nothing outside this root is ever created.
     #[arg(long, default_value = DEFAULT_MISSIONS_ROOT)]
     missions_root: String,
+
+    /// Opt-in secret broker inside an existing root-owned 0700 directory. Never enabled in mock mode.
+    #[arg(long)]
+    secret_socket: Option<std::path::PathBuf>,
+
+    /// Operator-reserved UID/GID range, distinct from accounts and ordinary workloads.
+    #[arg(long, default_value_t = 200000)]
+    secret_uid_start: u32,
+    #[arg(long, default_value_t = 64)]
+    secret_uid_count: u32,
+
+    /// Issue a grant using public binding metadata from this file and secret bytes from stdin.
+    #[arg(long, requires = "secret_socket")]
+    issue_secret: Option<std::path::PathBuf>,
 }
 
 /// See `Args::missions_root`. The bridge's `LinuxLeaseSubstrate` names the same default.
@@ -340,6 +360,13 @@ impl BpfMapSync for LiveBpfSync {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
+
+    if let Some(metadata) = &args.issue_secret {
+        return secrets::submit(args.secret_socket.as_deref().expect("required by clap"), metadata);
+    }
+    if args.secret_socket.is_some() && args.mock_bpf {
+        bail!("secret delivery requires enforcing BPF; --mock-bpf is incompatible");
+    }
 
     info!("Starting SPLAT Resident eBPF Containment Daemon on {}", args.listen);
 
@@ -527,6 +554,19 @@ async fn main() -> Result<()> {
 
     let lease_manager = LeaseManager::new(bpf_sync);
 
+    let secret_broker = if let Some(path) = &args.secret_socket {
+        if !is_root || !lease_manager.is_enforcing() {
+            bail!("secret delivery requires a root daemon with enforcing BPF");
+        }
+        let identities = identities::IdentityPool::reserved(
+            args.secret_uid_start, args.secret_uid_count, args.workload_uid, args.workload_gid)?;
+        let recovery = secret_recovery::Registry::recover(Path::new(missions_root.as_ref()))?;
+        let broker = secrets::Broker::new(identities).with_recovery(recovery);
+        let listener = secrets::bind(path)?;
+        tokio::spawn(secrets::serve(listener, broker.clone()));
+        Some(broker)
+    } else { None };
+
     // systemd stops this daemon with SIGTERM, and the workloads it leased are not in its own cgroup,
     // so they would outlive the stop. End them with their pinned policy still installed, then exit
     // cleanly; the unit restarts only on failure.
@@ -587,9 +627,12 @@ async fn main() -> Result<()> {
     let listener = TcpListener::bind(addr).await.context("bind TCP listener")?;
     info!("SPLAT eBPF daemon listening and ready for requests at {addr}");
 
+    let clients = Arc::new(tokio::sync::Semaphore::new(128));
+
     loop {
         match listener.accept().await {
             Ok((socket, peer)) => {
+                let Ok(client_slot) = clients.clone().try_acquire_owned() else { continue; };
                 info!("Accepted connection from {peer}");
                 let mgr = lease_manager.clone();
                 let viol_tx_clone = viol_tx.clone();
@@ -597,8 +640,10 @@ async fn main() -> Result<()> {
                 let ceiling_for_client = lease_ceiling.clone();
                 let missions_root_for_client = missions_root.clone();
                 let signer_for_client = outcome_signer.clone();
+                let broker_for_client = secret_broker.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids, ceiling_for_client, missions_root_for_client, signer_for_client).await {
+                    let _client_slot = client_slot;
+                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids, ceiling_for_client, missions_root_for_client, signer_for_client, broker_for_client).await {
                         error!("Client session error: {e:#}");
                     }
                 });
@@ -703,6 +748,15 @@ fn violation_frame(v: &ViolationEvent) -> serde_json::Value {
         "ktimeNs": v.ktime_ns,
         "seq": v.seq
     })
+}
+
+fn step_violation_frame(v: &ViolationEvent, secret_step: bool) -> serde_json::Value {
+    let mut frame = violation_frame(v);
+    if secret_step {
+        // A process can put its input into its own name; audit frames must not echo that channel.
+        frame["comm"] = serde_json::Value::String("[withheld]".into());
+    }
+    frame
 }
 
 /// Opens protocol 3's session: reads the caller's HELLO and answers it with this daemon's proof that it
@@ -819,7 +873,8 @@ impl<W: AsyncWrite + Unpin> FrameSink<W> {
             }
             None => frame.to_string(),
         };
-        self.writer.write_all(format!("{line}\n").as_bytes()).await
+        tokio::time::timeout(Duration::from_secs(5), self.writer.write_all(format!("{line}\n").as_bytes()))
+            .await.map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "frame write timed out"))?
     }
 }
 
@@ -864,6 +919,7 @@ async fn handle_client(
     lease_ceiling: Option<Arc<Ceiling>>,
     missions_root: Arc<str>,
     outcome_signer: Option<Arc<outcome::OutcomeSigner>>,
+    secret_broker: Option<secrets::Broker>,
 ) -> Result<()> {
     let (reader, mut writer) = socket.into_split();
     let mut buf_reader = BufReader::new(reader);
@@ -872,8 +928,13 @@ async fn handle_client(
     // Protocol 3: the caller's HELLO, and this daemon's proof that it holds the token, before anything
     // else is read. Protocol 2 put the token itself in every request, so a caller handed it to whatever
     // answered on this port - and while this daemon was not listening, anything in the guest could.
-    let Some(session) = open_session(&mut buf_reader, &mut writer, &mut line, &peer_auth).await? else {
+    let Some(session) = tokio::time::timeout(Duration::from_secs(10),
+        open_session(&mut buf_reader, &mut writer, &mut line, &peer_auth)).await.context("handshake timed out")?? else {
         return Ok(());
+    };
+    let _secret_session = match &secret_broker {
+        Some(broker) if session.prove_frames => Some(broker.register(&session)?),
+        _ => None,
     };
     // From here every frame this daemon sends goes through the sink, which proves each one when the
     // caller asked - refusals included, because a refusal is a frame the caller acts on.
@@ -881,7 +942,8 @@ async fn handle_client(
     let mut sequence: u64 = 0;
 
     loop {
-        match read_frame(&mut buf_reader, &mut line).await {
+        match tokio::time::timeout(Duration::from_secs(30), read_frame(&mut buf_reader, &mut line))
+            .await.context("idle session timed out")? {
             Ok(0) => break, // Peer closed.
             Ok(_) => {}
             Err(e) => {
@@ -941,7 +1003,9 @@ async fn handle_client(
                     "activeLeaseCount": lease_mgr.get_active_count(),
                     // Whether a ceiling bounds every lease here; without one the token alone
                     // authorizes whatever a request names.
-                    "ceiling": lease_ceiling.is_some()
+                    "ceiling": lease_ceiling.is_some(),
+                    "explicitEnvironment": true,
+                    "secretStdinSupported": secret_broker.is_some() && lease_mgr.is_enforcing()
                 });
                 out.send(&resp).await?;
             }
@@ -973,13 +1037,8 @@ async fn handle_client(
 
                 // argv verbatim. Absent is distinct from empty: empty means "no arguments", which
                 // is a legitimate request, while absent means the caller did not speak v2.
-                let argv: Vec<String> = match parsed.get("argv") {
-                    Some(v) if v.is_array() => v
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .filter_map(|e| e.as_str().map(str::to_string))
-                        .collect(),
+                let argv: Vec<String> = match string_list(&parsed, "argv") {
+                    Some(arguments) => arguments,
                     _ => {
                         warn!("Rejected an EXECUTE_TOOL with no argv array");
                         let err_chunk = serde_json::json!({
@@ -998,7 +1057,16 @@ async fn handle_client(
                 let duration_sec = parsed.get("leaseDurationSeconds").and_then(|v| v.as_u64()).unwrap_or(30) as u32;
                 let ephemeral_workspace = parsed.get("ephemeralWorkspace").and_then(|v| v.as_bool()).unwrap_or(false);
 
-                info!("Executing tool for mission {mission_id}: {command} {argv:?}");
+                let environment = match execution::environment(&parsed) {
+                    Ok(environment) => environment,
+                    Err(_) => {
+                        out.send(&serde_json::json!({"type":"STDERR", "data":"SPLAT refused the declared environment.\n"})).await?;
+                        out.send(&serde_json::json!({"type":"EXIT", "exitCode":-1})).await?;
+                        continue;
+                    }
+                };
+                // Arguments may contain caller data; the service journal is not a transcript.
+                info!("Executing tool for mission {mission_id}");
 
                 // 0. Refuse policy this daemon cannot enforce.
                 //
@@ -1150,6 +1218,26 @@ async fn handle_client(
                 }
                 let duration_sec = lease_ceiling.as_ref().map_or(duration_sec, |c| c.clamp_duration(duration_sec));
 
+                let mut step_secret = if parsed.get("secretGrant").is_some() {
+                    let acquired = match &secret_broker {
+                        Some(broker) if session.prove_frames && lease_mgr.is_enforcing() =>
+                            broker.take(&session, &parsed, Instant::now()),
+                        _ => Err(anyhow::anyhow!("secret delivery is unavailable")),
+                    };
+                    match acquired {
+                        Ok(secret) => Some(secret),
+                        Err(_) => {
+                            out.send(&serde_json::json!({"type":"STDERR", "data":"SPLAT refused the secret grant.\n"})).await?;
+                            out.send(&serde_json::json!({"type":"EXIT", "exitCode":-1})).await?;
+                            continue;
+                        }
+                    }
+                } else { None };
+                let secret_step = step_secret.is_some();
+                let workload = step_secret.as_ref().map_or(workload, |secret| WorkloadIdentity {
+                    uid: secret.identity.id(), gid: secret.identity.id(),
+                });
+
                 // 0.47 The mission's workspace, made here where root can make one and the workload
                 // cannot: owned by the workload, mode 0700, removed when the lease ends. Made after the
                 // ceiling admitted the lease and before the cgroup exists, so a refused lease leaves
@@ -1173,6 +1261,10 @@ async fn handle_client(
                 } else {
                     false
                 };
+
+                if let Some(secret) = &mut step_secret {
+                    if workspace_created { secret.register_workspace(Path::new(work_dir))?; }
+                }
 
                 // 0.5 Resolve the clamps.
                 //
@@ -1412,18 +1504,27 @@ async fn handle_client(
                     "workspace": effective_work_dir,
                     "workspaceCreated": workspace_created,
                     "workloadUid": workload.uid,
+                    "environmentMode": "explicit",
+                    "secretStdin": secret_step,
+                    "processOutput": if secret_step { "discarded" } else { "streamed" },
                 });
+                if let Some(secret) = &mut step_secret {
+                    secret.arm_cleanup(&cg, lease_mgr.clone(), jail_plan.clone());
+                }
                 out.send(&lease_frame).await?;
 
                 let mut cmd = Command::new(command);
                 cmd.args(&argv);
+                cmd.env_clear().envs(&environment).kill_on_drop(true);
+                cmd.stdin(step_secret.as_mut().and_then(|secret| secret.stdin.take())
+                    .map(Stdio::from).unwrap_or_else(Stdio::null));
                 if jail_plan.is_none() {
                     // Jailed, the child changes directory itself after pivot_root; std's chdir would
                     // land in the old root, which is detached by then.
                     cmd.current_dir(effective_work_dir);
                 }
-                cmd.stdout(Stdio::piped());
-                cmd.stderr(Stdio::piped());
+                cmd.stdout(if secret_step { Stdio::null() } else { Stdio::piped() });
+                cmd.stderr(if secret_step { Stdio::null() } else { Stdio::piped() });
 
                 // Join the leased cgroup BETWEEN fork and exec.
                 //
@@ -1467,6 +1568,8 @@ async fn handle_client(
                                 if let Some(plan) = &plan_for_child {
                                     jail::enter(plan)?;
                                 }
+
+                                if secret_step { execution::isolate_secret_ipc()?; }
 
                                 drop_privileges(wl_uid, wl_gid)
                             });
@@ -1520,7 +1623,7 @@ async fn handle_client(
                             while tokio::time::Instant::now() < deadline {
                                 match tokio::time::timeout(Duration::from_millis(60), viol_rx.recv()).await {
                                     Ok(Ok(v)) if v.cgroup_id == target_cgid => {
-                                        out.send(&violation_frame(&v)).await?;
+                                        out.send(&step_violation_frame(&v, secret_step)).await?;
                                         break;
                                     }
                                     Ok(Ok(_)) => continue,
@@ -1552,6 +1655,7 @@ async fn handle_client(
                 // The child joined its cgroup in pre_exec, before exec, so there is nothing to attach
                 // here. Verify rather than assume: a tool running outside its lease must be visible,
                 // not silently tolerated the way the discarded attach_pid error used to be.
+                if let Some(secret) = &mut step_secret { secret.identity.mark_spawned(); }
                 if cgroup_is_real {
                     if let Some(pid) = child.id() {
                         match cg.contains_pid(pid) {
@@ -1617,7 +1721,7 @@ async fn handle_client(
                                         match viol_rx.try_recv() {
                                             Ok(v) if v.cgroup_id == target_cgid => {
                                                 forwarded_in_task.fetch_add(1, Ordering::Relaxed);
-                                                let _ = tx_viol.send(violation_frame(&v)).await;
+                                                let _ = tx_viol.send(step_violation_frame(&v, secret_step)).await;
                                             }
                                             Ok(_) => {}
                                             Err(broadcast::error::TryRecvError::Lagged(_)) => {}
@@ -1643,7 +1747,7 @@ async fn handle_client(
                                 Ok(v) => {
                                     if v.cgroup_id == target_cgid {
                                         forwarded_in_task.fetch_add(1, Ordering::Relaxed);
-                                        let _ = tx_viol.send(violation_frame(&v)).await;
+                                        let _ = tx_viol.send(step_violation_frame(&v, secret_step)).await;
                                     }
                                 }
                                 // A burst across every lease overran this subscriber's slot of the
@@ -1688,30 +1792,34 @@ async fn handle_client(
                 // killing it. A lost client ends the lease, in the same order expiry uses: kill
                 // inside the installed policy, then withdraw the policy.
                 let mut pump_error: Option<std::io::Error> = None;
-                while let Some(msg) = rx.recv().await {
-                    if let Err(e) = out.send(&msg).await {
-                        pump_error = Some(e);
-                        break;
+                loop {
+                    tokio::select! {
+                        // A silent secret step has no stdout to reveal a dead client. Secret
+                        // sessions forbid pipelining, so EOF or another request ends this step.
+                        incoming = buf_reader.fill_buf(), if secret_step => {
+                            let kind = if incoming.is_ok() { std::io::ErrorKind::ConnectionAborted }
+                                else { std::io::ErrorKind::ConnectionReset };
+                            pump_error = Some(std::io::Error::new(kind, "secret step connection ended or pipelined"));
+                            break;
+                        }
+                        message = rx.recv() => match message {
+                            Some(msg) => if let Err(e) = out.send(&msg).await {
+                                pump_error = Some(e);
+                                break;
+                            },
+                            None => break,
+                        }
                     }
                 }
 
                 if let Some(e) = pump_error {
-                    if cgroup_is_real {
-                        match cg.kill_all() {
-                            Ok(n) if n > 0 => warn!(
-                                "Client for mission {mission_id} disconnected; killed {n} process(es) \
-                                 that were still holding its lease"
-                            ),
-                            Ok(_) => {}
-                            Err(err) => error!(
-                                "Client for mission {mission_id} disconnected and its cgroup could \
-                                 not be drained: {err:#}"
-                            ),
-                        }
+                    let drained = !cgroup_is_real || cg.kill_all().is_ok();
+                    if drained {
+                        lease_mgr.revoke_lease(cg.cgroup_id);
+                        let _ = waiter.await;
+                    } else {
+                        error!("Disconnected lease could not be drained; retaining policy for the expiry reaper");
                     }
-                    lease_mgr.revoke_lease(cg.cgroup_id);
-                    // Reap the (now dead) child so no zombie is left behind.
-                    let _ = waiter.await;
                     return Err(anyhow::Error::from(e).context("client write failed; lease terminated"));
                 }
 
@@ -1724,6 +1832,7 @@ async fn handle_client(
                 // only after draining descendants, before reporting EXIT and scratch teardown.
                 drop(cmd);
                 drop(jail_plan);
+                if let Some(secret) = &mut step_secret { secret.finish()?; }
 
                 // The workspace goes before EXIT is written, so the frame can say it went. Anything
                 // the tool left running in its cgroup is killed first, so nothing is still writing
@@ -1757,6 +1866,9 @@ async fn handle_client(
                     // How many VIOLATION frames this lease was sent.
                     "violationsReported": violations_reported
                 });
+                if secret_step {
+                    exit_chunk["secretStdinClosed"] = serde_json::Value::Bool(true);
+                }
 
                 // What the kernel counted for this cgroup, and whether the caller was told all of
                 // it. Absent on a daemon with no live program: it denied nothing because it denies
@@ -1804,6 +1916,11 @@ async fn handle_client(
                     exit_chunk["outcomeSignature"] = serde_json::Value::from(signer.sign(&canonical));
                     exit_chunk["outcomeKeyId"] = serde_json::Value::from(signer.key_id());
                     exit_chunk["outcomePublicKey"] = serde_json::Value::from(signer.public_key_base64());
+                    if let Some(secret) = &step_secret {
+                        let receipt = secret.receipt(parsed["stepId"].as_str().expect("validated secret step"), &canonical);
+                        exit_chunk["secretOutcomeSignature"] = serde_json::Value::from(signer.sign(&receipt));
+                        exit_chunk["secretOutcomeCanonical"] = serde_json::Value::from(receipt);
+                    }
                 }
 
                 out.send(&exit_chunk).await?;
