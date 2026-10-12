@@ -44,10 +44,18 @@ def retire_idle_pins(expected_hash):
         pins = list(directory.iterdir())
         assert {path.name for path in pins if path.name.startswith("link_")} == {
             "link_splat_bprm_check", "link_splat_file_open", "link_splat_socket_connect", "link_splat_socket_sendmsg"}
+        # bpftool 7.7's single-link command tests stale errno on success (src/link.c:do_show).
+        # Enumeration has a reliable status and supplies the exact pinned paths to validate.
+        links = json.loads(subprocess.check_output(["bpftool", "-j", "-f", "link", "show"]))
         for path in pins:
             kind = "link" if path.name.startswith("link_") else "map"
             assert path.name.startswith(kind + "_") and path.is_file() and not path.is_symlink()
-            subprocess.run(["bpftool", "-j", kind, "show", "pinned", str(path)], check=True, capture_output=True)
+            if kind == "link":
+                matching = [link for link in links if str(path) in link.get("pinned", [])]
+                assert len(matching) == 1 and matching[0].get("prog_type") == "lsm" \
+                    and matching[0].get("attach_type") == "lsm_mac" and matching[0].get("prog_id", 0) > 0
+            else:
+                subprocess.run(["bpftool", "-j", kind, "show", "pinned", str(path)], check=True, capture_output=True)
         leased = subprocess.run(["bpftool", "-j", "map", "dump", "pinned", str(directory / "map_leased_cgroups")],
             check=True, capture_output=True)
         assert json.loads(leased.stdout) == [], "pinned leases remain; refusing retirement"

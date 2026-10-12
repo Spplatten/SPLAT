@@ -81,10 +81,13 @@ Linux results below do not establish those Windows boundaries.
 ## What has been proven, and where
 
 The opt-in daemon-side 5.2 secret broker has a separate [contract and evidence boundary](SECRETS.md).
-Its root component checks pass in [secret-components.json](evidence/secret-components.json), while
-the full enforcing-daemon secret probe remains pending. Those checks do not expand the BPF claims
-below or close Windows caller identity. Secret steps additionally restrict socket creation and
-use private IPC; ordinary leases retain the local-IPC limitation in the table above.
+Its five root component checks pass in [secret-components.json](evidence/secret-components.json).
+The enforcing-daemon run at `2026-10-11T15:53:31Z` passes all 45 checks in
+[secret-probe.json](evidence/secret-probe.json), recording binary and native source hashes,
+synthetic local delivery, isolation, cleanup, crash recovery and installed-service restoration.
+Those checks do not expand the BPF claims below or close Windows caller identity. Secret steps
+additionally restrict socket creation and use private IPC; ordinary leases retain the local-IPC
+limitation in the table above.
 
 The root run on kernel 6.18.33.2 recorded **PASS over 74 checks**, including nine explicit scratch
 execution checks, eight CoW mount checks and eleven pin lifecycle checks, in

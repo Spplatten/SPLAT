@@ -6,12 +6,13 @@ isolated root component checks are recorded with source and test-binary hashes i
 [`evidence/secret-components.json`](evidence/secret-components.json). They exercise binary delivery,
 UID drop, private IPC, malformed/cancelled uploads and workspace recovery.
 
-**Full daemon enforcement and lifecycle proof remains pending.**
-[`evidence/secret-probe.json`](evidence/secret-probe.json) records a failed startup attempt: the
-installed service's older BPF pin set was correctly refused. Retiring those idle pins for the
-prepared integration proof requires explicit operator approval in this session. No passing
-component test replaces that proof. Desktop/vault handoff and `GovernedHttp` integration are
-separate work; this change does not close all of roadmap 5.2 or caller identity in 2.4.
+**The daemon enforcement and lifecycle proof passes all 45 checks.**
+[`evidence/secret-probe.json`](evidence/secret-probe.json) records the root run at
+`2026-10-11T15:53:31Z` on kernel `6.18.33.2-microsoft-standard-WSL2`, with binary and native source
+hashes. The operator approved retiring the verified idle installed pins for this synthetic,
+offline proof; the original installed binary was restored and its authenticated health confirmed
+enforcement afterward. Desktop/vault handoff and `GovernedHttp` integration are separate work;
+this completes the daemon part of roadmap 5.2, not the whole row or caller identity in 2.4.
 
 ## Enable the broker
 
@@ -136,12 +137,12 @@ The request digest covers serde_json's compact parsed object with sorted keys, e
 signed outcome. Preserve canonical text verbatim; reserializing JSON can change signed bytes.
 An absent signing key produces no signature, as with ordinary outcomes.
 
-The prepared [`probe-secrets.py`](probe-secrets.py) tests the enforcing daemon with synthetic
+The passing [`probe-secrets.py`](probe-secrets.py) tests the enforcing daemon with synthetic
 secrets and an in-process loopback receiver: grants, malformed uploads, root peer checks, CLI
 issuance, egress denial, simultaneous UIDs, `/proc` read denial, output suppression, signatures,
 failed spawn, disconnect, deadline, duplicate IDs and crash recovery. It records the binary and
 every native source hash. It refuses to stop a service with populated leases. Its optional
-`--retire-idle-pins INSTALLED_BPF_SHA256` step requires approval here: under the instance lock it
+`--retire-idle-pins INSTALLED_BPF_SHA256` step requires explicit operator authorization: under the instance lock it
 checks the exact pin directory and empty lease map before retiring policy, then retires the test
 pins after drain and restores the installed service. The daemon's foreign-pin refusal is unchanged.
 
