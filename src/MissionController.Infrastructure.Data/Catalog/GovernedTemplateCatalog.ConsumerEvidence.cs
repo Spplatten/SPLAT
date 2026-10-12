@@ -85,7 +85,7 @@ public static partial class GovernedTemplateCatalog
         if($page.title -isnot [string] -or $page.title.Length -gt 256) { throw 'invalid_listing_name'; };
         $sections=@($page.shelfMapping.information.items | Where-Object { $_.title -ceq 'In-App Purchases' });
         if($sections.Count -ne 1) { throw 'offers_not_observed'; };
-        $pairs=@($sections[0].items_V3 | Where-Object { $_.'$kind' -ceq 'textPair' });
+        $pairs=@($sections[0].items | Where-Object { $_.'$kind' -ceq 'textPair' });
         if($pairs.Count -lt 1 -or $pairs.Count -gt 20) { throw 'offers_not_observed'; };
         $offers=[Collections.Generic.List[object]]::new();
         foreach($pair in $pairs) {

@@ -29,7 +29,8 @@ public class ConsumerEvidenceTemplateTests
 
     private static string OfferPage(string id = AppId, string price = "$9.99", bool includeOffers = true)
     {
-        var section = new { title = "In-App Purchases", items_V3 = new[] {
+        // The shape apps.apple.com served on 2026-10-12: an Annotation whose pairs sit under "items".
+        var section = new { title = "In-App Purchases", items = new[] {
             new Dictionary<string, object> { ["$kind"] = "textPair", ["leadingText"] = "Monthly Premium", ["trailingText"] = price } } };
         var data = new { title = "Fixture App", titleOfferDisplayProperties = new { adamId = id },
             shelfMapping = new { information = new { items = includeOffers ? new[] { section } : Array.Empty<object>() } } };
