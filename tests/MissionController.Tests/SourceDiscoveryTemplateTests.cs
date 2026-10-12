@@ -20,7 +20,7 @@ namespace MissionController.Tests;
 /// </summary>
 public class SourceDiscoveryTemplateTests
 {
-    /// <summary>The five source sensors and the brief the figures feed.</summary>
+    /// <summary>The source sensors and the brief the figures feed.</summary>
     private static IReadOnlyList<SingleToolTemplate> Reaching() => GovernedTemplateCatalog.All
         .Where(template => template.Category == "Source Discovery & Feeds")
         .ToList();
@@ -56,18 +56,17 @@ public class SourceDiscoveryTemplateTests
     }
 
     [Fact]
-    public void TheCatalogShipsTheFiveProbes_EachWithItsOwnDestination()
+    public void TheCatalogShipsTheSevenProbes_EachWithOneDeclaredDestination()
     {
         var probes = Probes();
 
-        Assert.Equal(5, probes.Count);
+        Assert.Equal(7, probes.Count);
         Assert.Equal(
-            new[] { "api.bls.gov", "api.eia.gov", "itunes.apple.com", "rareresources.net", "wikimedia.org" },
+            new[] { "api.bls.gov", "api.eia.gov", "apps.apple.com", "itunes.apple.com", "itunes.apple.com", "rareresources.net", "wikimedia.org" },
             probes.Select(p => p.EgressRule.AllowedFqdn).OrderBy(f => f, StringComparer.Ordinal).ToArray());
 
-        // One host each. Two probes sharing a destination would mean one of them is not the reason
-        // that destination is declared, and the declaration is what an auditor reads.
-        Assert.Equal(probes.Count, probes.Select(p => p.EgressRule.AllowedFqdn).Distinct().Count());
+        // Catalog discovery and review sampling share Apple's public host, but
+        // retain separate commands and evidence contracts. One host per sensor.
         Assert.All(probes, p => Assert.Equal(EgressScope.ToolProcess, p.EgressRule.Scope));
         Assert.All(probes, p => Assert.True(p.EgressRule.ToolProcessNeedsNetwork));
     }

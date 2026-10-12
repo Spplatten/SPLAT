@@ -109,6 +109,8 @@ public class GovernedProjectCatalogTests
             {
                 "grants-opportunity-ingestion -> api.grants.gov",
                 "source-consumer-catalog -> itunes.apple.com",
+                "source-consumer-offers -> apps.apple.com",
+                "source-consumer-reviews -> itunes.apple.com",
                 "source-credential-gate-probe -> api.eia.gov",
                 "source-price-index-probe -> api.bls.gov",
                 "source-public-interest-probe -> wikimedia.org",
