@@ -1,17 +1,27 @@
-[CmdletBinding()]
+# The roadmap 2.4 gate is three runs against one managed deployment, in this order:
+#   1. Admitted standard account:   -Configuration <bridge.json> -Executable <splat-mcp.exe> -OutputPath owner.json
+#   2. Unadmitted standard account: -ExpectDenied -OwnerEvidence <a copy of owner.json it can read> -OutputPath denied.json
+#   3. Elevated: splat-mcp audit --managed --configuration <bridge.json> --probe owner.json --output audit.json
+# Run 2 counts only beside a PASS from run 1 within the hour; run 3 reads the ledger that run 1 is denied.
+[CmdletBinding(DefaultParameterSetName = 'Owner')]
 param(
-    [Parameter(Mandatory)][string]$Configuration,
-    [Parameter(Mandatory)][string]$Executable,
+    [Parameter(Mandatory, ParameterSetName = 'Owner')][string]$Configuration,
+    [Parameter(Mandatory, ParameterSetName = 'Owner')][string]$Executable,
     [Parameter(Mandatory)][string]$OutputPath,
-    [switch]$ExpectDenied
+    # bridge.json's directory admits the service and its operators only, so an unadmitted account
+    # takes the pipe and the service identity from the owner's evidence instead.
+    [Parameter(ParameterSetName = 'Denied')][switch]$ExpectDenied,
+    [Parameter(Mandatory, ParameterSetName = 'Denied')][string]$OwnerEvidence
 )
 $ErrorActionPreference = 'Stop'
-$config = Get-Content -LiteralPath $Configuration -Raw | ConvertFrom-Json
+$deniedRun = $PSCmdlet.ParameterSetName -eq 'Denied'
+$config = Get-Content -LiteralPath $(if ($deniedRun) { $OwnerEvidence } else { $Configuration }) -Raw | ConvertFrom-Json
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $groups = (& whoami.exe /groups /fo csv | Out-String)
 if ($groups -match 'S-1-5-32-544') { throw 'Run this probe as a standard account, not a filtered administrator.' }
-$result = [ordered]@{ Schema = 1; At = [DateTimeOffset]::UtcNow.ToString('o'); CallerSid = $identity.User.Value;
-    ServiceSid = $config.ServiceSid; StandardAccount = $true; Checks = [ordered]@{}; Responses = @(); Error = $null; Verdict = 'INCOMPLETE' }
+$result = [ordered]@{ Schema = 2; At = [DateTimeOffset]::UtcNow.ToString('o'); FinishedAt = $null; CallerSid = $identity.User.Value;
+    CallerName = $identity.Name; ServiceSid = $config.ServiceSid; PipeName = $config.PipeName; StandardAccount = $true;
+    Checks = [ordered]@{}; Admissions = @(); Responses = @(); Error = $null; Verdict = 'INCOMPLETE' }
 function Invoke-Bridge($Requests) {
     $start = [Diagnostics.ProcessStartInfo]::new($Executable, ('managed --configuration "{0}"' -f $Configuration))
     $start.UseShellExecute = $false
@@ -22,18 +32,44 @@ function Invoke-Bridge($Requests) {
     $process = [Diagnostics.Process]::Start($start)
     try {
         $out = $process.StandardOutput.ReadToEndAsync(); $err = $process.StandardError.ReadToEndAsync()
-        foreach ($request in $Requests) { $process.StandardInput.WriteLine(($request | ConvertTo-Json -Depth 12 -Compress)) }
+        foreach ($request in $Requests) { $process.StandardInput.WriteLine($request.Line) }
         $process.StandardInput.Close()
         if (-not $process.WaitForExit(90000)) { $process.Kill(); throw 'Bridge request timed out.' }
         @{ Exit = $process.ExitCode; Output = $out.GetAwaiter().GetResult(); Error = $err.GetAwaiter().GetResult() }
     } finally { $process.Dispose() }
 }
-function Tool($Id, $Name, $Arguments) { @{ jsonrpc = '2.0'; id = $Id; method = 'tools/call'; params = @{ name = $Name; arguments = $Arguments } } }
+# The params text is built once and sent verbatim, so its SHA-256 is the request_sha256 the service
+# writes in the admission row - the value run 3 finds that row by.
+function Tool($Id, $Name, $Arguments) {
+    $params = @{ name = $Name; arguments = $Arguments } | ConvertTo-Json -Depth 12 -Compress
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $digest = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($params)) | ForEach-Object { $_.ToString('x2') }) } finally { $sha.Dispose() }
+    [pscustomobject]@{ Id = $Id; Tool = $Name; Sha256 = $digest; Line = ('{{"jsonrpc":"2.0","id":{0},"method":"tools/call","params":{1}}}' -f $Id, $params) }
+}
+# Only the tools the service admits get an admission row; run 3 expects exactly one per entry here.
+function Admit($Request, $ClaimedPrincipal) {
+    $entry = [ordered]@{ Id = $Request.Id; Tool = $Request.Tool; RequestSha256 = $Request.Sha256 }
+    if ($ClaimedPrincipal) { $entry.ClaimedPrincipal = $ClaimedPrincipal }
+    $script:result.Admissions += [pscustomobject]$entry
+}
 try {
-    $health = Invoke-Bridge @( (Tool 1 'get_substrate_health' @{}) )
-    if ($ExpectDenied) {
-        $result.Checks.UnadmittedSidDenied = $health.Exit -ne 0 -and [string]::IsNullOrEmpty($health.Output)
+    if ($deniedRun) {
+        # A denial means something only beside a recent owner PASS on the same pipe and service.
+        $ownerAge = [DateTimeOffset]::UtcNow - [DateTimeOffset]$config.At
+        $result.Checks.OwnerControlPassed = $config.Verdict -eq 'PASS' -and [bool]$config.PipeName -and
+            $config.CallerSid -ne $identity.User.Value -and $ownerAge -ge [TimeSpan]::Zero -and $ownerAge -lt [TimeSpan]::FromHours(1)
+        # ACCESS_DENIED from CreateFile means the pipe exists and its ACL refused this SID. A stopped
+        # service or an absent pipe ends in a timeout instead, which is not a denial.
+        $client = [IO.Pipes.NamedPipeClientStream]::new('.', $config.PipeName,
+            [IO.Pipes.PipeAccessRights]'ReadData, WriteData, ReadPermissions, Synchronize', [IO.Pipes.PipeOptions]::None,
+            [Security.Principal.TokenImpersonationLevel]::Identification, [IO.HandleInheritability]::None)
+        $aclDenied = $false
+        try { $client.Connect(3000) } catch [UnauthorizedAccessException] { $aclDenied = $true } catch { } finally { $client.Dispose() }
+        $result.Checks.UnadmittedSidDenied = $aclDenied
     } else {
+        $first = Tool 1 'get_substrate_health' @{}
+        Admit $first
+        $health = Invoke-Bridge @($first)
         if ($health.Exit -ne 0) { throw $health.Error }
         $response = $health.Output.Trim() | ConvertFrom-Json
         $status = $response.result.content[0].text | ConvertFrom-Json
@@ -76,23 +112,33 @@ try {
         } catch [Management.Automation.MethodInvocationException] {
             $result.Checks.DirectDaemonUnauthenticatedDenied = $_.Exception.InnerException.ToString() -match 'SocketException'
         } finally { $tcp.Dispose() }
-        $requests = @(
-            (Tool 2 'run_command' @{ command = '/usr/bin/id'; args = @(); operatorIdentity = 'SYSTEM'; principalId = 'S-1-5-18' }),
-            (Tool 3 'run_code' @{ language = 'python'; code = "import socket`ns=socket.socket()`ntry:`n s.connect(('127.0.0.1',9))`n print('UNEXPECTED_CONNECT')`nexcept OSError as e:`n print('DENIED_ERRNO',e.errno)" }),
-            (Tool 4 'fs_read' @{ path = (Join-Path $config.StateDirectory 'ledger.key') }),
-            (Tool 5 'run_command' @{ command = '/bin/echo'; args = @('egress-bypass'); allowNetwork = $true; allowedIps = @('1.1.1.1'); allowedPorts = @(443) })
-        )
-        $run = Invoke-Bridge $requests
+        # The claimed principal is scored by run 3: the admission row must name this caller instead.
+        $spoof = Tool 2 'run_command' @{ command = '/usr/bin/id'; args = @(); operatorIdentity = 'SYSTEM'; principalId = 'S-1-5-18' }
+        $code = Tool 3 'run_code' @{ language = 'python'; code = "import socket`ns=socket.socket()`ntry:`n s.connect(('127.0.0.1',9))`n print('UNEXPECTED_CONNECT')`nexcept OSError as e:`n print('DENIED_ERRNO',e.errno)" }
+        $hostTool = Tool 4 'fs_read' @{ path = (Join-Path $config.StateDirectory 'ledger.key') }
+        # 203.0.113.7 is documentation space (RFC 5737), outside any real operator egress policy.
+        $egress = Tool 5 'run_command' @{ command = '/bin/echo'; args = @('egress-bypass'); allowNetwork = $true; allowedEgressIps = @('203.0.113.7') }
+        Admit $spoof 'S-1-5-18'; Admit $code; Admit $egress
+        $run = Invoke-Bridge @($spoof, $code, $hostTool, $egress)
         if ($run.Exit -ne 0) { throw $run.Error }
         $responses = @($run.Output.Split("`n") | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
         $result.Responses += $responses
-        $result.Checks.GovernedLeaseRunsAsNobody = $responses[0].result.content[0].text -match 'uid=65534'
-        $result.Checks.LiveKernelConnectDenial = $responses[1].result.content[0].text -match 'DENIED_ERRNO 1' -and
-            $responses[1].result.content[0].text -match 'KERNEL VIOLATION CONTAINMENT REPORT'
-        $result.Checks.PrivilegedHostToolDenied = $responses[2].error.code -eq -32601
-        $result.Checks.OwnerStillEnforcing = ((Invoke-Bridge @( (Tool 6 'get_substrate_health' @{}) )).Output -match 'Enforcing')
+        # Scored by id, so a missing response fails its own check instead of shifting the others.
+        $byId = @{}; foreach ($reply in $responses) { $byId[[string]$reply.id] = $reply }
+        $result.Checks.GovernedLeaseRunsAsNobody = $byId['2'].result.content[0].text -match 'uid=65534'
+        $result.Checks.LiveKernelConnectDenial = $byId['3'].result.content[0].text -match 'DENIED_ERRNO 1' -and
+            $byId['3'].result.content[0].text -match 'KERNEL VIOLATION CONTAINMENT REPORT'
+        $result.Checks.PrivilegedHostToolDenied = $byId['4'].error.code -eq -32601
+        # The last-hop probe's predicate for a refusal the MCP host made before any lease existed.
+        $egressText = [string]$byId['5'].result.content[0].text
+        $result.Checks.EgressOutsidePolicyRefused = [string]$config.Egress -notmatch '203\.0\.113\.7' -and
+            $egressText -match '\[SPLAT POLICY\]' -and $egressText -match 'not a kernel denial' -and $egressText -notmatch '\[Process Exited with code'
+        $last = Tool 6 'get_substrate_health' @{}
+        Admit $last
+        $result.Checks.OwnerStillEnforcing = ((Invoke-Bridge @($last)).Output -match 'Enforcing')
     }
-    if (@($result.Checks.Values | Where-Object { $_ -ne $true }).Count -eq 0) { $result.Verdict = 'PASS' }
+    if ($result.Checks.Count -gt 0 -and @($result.Checks.Values | Where-Object { $_ -ne $true }).Count -eq 0) { $result.Verdict = 'PASS' }
 } catch { $result.Error = $_.Exception.ToString() }
+$result.FinishedAt = [DateTimeOffset]::UtcNow.ToString('o')
 [IO.File]::WriteAllText($OutputPath, ($result | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
 if ($result.Verdict -ne 'PASS') { exit 1 }
