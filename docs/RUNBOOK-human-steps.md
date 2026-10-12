@@ -131,7 +131,7 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Completion target:** `Passed! - Failed: 0, Passed: 953`, on a line ending `(net10.0)`. The live
+**Completion target:** `Passed! - Failed: 0, Passed: 960`, on a line ending `(net10.0)`. The live
 corpus coverage gate currently fails for missing or stale recordings; see
 [the recording guide](../tests/MissionController.Tests/Fixtures/Missions/README.md). Do not bless
 old answers to claim that a changed prompt was exercised. The `dotnet` on this

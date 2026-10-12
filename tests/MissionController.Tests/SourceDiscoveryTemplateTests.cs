@@ -20,7 +20,7 @@ namespace MissionController.Tests;
 /// </summary>
 public class SourceDiscoveryTemplateTests
 {
-    /// <summary>Everything in the category: the four probes and the brief the figures feed.</summary>
+    /// <summary>The source sensors and the brief the figures feed.</summary>
     private static IReadOnlyList<SingleToolTemplate> Reaching() => GovernedTemplateCatalog.All
         .Where(template => template.Category == "Source Discovery & Feeds")
         .ToList();
@@ -62,15 +62,16 @@ public class SourceDiscoveryTemplateTests
         var destinations = probes.Select(p => p.EgressRule.AllowedFqdn).Distinct()
             .OrderBy(f => f, StringComparer.Ordinal).ToArray();
 
-        Assert.Equal(6, probes.Count);
+        Assert.Equal(9, probes.Count);
 
         // Not one host each. That rule held while every probe read a different publisher, and the
         // average-price probe is what showed it was the wrong rule: BLS serves an index family and a
         // price family from the same host, and two probes sharing a destination is a publisher with
         // two datasets rather than a redundant declaration. What has to hold is the other direction -
         // no destination is declared that nothing reaches, since an unused declaration is a hole an
-        // auditor would read as an intended reach.
-        Assert.Equal(new[] { "api.bls.gov", "api.census.gov", "api.eia.gov", "rareresources.net", "wikimedia.org" }, destinations);
+        // auditor would read as an intended reach. Apple's search and review feeds share
+        // itunes.apple.com the same way, with separate commands and evidence contracts.
+        Assert.Equal(new[] { "api.bls.gov", "api.census.gov", "api.eia.gov", "apps.apple.com", "itunes.apple.com", "rareresources.net", "wikimedia.org" }, destinations);
         Assert.All(destinations, fqdn => Assert.Contains(probes, p => p.EgressRule.AllowedFqdn == fqdn));
 
         Assert.All(probes, p => Assert.Equal(EgressScope.ToolProcess, p.EgressRule.Scope));

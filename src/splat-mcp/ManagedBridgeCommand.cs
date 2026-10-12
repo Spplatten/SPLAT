@@ -14,10 +14,12 @@ internal static class ManagedBridgeCommand
         bool bootstrap = args.FirstOrDefault() == "bridge-bootstrap";
         bool client = args.FirstOrDefault() == "managed";
         bool deployment = args.FirstOrDefault() is "provision" or "unmount" && args.Contains("--managed", StringComparer.Ordinal);
-        if (!host && !bootstrap && !client && !deployment) return null;
+        bool audit = args.FirstOrDefault() == "audit" && args.Contains("--managed", StringComparer.Ordinal);
+        if (!host && !bootstrap && !client && !deployment && !audit) return null;
         try
         {
             if (deployment) return await DeployAsync(args);
+            if (audit) return await AuditAsync(args);
             if (args.Length != 3 || args[1] != "--configuration")
                 throw new ArgumentException("Use managed --configuration <file> or bridge-service --configuration <file>.");
             var config = ManagedBridgeConfiguration.Load(args[2], serving: host || bootstrap);
@@ -102,6 +104,24 @@ internal static class ManagedBridgeCommand
             return process.ExitCode;
         }
         finally { File.Delete(temporary); }
+    }
+
+    // Run elevated after probe-managed-bridge.ps1's owner run: the service's state admits only the
+    // service account and administrators, which is the point of the deployment.
+    private static Task<int> AuditAsync(string[] args)
+    {
+        var options = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (int i = 1; i < args.Length; i++)
+        {
+            if (args[i] == "--managed") continue;
+            string option = args[i];
+            if (option is not ("--configuration" or "--probe" or "--output") || ++i == args.Length
+                || args[i].StartsWith('-') || !options.TryAdd(option, args[i]))
+                throw new ArgumentException("Managed audit accepts --configuration, --probe and --output.");
+        }
+        if (options.Count != 3)
+            throw new ArgumentException("Managed audit requires --configuration <bridge.json>, --probe <owner evidence> and --output <file>.");
+        return ManagedLedgerAudit.RunAsync(options["--configuration"], options["--probe"], options["--output"], CancellationToken.None);
     }
 
     private sealed class BridgeService : ServiceBase
