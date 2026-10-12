@@ -31,6 +31,7 @@ public abstract record McpServerCommand
                splat-mcp managed --configuration <administrator-owned bridge.json>
                splat-mcp provision --managed --rootfs <clean archive> --rootfs-sha256 <publisher hash> --operator-sid <SID[,SID]> [--instance SplatManaged] [--egress <list>] [--apply]
                splat-mcp unmount --managed [--instance SplatManaged] [--apply]
+               splat-mcp audit --managed --configuration <bridge.json> --probe <owner evidence> --output <file>
 
         Serves SPLAT's governed tools to an MCP client: JSON-RPC, one message per line, on stdin
         and stdout. Diagnostics go to stderr, never stdout.

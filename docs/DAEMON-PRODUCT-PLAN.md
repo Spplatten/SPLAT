@@ -47,7 +47,9 @@ Protocol 3 authenticates possession of a shared secret. It does not identify a W
 The managed service adds OS-authenticated named-pipe admission and an operator policy, but roadmap
 2.4 stays open until the separate-account deployment, owner positive control, cross-account denial,
 service lifecycle and keyed ledger pass on the packaged artifact. See
-[`THREAT-MODEL.md`](THREAT-MODEL.md) and [`probe-managed-bridge.ps1`](../packaging/probe-managed-bridge.ps1).
+[`THREAT-MODEL.md`](THREAT-MODEL.md) and [`probe-managed-bridge.ps1`](../packaging/probe-managed-bridge.ps1),
+whose header gives the gate's three runs: the admitted owner, an unadmitted account, and an elevated
+`splat-mcp audit --managed` that reads the keyed ledger the owner is denied.
 Changing the guest socket transport cannot supply that identity boundary.
 
 A Linux service requires its own caller authorization and tenant model; the Windows pipe does not
