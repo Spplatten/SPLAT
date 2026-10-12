@@ -21,7 +21,7 @@ public static partial class GovernedTemplateCatalog
     /// Bumped whenever the seeded set changes. The registry stores this so startup can skip a
     /// redundant full-catalog upsert when the on-disk set already matches the shipped build.
     /// </summary>
-    public const string CatalogVersion = "2.5.1";
+    public const string CatalogVersion = "2.6.0";
 
     // Removing a seed does not remove its persisted row. Keep retired identities reserved so
     // an upgraded registry cannot launch them, or import them again under their historical IDs.
@@ -269,6 +269,8 @@ public static partial class GovernedTemplateCatalog
         all.AddRange(AutonomousOperationsTemplates());
         all.AddRange(LinuxLeaseTemplates());
         all.AddRange(SourceDiscoveryTemplates());
+        all.AddRange(ConsumerCatalogTemplates());
+        all.AddRange(ConsumerEvidenceTemplates());
 
         for (int i = 0; i < all.Count; i++)
         {

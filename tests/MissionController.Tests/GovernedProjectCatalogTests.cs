@@ -103,13 +103,15 @@ public class GovernedProjectCatalogTests
             .ToList();
 
         // The whole set, named. A template that reaches a host nobody listed here is the change
-        // this test exists to stop being silent: the catalog's network surface is five destinations,
-        // and adding a sixth is a decision, not an edit.
+        // this test exists to stop being silent: each destination is an explicit decision.
         Assert.Equal(
             new[]
             {
                 "grants-opportunity-ingestion -> api.grants.gov",
                 "source-average-price-probe -> api.bls.gov",
+                "source-consumer-catalog -> itunes.apple.com",
+                "source-consumer-offers -> apps.apple.com",
+                "source-consumer-reviews -> itunes.apple.com",
                 "source-credential-gate-probe -> api.eia.gov",
                 "source-dataset-catalog-search -> api.census.gov",
                 "source-price-index-probe -> api.bls.gov",

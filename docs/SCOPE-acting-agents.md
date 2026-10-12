@@ -66,9 +66,9 @@ Claude and Gemini run in their providers' data centres. Through `splat-mcp` the 
 agent calling in, which is outside for the same reason. The only way to put a model inside a lease is
 to run a local one there.
 
-**Every tool runs in a sandbox, and twelve run under the kernel lease.** Of 58 templates, 12 run
+**Every tool runs in a sandbox, and twelve run under the kernel lease.** Of 61 templates, 12 run
 their tool in the WSL2 guest under the eBPF lease: the four Linux readers and, since 2026-10-10, the
-eight web probes below. The other 46 run on Windows under a restricted token, a locked-down folder
+eight web probes below. The other 49 run on Windows under a restricted token, a locked-down folder
 and a job object (counted by evaluating `GovernedTemplateCatalog.All`). By what they do:
 
 - **41 read Windows itself**: services, event logs, the registry, Defender, the network stack. They
@@ -83,6 +83,9 @@ and a job object (counted by evaluating `GovernedTemplateCatalog.All`). By what 
   handed to it, so it needs no DNS
   ([`LeasedWebProbe`](../src/MissionController.Infrastructure.Data/Catalog/LeasedWebProbe.cs)). None
   has run under a real lease yet.
+- **3 fetch Apple's public catalog for RARE from Windows**: the consumer catalog, review and offer
+  sensors. Their destination is declared and recorded, not pinned, so they are the next candidates
+  for the lease.
 - **5 work from their parameters and touch nothing.** Two are the actors made honest in §2, two are
   grants assessments, and one is `web-autonomous-site-deploy`. Its description still says it checks
   out, builds and deploys a site, while its tool prints its parameters and three version numbers.
