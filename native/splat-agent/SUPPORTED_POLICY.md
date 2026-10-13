@@ -40,7 +40,7 @@ while the daemon is dead.
 
 | Dimension | Where | What is checked |
 | --- | --- | --- |
-| The workload's root | mount namespace and `pivot_root`, in `pre_exec` | A root holding `/usr`, `/bin`, `/sbin`, `/lib*` and `/etc` read-only, the working directory, a fresh `/tmp`, `/proc` and six device nodes. `/home`, `/root`, `/mnt`, `/var`, `/opt` and `/sys` are absent, not hidden. **Built 2026-09-20, pending the root probe:** `jail.rs` changed on 2026-10-11, after the last root run checked it - see the note below. |
+| The workload's root | mount namespace and `pivot_root`, in `pre_exec` | A root holding `/usr`, `/bin`, `/sbin`, `/lib*` and `/etc` read-only, the working directory, a fresh `/tmp`, `/proc` and six device nodes. `/home`, `/root`, `/mnt`, `/var`, `/opt` and `/sys` are absent, not hidden. **Built 2026-09-20. Root probe PASS** against `6fc637d8` on the 2026-10-12 run, which built the shipping `jail.rs` (`53d978f`, 2026-10-11): `/home` and `/mnt` absent with the host holding both as the control (`jail_hides_home_and_mnt`), system directories read-only (`jail_system_dirs_read_only`), the working directory and `/tmp` writable with `/etc` visible (`jail_workdir_and_tmp_writable`), and `readOnlyFs` making the working directory read-only (`read_only_fs_makes_workdir_read_only`). |
 | `readOnlyFs` | the same | The working directory bound read-only as well. Refused only by a daemon that is not enforcing, which jails nothing. |
 | `overlayFs.enableCow` | child mount namespace, before the workdir bind | **Root probe PASS** against `6fc637d8`. The parent prepares private `upper/` and `work/`; the child mounts an overlay on its working-directory target. Writes are discarded after the cgroup drains. `readOnlyFs` still makes the merged view read-only. A mock daemon, missing lowerdir, mount-option separators and inode policy paths overlapping the lowerdir are refused. Executing newly created scratch inodes is not authorized by this feature. |
 | Memory, CPU, PID ceilings | cgroup v2 | Written to `memory.max`, `cpu.max`, `pids.max`, then **read back**; a controller that did not take the clamp fails the request. |
@@ -76,7 +76,8 @@ Linux results below do not establish those Windows boundaries.
 | **AF_UNIX / AF_NETLINK** | Local IPC is untouched. A per-socket allow-list keyed on the socket's inode is the real answer and does not exist. A leased tool can talk to any local daemon socket its uid can reach — including a resolver that answers over one, which is how a name lookup can still succeed on a host where `systemd-resolved` is reached that way rather than over UDP. |
 | **Raw and packet sockets** | Creating one needs `CAP_NET_RAW`, which a workload dropped to `nobody` does not have, so nothing policies it and nothing needs to. Not a claim about a workload that keeps capabilities: this daemon does not run one. |
 | **Inherited file descriptors** | The hooks fire on `open` and `connect`. A descriptor the tool inherits was opened by the daemon, before any of them ran. |
-| **Filesystem writes and reads outside the jail's contents** | Closed by the jail since 2026-09-20, pending its proof: the workload's root holds the system directories read-only, its working directory, a fresh `/tmp`, `/proc` and six device nodes, and nothing else. `/etc` travels whole and read-only; what `nobody` may not read there is still denied by mode, and the inode deny-list still applies inside the jail because bind mounts keep inode identity. Until the probe has run, treat the deny-list as the boundary it was: on 2026-09-18, `nobody` read a public key in the Windows user's `.ssh` folder through `/mnt/c`. Two things close that today: `/mnt` is absent from the jail, and `splat-mcp provision --apply` now writes the `[automount]` umask of 077 into the guest's `/etc/wsl.conf` when it is missing, which shuts `nobody` out of the Windows drives for anything not jailed once WSL restarts. |
+| **Filesystem writes and reads outside the jail's contents** | Closed by the jail since 2026-09-20 (**root probe PASS** against `6fc637d8` on the 2026-10-12 run — `jail_*` and `read_only_fs_makes_workdir_read_only`): the workload's root holds the system directories read-only, its working directory, a fresh `/tmp`, `/proc` and six device nodes, and nothing else. `/etc` travels whole and read-only; what `nobody` may not read there is still denied by mode, and the inode deny-list still applies inside the jail because bind mounts keep inode identity. Before that run the deny-list was the boundary: on 2026-09-18, `nobody` read a public key in the Windows user's `.ssh` folder through `/mnt/c`. Two things close that today: `/mnt` is absent from the jail, and `splat-mcp provision --apply` now writes the `[automount]` umask of 077 into the guest's `/etc/wsl.conf` when it is missing, which shuts `nobody` out of the Windows drives for anything not jailed once WSL restarts. |
+| **Signals and `/proc` reach between two ordinary leases** | Every ordinary workload runs as the single `--workload-uid` (default 65534, `src/main.rs`), the jail unshares the mount namespace only (`CLONE_NEWNS`, `src/jail.rs`), and the `/proc` it mounts carries no `hidepid`. Two concurrent ordinary leases therefore share one pid namespace and see each other in `/proc`: at the shared uid, one can `kill(2)` the other's workload and passes `ptrace_may_access(PTRACE_MODE_READ_FSCREDS)` for it, so it can `readlink` and walk the other's `/proc/<pid>/cwd`, `/root` and `/fd` — into that lease's working directory and its `0700` mission workspace, to read and to write. A root run recorded this in `evidence/daemon-probe.json` (2026-10-12): `cross_lease_signal_reaches_a_peer_lease`, `cross_lease_peer_proc_cwd_readlinked`, `cross_lease_peer_proc_root_readlinked`, `cross_lease_peer_workspace_read_via_proc` and `cross_lease_peer_workspace_written_via_proc` are all true, with `cross_lease_control_ops_possible` the control that the operations are otherwise possible. A secret step is outside this: it is given a distinct uid from the reserved pool and a private IPC namespace (`src/identities.rs`, `src/execution.rs`), so the uid-keyed signal and `/proc` credential checks fail across its boundary. |
 
 ## What has been proven, and where
 
@@ -91,7 +92,7 @@ limitation in the table above.
 
 The root run on kernel 6.18.33.2 recorded **PASS over 74 checks**, including nine explicit scratch
 execution checks, eight CoW mount checks and eleven pin lifecycle checks, in
-`evidence/daemon-probe.json` at `2026-10-06T03:47:49Z`. The last-hop probe also recorded PASS.
+`evidence/daemon-probe.json` at `2026-10-12T14:59:50Z` (the 2026-10-06 run it supersedes passed the same checks). The last-hop probe also recorded PASS.
 The scratch grant covers executable files in the merged overlay, including lower files; it
 does not validate their authorship, contents or arguments. Both opt-in flags default to false.
 That file carries the SHA-256 of
@@ -106,13 +107,15 @@ refusal of a wrong hash, an incomplete set and a substituted map. It restores th
 stops its daemon on exit. Ordinary client runs leave persistence checks unproven; replay records
 always say REPLAY.
 
-> **Re-run under root on 2026-10-06.** `probe-daemon.sh` and `probe-last-hop.ps1` both record PASS
-> against `6fc637d8`, the BPF source that ships, at `2026-10-06T03:47:49Z` and `2026-10-06T03:47:55Z`;
-> the daemon and last-hop evidence below is from those runs. The daemon run also checked the
-> mission workspace, the `LEASE` frame and the signed outcome, and their rows above name the checks.
-> Its five jail results passed as well (`jail_*` and `read_only_fs_makes_workdir_read_only`),
-> but `jail.rs` changed on 2026-10-11 (`53d978f`), so the jail stays pending until a root run checks
-> the code that ships; `docs/GUIDE-operator.md` has the steps.
+> **Re-run under root: daemon on 2026-10-12, last-hop on 2026-10-06.** `probe-daemon.sh` records PASS
+> against `6fc637d8`, the BPF source that ships, at `2026-10-12T14:59:50Z`, and `probe-last-hop.ps1`
+> at `2026-10-06T03:47:55Z`; the daemon and last-hop evidence below is from those runs. The daemon run
+> also checked the mission workspace, the `LEASE` frame and the signed outcome, and their rows above
+> name the checks. The jail is covered now too: the 2026-10-12 run built the shipping `jail.rs`
+> (`53d978f`, 2026-10-11) and its five jail results passed (`jail_*` and
+> `read_only_fs_makes_workdir_read_only`), so the jail row above is no longer pending. The same run
+> also recorded that two ordinary leases can reach each other through signals and `/proc` — see the
+> new row in the *Not policed* table; `docs/GUIDE-operator.md` has the steps.
 
 | Claim | Evidence |
 | --- | --- |
@@ -124,7 +127,7 @@ always say REPLAY.
 | An approved host is not approved on every port | same run — `:9999` refused on a lease naming `:80` |
 | IPv6 is denied rather than waved through | same run |
 | The workload runs as `nobody`, not as the daemon's root | same run — `workload_not_root`, the tool reporting uid `65534` |
-| Expiry kills the workload rather than unpolicing it | same run — killed 5.4s into a 60s sleep (`expiry_killed_the_workload`) |
+| Expiry kills the workload rather than unpolicing it | same run — killed 5.5s into a 60s sleep (`expiry_killed_the_workload`) |
 | The kernel vetoes an out-of-lease exec, open and connect, standalone | `../splat-canary/evidence/canary-*.json` — one lease at a time |
 | The daemon refuses to run without live enforcement | `evidence/fail-closed-probe.json` |
 | An unauthenticated caller cannot execute | `evidence/peer-auth-probe.json` |

@@ -896,6 +896,19 @@ feature_checks = dict.fromkeys([
 ], False)
 feature_observations = {"errors": [], "lifecycle_requested": bool(managed_binary)}
 
+# Cross-lease reach between two ORDINARY leases. True means the operation SUCCEEDED from lease A
+# against lease B - the isolation gap is present. These are kept apart from feature_checks on
+# purpose: feature_checks read True == contained, but here True == reachable, so folding them into
+# the PASS conjunction with that polarity would score a confirmed gap as a clean run. They are raw
+# facts about an area SUPPORTED_POLICY.md's "Not policed" table governs, recorded and never gated,
+# the same shape as udp_violation_frame_reached_the_session below. Initialised False so a non-root
+# or replay run records them False, the rule every other root-only measurement already follows.
+cross_lease = dict.fromkeys([
+    "control_ops_possible", "signal_reaches_peer", "proc_cwd_readlinked",
+    "proc_root_readlinked", "peer_workspace_read", "peer_workspace_written",
+], False)
+cross_lease_observations = {}
+
 def wait_for(predicate, seconds=10):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -1249,6 +1262,113 @@ time.sleep(60)
         if not cg.exists():
             shutil.rmtree(ws)
 
+def probe_cross_lease():
+    # Two ORDINARY leases, concurrent. B sleeps in its own ephemeral workspace; A, a second
+    # ordinary lease, reaches for B's process and that workspace. Every ordinary workload runs at
+    # the daemon's one default workload uid - only a secret step is handed a private uid and a
+    # private IPC namespace - and the jail unshares the mount namespace alone, so A and B share one
+    # pid namespace and a procfs mounted with no hidepid. That is enough for A to see B in /proc and,
+    # at the same uid, pass ptrace_may_access(PTRACE_MODE_READ_FSCREDS) for B's magic links.
+    #
+    # The control is A running the SAME four operations against its OWN process and cwd first: if
+    # that fails, a failed peer result is a broken probe rather than isolation, so the peer booleans
+    # are only evidence of a gap when the control says the operations are mechanically possible.
+    feature_observations["cross_lease"] = cross_lease_observations
+    secret = "xlease-" + os.urandom(8).hex()
+    b_ws = Path(missions_root) / "probe-xlease-b"
+    a_ws = Path(missions_root) / "probe-xlease-a"
+    for ws in (b_ws, a_ws):
+        shutil.rmtree(ws, ignore_errors=True)
+    # B publishes its pid into its own workspace (root, orchestrating, reads it there) and holds a
+    # private 0700 canary the attacker must not know in advance, then sleeps inside its lease.
+    b_code = """import os, time
+from pathlib import Path
+Path('canary').write_text('__SECRET__')
+Path('pid').write_text(str(os.getpid()))
+print('PEER_READY', flush=True)
+time.sleep(14)
+""".replace("__SECRET__", secret)
+    frames_b = []
+    worker = threading.Thread(target=lambda: frames_b.extend(call({
+        "type": "EXECUTE_TOOL", "missionId": "probe-xlease-b",
+        "command": "/usr/bin/python3", "argv": ["-c", b_code],
+        "allowedExecPaths": ["/usr/bin/python3"],
+        "workingDirectory": str(b_ws), "ephemeralWorkspace": True,
+        "leaseDurationSeconds": 20,
+    }, "crosslease-b", settle=18.0) or []))
+    worker.start()
+    try:
+        if not wait_for(lambda: (b_ws / "pid").is_file(), seconds=15):
+            raise RuntimeError("peer lease B never published its pid; A had no target to reach")
+        peer_pid = int((b_ws / "pid").read_text().strip())
+        cross_lease_observations["peer_pid"] = peer_pid
+        # Values are spliced by name, never %-formatted, so the many % and quotes in A's own print
+        # statements cannot collide with the injection.
+        a_code = """import os
+pid = __PID__
+ctrl = []
+try:
+    os.kill(os.getpid(), 0); ctrl.append('kill')
+    os.readlink('/proc/self/cwd'); ctrl.append('cwd')
+    os.readlink('/proc/self/root'); ctrl.append('root')
+    open('self-file', 'w').write('x'); open('self-file').read(); ctrl.append('rw')
+except Exception as exc:
+    print('CONTROL_FAIL=' + repr(exc), flush=True)
+print('CONTROL_OK' if len(ctrl) == 4 else 'CONTROL_PARTIAL=' + repr(ctrl), flush=True)
+print('SELF_UID=' + str(os.getuid()), flush=True)
+try:
+    status = open('/proc/' + str(pid) + '/status').read()
+    print('PEER_UID=' + next(l for l in status.splitlines() if l.startswith('Uid:')).split()[1], flush=True)
+except OSError as exc:
+    print('PEER_STATUS_FAIL=' + str(exc.errno), flush=True)
+try:
+    os.kill(pid, 0); print('KILL0_OK', flush=True)
+except OSError as exc:
+    print('KILL0_FAIL=' + str(exc.errno), flush=True)
+for n in ('cwd', 'root'):
+    try:
+        print('LINK_' + n + '=' + os.readlink('/proc/' + str(pid) + '/' + n), flush=True)
+    except OSError as exc:
+        print('LINK_' + n + '_FAIL=' + str(exc.errno), flush=True)
+try:
+    print('PEER_READ=' + open('/proc/' + str(pid) + '/cwd/canary').read(), flush=True)
+except OSError as exc:
+    print('PEER_READ_FAIL=' + str(exc.errno), flush=True)
+try:
+    open('/proc/' + str(pid) + '/cwd/injected-by-a', 'w').write('A reached B')
+    print('PEER_WRITE_OK', flush=True)
+except OSError as exc:
+    print('PEER_WRITE_FAIL=' + str(exc.errno), flush=True)
+""".replace("__PID__", str(peer_pid))
+        frames_a = call({
+            "type": "EXECUTE_TOOL", "missionId": "probe-xlease-a",
+            "command": "/usr/bin/python3", "argv": ["-c", a_code],
+            "allowedExecPaths": ["/usr/bin/python3"],
+            "workingDirectory": str(a_ws), "ephemeralWorkspace": True,
+            "leaseDurationSeconds": 20,
+        }, "crosslease-a", settle=12.0)
+        out = stdout_text(frames_a)
+        cross_lease_observations["attacker_stdout"] = out
+        # The host's own view of B's workspace while B still sleeps: the one write signal that does
+        # not depend on A's self-report, since root can see the file A left in B's private directory.
+        injected_on_host = (b_ws / "injected-by-a").is_file()
+        cross_lease_observations["injected_file_present_on_host"] = injected_on_host
+        for part in out.split():
+            for marker in ("SELF_UID=", "PEER_UID="):
+                if part.startswith(marker):
+                    cross_lease_observations[marker.rstrip("=").lower()] = part.split("=", 1)[1]
+        cross_lease["control_ops_possible"] = "CONTROL_OK" in out
+        cross_lease["signal_reaches_peer"] = "KILL0_OK" in out
+        cross_lease["proc_cwd_readlinked"] = "LINK_cwd=" in out
+        cross_lease["proc_root_readlinked"] = "LINK_root=" in out
+        # A never held B's secret; reading it back out of out is reach into B's 0700 workspace.
+        cross_lease["peer_workspace_read"] = secret in out
+        cross_lease["peer_workspace_written"] = "PEER_WRITE_OK" in out and injected_on_host
+    finally:
+        worker.join(timeout=25)
+        for ws in (b_ws, a_ws):
+            shutil.rmtree(ws, ignore_errors=True)
+
 if replay is None and hasattr(os, "geteuid") and os.geteuid() == 0:
     print("\n== 18. CoW: private overlay writes, unchanged lowerdir, teardown ==")
     try:
@@ -1260,8 +1380,13 @@ if replay is None and hasattr(os, "geteuid") and os.geteuid() == 0:
         probe_scratch_exec()
     except Exception as e:
         feature_observations["errors"].append("scratch exec: " + str(e))
+    print("\n== 19. Cross-lease reach: one ordinary lease against another's process and workspace ==")
+    try:
+        probe_cross_lease()
+    except Exception as e:
+        feature_observations["errors"].append("cross-lease: " + str(e))
     if managed_binary:
-        print("\n== 19. Pins: SIGKILL, surviving denials, restart identity, rejected foreign state ==")
+        print("\n== 20. Pins: SIGKILL, surviving denials, restart identity, rejected foreign state ==")
         try:
             probe_pins()
         except Exception as e:
@@ -1270,6 +1395,14 @@ for name, passed in feature_checks.items():
     print(f"  {name}: {passed}")
 for error in feature_observations["errors"]:
     print("  root probe error: " + error)
+# Cross-lease reach. The control gates the reading of the rest: with it True, a True below is lease A
+# genuinely reaching lease B; with it False, the probe could not perform the operations at all.
+print(f"  cross-lease control (A on itself) : {cross_lease['control_ops_possible']}")
+print(f"  cross-lease kill -0 reaches peer  : {cross_lease['signal_reaches_peer']}")
+print(f"  cross-lease /proc/<peer>/cwd link : {cross_lease['proc_cwd_readlinked']}")
+print(f"  cross-lease /proc/<peer>/root link: {cross_lease['proc_root_readlinked']}")
+print(f"  cross-lease read peer workspace   : {cross_lease['peer_workspace_read']}")
+print(f"  cross-lease wrote peer workspace  : {cross_lease['peer_workspace_written']}")
 daemon_proved_itself = bool(handshakes) and all(proven for _, proven in handshakes)
 daemon_frames_proven = bool(frame_sessions) and all(p for _, p in frame_sessions) and not frame_failures
 
@@ -1377,6 +1510,17 @@ evidence = {
         "mission_workspace_gone_from_the_host": workspace_gone_after,
         "mission_workspace_elsewhere_refused": workspace_elsewhere_refused,
         "mission_workspace_removed_on_refusal": workspace_removed_on_refusal,
+        # Cross-lease reach between two ordinary leases. Recorded, never gated into the verdict: True
+        # means lease A reached lease B (the gap is present), the opposite polarity from every check
+        # above, so the PASS conjunction must not read these. The control says the operations are
+        # mechanically possible; the peer booleans are only a finding when it is True. See the note
+        # where `cross_lease` is defined, and the "Not policed" table in SUPPORTED_POLICY.md.
+        "cross_lease_control_ops_possible": cross_lease["control_ops_possible"],
+        "cross_lease_signal_reaches_a_peer_lease": cross_lease["signal_reaches_peer"],
+        "cross_lease_peer_proc_cwd_readlinked": cross_lease["proc_cwd_readlinked"],
+        "cross_lease_peer_proc_root_readlinked": cross_lease["proc_root_readlinked"],
+        "cross_lease_peer_workspace_read_via_proc": cross_lease["peer_workspace_read"],
+        "cross_lease_peer_workspace_written_via_proc": cross_lease["peer_workspace_written"],
     },
     "violations": [
         {k: m.get(k) for k in ("hook", "pid", "detail", "detailText", "comm") if k in m}
