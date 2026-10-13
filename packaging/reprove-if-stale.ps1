@@ -15,6 +15,11 @@
     PASS still describes the program that ships, and nothing runs. Different means the proof has
     expired, and the full re-proof runs.
 
+    The hash is half the program. The daemon's own source - the jail, the workspace, the outcome
+    signer, the cgroup drain - can move without touching the BPF file, as it did on 2026-10-11, and a
+    trigger that read only the hash would never re-prove it. So the proof also expires when anything
+    under the daemon's source changed after the commit that last recorded the evidence.
+
     THE PROOF RUNS AGAINST A CLEAN CHECKOUT, and that is the reason this script exists rather than a
     schtasks line pointing straight at reprove-substrate.ps1. The repository is a shared working tree
     - more than one agent edits it, and it usually carries uncommitted work. A probe run there would
@@ -42,6 +47,11 @@
 .PARAMETER LogPath
     Appended to on every run, whether or not anything was proven.
 
+.PARAMETER AllowDirtyTree
+    Prove the working tree as it stands even when it holds uncommitted changes under
+    native/splat-agent or src. Without it an expired proof is refused rather than built from, and
+    recorded over, somebody's unfinished work.
+
 .PARAMETER Force
     Re-prove even when the hashes agree. For testing this script, and for the case where the
     evidence is suspect rather than stale.
@@ -52,6 +62,7 @@ param(
     [string]$Repo,
     [string]$LogPath = "$env:LOCALAPPDATA\SPLAT\reprove.log",
     [switch]$Force,
+    [switch]$AllowDirtyTree,
     [switch]$CheckOnly
 )
 
@@ -142,16 +153,28 @@ if ($LASTEXITCODE -eq 0 -and $evidenceJson) {
     Write-Line "no daemon-probe.json on origin/main; treating the proof as expired."
 }
 
-if ($recordedHash -eq $treeHash -and -not $Force) {
+# The commit that last recorded the evidence, and every daemon source file changed after it on
+# origin/main. The commit that recorded it may carry source changes of its own; those are the ones
+# it proved, so the comparison starts from it rather than from its parent.
+$daemonPaths = @('native/splat-agent/src', 'native/splat-agent/Cargo.toml', 'native/splat-agent/Cargo.lock', 'native/splat-agent/build.rs')
+$evidenceCommit = (& git -C $Repo log -1 --format=%H origin/main -- $evidenceRelative)
+$daemonMoved = @()
+if ($evidenceCommit) {
+    $daemonMoved = @(& git -C $Repo diff --name-only $evidenceCommit.Trim() origin/main -- $daemonPaths)
+    if ($LASTEXITCODE -ne 0) { Fail 'git diff of the daemon source since the evidence failed; staleness is unknown.' }
+}
+
+if ($recordedHash -eq $treeHash -and $daemonMoved.Count -eq 0 -and -not $Force) {
     Write-Line "current  $revision  bpf $($treeHash.Substring(0,12))  proven $recordedAt - nothing to do."
     exit 0
 }
 
-$verdict = "expired  {0}  ships bpf {1}  evidence bpf {2} ({3})" -f
+$verdict = "expired  {0}  ships bpf {1}  evidence bpf {2} ({3}){4}" -f
     $revision,
     $treeHash.Substring(0, 12),
     $(if ($recordedHash) { $recordedHash.Substring(0, 12) } else { 'none' }),
-    $recordedAt
+    $recordedAt,
+    $(if ($daemonMoved.Count -gt 0) { "  daemon source changed since it: $($daemonMoved -join ', ')" } else { '' })
 
 if ($CheckOnly) {
     Write-Line "$verdict - CheckOnly, so nothing was built, stopped, proven or checked out."
@@ -167,20 +190,26 @@ if ($CheckOnly) {
 # to be sitting uncommitted here.
 #
 # What that costs, stated rather than hidden: if the working tree holds edits to the daemon or the BPF
-# source, reprove-substrate.ps1 builds and proves THOSE, and the evidence it records will carry their
-# hash - which will not match origin/main and will read as expired on the next run. So a re-proof is
-# worth running from a clean tree, and the run below says so when it is not.
+# source, reprove-substrate.ps1 builds and proves THOSE, and writes its evidence over whatever sits in
+# the evidence directory - including a peer's uncommitted evidence. A scheduled run cannot tell an
+# abandoned edit from an agent mid-task, so it refuses; -AllowDirtyTree is the operator saying which.
 # ------------------------------------------------------------------------------------------------
-$dirty = @(& git -C $Repo status --porcelain --untracked-files=no -- 'native/splat-agent' 'src')
+$dirty = @(& git -C $Repo status --porcelain -- 'native/splat-agent' 'src')
+if ($dirty.Count -gt 0 -and -not $AllowDirtyTree) {
+    Write-Line "refused  $verdict"
+    Write-Line "         the working tree holds $($dirty.Count) uncommitted or untracked path(s) under native/splat-agent"
+    Write-Line "         or src. A re-proof would build those and record over any evidence there. Commit them, or"
+    Write-Line "         rerun with -AllowDirtyTree to prove the tree as it stands."
+    exit 3
+}
 if ($dirty.Count -gt 0) {
-    Write-Line "WARNING  the working tree holds $($dirty.Count) uncommitted change(s) under native/splat-agent or src;"
-    Write-Line "         what gets proven is the tree as it stands, not origin/main. Commit or stash first if"
-    Write-Line "         the evidence is meant to describe what ships."
+    Write-Line "WARNING  proving the tree as it stands (-AllowDirtyTree): $($dirty.Count) uncommitted path(s) under"
+    Write-Line "         native/splat-agent or src, so the evidence will not describe origin/main."
 }
 
 Write-Line "$verdict - re-proving in $Repo."
 
-& powershell -ExecutionPolicy Bypass -File (Join-Path $Repo 'packagingeprove-substrate.ps1')
+& powershell -ExecutionPolicy Bypass -File (Join-Path $Repo 'packaging\reprove-substrate.ps1')
 $code = $LASTEXITCODE
 
 if ($code -eq 0) {

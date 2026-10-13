@@ -3,6 +3,10 @@
 #   2. Unadmitted standard account: -ExpectDenied -OwnerEvidence <a copy of owner.json it can read> -OutputPath denied.json
 #   3. Elevated: splat-mcp audit --managed --configuration <bridge.json> --probe owner.json --output audit.json
 # Run 2 counts only beside a PASS from run 1 within the hour; run 3 reads the ledger that run 1 is denied.
+# Then the service lifecycle, elevated, with run 1 repeated after the first two: Restart-Service
+# <instance>; splat-mcp provision --managed --upgrade --apply from a newly published build, which
+# restores the previous build if the new one does not stay running; and splat-mcp unmount --managed
+# --apply, which moves the retained ledger aside so the same instance can be installed again.
 [CmdletBinding(DefaultParameterSetName = 'Owner')]
 param(
     [Parameter(Mandatory, ParameterSetName = 'Owner')][string]$Configuration,

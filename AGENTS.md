@@ -83,7 +83,8 @@ Kernel claims are backed by `native/splat-agent/evidence/daemon-probe.json`, whi
 SHA-256 of the BPF source it exercised. `DocumentationDriftTests` fails the build if the README
 claims enforcement while that hash does not match what ships, so a proof cannot outlive the program
 it proved. Re-run with `packaging/reprove-substrate.ps1`; `packaging/reprove-if-stale.ps1` fires it
-only when the BPF source has moved ahead of the evidence.
+when the BPF source or the daemon's own source has moved ahead of the evidence, and refuses to prove
+over uncommitted work under `native/splat-agent` or `src`.
 
 `native/splat-agent/SUPPORTED_POLICY.md` enumerates what SPLAT does **not** enforce. It is attached
 to commercial agreements as an exhibit. Do not weaken, trim or soften a row in it without a

@@ -58,9 +58,10 @@ mattered:
 Then, on your say-so, the kernel program itself changed: each refusal record now carries the
 kernel's own clock and a sequence number, the program counts the refusals it had no room to
 record, and the connect hook refuses a network address too short to hold one. Every recorded proof
-carries the SHA-256 of that file, so the daemon and last-hop proofs no longer name the program
-that ships. The README's "proven" claims are withdrawn until they are re-run, and re-running them
-needs root. That is Part 2.
+carries the SHA-256 of that file, so the daemon and last-hop proofs stopped naming the program
+that ships, and the README's "proven" claims were withdrawn until they were re-run under root.
+They were re-run on 2026-10-01, and again on 2026-10-06 against `6fc637d8`, the source that ships
+today. Part 2 is how to do it the next time the program changes.
 
 ### How to learn it, in order
 
@@ -123,9 +124,10 @@ Two kinds of root exist here, and only one of them needs you.
 
 ### Step 1 — Re-run the guard's proofs against the new build
 
-Both the guard and its kernel program changed today, so this step is required, not optional: the
-recorded daemon and last-hop proofs name a program that no longer ships, and the README says so
-until you have run this. The standalone canary is a frozen copy and does not need re-running.
+Run this whenever the guard or its kernel program changes. Until you do, the recorded daemon and
+last-hop proofs describe a program that no longer ships, and when the kernel program is the part
+that changed, the build refuses the README's claims outright. The standalone canary is a frozen
+copy and does not need re-running.
 Three runs, in two terminals - or, since 2026-09-23, one command from PowerShell, which does all
 three without a password because it starts the guard through `wsl -u root` rather than `sudo`:
 
