@@ -55,34 +55,53 @@ internal static class ManagedBridgeCommand
         }
     }
 
-    private static async Task<int> DeployAsync(string[] args)
+    internal sealed record DeploymentRequest(string Mode, string Instance, IReadOnlyDictionary<string, string> Options, bool Apply);
+
+    // provision --managed installs, provision --managed --upgrade replaces a running instance's build
+    // in place, and unmount --managed removes it. Parsed apart from running, so the combinations that
+    // must be refused are testable without an elevated terminal.
+    internal static DeploymentRequest ParseDeployment(string[] args)
     {
         var options = new Dictionary<string, string>(StringComparer.Ordinal);
-        bool apply = false;
+        bool apply = false, upgrade = false;
         for (int i = 1; i < args.Length; i++)
         {
             if (args[i] == "--managed") continue;
             if (args[i] == "--apply") { if (apply) throw new ArgumentException("Duplicate --apply."); apply = true; continue; }
+            if (args[i] == "--upgrade") { if (upgrade) throw new ArgumentException("Duplicate --upgrade."); upgrade = true; continue; }
             string option = args[i];
             if (option is not ("--rootfs" or "--rootfs-sha256" or "--operator-sid" or "--instance" or "--egress") || ++i == args.Length
                 || args[i].StartsWith('-') || !options.TryAdd(option, args[i]))
-                throw new ArgumentException("Managed deployment accepts --rootfs, --rootfs-sha256, --operator-sid, --instance, --egress and --apply.");
+                throw new ArgumentException("Managed deployment accepts --rootfs, --rootfs-sha256, --operator-sid, --instance, --egress, --upgrade and --apply.");
         }
         bool remove = args[0] == "unmount";
+        if (remove && upgrade) throw new ArgumentException("--upgrade belongs to provision --managed, not unmount.");
         string instance = options.GetValueOrDefault("--instance", "SplatManaged");
         if (!System.Text.RegularExpressions.Regex.IsMatch(instance, @"\ASplat[A-Za-z0-9]{0,14}\z"))
             throw new ArgumentException("Managed instance names start with Splat and contain at most 19 letters/digits.");
-        if (remove && options.Keys.Any(key => key != "--instance")) throw new ArgumentException("Managed unmount accepts only --instance and --apply.");
-        if (!remove && (!options.ContainsKey("--rootfs") || !options.ContainsKey("--operator-sid")
+        if ((remove || upgrade) && options.Keys.Any(key => key != "--instance"))
+            throw new ArgumentException($"Managed {(remove ? "unmount" : "upgrade")} accepts only --instance and --apply.");
+        if (!remove && !upgrade && (!options.ContainsKey("--rootfs") || !options.ContainsKey("--operator-sid")
             || !options.TryGetValue("--rootfs-sha256", out var rootfsHash)
             || !System.Text.RegularExpressions.Regex.IsMatch(rootfsHash, @"\A[0-9a-fA-F]{64}\z")))
             throw new ArgumentException("Managed provision requires --rootfs <clean archive>, --rootfs-sha256 <publisher hash> and --operator-sid <Windows SID>.");
+        return new DeploymentRequest(remove ? "Remove" : upgrade ? "Upgrade" : "Install", instance, options, apply);
+    }
+
+    private static async Task<int> DeployAsync(string[] args)
+    {
+        var request = ParseDeployment(args);
         string? executable = Environment.ProcessPath;
         if (executable is null || !Path.GetFileName(executable).Equals("splat-mcp.exe", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Use the published self-contained splat-mcp.exe for managed deployment.");
-        if (!apply)
+        if (!request.Apply)
         {
-            Console.WriteLine($"{(remove ? "Remove" : "Install")} managed instance {instance}: dedicated non-admin account, WSL distro, Windows bridge service and private ledger. Use --apply from an elevated Windows terminal.");
+            Console.WriteLine(request.Mode switch
+            {
+                "Remove" => $"Remove managed instance {request.Instance}: its service, account and WSL distro. The private ledger is kept and moved aside, administrators only.",
+                "Upgrade" => $"Upgrade managed instance {request.Instance} to this build: stop its service, replace the executable, re-run the guest bootstrap as its account and restart, restoring the previous build if it does not stay running.",
+                _ => $"Install managed instance {request.Instance}: dedicated non-admin account, WSL distro, Windows bridge service and private ledger.",
+            } + " Use --apply from an elevated Windows terminal.");
             return 0;
         }
         using var script = typeof(Program).Assembly.GetManifestResourceStream("managed-deployment.ps1")
@@ -96,9 +115,9 @@ internal static class ManagedBridgeCommand
             var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"))
                 { UseShellExecute = false, CreateNoWindow = true };
             foreach (string arg in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", temporary,
-                "-Mode", remove ? "Remove" : "Install", "-Instance", instance, "-Executable", executable }) start.ArgumentList.Add(arg);
+                "-Mode", request.Mode, "-Instance", request.Instance, "-Executable", executable }) start.ArgumentList.Add(arg);
             foreach (var pair in new[] { ("--rootfs", "-Rootfs"), ("--rootfs-sha256", "-RootfsSha256"), ("--operator-sid", "-OperatorSid"), ("--egress", "-Egress") })
-                if (options.TryGetValue(pair.Item1, out string? value)) { start.ArgumentList.Add(pair.Item2); start.ArgumentList.Add(value); }
+                if (request.Options.TryGetValue(pair.Item1, out string? value)) { start.ArgumentList.Add(pair.Item2); start.ArgumentList.Add(value); }
             using var process = Process.Start(start) ?? throw new IOException("Managed installer did not start.");
             await process.WaitForExitAsync();
             return process.ExitCode;
