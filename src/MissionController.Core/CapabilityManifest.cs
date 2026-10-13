@@ -88,7 +88,11 @@ public static class CapabilityManifest
         // policy still calls it pending its probe.
         new("The workload's root", LeaseEnforcement.Daemon),
         new("readOnlyFs", LeaseEnforcement.Daemon),
-        new("overlayFs.enableCow", LeaseEnforcement.Refused),
+        // Left the Refused table once the overlay mounted inside the child's namespace: root probe
+        // PASS against 6fc637d8 on 2026-10-06, as the policy's own rows record. doctor read
+        // "refused by the daemon" for a dimension the daemon was enforcing.
+        new("overlayFs.enableCow", LeaseEnforcement.Daemon),
+        new("overlayFs.allowScratchExec", LeaseEnforcement.Kernel),
         // Closed 2026-09-21 by `lsm/socket_sendmsg`: a datagram that names its own destination is
         // judged against the same allow-list a connect is, so it is no longer a way around the hook.
         new("IPv4 datagrams", LeaseEnforcement.Kernel),
