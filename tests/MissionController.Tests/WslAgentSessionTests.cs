@@ -89,6 +89,14 @@ public sealed class WslAgentSessionTests
             StandInAgent.Challenge(serverNonce, WslAgentSession.DaemonProof(key, nonce, serverNonce, provesFrames: true), framesProven: false));
         Assert.IsType<WslAgentHandshakeException>(failure);
         Assert.Single(StandInAgent.Frames(sent));
+
+        // Honestly proven as plain: what the real daemon answers once a relay deletes proveFrames from the
+        // HELLO. The proof holds, so only refusing an unproven session keeps the relay from writing the
+        // LEASE and EXIT frames - reproduced end to end against WslLeasedExecutor on 2026-10-15.
+        (failure, sent) = await HandshakeAgainstAsync(nonce =>
+            StandInAgent.Challenge(serverNonce, WslAgentSession.DaemonProof(key, nonce, serverNonce, provesFrames: false), framesProven: false));
+        Assert.IsType<WslAgentHandshakeException>(failure);
+        Assert.Single(StandInAgent.Frames(sent));
     }
 
     /// <summary>An older daemon answers a HELLO as a request it does not know; the bridge reports that in its words.</summary>
