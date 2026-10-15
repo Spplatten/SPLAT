@@ -130,8 +130,10 @@ including a protocol 2 request carrying the token itself — is refused, and the
 Since 2026-09-23 the answers are proven the same way (roadmap 2.6): a bridge that asks in its
 `HELLO` gets every later frame wrapped as `PROVEN`, proven over both nonces, the frame's number on
 the connection and its exact bytes, and refuses the session at the first frame that does not hold.
-An older bridge that does not ask is answered unwrapped; an older daemon that cannot agree is
-believed as before, and `doctor` says so.
+An older bridge that does not ask is answered unwrapped. Since 2026-10-15 the bridge refuses a
+daemon that does not agree: nothing proves the `HELLO`'s request, so a relay that deleted it would
+get a genuine plain-label `CHALLENGE` and could then write the lease's frames. That relay was
+reproduced against `WslLeasedExecutor`; `WslAgentSessionTests` now refuses the plain answer.
 
 **`EXECUTE_TOOL`, in order:**
 

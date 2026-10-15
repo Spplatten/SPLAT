@@ -26,9 +26,9 @@ namespace MissionController.Infrastructure.Linux;
 /// stripped off in transit - and then wraps every frame it sends as PROVEN, proven over both nonces, the
 /// frame's number on the connection and its exact bytes: the request proof's shape, in the other
 /// direction. A frame that does not prove itself ends the session, because nothing after it can be
-/// believed, including where the next frame begins. A daemon that predates the field answers unwrapped
-/// and is believed as before; <see cref="FramesProven"/> says which kind this session got, so a host can
-/// report it rather than assume it.
+/// believed, including where the next frame begins. A daemon that answers unwrapped is refused at the
+/// handshake: the HELLO's request is not bound into any proof, so an unwrapped answer is what a relay
+/// that stripped the request would also produce (2026-10-15).
 /// </summary>
 public sealed class WslAgentSession : IDisposable
 {
@@ -70,8 +70,8 @@ public sealed class WslAgentSession : IDisposable
     }
 
     /// <summary>
-    /// Whether the daemon agreed to prove every frame it sends on this connection. False from a daemon
-    /// older than 2026-09-23, whose frames are then believed on the strength of the handshake alone.
+    /// Whether the daemon agreed to prove every frame it sends on this connection. Always true on an open
+    /// session, since <see cref="OpenAsync"/> refuses one that did not; kept so hosts still report it.
     /// </summary>
     public bool FramesProven { get; }
 
@@ -149,6 +149,19 @@ public sealed class WslAgentSession : IDisposable
                     "What answered on the daemon's port did not prove it holds this host's token, so nothing was sent "
                     + "to it. Either the token this host read is not the daemon's, or what is listening is not the "
                     + "SPLAT daemon.");
+            }
+
+            // The label binds the daemon's answer, but nothing binds the HELLO's request for proven frames:
+            // a relay that deletes proveFrames gets a genuine plain-label proof from the real daemon and is then
+            // free to write every frame after it, LEASE and EXIT included. Every shipped daemon has proven its
+            // frames since 2026-09-23, so a session that comes back unproven is refused rather than believed.
+            if (!framesProven)
+            {
+                throw new WslAgentHandshakeException(
+                    "The daemon proved it holds this host's token but did not agree to prove the frames it sends, "
+                    + "so nothing was sent to it. Either it predates 2026-09-23 and must be updated, or something "
+                    + "between this host and the daemon removed the request; without proven frames a relay could "
+                    + "write the lease's outcome.");
             }
 
             return new WslAgentSession(reader, writer, key, clientNonce, serverNonce, framesProven);
