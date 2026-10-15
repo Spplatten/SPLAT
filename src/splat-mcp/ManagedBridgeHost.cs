@@ -27,6 +27,14 @@ internal static class ManagedBridgeHost
         { "run_command", "run_code", "get_substrate_health" };
     internal const PipeAccessRights ClientRights = ManagedBridgeClient.ClientRights;
 
+    // The admission row's exact shape. ManagedLedgerAudit finds a probe's rows by these strings, so
+    // the writer and the reader share them rather than each spelling the row its own way.
+    internal const string Transport = "mcp-managed-pipe";
+    internal const string AdmissionAction = "MANAGED_CALL_ADMITTED";
+    internal static string AdmissionDetails(string tool, string requestSha256) => $"Tool={tool}; request_sha256={requestSha256}";
+    internal static string RequestSha256(JsonElement? parameters) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(parameters?.GetRawText() ?? "null"))).ToLowerInvariant();
+
     internal static PipeSecurity Security(ManagedBridgeConfiguration config)
     {
         var security = new PipeSecurity();
@@ -103,7 +111,7 @@ internal static class ManagedBridgeHost
             using var token = WindowsIdentity.GetCurrent(true) ?? throw new UnauthorizedAccessException("Missing client token.");
             string sid = token.User?.Value ?? throw new UnauthorizedAccessException("Missing client SID.");
             if (!config.OperatorSids.Contains(sid, StringComparer.Ordinal)) throw new UnauthorizedAccessException("Caller is not admitted.");
-            caller = new OperatorIdentity(token.Name, sid, OperatorAuthenticationMethod.WindowsAuthenticated, "mcp-managed-pipe");
+            caller = new OperatorIdentity(token.Name, sid, OperatorAuthenticationMethod.WindowsAuthenticated, Transport);
         });
         identity.Set(caller ?? throw new UnauthorizedAccessException("Missing pipe identity."));
         await pipe.WriteAsync(new byte[] { 1 }, handshake.Token);
@@ -146,14 +154,14 @@ internal static class ManagedBridgeHost
                 return new McpJsonRpcMessage { JsonRpc = "2.0", Id = request.Id,
                     Error = new McpError { Code = -32601, Message = "This managed service exposes Linux lease tools and substrate health only." } };
             var actor = await identity.ResolveAsync(ct);
-            if (!actor.IsAttributable || actor.Transport != "mcp-managed-pipe") throw new UnauthorizedAccessException("Untrusted service caller.");
-            string digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Params?.GetRawText() ?? "null"))).ToLowerInvariant();
+            if (!actor.IsAttributable || actor.Transport != Transport) throw new UnauthorizedAccessException("Untrusted service caller.");
+            string digest = RequestSha256(request.Params);
             // Commit intent before calling any handler. A failed ledger write means no execution;
             // cancellation after execution still leaves a durable, SID-attributed admission record.
             try
             {
-                await ledger.AppendLogAsync(Guid.NewGuid(), "mcp-tool-" + tool, "MANAGED_CALL_ADMITTED",
-                    $"Tool={tool}; request_sha256={digest}", actor.ToLedgerIdentity(), ct);
+                await ledger.AppendLogAsync(Guid.NewGuid(), "mcp-tool-" + tool, AdmissionAction,
+                    AdmissionDetails(tool, digest), actor.ToLedgerIdentity(), ct);
             }
             catch (Exception) when (!ct.IsCancellationRequested)
             {

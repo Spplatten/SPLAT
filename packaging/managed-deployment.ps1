@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Install','Remove','GuestInstall','GuestRemove')][string]$Mode,
+    [ValidateSet('Install','Upgrade','Remove','GuestInstall','GuestUpgrade','GuestRemove')][string]$Mode,
     [ValidatePattern('^Splat[A-Za-z0-9]{0,14}$')][string]$Instance = 'SplatManaged',
     [string]$Executable, [string]$Rootfs, [string]$RootfsSha256,
     [string]$OperatorSid, [string]$Egress = ''
@@ -62,35 +62,46 @@ function Invoke-Guest([string]$Script) {
     } finally { $process.Dispose() }
 }
 
-if ($Mode -in @('GuestInstall', 'GuestRemove')) {
+if ($Mode -in @('GuestInstall', 'GuestUpgrade', 'GuestRemove')) {
     # Only the provisioned account may operate this registration. Parent directories and the
     # manifest are admin-owned; guest output is never interpreted as a Windows command.
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne $manifest.AccountSid) { throw 'Wrong guest owner.' }
     if ($manifest.Instance -ne $Instance -or $manifest.Root -ne $root) { throw 'Foreign deployment manifest.' }
+    # Host drive access is needed only while the installed executable's daemon is copied in. Mode
+    # 0700 and disabled Windows interop keep leased uid 65534 away from it meanwhile, and the final
+    # configuration is restored even when the bootstrap fails, so a failed run never leaves the
+    # Windows drives mounted in the guest.
+    function Invoke-Bootstrap([string]$LogName) {
+        Invoke-Guest @'
+set -eu
+printf '[boot]\nsystemd=true\n[automount]\noptions="umask=077"\n[interop]\nenabled=false\nappendWindowsPath=false\n' > /etc/wsl.conf
+'@
+        & $wsl --terminate $Instance
+        if ($LASTEXITCODE -ne 0) { throw 'Could not restart the managed distro.' }
+        Invoke-Guest 'test "$(cat /proc/1/comm)" = systemd'
+        & $installedExe bridge-bootstrap --configuration $configPath > (Join-Path $state $LogName) 2>&1
+        $bootstrapExit = $LASTEXITCODE
+        Invoke-Guest @'
+set -eu
+printf '[boot]\nsystemd=true\n[automount]\nenabled=false\n[interop]\nenabled=false\nappendWindowsPath=false\n' > /etc/wsl.conf
+'@
+        & $wsl --terminate $Instance
+        if ($LASTEXITCODE -ne 0) { throw 'Could not apply final guest isolation.' }
+        if ($bootstrapExit -ne 0) { throw 'Managed daemon bootstrap did not prove enforcement.' }
+    }
     try {
         if ($Mode -eq 'GuestInstall') {
             if ((& $wsl --list --quiet | Out-String).Replace([string][char]0, '').Trim()) { throw 'The new service account already has a distro.' }
             [IO.File]::WriteAllText((Join-Path $env:USERPROFILE '.wslconfig'), "[wsl2]`nkernelCommandLine=lsm=landlock,lockdown,yama,loadpin,safesetid,integrity,selinux,apparmor,tomoyo,bpf`n", [Text.UTF8Encoding]::new($false))
-            & $wsl --import $Instance (Join-Path $state 'distro') (Join-Path $root 'rootfs.tar.xz') --version 2
+            & $wsl --import $Instance (Join-Path $state 'distro') (Join-Path $root $manifest.RootfsFile) --version 2
             if ($LASTEXITCODE -ne 0) { throw 'WSL import failed.' }
-            # Host drive access is temporarily needed to copy the embedded daemon. Mode 0700 and
-            # disabled Windows interop keep leased uid 65534 away from it during bootstrap.
-            Invoke-Guest @'
-set -eu
-printf '[boot]\nsystemd=true\n[automount]\noptions="umask=077"\n[interop]\nenabled=false\nappendWindowsPath=false\n' > /etc/wsl.conf
-'@
-            & $wsl --terminate $Instance
-            if ($LASTEXITCODE -ne 0) { throw 'Could not restart the newly imported distro.' }
-            Invoke-Guest 'test "$(cat /proc/1/comm)" = systemd'
-            & $installedExe bridge-bootstrap --configuration $configPath > (Join-Path $state 'bootstrap.log') 2>&1
-            if ($LASTEXITCODE -ne 0) { throw 'Managed daemon bootstrap did not prove enforcement.' }
-            Invoke-Guest @'
-set -eu
-printf '[boot]\nsystemd=true\n[automount]\nenabled=false\n[interop]\nenabled=false\nappendWindowsPath=false\n' > /etc/wsl.conf
-'@
-            & $wsl --terminate $Instance
-            if ($LASTEXITCODE -ne 0) { throw 'Could not apply final guest isolation.' }
+            Invoke-Bootstrap 'bootstrap.log'
+        } elseif ($Mode -eq 'GuestUpgrade') {
+            # The registration and its state stay; only the daemon the new executable carries moves in.
+            $names = @((& $wsl --list --quiet | Out-String).Replace([string][char]0, '').Split("`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            if ($names -notcontains $Instance) { throw 'The managed distro is missing; an upgrade cannot recreate it.' }
+            Invoke-Bootstrap 'upgrade-bootstrap.log'
         } else {
             $names = @((& $wsl --list --quiet | Out-String).Replace([string][char]0, '').Split("`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
             if (@($names | Where-Object { $_ -ne $Instance }).Count) { throw 'Foreign distros under service account; refusing removal.' }
@@ -162,14 +173,93 @@ if ($Mode -eq 'Remove') {
     Set-ProtectedDirectory $state @()
     $manifest.Status = 'Removed; audit state retained'
     Write-Json $manifestPath $manifest
-    Write-Output "Removed $Instance service/account/distro; protected audit state retained at $state."
+    # The retained root moves aside, readable by administrators only. Left in place it refused every
+    # reinstall, and its bridge.json kept the desktop failing closed against a service that was gone.
+    $archive = '{0}.removed-{1}' -f $root, [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
+    try {
+        Set-ProtectedDirectory $root @()
+        Rename-Item -LiteralPath $root -NewName (Split-Path -Leaf $archive)
+    } catch {
+        Write-Warning "Removed $Instance, but its retained state could not be moved aside ($($_.Exception.Message)). It is still at $root; move it before reinstalling."
+        exit 0
+    }
+    Write-Output "Removed $Instance service/account/distro; protected audit state retained at $archive."
     exit 0
 }
 
-if ($Mode -ne 'Install') { throw 'Specify Install or Remove.' }
+if ($Mode -eq 'Upgrade') {
+    Assert-Manifest
+    if ([string]$manifest.Status -notlike 'Installed*') { throw "Instance $Instance is not installed (status: $($manifest.Status))." }
+    $account = Get-LocalUser -Name $Instance -ErrorAction SilentlyContinue
+    if (-not $account -or $account.SID.Value -ne $manifest.AccountSid) { throw 'Account is missing or was substituted; refusing upgrade.' }
+    $service = Get-CimInstance Win32_Service -Filter "Name='$Instance'"
+    if (-not $service -or $service.PathName -ne $manifest.ServiceCommand -or $service.StartName -ne ".\$Instance") { throw 'Service is missing or was substituted; refusing upgrade.' }
+    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw 'Published executable is missing.' }
+    if ([IO.Path]::GetFullPath($Executable) -eq [IO.Path]::GetFullPath($installedExe)) { throw 'Run the upgrade from the newly published splat-mcp.exe, not the installed copy.' }
+    $newHash = (Get-FileHash -LiteralPath $Executable -Algorithm SHA256).Hash
+    if ($newHash -eq (Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash) {
+        Write-Output "$Instance already runs this build ($newHash); nothing to upgrade."
+        exit 0
+    }
+    # The guest step runs as the service account, whose password nobody keeps, so each start rotates
+    # it and hands the new one to the service manager before the account runs anything.
+    function Start-Build {
+        $password = New-Password
+        Set-LocalUser -SID $account.SID -Password $password
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($password)
+        try {
+            $change = Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{
+                StartName = ".\$Instance"; StartPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+        } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+        if ($change.ReturnValue -ne 0) { throw "The service manager refused the rotated credential ($($change.ReturnValue))." }
+        Start-Owner ([PSCredential]::new(".\$Instance", $password)) 'GuestUpgrade'
+        $errorLog = Join-Path $state 'service-error.log'
+        $before = if (Test-Path -LiteralPath $errorLog) { (Get-Item -LiteralPath $errorLog).Length } else { 0 }
+        Start-Service -Name $Instance
+        Start-Sleep -Seconds 15
+        $after = if (Test-Path -LiteralPath $errorLog) { (Get-Item -LiteralPath $errorLog).Length } else { 0 }
+        if ((Get-Service -Name $Instance).Status -ne 'Running' -or $after -ne $before) { throw 'The service did not stay running; see service-error.log in the private state.' }
+    }
+    $previousExe = "$installedExe.previous"
+    Stop-Service -Name $Instance -ErrorAction Stop
+    Copy-Item -LiteralPath $installedExe -Destination $previousExe -Force
+    try {
+        # The new script replaces the old one and stays even on rollback: it is the one that knows
+        # GuestUpgrade, which a rollback needs to put the previous build's daemon back in the guest.
+        Copy-Item -LiteralPath $Executable -Destination $installedExe -Force
+        Copy-Item -LiteralPath $PSCommandPath -Destination $installedScript -Force
+        Start-Build
+    } catch {
+        $failure = $_.Exception.Message
+        Stop-Service -Name $Instance -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath $previousExe -Destination $installedExe -Force
+        try { Start-Build; $restored = 'the previous build is running again' }
+        catch { $restored = "the previous build did not restart either ($($_.Exception.Message)), so the service is stopped" }
+        throw "Upgrade failed ($failure); $restored."
+    }
+    $manifest | Add-Member -NotePropertyName ExecutableSha256 -NotePropertyValue $newHash -Force
+    $manifest | Add-Member -NotePropertyName UpgradedAt -NotePropertyValue ([DateTimeOffset]::UtcNow.ToString('o')) -Force
+    $manifest.Status = 'Installed; requires managed boundary probe'
+    Write-Json $manifestPath $manifest
+    Write-Output "Upgraded $Instance to $newHash; the previous build is kept as $previousExe. Run the managed boundary probe again."
+    exit 0
+}
+
+if ($Mode -ne 'Install') { throw 'Specify Install, Upgrade or Remove.' }
+# wsl --import is handed a file whose name says what it holds. Canonical's .wsl images are gzip, and a
+# fixed rootfs.tar.xz name mislabelled exactly the archive this deployment's runbook points at.
+function Get-RootfsName([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    try { $head = New-Object byte[] 262; $read = $stream.Read($head, 0, $head.Length) } finally { $stream.Dispose() }
+    if ($read -ge 2 -and $head[0] -eq 0x1F -and $head[1] -eq 0x8B) { return 'rootfs.tar.gz' }
+    if ($read -ge 6 -and $head[0] -eq 0xFD -and $head[1] -eq 0x37 -and $head[2] -eq 0x7A -and $head[3] -eq 0x58 -and $head[4] -eq 0x5A -and $head[5] -eq 0x00) { return 'rootfs.tar.xz' }
+    if ($read -eq 262 -and [Text.Encoding]::ASCII.GetString($head, 257, 5) -eq 'ustar') { return 'rootfs.tar' }
+    throw 'The rootfs is not a tar, tar.gz or tar.xz archive.'
+}
 if (-not (Test-Path -LiteralPath $Rootfs -PathType Leaf) -or $RootfsSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
     (Get-FileHash -LiteralPath $Rootfs -Algorithm SHA256).Hash -ne $RootfsSha256) { throw 'Rootfs must match its independently obtained publisher SHA-256.' }
 if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw 'Published executable is missing.' }
+$rootfsFile = Get-RootfsName $Rootfs
 $operators = @($OperatorSid.Split(',') | Select-Object -Unique)
 foreach ($sid in $operators) {
     if ($sid -notmatch '^S-1-5-21-\d+-\d+-\d+-\d+$') { throw 'Explicit Windows account SIDs are required.' }
@@ -210,7 +300,7 @@ $null = New-Item -ItemType Directory -Path $root
 Set-ProtectedDirectory $root @()
 $password = New-Password
 $account = New-LocalUser -Name $Instance -Password $password -PasswordNeverExpires -UserMayNotChangePassword -Description 'SPLAT managed endpoint; do not use interactively'
-$manifest = [ordered]@{ Schema = 1; Instance = $Instance; Root = $root; AccountSid = $account.SID.Value; Status = 'Installing'; ServiceCommand = ('"{0}" bridge-service --configuration "{1}"' -f $installedExe, $configPath) }
+$manifest = [ordered]@{ Schema = 1; Instance = $Instance; Root = $root; AccountSid = $account.SID.Value; Status = 'Installing'; ServiceCommand = ('"{0}" bridge-service --configuration "{1}"' -f $installedExe, $configPath); RootfsFile = $rootfsFile }
 Write-Json $manifestPath $manifest
 Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $account
 Set-ProtectedDirectory $root (@($account.SID.Value) + $operators)
@@ -219,8 +309,8 @@ Set-ProtectedDirectory $state @() $account.SID.Value
 Set-ProtectedDirectory (Join-Path $root 'workspace') @() $account.SID.Value
 Copy-Item -LiteralPath $Executable -Destination $installedExe
 Copy-Item -LiteralPath $PSCommandPath -Destination $installedScript
-Copy-Item -LiteralPath $Rootfs -Destination (Join-Path $root 'rootfs.tar.xz')
-if ((Get-FileHash -LiteralPath (Join-Path $root 'rootfs.tar.xz')).Hash -ne $RootfsSha256) { throw 'Copied rootfs hash changed.' }
+Copy-Item -LiteralPath $Rootfs -Destination (Join-Path $root $rootfsFile)
+if ((Get-FileHash -LiteralPath (Join-Path $root $rootfsFile)).Hash -ne $RootfsSha256) { throw 'Copied rootfs hash changed.' }
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $listener.Start()
 $port = $listener.LocalEndpoint.Port
@@ -234,7 +324,7 @@ try { $rng.GetBytes($key); [IO.File]::WriteAllBytes((Join-Path $state 'ledger.ke
 $credential = [PSCredential]::new(".\$Instance", $password)
 Start-Owner $credential 'GuestInstall'
 # Only this exact newly created staging file is removed. The guest's disk is never the input image.
-Remove-Item -LiteralPath (Join-Path $root 'rootfs.tar.xz')
+Remove-Item -LiteralPath (Join-Path $root $rootfsFile)
 $null = New-Service -Name $Instance -BinaryPathName $manifest.ServiceCommand -Credential $credential -StartupType Automatic -Description 'SPLAT Windows caller boundary and private policy/audit host'
 Start-Service -Name $Instance
 $manifest.Status = 'Installed; requires managed boundary probe'

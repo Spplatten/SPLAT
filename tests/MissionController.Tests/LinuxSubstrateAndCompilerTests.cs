@@ -134,11 +134,9 @@ public class LinuxSubstrateAndCompilerTests
         Assert.Equal(10u, lease.LeaseDurationSeconds);
         Assert.Equal(512UL * 1024 * 1024, lease.Limits.MaxMemoryBytes);
         Assert.Equal(60u, lease.Limits.MaxCpuPercent);
-        // The overlay SHAPE is compiled - paths and all - but copy-on-write is not requested,
-        // because no part of the substrate provides it: the mount code is unwired, and mounting
-        // in the daemon's own namespace would not be a boundary the tool could not walk out of.
-        // The daemon now refuses enableCow outright, so asking for it here would refuse every
-        // mission. This assertion used to demand the promise.
+        // The overlay SHAPE is compiled - paths and all - but copy-on-write is not requested. The
+        // daemon mounts it inside the child's namespace now, and it is a separate explicit grant:
+        // compiling a template must never turn it on. This assertion used to demand the promise.
         Assert.NotNull(lease.OverlayFs);
         Assert.False(lease.OverlayFs.EnableCow);
         Assert.Equal("/var/splat/baseline", lease.OverlayFs.LowerDir);

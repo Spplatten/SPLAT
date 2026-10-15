@@ -46,8 +46,8 @@
 # matches `<header class="hero">`, and an earlier republish lost that opening tag, so the live page
 # rendered its title placard as bare text for months while every other copy looked right.
 
-published  2026-10-10
-version    66
+published  2026-10-12
+version    67
 source     docs/SPLAT-Field-Guide.html
-sha256     72ba67c829caf17f1d1947489b21decf0f7e3d25b93c2a3cab31e72f3d94d4d8
-handoff    eight web probes moved under the Linux lease: leased 4 -> 12, Windows 54 -> 46, one in seven -> one in six; census bound and passing
+sha256     a7a6aa354c6c6d6ca5adc0ebb6095c6c9fd33e4b1a78912d6f522e9b12fa3a86
+handoff    RARE consumer sensors merged: catalog 58 -> 61, three Windows templates dial Apple with a declared, unpinned destination; census bound and passing
