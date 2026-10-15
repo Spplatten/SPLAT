@@ -2,7 +2,7 @@
 
 **Decision, 2026-10-11: not now.** The daemon stays on `libbpf-rs` through roadmap 5.2 and 2.4. Aya
 gets a time-boxed trial when the daemon is packaged for Linux hosts, priority 5 in
-[DAEMON-PRODUCT-PLAN.md](DAEMON-PRODUCT-PLAN.md), because packaging is where its advantage lies.
+the daemon product plan (moved out of the repository on 2026-10-14), because packaging is where its advantage lies.
 This page is a plan. Nothing in it is built.
 
 ## The daemon today

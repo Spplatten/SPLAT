@@ -308,7 +308,7 @@ the daemon, the BPF program or the lease path, the root probe is the test.
 
 ## Where it goes next
 
-The workload's mount namespace — P2 of [the live plan](audits/2026-09-09-oem-subtraction-plan.md)
+The workload's mount namespace — P2 of the live plan, which moved out of the repository on 2026-10-14
 — was built on 2026-09-20 and was proven under root on 2026-09-29, on all five checks: the host's own `/home` and `/mnt` as the control, both absent from the workload's root (along with `/root`, `/var` and `/sys`), the system directories read-only, the working directory and a fresh `/tmp` writable with `/etc` visible, and `readOnlyFs` making the working directory read-only.
 `readOnlyFs` left the refused list with it. Two things still stand on that namespace:
 `overlayFs.enableCow`, which is `cow.rs` mounted as the working directory inside the jail and is

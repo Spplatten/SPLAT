@@ -83,7 +83,8 @@ if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'caller-identity-listener.c'
 }
 Copy-Item -LiteralPath (Join-Path $root 'docs\COMMUNITY-TESTING.md') -Destination (Join-Path $stage 'docs')
 Copy-Item -LiteralPath (Join-Path $root 'docs\audits\2026-10-06-community-distribution.md') -Destination (Join-Path $stage 'docs')
-foreach ($name in @('THREAT-MODEL.md', 'HANDOFF-caller-identity.md')) {
+# The 2.4 handoff moved to private/ on 2026-10-14; the threat model it assumed still ships.
+foreach ($name in @('THREAT-MODEL.md')) {
     Copy-Item -LiteralPath (Join-Path $root "docs\$name") -Destination (Join-Path $stage 'docs')
 }
 foreach ($name in @('daemon-probe.json', 'last-hop-probe.json')) {

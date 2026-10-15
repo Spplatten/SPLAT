@@ -328,7 +328,7 @@ function build_(form) {
 }
 
 /**
- * Checks the finished form against the rules in docs/HANDOFF-community-feedback-survey.md, reading
+ * Checks the finished form against the rules in the survey handoff (private/ since 2026-10-14), reading
  * the form back rather than trusting the code that built it. Throws, and the caller leaves the
  * form unrecorded so it can be deleted.
  */
