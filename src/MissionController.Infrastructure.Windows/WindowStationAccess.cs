@@ -128,7 +128,7 @@ public static class WindowStationAccess
             return (true, false, $"{what}: has no DACL, so nothing restricts it");
         }
 
-        if (AlreadyAllows(dacl, containerSid) || AlreadyAllows(dacl, AllApplicationPackages))
+        if (AlreadyAllows(dacl, containerSid, mask) || AlreadyAllows(dacl, AllApplicationPackages, mask))
         {
             return (true, false, $"{what}: already open to the container");
         }
@@ -154,7 +154,7 @@ public static class WindowStationAccess
         }
     }
 
-    private static bool AlreadyAllows(RawAcl dacl, SecurityIdentifier sid)
+    private static bool AlreadyAllows(RawAcl dacl, SecurityIdentifier sid, int requiredMask)
     {
         foreach (var ace in dacl)
         {
@@ -162,7 +162,8 @@ public static class WindowStationAccess
             if (ace is CommonAce common
                 && common.AceType == AceType.AccessAllowed
                 && common.SecurityIdentifier == sid
-                && (common.AceFlags & AceFlags.InheritOnly) == 0)
+                && (common.AceFlags & AceFlags.InheritOnly) == 0
+                && (common.AccessMask & requiredMask) == requiredMask)
             {
                 return true;
             }

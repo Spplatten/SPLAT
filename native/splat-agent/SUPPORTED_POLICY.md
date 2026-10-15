@@ -12,6 +12,16 @@ nothing on the far end consumed either one.
 
 Protocol version 3. Anything else is refused; see `main.rs`, and `docs/SCHEMA.md` for the frames.
 
+Optional execution policies on `EXECUTE_POLICY` and `EXECUTE_AGENT` have a separate
+[agent execution contract](EXECUTION_POLICY.md). The source/artifact-bound
+[agent proof](evidence/agent-manifest-probe.json) records 50/50 live checks; the matching
+[lifecycle proof](evidence/lease-isolation-agent-bridge.json) records 51/51. These measured-guest
+results do not establish clean-machine deployment or upgrade the baseline claims below.
+In particular, an explicit execution policy's generated seccomp filter refuses new AF_UNIX and
+AF_NETLINK sockets (`generated_filter_refuses_alternate_abis_unknown_calls_and_local_sockets`).
+The baseline local-IPC row still applies to leases without that policy; inherited descriptors
+and other IPC mechanisms are not thereby eliminated.
+
 ---
 
 ## Enforced in the kernel (BPF-LSM)
@@ -76,6 +86,7 @@ Linux results below do not establish those Windows boundaries.
 | **AF_UNIX / AF_NETLINK** | Local IPC is untouched. A per-socket allow-list keyed on the socket's inode is the real answer and does not exist. A leased tool can talk to any local daemon socket its uid can reach — including a resolver that answers over one, which is how a name lookup can still succeed on a host where `systemd-resolved` is reached that way rather than over UDP. |
 | **Raw and packet sockets** | Creating one needs `CAP_NET_RAW`, which a workload dropped to `nobody` does not have, so nothing policies it and nothing needs to. Not a claim about a workload that keeps capabilities: this daemon does not run one. |
 | **Inherited file descriptors** | The hooks fire on `open` and `connect`. A descriptor the tool inherits was opened by the daemon, before any of them ran. |
+| **Ordinary sibling leases sharing a UID** | The 2026-10-12 root run in `evidence/lease-isolation-before.json` confirmed a delivered `SIGUSR1` and reads of a synthetic sibling workspace through `/proc/<pid>/cwd`, `/proc/<pid>/root` and `/proc/<pid>/fd`. Separate BPF policy maps did not isolate those operations. A replacement identity boundary requires its own fresh probe. |
 | **Filesystem writes and reads outside the jail's contents** | Closed by the jail since 2026-09-20, pending its proof: the workload's root holds the system directories read-only, its working directory, a fresh `/tmp`, `/proc` and six device nodes, and nothing else. `/etc` travels whole and read-only; what `nobody` may not read there is still denied by mode, and the inode deny-list still applies inside the jail because bind mounts keep inode identity. Until the probe has run, treat the deny-list as the boundary it was: on 2026-09-18, `nobody` read a public key in the Windows user's `.ssh` folder through `/mnt/c`. Two things close that today: `/mnt` is absent from the jail, and `splat-mcp provision --apply` now writes the `[automount]` umask of 077 into the guest's `/etc/wsl.conf` when it is missing, which shuts `nobody` out of the Windows drives for anything not jailed once WSL restarts. |
 
 ## What has been proven, and where

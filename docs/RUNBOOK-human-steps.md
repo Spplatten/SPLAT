@@ -131,12 +131,22 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Completion target:** `Passed! - Failed: 0, Passed: 953`, on a line ending `(net10.0)`. The live
-corpus coverage gate currently fails for missing or stale recordings; see
+**Completion target:** `Passed! - Failed: 0, Passed: 1050`, on a line ending `(net10.0)`. The live
+packaged A2A proof is skipped by default; explicitly select its artifact as described in
+[the A2A guide](A2A-TEMPLATE-BRIDGE.md) before treating this as an all-cases target. All four
+Anthropic tests also skip by default, including when a funded key is stored. Separate explicit
+consent flags govern synthetic requests, host telemetry and corpus recording; see
+[the recording guide](../tests/MissionController.Tests/Fixtures/Missions/README.md). A skip is
+not a passing live-model result. The current-definition corpus coverage gate passed after the
+nine-template renewal on 2026-10-14; see
 [the recording guide](../tests/MissionController.Tests/Fixtures/Missions/README.md). Do not bless
 old answers to claim that a changed prompt was exercised. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call
 operator, without which a quoted path followed by arguments is a parse error.
+
+On the current host, DNS-cache inspection requires elevation: run the test host from an elevated
+PowerShell for that proof. A standard-user run still fails `UNPROVEN` when the cache is unavailable;
+resolution refusal alone is not sufficient evidence. No DNS-service ACL change is required.
 
 Run it from an elevated PowerShell as well, when you can. On 2026-09-18 an elevated run caught what a
 normal one could not - every restricted-token launch dying with `0xC0000142`. It was fixed the same

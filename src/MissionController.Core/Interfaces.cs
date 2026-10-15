@@ -579,7 +579,9 @@ public record LeaseSpec(
     // The daemon creates the working directory for this lease under its missions root, owned by
     // the workload, and removes it when the lease ends: a governed mission's jail, on the substrate
     // where only root in the guest can make one. False for a caller that names a directory it owns.
-    bool EphemeralWorkspace = false);
+    bool EphemeralWorkspace = false,
+    ExecutionPolicy? ExecutionPolicy = null,
+    bool RequireEnforcing = false);
 
 /// <summary>
 /// What the daemon reported about the lease it installed, from its <c>LEASE</c> and <c>EXIT</c> frames:
@@ -627,7 +629,9 @@ public record LeaseOutcome(
     string? SignedOutcome = null,
     string? OutcomeSignature = null,
     string? OutcomeKeyId = null,
-    string? OutcomePublicKey = null);
+    string? OutcomePublicKey = null,
+    // A post-spawn daemon acknowledgement, not a field in the existing RSA-signed outcome v1.
+    string? ExecutionPolicySha256 = null);
 
 /// <summary>
 /// What the daemon reported about a lease, in the vocabulary the run record reads. Every line is read
@@ -672,6 +676,9 @@ public static class LeaseControls
         {
             controls.Add($"workload:uid={uid}");
         }
+
+        if (lease.ExecutionPolicySha256 is { } hash)
+            controls.Add($"execution-policy:landlock+seccomp-cbpf sha256={hash} (guest acknowledgement; outside signed outcome v1)");
 
         if (lease.Workspace is { } workspace)
         {

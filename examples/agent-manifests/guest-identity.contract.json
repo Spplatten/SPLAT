@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "agentId": "guest-identity-contract",
+  "name": "Guest Identity with File Grants",
+  "description": "An explicit execution contract for the measured Ubuntu WSL guest; runtime file versions must be reviewed for another guest.",
+  "instructions": "Report the observed release, kernel, load and memory. Cite the readings and mark any refused or unavailable input as unknown.",
+  "targetModel": "claude-haiku-4-5",
+  "tools": [
+    {
+      "name": "read_guest_identity",
+      "templateId": "linux-guest-identity",
+      "executionPolicy": {
+        "schemaVersion": 1,
+        "architecture": "x86_64",
+        "syscalls": [
+          "access", "arch_prctl", "brk", "close", "execve", "exit_group", "fadvise64",
+          "fcntl", "fstat", "getrandom", "gettid", "ioctl", "lseek", "mmap", "mprotect",
+          "munmap", "openat", "pipe2", "poll", "pread64", "prlimit64", "read", "readlink",
+          "rseq", "rt_sigaction", "sched_getaffinity", "set_robust_list", "set_tid_address",
+          "sigaltstack", "splice", "statfs", "statx", "write"
+        ],
+        "fileGrants": [
+          { "path": "/usr/lib/cargo/bin/coreutils/cat", "access": ["read", "execute"] },
+          { "path": "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2", "access": ["read", "execute"] },
+          { "path": "/usr/lib/x86_64-linux-gnu/libsystemd.so.0.42.0", "access": ["read"] },
+          { "path": "/usr/lib/x86_64-linux-gnu/libselinux.so.1", "access": ["read"] },
+          { "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1", "access": ["read"] },
+          { "path": "/usr/lib/x86_64-linux-gnu/libm.so.6", "access": ["read"] },
+          { "path": "/usr/lib/x86_64-linux-gnu/libc.so.6", "access": ["read"] },
+          { "path": "/usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0", "access": ["read"] },
+          { "path": "/etc/ld.so.cache", "access": ["read"] },
+          { "path": "/usr/lib/locale/C.utf8", "access": ["read"], "scope": "tree" },
+          { "path": "/usr/lib/os-release", "access": ["read"] },
+          { "path": "/proc/version", "access": ["read"] },
+          { "path": "/proc/uptime", "access": ["read"] },
+          { "path": "/proc/loadavg", "access": ["read"] },
+          { "path": "/proc/meminfo", "access": ["read"] }
+        ]
+      }
+    }
+  ]
+}

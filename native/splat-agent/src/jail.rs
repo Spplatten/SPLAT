@@ -22,10 +22,10 @@
 
 use std::ffi::CString;
 use std::fs;
-use std::io;
+use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{symlink, MetadataExt};
+use std::os::unix::fs::{symlink, MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::ptr;
 
@@ -36,8 +36,9 @@ use tracing::warn;
 pub const ROOTS_BASE: &str = "/run/splat/roots";
 
 /// Bound read-only into every jail, whichever of them exist on the host. /etc travels whole: the
-/// resolver, the certificates and the passwd entry for `nobody` live there, and the files there
-/// that `nobody` may not read are denied by their mode or by the inode deny-list, both of which a
+/// resolver and certificates live there; private leases replace passwd/group with generated
+/// identity entries rather than requiring host accounts. The other files there
+/// that the workload may not read are denied by their mode or by the inode deny-list, both of which a
 /// bind mount preserves.
 const SYSTEM_DIRS: [&str; 8] = ["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc"];
 
@@ -74,6 +75,7 @@ pub struct JailPlan {
     old_root: CString,
     /// The system directories, read-only, mounted first.
     system_binds: Vec<Bind>,
+    identity_binds: Vec<Bind>,
     /// The working directory, mounted after the fresh /tmp it may live inside.
     workdir_bind: Option<Bind>,
     tmpfs_tmp: Option<CString>,
@@ -115,6 +117,7 @@ impl JailPlan {
             scratch_exec: None,
             old_root: c_path(&root.join(".oldroot")),
             system_binds: Vec::new(),
+            identity_binds: Vec::new(),
             workdir_bind: None,
             tmpfs_tmp: None,
             tmp_mkdirs: Vec::new(),
@@ -208,6 +211,24 @@ impl JailPlan {
         Ok(plan)
     }
 
+    pub fn set_workload_identity(&mut self, uid: u32, gid: u32) -> Result<()> {
+        if uid < 65536 || gid < 65536 || !self.identity_binds.is_empty() {
+            bail!("jail identity must be one reserved, non-root UID/GID");
+        }
+        let root = PathBuf::from(std::ffi::OsStr::from_bytes(self.new_root.as_bytes()));
+        // Numeric identities must remain usable by NSS clients without creating global accounts.
+        // These files contain only synthetic entries, never copies of protected host account data.
+        for (name, content) in identity_contents(uid, gid) {
+            let source = root.join(format!(".splat-{name}"));
+            let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o444).open(&source)?;
+            self.created.push(Created::Entry(source.clone()));
+            file.write_all(content.as_bytes())?;
+            self.identity_binds.push(Bind { source: c_path(&source),
+                target: c_path(&root.join("etc").join(name)), read_only: true });
+        }
+        Ok(())
+    }
+
     pub fn authorize_scratch_exec(&mut self, map: OwnedFd, cgroup_id: u64) -> Result<()> {
         if self.overlay_bind.is_none() {
             bail!("scratch execution requires the child's overlay mount");
@@ -267,8 +288,37 @@ impl Drop for JailPlan {
     }
 }
 
+fn identity_contents(uid: u32, gid: u32) -> [(&'static str, String); 2] {
+    [
+        ("passwd", format!("root:x:0:0:root:/root:/bin/sh\nsplat{uid}:x:{uid}:{gid}:SPLAT lease:/tmp:/bin/sh\n")),
+        ("group", format!("root:x:0:\nsplat{gid}:x:{gid}:\n")),
+    ]
+}
+
+fn is_generated_identity(path: &Path, root: &Path, base_dev: u64, md: &fs::Metadata) -> Result<bool> {
+    if path.parent() != Some(root) || !md.is_file() || md.dev() != base_dev
+        || md.uid() != unsafe { libc::geteuid() } || md.mode() & 0o7777 != 0o444 || md.len() > 256 {
+        return Ok(false);
+    }
+    let index = match path.file_name().and_then(|name| name.to_str()) {
+        Some(".splat-passwd") => 0,
+        Some(".splat-group") => 1,
+        _ => return Ok(false),
+    };
+    let file = fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
+    let opened = file.metadata()?;
+    if opened.dev() != md.dev() || opened.ino() != md.ino() { return Ok(false); }
+    let mut content = String::new();
+    if file.take(257).read_to_string(&mut content).is_err() { return Ok(false); }
+    let fields: Vec<_> = content.lines().nth(1).unwrap_or("").split(':').collect();
+    let uid = fields.get(2).and_then(|id| id.parse::<u32>().ok()).unwrap_or(0);
+    let gid = if index == 0 { fields.get(3).and_then(|id| id.parse::<u32>().ok()).unwrap_or(0) } else { uid };
+    // A familiar name alone is not authority to delete a populated file after a crash.
+    Ok(uid >= 65536 && gid >= 65536 && content == identity_contents(uid, gid)[index].1)
+}
+
 /// Removes the skeletons a previous daemon left under `base`. Only what a skeleton is made of is
-/// removed - empty directories, symlinks and empty files - and never across a filesystem boundary,
+/// removed - empty directories, symlinks, empty files and verified synthetic identity files - never across a filesystem boundary,
 /// so a mount that somehow survived is a stop, not a tree to descend.
 pub fn reap_leftover_roots(base: &Path) -> Result<usize> {
     if !base.exists() {
@@ -278,16 +328,20 @@ pub fn reap_leftover_roots(base: &Path) -> Result<usize> {
     let mut removed = 0;
     for entry in fs::read_dir(base).with_context(|| format!("read {}", base.display()))? {
         let path = entry?.path();
-        if remove_skeleton(&path, base_dev)? {
+        if remove_skeleton(&path, base_dev, &path)? {
             removed += 1;
         }
     }
     Ok(removed)
 }
 
-fn remove_skeleton(path: &Path, base_dev: u64) -> Result<bool> {
+fn remove_skeleton(path: &Path, base_dev: u64, root: &Path) -> Result<bool> {
     let md = fs::symlink_metadata(path)?;
     if md.file_type().is_symlink() || (md.is_file() && md.len() == 0) {
+        fs::remove_file(path)?;
+        return Ok(true);
+    }
+    if is_generated_identity(path, root, base_dev, &md)? {
         fs::remove_file(path)?;
         return Ok(true);
     }
@@ -296,7 +350,7 @@ fn remove_skeleton(path: &Path, base_dev: u64) -> Result<bool> {
     }
     let mut all_gone = true;
     for child in fs::read_dir(path)? {
-        if !remove_skeleton(&child?.path(), base_dev)? {
+        if !remove_skeleton(&child?.path(), base_dev, root)? {
             all_gone = false;
         }
     }
@@ -326,6 +380,9 @@ pub unsafe fn enter(plan: &JailPlan) -> io::Result<()> {
     check(libc::mount(plan.new_root.as_ptr(), plan.new_root.as_ptr(), none, libc::MS_BIND, null_data))?;
 
     for bind in &plan.system_binds {
+        bind_mount(bind)?;
+    }
+    for bind in &plan.identity_binds {
         bind_mount(bind)?;
     }
     // The fresh /tmp, then the working directory, which may live inside it.
@@ -388,7 +445,7 @@ pub unsafe fn enter(plan: &JailPlan) -> io::Result<()> {
 }
 
 /// A bind, then the remount that sets its flags: a bind mount takes none on the first call.
-/// nosuid on every one, because the workload is `nobody` and must stay so.
+/// nosuid on every one, because the workload must retain its unprivileged identity.
 unsafe fn bind_mount(bind: &Bind) -> io::Result<()> {
     let none: *const libc::c_char = ptr::null();
     let null_data: *const libc::c_void = ptr::null();
@@ -434,6 +491,44 @@ mod tests {
 
     fn base_for(host: &Path) -> PathBuf {
         host.join("roots")
+    }
+
+    #[test]
+    fn private_identity_files_are_read_only_synthetic_and_removed_with_the_jail() {
+        let host = fake_host();
+        let base = base_for(&host);
+        let root = base.join("mission_identity");
+        let mut plan = JailPlan::prepare(&base, "identity", Path::new("/srv/space"), false, false, &host).unwrap();
+        assert!(plan.set_workload_identity(0, 0).is_err());
+        plan.set_workload_identity(200000, 200000).unwrap();
+        assert!(plan.set_workload_identity(200001, 200001).is_err());
+        assert!(fs::read_to_string(root.join(".splat-passwd")).unwrap().contains("splat200000:x:200000:200000:"));
+        assert_eq!(plan.identity_binds.len(), 2);
+        assert!(plan.identity_binds.iter().all(|bind| bind.read_only));
+        drop(plan);
+        assert!(!root.exists());
+        fs::remove_dir_all(host).unwrap();
+    }
+
+    #[test]
+    fn recovery_removes_generated_identities_but_preserves_populated_impostors() {
+        let host = fake_host();
+        let base = base_for(&host);
+        for (mission, contents) in [("generated", None), ("impostor", Some("unrelated data"))] {
+            let mut plan = JailPlan::prepare(&base, mission, Path::new("/srv/space"), false, false, &host).unwrap();
+            plan.set_workload_identity(200000, 200000).unwrap();
+            if let Some(contents) = contents {
+                let path = base.join(format!("mission_{mission}/.splat-passwd"));
+                fs::remove_file(&path).unwrap();
+                let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o444).open(path).unwrap();
+                file.write_all(contents.as_bytes()).unwrap();
+            }
+            std::mem::forget(plan);
+        }
+        assert_eq!(reap_leftover_roots(&base).unwrap(), 1);
+        assert!(!base.join("mission_generated").exists());
+        assert_eq!(fs::read_to_string(base.join("mission_impostor/.splat-passwd")).unwrap(), "unrelated data");
+        fs::remove_dir_all(host).unwrap();
     }
 
     #[test]

@@ -35,6 +35,7 @@ public static class Program
 {
     public static async Task<int> Main(string[] args)
     {
+        if (await A2aServer.TryRunAsync(args) is int a2aExit) return a2aExit;
         if (await ManagedBridgeCommand.TryRunAsync(args) is int managedExit) return managedExit;
         // Decided before anything is built: a bad invocation must not create the ledger database,
         // seed the catalog or reach for the daemon. stdout is the JSON-RPC channel, so everything that
@@ -60,6 +61,24 @@ public static class Program
         // have no console to configure.
         Console.OutputEncoding = Encoding.UTF8;
         Console.InputEncoding = Encoding.UTF8;
+
+        if (command is McpServerCommand.ImportAgent import)
+        {
+            try
+            {
+                var context = new SqliteStorageContext(Environment.GetEnvironmentVariable("SPLAT_DB_PATH")
+                    ?? SplatDataRoot.Layout.LedgerDatabase);
+                var compiled = await new AgentManifestImporter(context).ImportAsync(await File.ReadAllTextAsync(import.Path));
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { agentId = AgentManifestApproval.AgentIdOf(compiled),
+                    contractSha256 = AgentManifestApproval.Hash(compiled), projectId = compiled.Project.ProjectId }));
+                return 0;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine("splat-mcp: " + ex.Message);
+                return McpServerCommand.UsageExitCode;
+            }
+        }
 
         if (command is McpServerCommand.Provision provision)
         {
@@ -160,6 +179,20 @@ public static class Program
             : $"splat-mcp: run records are signed by {runRecordSigner.KeyId}");
 
         var storageContext = new SqliteStorageContext(dbPath);
+        AgentManifestApproval? agent = null;
+        if (serve.AgentId is not null || serve.AgentVersion is not null)
+        {
+            try
+            {
+                agent = await new AgentManifestImporter(storageContext).LoadApprovedAsync(serve.AgentId!, serve.AgentVersion!, ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Console.Error.WriteLine("splat-mcp: " + ex.Message);
+                return McpServerCommand.UsageExitCode;
+            }
+            Console.Error.WriteLine($"splat-mcp: agent {agent.AgentId}, approved contract {agent.Sha256}; only declared tools are available");
+        }
         var auditLedger = new SqliteChainedAuditLedger(storageContext, ledgerKey);
         var merkleEngine = new MerkleTreeEngine();
         var runRecords = new MissionRunRecordAssembler(
@@ -281,7 +314,8 @@ public static class Program
             // not merely by a holder of the key the bundle carries with it.
             recordVerifier: new RunRecordLedgerVerifier(auditLedger, merkleEngine, runRecordSigner),
             credentialSanitizer: credSanitizer,
-            dlpSanitizer: dlpSanitizer);
+            dlpSanitizer: dlpSanitizer,
+            agent: agent);
 
         using (runRecordSigner)
         {

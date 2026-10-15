@@ -88,7 +88,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
 
             uint creationFlags = Win32Interop.CREATE_SUSPENDED | Win32Interop.CREATE_NO_WINDOW | Win32Interop.CREATE_UNICODE_ENVIRONMENT;
             bool success = false;
-            environmentBlock = Marshal.StringToHGlobalUni(ToolEnvironmentBlock());
+            environmentBlock = Marshal.StringToHGlobalUni(ToolEnvironmentBlock(resolvedExecutable));
 
             // Network denial is applied by launching into an AppContainer holding ZERO capability
             // SIDs. Capabilities are what grant an AppContainer its reach, so an empty set leaves the
@@ -377,7 +377,7 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
     /// the next command. Everything else is inherited: a template reads %COMPUTERNAME%, and the
     /// tools themselves read SystemRoot, TEMP and the profile paths.
     /// </summary>
-    private static string ToolEnvironmentBlock()
+    private static string ToolEnvironmentBlock(string executable)
     {
         string system = Environment.SystemDirectory;
         var variables = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -398,6 +398,19 @@ public sealed class SuspendedProcessLauncher : IProcessLauncher
             .Where(dir => !windowsDirectories.Contains(dir.TrimEnd('\\'), StringComparer.OrdinalIgnoreCase));
         variables["PATH"] = string.Join(';', windowsDirectories.Concat(operatorDirectories));
         variables["NoDefaultCurrentDirectoryInExePath"] = "1";
+
+        // A .NET parent launched by pwsh inherits its module path. Windows PowerShell 5.1
+        // can then load PS7's same-named built-ins and lose Get-FileHash/Get-ExecutionPolicy.
+        // Resolve the Windows interpreter's own modules first without dropping custom modules.
+        if (Path.GetFileName(executable).Equals("powershell.exe", StringComparison.OrdinalIgnoreCase) ||
+            Path.GetFileName(executable).Equals("cmd.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            string windowsModules = Path.Combine(system, "WindowsPowerShell", "v1.0", "Modules");
+            var inheritedModules = (variables.TryGetValue("PSModulePath", out var modules) ? modules : string.Empty)
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(path => !path.TrimEnd('\\').Equals(windowsModules, StringComparison.OrdinalIgnoreCase));
+            variables["PSModulePath"] = string.Join(';', new[] { windowsModules }.Concat(inheritedModules));
+        }
 
         // CreateProcess wants the block sorted without regard to case: name=value\0 per variable,
         // then one more \0 to end it.

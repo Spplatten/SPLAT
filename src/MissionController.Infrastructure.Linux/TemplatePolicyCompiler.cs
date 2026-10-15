@@ -54,6 +54,9 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
         uint leaseDurationSeconds = 30)
     {
         ArgumentNullException.ThrowIfNull(template);
+        template.Tool.ExecutionPolicy?.Validate();
+        if (template.Tool.ExecutionPolicy is not null && template.Tool.Substrate != ToolSubstrate.LinuxLease)
+            throw new PolicyCompilationException("Execution policies require the Linux lease substrate.");
         if (string.IsNullOrWhiteSpace(workingDirectory))
         {
             workingDirectory = "/tmp/splat_sandboxes/" + missionId;
@@ -226,7 +229,8 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
             OverlayFs: overlay,
             // A governed mission's workspace is the daemon's to make and remove; a caller that
             // compiled a Windows template for the guest keeps naming a directory of its own.
-            EphemeralWorkspace: template.Tool.Substrate == ToolSubstrate.LinuxLease);
+            EphemeralWorkspace: template.Tool.Substrate == ToolSubstrate.LinuxLease,
+            ExecutionPolicy: template.Tool.ExecutionPolicy);
     }
 
     private static IReadOnlyList<string> GetStandardLinuxBinaryPaths(string toolName)

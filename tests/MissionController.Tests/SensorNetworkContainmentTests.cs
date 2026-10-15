@@ -172,8 +172,7 @@ public class SensorNetworkContainmentTests
     /// unavailable inside the container - name resolution failing would block a tool that resolves a
     /// hostname while leaving one that hardcodes an address free to reach the internet.
     ///
-    /// Skipped rather than failed when the host itself is offline: the control below is what tells
-    /// the two apart, and a machine with no route out cannot prove or disprove containment.
+    /// A missing positive control fails this proof as unproven: an offline host cannot certify denial.
     /// </summary>
     [Fact]
     public async Task ContainedSensor_CannotReachTheInternet_NotEvenByRawIpThatSkipsDns()
@@ -182,10 +181,8 @@ public class SensorNetworkContainmentTests
         // itself, before any sandbox is involved. Inferring it from the unconfined sensor's own exit
         // code would make "the sandbox is broken" and "the network is down" indistinguishable, and
         // the test would quietly pass in both cases.
-        if (!TestHostCanReachInternet())
-        {
-            return;
-        }
+        Assert.True(TestHostCanReachInternet(),
+            "UNPROVEN: no host Internet positive control; this run cannot certify Internet denial.");
 
         string script = ConnectScript("1.1.1.1", 443);
 
@@ -224,10 +221,8 @@ public class SensorNetworkContainmentTests
         static string LookupScript(string name) =>
             $"try {{ [Net.Dns]::GetHostAddresses('{name}') | Out-Null; exit {Resolved} }} catch {{ exit {NotResolved} }}";
 
-        if (!TestHostCanReachInternet() || !HostResolves(FreshName()))
-        {
-            return;
-        }
+        Assert.True(TestHostCanReachInternet() && HostResolves(FreshName()),
+            "UNPROVEN: DNS positive control unavailable; this run cannot certify DNS-service containment.");
 
         string open = FreshName();
         int unconfined = await RunProbeAsync(LookupScript(open), denyNetworkAccess: false);
@@ -244,7 +239,10 @@ public class SensorNetworkContainmentTests
                 ? "CONTAINMENT BREACH: a network-denied sensor resolved a name it chose."
                 : $"The network-denied sensor exited {confined}, neither resolving nor refused. Nothing about containment can be concluded.");
 
-        string cache = ResolverCache();
+        string? cache = ResolverCache();
+        Assert.True(cache is not null,
+            "UNPROVEN: DNS Client cache is unavailable. Resolution refusal alone does not prove the query never left.");
+
         Assert.True(cache.Contains(open, StringComparison.OrdinalIgnoreCase),
             "Control failed: the unconfined lookup is not in the DNS Client cache, so the cache cannot say where the confined one went.");
         Assert.False(cache.Contains(denied, StringComparison.OrdinalIgnoreCase),
@@ -263,7 +261,7 @@ public class SensorNetworkContainmentTests
         }
     }
 
-    private static string ResolverCache()
+    private static string? ResolverCache()
     {
         var psi = new System.Diagnostics.ProcessStartInfo(@"C:\Windows\System32\ipconfig.exe", "/displaydns")
         {
@@ -274,7 +272,7 @@ public class SensorNetworkContainmentTests
         using var ipconfig = System.Diagnostics.Process.Start(psi)!;
         string text = ipconfig.StandardOutput.ReadToEnd();
         ipconfig.WaitForExit();
-        return text;
+        return ipconfig.ExitCode == 0 ? text : null;
     }
 
     /// <summary>

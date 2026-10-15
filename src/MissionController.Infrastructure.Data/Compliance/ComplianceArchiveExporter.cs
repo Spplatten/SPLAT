@@ -690,7 +690,8 @@ function Test-Signature($missionId) {
     }
 
     foreach ($name in $listed.Keys) {
-        $actual = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+        # Hash the exact bytes without depending on optional module autoload in the verifier's host.
+        $actual = Get-Sha256HexOfBytes ([System.IO.File]::ReadAllBytes((Join-Path $PSScriptRoot $name)))
         if ($actual -ne $listed[$name]) { Stop-Verification ""$name is not the file that was signed."" }
     }
     foreach ($required in @('mission_run_record.json', 'audit_chain.json', 'merkle_proofs.json')) {

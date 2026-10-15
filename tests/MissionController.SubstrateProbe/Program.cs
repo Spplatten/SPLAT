@@ -50,7 +50,8 @@ foreach (var template in templates)
         ProcessExecutionResult result = await substrate.Launcher.LaunchSuspendedInJobAsync(template.Tool.ExecutablePath,
             GovernedArgumentBinder.Bind(template, new Dictionary<string, string>()), workspace, job, true, template.Tool.TimeoutSeconds);
         bool passed = result.ExitCode == 0 && !result.TimedOut && result.Lease is { Enforcing: true, Installed: true,
-            WorkspaceRemoved: true, WorkloadUid: 65534, ViolationsComplete: true }
+            WorkspaceRemoved: true, ViolationsComplete: true }
+            && (result.Lease.WorkloadUid == 65534 || result.Lease.WorkloadUid >= 200000)
             && !string.IsNullOrWhiteSpace(result.Lease.SignedOutcome)
             && !result.StandardOutput.Contains("PROBE_FAILED", StringComparison.Ordinal)
             && !result.StandardOutput.Contains("INGESTION_FAILED", StringComparison.Ordinal);

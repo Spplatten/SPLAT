@@ -94,6 +94,25 @@ public class DerivedTemplateGuardTests
     }
 
     [Fact]
+    public void ACopyCannotChangeItsSubstrateOrLeaseArgumentBinding()
+    {
+        var source = GovernedTemplateCatalog.All.First(t => t.TemplateId == "linux-disk-usage");
+        var copy = DerivedFrom(source);
+        Assert.NotNull(DerivedTemplateGuard.Problem(copy with { Tool = source.Tool with { Substrate = ToolSubstrate.Windows } }));
+        Assert.NotNull(DerivedTemplateGuard.Problem(copy with { Tool = source.Tool with { PassLeaseEgressAsArguments = true } }));
+        Assert.NotNull(DerivedTemplateGuard.Problem(copy with { Tool = source.Tool with { ExecutablePath = source.Tool.ExecutablePath.ToUpperInvariant() } }));
+    }
+
+    [Fact]
+    public void ACopyCannotChangeItsEgressPortOrTransport()
+    {
+        var source = Base();
+        var copy = DerivedFrom(source);
+        Assert.NotNull(DerivedTemplateGuard.Problem(copy with { EgressRule = source.EgressRule with { AllowedPort = 22 } }));
+        Assert.NotNull(DerivedTemplateGuard.Problem(copy with { EgressRule = source.EgressRule with { EnforceHttpsOnly = false } }));
+    }
+
+    [Fact]
     public void ACopyThatPointsAtAnotherDestination_IsRefused()
     {
         var tampered = DerivedFrom(Base()) with

@@ -9,7 +9,8 @@ namespace MissionController.Host;
 [SupportedOSPlatform("windows")]
 public sealed record ManagedBridgeConfiguration(
     int Schema, string ServiceName, string ServiceSid, string PipeName, string Distribution,
-    int Port, string StateDirectory, string WorkspaceDirectory, string[] OperatorSids, string Egress = "")
+    int Port, string StateDirectory, string WorkspaceDirectory, string[] OperatorSids, string Egress = "",
+    string? AgentId = null, string? AgentVersion = null)
 {
     public static ManagedBridgeConfiguration Load(string path, bool serving = false)
     {
@@ -31,6 +32,10 @@ public sealed record ManagedBridgeConfiguration(
 
     internal void Validate(bool serving = false)
     {
+        if ((AgentId is not null || AgentVersion is not null)
+            && (!Regex.IsMatch(AgentId ?? "", @"\A[a-z][a-z0-9]*(?:-[a-z0-9]+)*\z")
+                || AgentId!.Length > 48 || !Regex.IsMatch(AgentVersion ?? "", @"\A[0-9a-f]{64}\z")))
+            throw new InvalidDataException("Managed agent endpoints require an agent ID and approved contract version.");
         if (Schema != 1 || !Name(ServiceName) || !Name(PipeName) || !Name(Distribution) || Port is < 1024 or > 65535)
             throw new InvalidDataException("Invalid managed bridge configuration.");
         _ = new SecurityIdentifier(ServiceSid);

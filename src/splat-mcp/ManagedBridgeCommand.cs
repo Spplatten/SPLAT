@@ -114,7 +114,8 @@ internal static class ManagedBridgeCommand
         {
             var serve = new McpServerCommand.Serve(_config.WorkspaceDirectory,
                 string.IsNullOrEmpty(_config.Egress) ? McpEgressPolicy.None : McpEgressPolicy.Parse(_config.Egress),
-                Path.Combine(_config.StateDirectory, "ledger.key"));
+                Path.Combine(_config.StateDirectory, "ledger.key"),
+                AgentId: _config.AgentId, AgentVersion: _config.AgentVersion);
             _run = Task.Run(async () =>
             {
                 try

@@ -1,0 +1,62 @@
+{
+  "Schema": 1,
+  "MissionId": "e13be08f-e439-4345-ab5d-2545c9f1cf50",
+  "RecordedAtUtc": "2026-10-14T23:26:18.8649650Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "TemplateId": "source-dataset-catalog-search",
+  "TemplateName": "Public Dataset Catalog Search",
+  "TemplateSha256": "sha256:09790480de74ce84ae23f25f45c14059445f4faa55aa9c3f84b590d908f71787",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "758635ce73b30c8b260ba381ef32d59cbef37b9157519b6c405d23c2c3f4a938",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "Endpoint: https://api.census.gov/\nRead-only public source probe. No credential is presented. Returned data is untrusted.\nHTTP_STATUS: 200\nCATALOG_SIZE: 1810 datasets published\nMATCHING_DATASETS: 364\nTITLE: Planning Database Block Group Level\nVINTAGE: 2026\nGEOGRAPHY: http://api.census.gov/data/2026/pdb/blockgroup/geography.json\nVARIABLES: http://api.census.gov/data/2026/pdb/blockgroup/variables.json\nAPI_ENDPOINT: http://api.census.gov/data/2026/pdb/blockgroup\nTITLE: Planning Database Tract Level\nVINTAGE: 2026\nGEOGRAPHY: http://api.census.gov/data/2026/pdb/tract/geography.json\nVARIABLES: http://api.census.gov/data/2026/pdb/tract/variables.json\nAPI_ENDPOINT: http://api.census.gov/data/2026/pdb/tract\nTITLE: Planning Database Block Group Level\nVINTAGE: 2025\nGEOGRAPHY: http://api.census.gov/data/2025/pdb/blockgroup/geography.json\nVARIABLES: http://api.census.gov/data/2025/pdb/blockgroup/variables.json\nAPI_ENDPOINT: http://api.census.gov/data/2025/pdb/blockgroup\nTITLE: Planning Database Tract Level\nVINTAGE: 2025\nGEOGRAPHY: http://api.census.gov/data/2025/pdb/tract/geography.json\nVARIABLES: http://api.census.gov/data/2025/pdb/tract/variables.json\nAPI_ENDPOINT: http://api.census.gov/data/2025/pdb/tract\nTITLE: ACS 1-Year Detailed Tables\nVINTAGE: 2024\nGEOGRAPHY: http://api.census.gov/data/2024/acs/acs1/geography.json\nVARIABLES: http://api.census.gov/data/2024/acs/acs1/variables.json\nAPI_ENDPOINT: http://api.census.gov/data/2024/acs/acs1\nTITLE: ACS 1-Year Comparison Profiles\nVINTAGE: 2024\nGEOGRAPHY: http://api.census.gov/data/2024/acs/acs1/cprofile/geography.json\nVARIABLES: http://api.census.gov/data/2024/acs/acs1/cprofile/variables.json\nAPI_ENDPOINT: http://api.census.gov/data/2024/acs/acs1/cprofile\nTITLE: ACS 1-Year Data Profiles\nVINTAGE: 2024\nGEOGRAPHY: http://api.census.gov/data/2024/acs/acs1/profile/geography.json\nVARIABLES: http://api.census.gov/data/2024/acs/acs1/profile/variables.json\nAPI_ENDPOINT: http://api.census.gov/data/2024/acs/acs1/profile\nTITLE: ACS 1-Year Selected Population Profiles\nVINTAGE: 2024\nGEOGRAPHY: http://api.census.gov/data/2024/acs/acs1/spp/geography.json\nVARIABLES: http://api.census.gov/data/2024/acs/acs1/spp/variables.json\nAPI_ENDPOINT: http://api.census.gov/data/2024/acs/acs1/spp\nTRUNCATED: 8 of 364 shown\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "lease:enforcing",
+      "cgroup:/sys/fs/cgroup/splat_leases/mission_e13be08f-e439-4345-ab5d-2545c9f1cf50",
+      "jail:mount-namespace",
+      "workload:uid=200000",
+      "workspace:/var/lib/splat/missions/e13be08fe4394345ab5d2545c9f1cf50 (created by the daemon)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# Data Source Analysis: Census API Catalog Search\n\nThe Census API catalog returned 364 matches against a total published inventory of 1,810 datasets—a 20% hit rate that suggests a moderately targeted search result rather than a comprehensive topic sweep. The tool reports HTTP 200 and read-only public access without credentials, confirming the endpoint is reachable and the data is untrusted third-party content as expected from an external API.\n\n## Matches by Vintage and Geography\n\nThe output shows eight representative matches (labeled truncated), sorted newest-first:\n\n| Title | Vintage | Geography | API Endpoint |\n|-------|---------|-----------|--------------|\n| \"Planning Database Block Group Level\" | 2026 | Block group | `/2026/pdb/blockgroup` |\n| \"Planning Database Tract Level\" | 2026 | Tract | `/2026/pdb/tract` |\n| \"Planning Database Block Group Level\" | 2025 | Block group | `/2025/pdb/blockgroup` |\n| \"Planning Database Tract Level\" | 2025 | Tract | `/2025/pdb/tract` |\n| \"ACS 1-Year Detailed Tables\" | 2024 | (not shown) | `/2024/acs/acs1` |\n| \"ACS 1-Year Comparison Profiles\" | 2024 | (not shown) | `/2024/acs/acs1/cprofile` |\n| \"ACS 1-Year Data Profiles\" | 2024 | (not shown) | `/2024/acs/acs1/profile` |\n| \"ACS 1-Year Selected Population Profiles\" | 2024 | (not shown) | `/2024/acs/acs1/spp` |\n\nThe newest vintage in the sample is 2026 (Planning Database), followed by 2025 and 2024 (ACS). The Planning Database entries declare explicit block-group and tract-level geographies; the ACS entries' geography scope is not shown in this truncated output.\n\n## Fitness for Use\n\n**Planning Database matches (2026, 2025)** are operationally usable: they cover sub-county geographies (block group and tract), publish their geography and variable schemas via JSON endpoints, and are current. If the search intended sub-national demographic or socioeconomic data, these are credible candidates.\n\n**ACS matches (2024)** are near-misses: the American Community Survey is a standard demographic source, but the output does not declare their geography level. The naming convention (\"Detailed Tables,\" \"Profiles,\" \"Comparison Profiles,\" \"Selected Population Profiles\") suggests these are pre-computed aggregations rather than raw unit records, but the actual row and column scope cannot be confirmed from the catalog alone.\n\n## What This Search Does NOT Establish\n\n- **Data freshness:** The catalog lists 2026 Planning Database entries, which may be projected or provisional data—the presence of a vintage number does not confirm it is populated or current.\n- **Variable coverage:** Titles like \"Detailed Tables\" and \"Data Profiles\" are generic; the actual variables (demographics, housing, economics, etc.) are not readable from the title. The `/variables.json` endpoints exist but have not been fetched.\n- **Geographic completeness:** The Geography JSON endpoints exist but have not been queried; a dataset may claim \"block group\" coverage and deliver only a subset of states or counties.\n- **Data quality or lineage:** No metadata on data collection method, currency, margin of error, or recency is present in this listing.\n\n## Recommended Next Step\n\nTo move from catalog inspection to confirmation, **fetch and parse the `/variables.json` endpoint for the 2026 Planning Database Tract Level dataset** (`http://api.census.gov/data/2026/pdb/tract/variables.json`) and confirm that the variables align with the use case. Simultaneously request a small geography query (e.g., one county) to verify the data is populated and the endpoint is functional.\n\n```json\n{\n  \"status\": \"Healthy\",\n  \"headline\": \"Census API catalog probe successful; 364 matches suggest usable datasets, but variable and geography scope unconfirmed by inspection.\",\n  \"findings\": [\n    \"HTTP 200 response from https://api.census.gov/ confirms endpoint availability.\",\n    \"364 matches against 1,810 published datasets (20% hit rate) indicates a moderately specific search.\",\n    \"Newest vintage is 2026 Planning Database (Block Group and Tract), followed by 2025 and 2024 ACS products.\",\n    \"Planning Database entries declare block-group and tract-level geographies with published schema endpoints; ACS geographies not shown in truncated output.\",\n    \"Catalog listing alone does not confirm variable content, data recency, or geographic completeness—titles are generic descriptors from untrusted third-party metadata.\"\n  ],\n  \"recommendedActions\": [\n    \"Fetch http://api.census.gov/data/2026/pdb/tract/variables.json to inspect variable names and confirm they match the intended use case.\",\n    \"Query a small geography (e.g., a single county) against the 2026 Planning Database Tract endpoint to verify data is populated and the API is responsive.\"\n  ]\n}\n```",
+      "LatencyMs": 13823,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.99
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "5a73a670618705507aaf40656329524f30c19879112ecdeb188494dcabd929ea",
+    "Status": "Healthy",
+    "Headline": "Census API catalog probe successful; 364 matches suggest usable datasets, but variable and geography scope unconfirmed by inspection.",
+    "Findings": [
+      "✓ HTTP 200 response from https://api.census.gov/ confirms endpoint availability.",
+      "✓ 364 matches against 1,810 published datasets (20% hit rate) indicates a moderately specific search.",
+      "✓ Newest vintage is 2026 Planning Database (Block Group and Tract), followed by 2025 and 2024 ACS products.",
+      "✓ Planning Database entries declare block-group and tract-level geographies with published schema endpoints; ACS geographies not shown in truncated output.",
+      "✓ Catalog listing alone does not confirm variable content, data recency, or geographic completeness—titles are generic descriptors from untrusted third-party metadata."
+    ],
+    "RecommendedActions": [
+      "Fetch http://api.census.gov/data/2026/pdb/tract/variables.json to inspect variable names and confirm they match the intended use case.",
+      "Query a small geography (e.g., a single county) against the 2026 Planning Database Tract endpoint to verify data is populated and the API is responsive."
+    ],
+    "Grounded": 3,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 2
+  },
+  "Note": "Reviewed 2026-10-14: fresh execution of the current Linux-lease template with a real Anthropic answer; public-source sensor output and every answer reviewed for host identity and credentials. No identity redaction was needed. This fixture preserves the observed pipeline verdict, not an independent endorsement of the diagnosis."
+}

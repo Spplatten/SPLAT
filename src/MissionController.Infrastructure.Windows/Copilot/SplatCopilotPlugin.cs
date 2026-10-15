@@ -39,6 +39,10 @@ public sealed class SplatCopilotPlugin
     {
         if (string.IsNullOrWhiteSpace(requestedPath))
             return null;
+        // Win32 normalization erases trailing dots/spaces before the handle guard can reject them.
+        foreach (string part in requestedPath.Split('\\', '/'))
+            if (part is not "." and not ".." && (part.EndsWith('.') || part.EndsWith(' ')))
+                return null;
 
         string candidate;
         try
@@ -146,14 +150,11 @@ public sealed class SplatCopilotPlugin
             });
         }
 
-        if (!File.Exists(resolvedPath))
-        {
-            return JsonSerializer.Serialize(new { success = false, error = $"File not found in workspace: {resolvedPath}" });
-        }
-
         try
         {
-            string content = await File.ReadAllTextAsync(resolvedPath, cancellationToken);
+            using var stream = WorkspaceFile.Open(_workspaceRoot, resolvedPath, write: false);
+            using var reader = new StreamReader(stream);
+            string content = await reader.ReadToEndAsync(cancellationToken);
             return JsonSerializer.Serialize(new
             {
                 success = true,
@@ -207,13 +208,11 @@ public sealed class SplatCopilotPlugin
 
         try
         {
-            string? dir = Path.GetDirectoryName(resolvedPath);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-            {
-                Directory.CreateDirectory(dir);
-            }
-
-            await File.WriteAllTextAsync(resolvedPath, content, cancellationToken);
+            using var stream = WorkspaceFile.Open(_workspaceRoot, resolvedPath, write: true);
+            stream.SetLength(0);
+            using var writer = new StreamWriter(stream);
+            await writer.WriteAsync(content.AsMemory(), cancellationToken);
+            await writer.FlushAsync(cancellationToken);
             return JsonSerializer.Serialize(new
             {
                 success = true,

@@ -125,6 +125,12 @@ public sealed class SqliteStorageContext
                     ProjectJson TEXT NOT NULL DEFAULT '{}'
                 );
 
+                CREATE TABLE IF NOT EXISTS AgentManifests (
+                    AgentId TEXT PRIMARY KEY,
+                    ContractSha256 TEXT NOT NULL,
+                    ManifestJson TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS GovernedCrews (
                     CrewId TEXT PRIMARY KEY,
                     Name TEXT NOT NULL,

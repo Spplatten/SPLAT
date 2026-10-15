@@ -381,7 +381,7 @@ for path in ['/proc/{pid}/fd/0','/proc/{pid}/mem','/proc/{pid}/environ']:
             sibling_frames = self.completed(second, sibling)
             sibling_lease = next(frame for frame in sibling_frames if frame["type"] == "LEASE")
             self.check("concurrent_secret_uids_distinct_and_proc_reads_denied", sibling_lease["workloadUid"] != lease["workloadUid"])
-            self.check("legacy_uid_cannot_read_secret_process", bool(self.completed(second,
+            self.check("ordinary_lease_cannot_read_secret_process", bool(self.completed(second,
                 self.request("secret-proof-legacy", attacker_code))))
             duplicate = self.request("secret-proof-publisher", "pass")
             duplicate["workingDirectory"] = str(self.root / "missions" / "different-workspace")
@@ -430,12 +430,14 @@ for path in ['/proc/{pid}/fd/0','/proc/{pid}/mem','/proc/{pid}/environ']:
             value not in line for session in self.sessions for line in session.raw) for value in self.needles))
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(proof_type=Proof, probe_path=None, configure_parser=None):
+    parser = argparse.ArgumentParser(description=proof_type.__doc__ or __doc__)
     parser.add_argument("--daemon", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--retire-idle-pins", metavar="INSTALLED_BPF_SHA256",
         help="Explicitly retire this verified idle pin set during testing, then rebuild the installed service's pins on restoration")
+    if configure_parser:
+        configure_parser(parser)
     args = parser.parse_args()
     assert os.geteuid() == 0, "root is required"
     args.daemon = args.daemon.resolve(strict=True)
@@ -445,16 +447,18 @@ def main():
     hashes = {str(path.relative_to(source)): digest(path.read_bytes()) for path in inputs}
     report = {"timestampUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "kernel": os.uname().release,
         "daemonSha256": digest(args.daemon.read_bytes()), "sourceSha256": hashes,
-        "probeSha256": digest(Path(__file__).read_bytes()), "syntheticOnly": True, "externalNetworkUsed": False,
+        "probeSha256": digest(Path(probe_path or __file__).read_bytes()),
+        "runnerSha256": digest(Path(__file__).read_bytes()), "syntheticOnly": True, "externalNetworkUsed": False,
         "checks": {}, "verdict": "FAIL"}
     was_active = subprocess.run(["systemctl", "is-active", "--quiet", "splat-agent.service"]).returncode == 0
+    report["installedServiceWasActive"] = was_active
     installed_sha = None
     if was_active:
         installed_pid = int(subprocess.check_output(["systemctl", "show", "-p", "MainPID", "--value", "splat-agent.service"]))
         installed_sha = digest(Path(f"/proc/{installed_pid}/exe").read_bytes())
     root = Path(tempfile.mkdtemp(prefix="splat-secret-proof-"))
     root.chmod(0o700)
-    proof = Proof(args, root)
+    proof = proof_type(args, root)
     stopped = False
     retired = False
     try:
@@ -508,7 +512,14 @@ def main():
             proof.checks["installed_service_restored"] = restored
             if not restored:
                 report["verdict"] = "FAIL"
+        else:
+            inactive = subprocess.run(["systemctl", "is-active", "--quiet", "splat-agent.service"]).returncode != 0
+            proof.checks["installed_service_remained_inactive"] = inactive
+            if not inactive:
+                report["verdict"] = "FAIL"
         report["checks"] = proof.checks
+        if hasattr(proof, "observations"):
+            report["observations"] = proof.observations
         if report["verdict"] == "PASS":
             shutil.rmtree(root)
         else:

@@ -154,10 +154,14 @@ public class WslLeasedExecutor : ILeasedExecutor
             // Whatever answered must prove it holds the token before a byte of the lease is sent to it.
             using var session = await OpenSessionAsync(stream, authToken, ct);
 
+            lease.ExecutionPolicy?.Validate();
             // 1. Serialize Lease Request Envelope
             var payload = new
             {
-                type = "EXECUTE_TOOL",
+                // Older guests reject an unknown operation; they must never ignore a restriction
+                // attached to the legacy envelope and then launch with broader permissions.
+                type = lease.RequireEnforcing ? "EXECUTE_AGENT" : lease.ExecutionPolicy is null ? "EXECUTE_TOOL" : "EXECUTE_POLICY",
+                executionPolicy = lease.ExecutionPolicy,
                 protocolVersion = WslAgentSession.ProtocolVersion,
                 missionId = lease.MissionId.ToString(),
                 command = command,
@@ -235,6 +239,18 @@ public class WslLeasedExecutor : ILeasedExecutor
                                 stderrBuilder.Append(text);
                                 stderr?.Report(text);
                             }
+                            break;
+
+                        case "POLICY_APPLIED":
+                            if (lease.ExecutionPolicy is null || outcome is null
+                                || !root.TryGetProperty("sha256", out var policyHash)
+                                || policyHash.ValueKind != JsonValueKind.String
+                                || policyHash.GetString() is not { Length: 64 } hash
+                                || hash.Any(c => !Uri.IsHexDigit(c))
+                                || !root.TryGetProperty("landlockAbi", out var abi) || abi.GetInt32() < 5
+                                || !root.TryGetProperty("syscallFilter", out var filter) || filter.GetString() != "seccomp-cbpf-v1")
+                                throw new InvalidOperationException("The guest did not acknowledge a supported execution policy.");
+                            outcome = outcome with { ExecutionPolicySha256 = hash };
                             break;
 
                         case "VIOLATION":
@@ -382,6 +398,17 @@ public class WslLeasedExecutor : ILeasedExecutor
                                 stderr?.Report(note + "\n");
                             }
 
+                            if (lease.ExecutionPolicy is not null && exitCode == 0 && outcome?.ExecutionPolicySha256 is null)
+                            {
+                                exitCode = -1;
+                                throw new InvalidOperationException("The guest reported success without acknowledging the required execution policy.");
+                            }
+                            if (lease.RequireEnforcing && exitCode == 0
+                                && outcome is not { Installed: true, Enforcing: true, Jailed: true })
+                            {
+                                exitCode = -1;
+                                throw new InvalidOperationException("The guest did not confirm the enforcing jail required by this agent.");
+                            }
                             stopwatch.Stop();
                             return new ProcessExecutionResult(
                                 ExitCode: exitCode,
