@@ -77,3 +77,13 @@ Thumbs.db
 # competitor reading the segment order learns the plan. The engineering rationale that cited them
 # stays in docs/; see the removal row in docs/README.md for what replaced each link.
 private/
+
+# The operator's own documents stay off git (2026-10-14). demo/ is screen-recording and dubbing
+# material, now including enterprise and A2A sales cuts. The three files below are feature write-ups
+# a peer drafted and never committed; a tracked doc that links to one must say where it went before
+# that work lands, or the link check fails on a clean clone. Docs the suite reads (README, ROADMAP,
+# the Field Guide, TUTORIAL) are a separate decision, because removing them breaks that build.
+demo/
+docs/A2A-TEMPLATE-BRIDGE.md
+docs/AGENT-MANIFEST-BINDING.md
+native/splat-agent/EXECUTION_POLICY.md
