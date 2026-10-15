@@ -35,4 +35,22 @@ public sealed class ManagedDeploymentTests
         Assert.Throws<ArgumentException>(() => Parse("unmount", "--managed", "--operator-sid", "S-1-5-21-1-2-3-1001"));
         Assert.Throws<ArgumentException>(() => Parse("provision", "--managed", "--instance", "NotSplat", "--upgrade"));
     }
+
+    /// <summary>
+    /// Pins the shipped script against the defect that failed the first live 2.4 install. Guest
+    /// scripts went to sh through Process.StandardInput. On a UTF-8 system the writer prefixed a BOM,
+    /// and WriteLine ended the text with CRLF, so /etc/wsl.conf was written as 'wsl.conf\r' and systemd
+    /// never started. They now reach sh from a BOM-less UTF-8 file.
+    /// </summary>
+    [Fact]
+    public void GuestScriptsReachShAsExactBytes()
+    {
+        using var resource = typeof(ManagedBridgeCommand).Assembly.GetManifestResourceStream("managed-deployment.ps1");
+        Assert.NotNull(resource);
+        string script = new StreamReader(resource).ReadToEnd();
+
+        Assert.DoesNotContain("StandardInput.WriteLine", script);
+        Assert.Contains("[Text.UTF8Encoding]::new($false).GetBytes($Script.Replace(\"`r\", '')", script);
+        Assert.Contains("-RedirectStandardInput $scriptFile", script);
+    }
 }
