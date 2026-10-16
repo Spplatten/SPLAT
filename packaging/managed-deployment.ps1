@@ -130,10 +130,20 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 
 function Start-Owner([PSCredential]$Credential, [string]$Action) {
     $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Mode {1} -Instance {2}' -f $installedScript, $Action, $Instance
+    $receiptPath = Join-Path $state "$Action.json"
+    # A receipt from an earlier attempt must not answer for this one. It is kept beside it, renamed,
+    # because the state directory is the deployment's record.
+    if (Test-Path -LiteralPath $receiptPath) {
+        Move-Item -LiteralPath $receiptPath -Destination ('{0}.{1}.previous' -f $receiptPath, [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))
+    }
     $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -Credential $Credential -LoadUserProfile -WindowStyle Hidden -PassThru
     if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'Service-account bootstrap timed out; deployment retained for managed unmount.' }
-    $receiptPath = Join-Path $state "$Action.json"
-    if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $receiptPath)) { throw "Service-account $Action failed; inspect $state." }
+    # The receipt is the verdict, because it is the one place the account's run records why it
+    # failed. Testing the exit code first turned every failure into "inspect state", which hid that
+    # reason, and an exit code this session cannot read compared as non-zero.
+    if (-not (Test-Path -LiteralPath $receiptPath)) {
+        throw "Service-account $Action stopped before writing its receipt (exit code '$($process.ExitCode)'); inspect $state."
+    }
     $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
     if (-not $receipt.Success) { throw "Service-account $Action failed: $($receipt.Error)" }
 }
