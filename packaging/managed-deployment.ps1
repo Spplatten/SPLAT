@@ -43,23 +43,25 @@ function New-Password {
     ConvertTo-SecureString ('aA1!' + [Convert]::ToBase64String($bytes)) -AsPlainText -Force
 }
 function Invoke-Guest([string]$Script) {
-    $start = [Diagnostics.ProcessStartInfo]::new($wsl, "-d $Instance -u root -e /bin/sh -s")
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    $start.RedirectStandardInput = $true
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    $process = [Diagnostics.Process]::Start($start)
+    # sh reads the script from a file of exact bytes: UTF-8 with no BOM, LF line endings. It used to
+    # arrive through Process.StandardInput, whose Windows PowerShell writer prefixes the console
+    # encoding's BOM on a UTF-8 system and whose WriteLine ends the text with CRLF. sh then ran
+    # '﻿set', wrote /etc/wsl.conf as 'wsl.conf\r', and compared pid 1 against 'systemd\r', so
+    # systemd never started and every managed install failed with an empty error (2026-10-14).
+    $id = [Guid]::NewGuid().ToString('N')
+    $scriptFile = Join-Path $env:TEMP "splat-guest-$id.sh"
+    $stdoutFile = Join-Path $env:TEMP "splat-guest-$id.out"
+    $stderrFile = Join-Path $env:TEMP "splat-guest-$id.err"
+    [IO.File]::WriteAllBytes($scriptFile, [Text.UTF8Encoding]::new($false).GetBytes($Script.Replace("`r", '').TrimEnd("`n") + "`n"))
     try {
-        $out = $process.StandardOutput.ReadToEndAsync()
-        $err = $process.StandardError.ReadToEndAsync()
-        $process.StandardInput.WriteLine($Script.Replace("`r", ''))
-        $process.StandardInput.Close()
+        $process = Start-Process -FilePath $wsl -ArgumentList @('-d', $Instance, '-u', 'root', '-e', '/bin/sh', '-s') -NoNewWindow -PassThru `
+            -RedirectStandardInput $scriptFile -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+        $null = $process.Handle  # Without a handle taken while it runs, Windows PowerShell can lose ExitCode.
         if (-not $process.WaitForExit(120000)) { $process.Kill(); throw 'Managed guest command timed out.' }
-        $output = $out.GetAwaiter().GetResult() + $err.GetAwaiter().GetResult()
-        if ($process.ExitCode -ne 0) { throw "Managed guest command failed: $output" }
+        $output = ([IO.File]::ReadAllText($stdoutFile) + [IO.File]::ReadAllText($stderrFile)).Replace([string][char]0, '')
+        if ($process.ExitCode -ne 0) { throw "Managed guest command failed (exit $($process.ExitCode)): $output" }
         if ($output) { Write-Output $output }
-    } finally { $process.Dispose() }
+    } finally { Remove-Item -LiteralPath $scriptFile, $stdoutFile, $stderrFile -ErrorAction SilentlyContinue }
 }
 
 if ($Mode -in @('GuestInstall', 'GuestUpgrade', 'GuestRemove')) {
@@ -128,10 +130,20 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 
 function Start-Owner([PSCredential]$Credential, [string]$Action) {
     $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Mode {1} -Instance {2}' -f $installedScript, $Action, $Instance
+    $receiptPath = Join-Path $state "$Action.json"
+    # A receipt from an earlier attempt must not answer for this one. It is kept beside it, renamed,
+    # because the state directory is the deployment's record.
+    if (Test-Path -LiteralPath $receiptPath) {
+        Move-Item -LiteralPath $receiptPath -Destination ('{0}.{1}.previous' -f $receiptPath, [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))
+    }
     $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -Credential $Credential -LoadUserProfile -WindowStyle Hidden -PassThru
     if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'Service-account bootstrap timed out; deployment retained for managed unmount.' }
-    $receiptPath = Join-Path $state "$Action.json"
-    if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $receiptPath)) { throw "Service-account $Action failed; inspect $state." }
+    # The receipt is the verdict, because it is the one place the account's run records why it
+    # failed. Testing the exit code first turned every failure into "inspect state", which hid that
+    # reason, and an exit code this session cannot read compared as non-zero.
+    if (-not (Test-Path -LiteralPath $receiptPath)) {
+        throw "Service-account $Action stopped before writing its receipt (exit code '$($process.ExitCode)'); inspect $state."
+    }
     $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
     if (-not $receipt.Success) { throw "Service-account $Action failed: $($receipt.Error)" }
 }
