@@ -181,6 +181,18 @@ public class GovernedArgumentBinderTests
 
         Assert.Throws<TemplateParameterRejectedException>(() => Bind(template, ("MaxEventCount", "5; calc")));
         Assert.Contains("250", Bind(template, ("MaxEventCount", "250")));
+
+        // Under a Linux lease the bound string is split by PosixArgumentSplitter, where a bare trailing
+        // backslash escaped the separator after it and swallowed the next argument (2026-10-15).
+        var linux = Template("/usr/bin/df", "'header' {Target} --read-only");
+        linux = linux with { Tool = linux.Tool with { Substrate = ToolSubstrate.LinuxLease } };
+        Assert.Throws<TemplateParameterRejectedException>(() => Bind(linux, ("Target", "host\\")));
+        Assert.Empty(GovernedArgumentBinder.ScreenProposedValues(linux,
+            new Dictionary<string, string> { ["Target"] = "host\\" }, null).Accepted);
+        Assert.Equal(new[] { "header", "host", "--read-only" }, PosixArgumentSplitter.Split(Bind(linux, ("Target", "host"))));
+        // Inside a POSIX single-quoted literal a backslash is inert, so it stays permitted there.
+        var quoted = linux with { Tool = linux.Tool with { ArgumentsTemplate = "'{Target}' --read-only" } };
+        Assert.Equal(new[] { "a\\b", "--read-only" }, PosixArgumentSplitter.Split(Bind(quoted, ("Target", "a\\b"))));
     }
 
     // ---------------------------------------------------------------- second-order injection
