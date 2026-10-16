@@ -21,8 +21,8 @@ this destination, for this many seconds* — not a machine.
 
 ## Where it stands
 
-As of 2026-09-10. [The live plan](audits/2026-09-09-oem-subtraction-plan.md) is the source; this is
-the short form.
+As of 2026-09-10. The live plan is the source; this is the short form. The plan itself
+moved out of the repository on 2026-10-14.
 
 - **Commercial path:** license the daemon and the containment primitives to companies building
   agent platforms. The first revenue is expected from paid containment assessments, which need
@@ -182,4 +182,4 @@ Open, and written down, so that nobody rediscovers them as news.
 2. [MODULE_INFO.md](MODULE_INFO.md), for the project you are in.
 3. [SUPPORTED_POLICY.md](../native/splat-agent/SUPPORTED_POLICY.md), before saying anything about
    what a lease stops.
-4. [The live plan](audits/2026-09-09-oem-subtraction-plan.md), before starting anything new.
+4. The live plan, before starting anything new. It moved out of the repository on 2026-10-14.
