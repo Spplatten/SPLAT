@@ -116,7 +116,7 @@ public class RevocationDurabilityTests
 
             Assert.True((await second.WaitAsync(TimeSpan.FromSeconds(10))).IsRevoked);
             Assert.False((await first.WaitAsync(TimeSpan.FromSeconds(10))).IsRevoked);
-            Assert.Equal(1, store.Loads);
+            Assert.Equal(2, store.Loads);
         }
         finally
         {
@@ -161,9 +161,9 @@ public class RevocationDurabilityTests
             Assert.True((await manager.CheckRevocationAsync("burned-key")).IsRevoked);
             Assert.Equal(2, store.Loads);
 
-            // And once it has loaded, it is not read again.
+            // Refresh every authorization check so another host's revocations take effect.
             await manager.CheckRevocationAsync("burned-key");
-            Assert.Equal(2, store.Loads);
+            Assert.Equal(3, store.Loads);
         }
         finally
         {

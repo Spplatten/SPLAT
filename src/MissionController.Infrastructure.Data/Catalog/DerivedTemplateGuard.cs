@@ -123,6 +123,7 @@ public static class DerivedTemplateGuard
         && derived.IntegrityLevel == source.IntegrityLevel
         && derived.Substrate == source.Substrate
         && derived.PassLeaseEgressAsArguments == source.PassLeaseEgressAsArguments
+        && derived.PassLeaseHostPinsAsArguments == source.PassLeaseHostPinsAsArguments
         // Adding an opt-in restriction to an unrestricted base cannot expand its jail/exec/egress.
         // A base that already requires one must retain it verbatim, including after database reload.
         && (source.ExecutionPolicy is null || System.Text.Json.JsonSerializer.Serialize(derived.ExecutionPolicy)
@@ -136,7 +137,9 @@ public static class DerivedTemplateGuard
         && string.Equals(derived.AllowedFqdn, source.AllowedFqdn, StringComparison.OrdinalIgnoreCase)
         && derived.AllowedPort == source.AllowedPort
         && derived.EnforceHttpsOnly == source.EnforceHttpsOnly
-        && derived.Scope == source.Scope;
+        && derived.Scope == source.Scope
+        && (derived.AdditionalFqdns ?? Array.Empty<string>())
+            .SequenceEqual(source.AdditionalFqdns ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
 
     private static string Describe(SingleToolDefinition? tool) =>
         tool is null ? "(none)" : $"{tool.ExecutablePath} {tool.ArgumentsTemplate}".Trim();

@@ -581,7 +581,9 @@ public record LeaseSpec(
     // where only root in the guest can make one. False for a caller that names a directory it owns.
     bool EphemeralWorkspace = false,
     ExecutionPolicy? ExecutionPolicy = null,
-    bool RequireEnforcing = false);
+    bool RequireEnforcing = false,
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? ResolvedEgressHosts = null,
+    LeaseExecutionContext? ExecutionContext = null);
 
 /// <summary>
 /// What the daemon reported about the lease it installed, from its <c>LEASE</c> and <c>EXIT</c> frames:
@@ -631,7 +633,10 @@ public record LeaseOutcome(
     string? OutcomeKeyId = null,
     string? OutcomePublicKey = null,
     // A post-spawn daemon acknowledgement, not a field in the existing RSA-signed outcome v1.
-    string? ExecutionPolicySha256 = null);
+    string? ExecutionPolicySha256 = null,
+    string? ExecutionContextSha256 = null,
+    string? EffectivePolicySha256 = null,
+    bool? WorkloadDrained = null);
 
 /// <summary>
 /// What the daemon reported about a lease, in the vocabulary the run record reads. Every line is read
@@ -678,7 +683,11 @@ public static class LeaseControls
         }
 
         if (lease.ExecutionPolicySha256 is { } hash)
-            controls.Add($"execution-policy:landlock+seccomp-cbpf sha256={hash} (guest acknowledgement; outside signed outcome v1)");
+            controls.Add($"execution-policy:landlock+seccomp-cbpf sha256={hash} " + (lease.ExecutionContextSha256 is null
+                ? "(guest acknowledgement; outside signed outcome v1)" : "(verified signed outcome v2)"));
+        if (lease.ExecutionContextSha256 is { } context)
+            controls.Add($"agent-context:sha256={context} effective-policy:sha256={lease.EffectivePolicySha256} (verified signed outcome v2)");
+        if (lease.WorkloadDrained == true) controls.Add("workload:drained (verified signed outcome v2)");
 
         if (lease.Workspace is { } workspace)
         {

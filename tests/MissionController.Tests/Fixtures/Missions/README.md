@@ -40,6 +40,11 @@ back to the full catalog. Omitting this variable selects the full catalog and re
 that full payload scope. This restriction does not enable the other live tests: filter to the corpus
 test alone.
 
+For parameterized sensors, `SPLAT_RECORD_CORPUS_PARAMETERS` accepts a JSON object mapping only
+selected template IDs to their declared string parameters, for example
+`{"source-consumer-reviews":{"AppId":"570060128"}}`. Validation happens before sensor collection;
+it neither expands the selected templates nor grants consent to send their output.
+
 `MissionCorpusTests.EveryShippedTemplate_HasALiveRecordingOfItsCurrentDefinition` evaluates the
 shipped catalog and fails for every missing or stale recording. Simulations, rejected diagnoses,
 timed-out or empty sensors, and files without a recorded answer do not cover a template. Rejected

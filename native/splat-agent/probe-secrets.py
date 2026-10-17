@@ -448,7 +448,9 @@ def main(proof_type=Proof, probe_path=None, configure_parser=None):
     report = {"timestampUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "kernel": os.uname().release,
         "daemonSha256": digest(args.daemon.read_bytes()), "sourceSha256": hashes,
         "probeSha256": digest(Path(probe_path or __file__).read_bytes()),
-        "runnerSha256": digest(Path(__file__).read_bytes()), "syntheticOnly": True, "externalNetworkUsed": False,
+        "runnerSha256": digest(Path(__file__).read_bytes()),
+        "syntheticOnly": getattr(proof_type, "synthetic_only", True),
+        "externalNetworkUsed": False,
         "checks": {}, "verdict": "FAIL"}
     was_active = subprocess.run(["systemctl", "is-active", "--quiet", "splat-agent.service"]).returncode == 0
     report["installedServiceWasActive"] = was_active
@@ -520,6 +522,7 @@ def main(proof_type=Proof, probe_path=None, configure_parser=None):
         report["checks"] = proof.checks
         if hasattr(proof, "observations"):
             report["observations"] = proof.observations
+        report["externalNetworkUsed"] = getattr(proof, "external_network_used", False)
         if report["verdict"] == "PASS":
             shutil.rmtree(root)
         else:

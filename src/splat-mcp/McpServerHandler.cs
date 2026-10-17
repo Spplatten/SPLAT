@@ -843,6 +843,9 @@ public partial class McpServerHandler
             violations: violationProgress,
             ct: ct);
 
+        _agentResult?.Invoke(execResult);
+        // Cancellation stops the workload, not the durable account of its final receipt.
+        ct = CancellationToken.None;
         string actor = await ResolveActorAsync(ct);
         var facts = NewLeaseFacts(missionId, ledgerTool, actor, startedAtUtc, command, argumentsForLog, workDir, timeoutSec);
 

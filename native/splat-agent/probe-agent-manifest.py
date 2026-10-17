@@ -87,7 +87,7 @@ class AgentProof(runner.Proof):
             == hashlib.sha256(self.args.daemon.read_bytes()).hexdigest())
         repository = Path(__file__).resolve().parents[2]
         compiled_inputs = [item for item in build["sourceInputs"]
-            if Path(item["path"]).suffix in (".cs", ".csproj", ".rs", ".c", ".h", ".toml", ".lock")]
+            if Path(item["path"]).suffix in (".cs", ".csproj", ".py", ".rs", ".c", ".h", ".toml", ".lock", ".props", ".targets")]
 
         def sources_match():
             return bool(compiled_inputs) and all(repository in (repository / item["path"]).resolve().parents

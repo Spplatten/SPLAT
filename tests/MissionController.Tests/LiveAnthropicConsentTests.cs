@@ -88,4 +88,19 @@ public sealed class LiveAnthropicConsentTests
             Assert.Equal(expected[method.Name], attribute.Scope);
         }
     }
+
+    [Theory]
+    [InlineData("{\"source-consumer-reviews\":{\"AppId\":\"570060128\"}}", true)]
+    [InlineData("{\"net-dns-audit\":{}}", false)]
+    [InlineData("{\"source-consumer-reviews\":{\"AppId\":123}}", false)]
+    [InlineData("{\"source-consumer-reviews\":{\"AppId\":\"1\",\"AppId\":\"2\"}}", false)]
+    [InlineData("{\"source-consumer-reviews\":{},\"source-consumer-reviews\":{}}", false)]
+    public void RecordingParametersCannotExpandTemplateSelection(string json, bool valid)
+    {
+        var templates = LiveMissionTests.SelectCorpusTemplates("source-consumer-reviews");
+        if (valid)
+            Assert.Equal("570060128", LiveMissionTests.SelectCorpusParameters(json, templates)["source-consumer-reviews"]["AppId"]);
+        else
+            Assert.Throws<InvalidOperationException>(() => LiveMissionTests.SelectCorpusParameters(json, templates));
+    }
 }

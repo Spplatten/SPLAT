@@ -1,7 +1,7 @@
 # Agent contracts at the MCP boundary
 
 Implementation: `AgentManifestImporter`, `AgentManifestApproval`, `McpServerHandler.Agent`, and
-`EXECUTE_AGENT` in the daemon. Regression coverage: `AgentManifestBindingTests` and
+`EXECUTE_BOUND` in the daemon. Regression coverage: `AgentManifestBindingTests` and
 `WslLeasedExecutorWireTests`. Live evidence is written by `native/splat-agent/probe-agent-manifest.py`;
 an implementation or test build alone does not establish a deployed enforcement result.
 
@@ -26,10 +26,11 @@ The approval must exist in the service's private database. Delegate only the bou
 that agent; separately granting it an unrestricted endpoint or the daemon credential grants separate
 authority. This does not change the documented same-Windows-owner or guest-root trust boundary.
 
-Agent calls use `EXECUTE_AGENT`, which requires an enforcing daemon even without an optional
-Landlock/seccomp contract. Old daemons reject this operation. Explicit contracts still require
-their successful installation acknowledgement; the bridge rejects an unconfirmed enforcing jail.
-That acknowledgement remains outside the existing RSA-signed outcome format.
+Agent calls use `EXECUTE_BOUND`, which requires an enforcing daemon and outcome signing even
+without an optional Landlock/seccomp contract. Old daemons reject this operation. Outcome v2
+signs the policy hash and invocation identity, and the bridge verifies their exact values before
+accepting success or confirmed drain (`BoundLeaseReceiptTests`). Outcome v1 remains readable
+for legacy unbound calls and does not carry those additional assurances.
 
 The [local A2A adapter](A2A-TEMPLATE-BRIDGE.md) uses the same approved binding and per-call lease.
 Its own authentication, task ownership and replay journal are separate from MCP tool discovery.
@@ -104,5 +105,7 @@ PowerShell module environment. Three live-model tests reporting HTTP 400 and the
 coverage failure remain unresolved; the full suite is not reported green.
 
 The implemented bridge maps reviewed catalog bindings and explicit grants to leases, Landlock and
-generated seccomp classic BPF. Arbitrary tool-schema-to-syscall inference, generated Rust/eBPF-LSM
-per tool, and cryptographic attestation of the execution-policy hash remain outside the proven scope.
+generated seccomp classic BPF. Arbitrary tool-schema-to-syscall inference and generated Rust/eBPF-LSM
+per tool remain outside scope. Outcome v2 adds a guest signature over policy and invocation identity;
+it is not hardware-backed attestation of an honest guest or kernel. The A2A document tracks the
+separate source-bound proof for this newer format; the October 14 v1 checkpoint above is historical.

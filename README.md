@@ -54,7 +54,7 @@ Technical evaluations of agent sandboxes tend to blur together into generic "iso
 | Component | State |
 | :--- | :--- |
 | Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
-| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Built, unproven beyond the reviewed corpus** — 1050 automated tests; current-definition live corpus coverage passes after the nine-template renewal on 2026-10-14 (see verification below) |
+| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Built, unproven beyond the reviewed corpus** — 1092 automated tests; the nine-template renewal on 2026-10-14 is historical evidence. The three RARE sensors now require accepted recordings of their Linux definitions (see verification below) |
 | Zero-warning build gate | **Enforced** — [`src`](src/Directory.Build.props) and [`tests`](tests/Directory.Build.props) compile with `TreatWarningsAsErrors`, so a cold solution build reports 0 warnings and 0 errors. No project is exempt: the console joined on 2026-09-18, when it moved to Windows App SDK 2.5.1 on .NET 10 and built without a warning, and `WarningGateTests` fails if an exemption appears |
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented; the hop is Demonstrated end to end against the program that ships** — stdio JSON-RPC, 12 tools. Re-recorded PASS on 2026-10-06 against kernel program `6fc637d8`, which is the source in this tree ([evidence](native/splat-agent/evidence/last-hop-probe.json)): a client's command travelled to the kernel and was refused there, the permitted one ran as `uid=65534`, an undeclared exec and a connect outside the lease each returned `-EPERM`, and a destination outside the host's egress policy was refused before any lease was requested. This claim was withdrawn twice before, on 2026-09-20 and again on 2026-09-25, each time because the kernel program changed hours after a passing run - once by our own edit. A proof cannot outlive the program it tested, including when the change is ours and the same day; what is new is that the hash comparison now runs on a schedule instead of waiting to be noticed. `packaging\reprove-substrate.ps1` restores it. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining ten run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
@@ -185,9 +185,9 @@ Every call lands in the audit ledger attributed to a resolved principal — the 
 
 ## Governance model
 
-- **The 1:1:1 invariant.** Every governed template binds **1 template → 1 model → 1 dedicated native tool → 1 approved egress FQDN**, enforced by strict validation and an in-memory egress firewall ([`EgressFirewallHandler.cs`](src/MissionController.Infrastructure.Network/EgressFirewallHandler.cs)). A 40+ template catalog covers network, identity, endpoint, SysOps, and compliance runbooks.
+- **The 1:1:1 invariant.** Every governed template binds **1 template → 1 model → 1 dedicated native tool**. The model gateway has one approved FQDN, enforced by strict validation and an in-memory egress firewall ([`EgressFirewallHandler.cs`](src/MissionController.Infrastructure.Network/EgressFirewallHandler.cs)). A Linux tool may declare up to eight exact destination hosts; [`TemplatePolicyCompiler.cs`](src/MissionController.Infrastructure.Linux/TemplatePolicyCompiler.cs) resolves and pins their IPv4 addresses for each lease. A 40+ template catalog covers network, identity, endpoint, SysOps, and compliance runbooks.
 
-  **Which leg that FQDN governs.** Two different processes can reach a destination, and they are not contained the same way. Almost every template's rule names the **AI gateway**, which SPLAT's own process calls — that leg is pinned by the provider client and the firewall handler above. A template may instead declare that its **sensor** opens the destination (`EgressScope.ToolProcess`; today only the Grants.gov discovery suite). The distinction is enforced, not documentary: a gateway-scoped template's tool is launched with no network stack at all *where the container does not also break it* (see the network-denial row above), and on Linux `TemplatePolicyCompiler` no longer opens a kernel network lease for it — reading the FQDN alone previously granted one to the entire catalog. What Windows still cannot do is pin *which* host a sensor-scoped tool reaches: an AppContainer chooses network or no network, not a destination, so for that one suite the declared FQDN remains an audited governance claim until a loopback broker or WFP filter lands. Those templates are read-only and present no credential.
+  **Which leg that FQDN governs.** Two different processes can reach a destination. The **AI gateway** is called by SPLAT's own process and governed by its provider client and firewall handler. A sensor destination uses `EgressScope.ToolProcess`; the public discovery and RARE sensors now run under Linux leases. The kernel enforces their pinned address/port set, while the RARE sensor connects using those exact pins and verifies the requested hostname through TLS. A gateway-scoped template does not earn a sensor network lease. Windows still cannot pin a network-capable child's destinations; its local-subsystem exemptions remain documented in [the Windows boundary](docs/ARCHITECTURE-windows-substrate.md#what-this-substrate-does-not-do).
 - **Bounded composition, not swarms.** Project Studio chains at most six ordered agent stages with a bounded, DLP-filtered evidence hand-off between them. No recursive routing, no parallel swarm, no open-ended loops — multi-step autonomy is *earned* as the kernel substrate lands, not assumed.
 - **Reasoning cores are pluggable** — streaming Anthropic Claude and Google Gemini clients behind [`ModelClientRouter.cs`](src/MissionController.Infrastructure.Network/Ai/ModelClientRouter.cs), routed by available key.
 
@@ -200,8 +200,8 @@ $ dotnet test tests/MissionController.Tests/MissionController.Tests.csproj
 The 2026-10-05 recordings remain historical evidence, including the four original Linux templates
 run through the guest lease. On 2026-10-14, the eight public probes moved into Linux and
 `sysops-time-sync` were recorded against live Anthropic models, reviewed and promoted. The
-current-definition coverage, privacy and replay gates pass (`MissionCorpusTests`,
-`MissionCorpusPrivacyTests`, `MissionReplayTests`); the new fixture notes retain known model
+coverage, privacy and replay gates passed for those recorded definitions (`MissionCorpusTests`,
+`MissionCorpusPrivacyTests`, `MissionReplayTests`); their fixture notes retain known model
 errors rather than treating acceptance as factual correctness. Replaying an old answer cannot
 validate a changed template. The Field Guide's separate publication
 record is checked by `DocumentationDriftTests.ThePublishedFieldGuide_IsTheSourceAsItStandsToday`.
@@ -209,7 +209,14 @@ The [recording guide](tests/MissionController.Tests/Fixtures/Missions/README.md)
 and the adversarial checks. These recordings hold observed pipeline behaviour; diagnosis accuracy
 beyond this reviewed corpus remains **built, unproven**. The test count below is an inventory.
 
-1050 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
+On 2026-10-17 the [published A2A authority proof](native/splat-agent/evidence/a2a-authority-probe.json)
+passed 114/114 checks, including all three RARE sensors against public Apple sources, signed
+delegation narrowing, cancellation drain and revocation. No model API was called. These are
+containment proofs; they do not replace the three missing accepted live-model corpus fixtures.
+The Windows DNS observation and updated Field Guide publication also remain release gates.
+See [the current A2A verification](docs/A2A-TEMPLATE-BRIDGE.md#verification-recorded-2026-10-17).
+
+1092 xUnit unit, integration, and security tests. Coverage spans the sandbox clamps (`HardeningSubsystemTests`), the Job Object containment flags read back out of the live kernel object, the restricted token asserted against `whoami` running inside the sandbox, governed argument binding, DLP masking, ledger tamper-detection, egress-firewall enforcement, operator attribution, token lifecycle and circuit breakers, the remediation/rollback engine, the MCP server, and end-to-end multi-layer verification.
 
 **On the warning count.** The 2026-10-01 cold solution build (`--no-incremental`) completed with zero warnings and errors, including the WinUI project. This verifies compilation; live corpus and runtime containment require their separate evidence.
 
@@ -228,7 +235,7 @@ SPLAT/
 ├── native/
 │   ├── splat-agent/                             # Rust eBPF daemon: lease_lsm.bpf.c + libbpf-rs loader
 │   └── splat-canary/                            # Minimal -EPERM proof harness (preflight → canary)
-├── tests/MissionController.Tests/               # 1050 xUnit unit / integration / security tests
+├── tests/MissionController.Tests/               # 1092 xUnit unit / integration / security tests
 ├── packaging/                                   # Signed MSIX build + Intune/SCCM silent install scripts
 └── docs/                                        # Architecture, context and module maps; briefs, plans, audits - index in docs/README.md
 ```

@@ -10,17 +10,20 @@ clean-machine installation and managed cross-account deployment remain unproven.
 
 An agent tool binding may carry an `executionPolicy`. The manifest importer stores it on the
 template, `TemplatePolicyCompiler` carries it into `LeaseSpec`, and `WslLeasedExecutor` sends
-`EXECUTE_POLICY`, or `EXECUTE_AGENT` for an agent-bound endpoint. Older daemons refuse an unknown
-operation rather than ignoring the restriction; `EXECUTE_AGENT` also requires enforcement when
-the optional execution policy is absent.
+`EXECUTE_POLICY`, or `EXECUTE_BOUND` for an agent-bound endpoint. Older daemons refuse an unknown
+operation rather than ignoring the restriction; bound execution requires enforcement and outcome
+signing even when the optional execution policy is absent. `EXECUTE_AGENT` remains a legacy route.
 The original executable, jail, operator ceiling, resource limits and BPF egress checks still apply.
 
 The guest compiles the explicit syscall list into seccomp **classic BPF** at request time and
 adds Landlock file rules in the fork child, after entering the jail and dropping privileges.
 Both must succeed before exec. This is runtime policy generation, not generated Rust or a
 new eBPF-LSM program. `POLICY_APPLIED` is sent only after successful spawn; a successful result
-without it is rejected by the bridge. Its policy hash is an acknowledgement, not part of the
-existing RSA-signed outcome format.
+without it is rejected by the bridge. Outcome v1 carries only an acknowledgement. Bound calls use
+outcome v2, signing the execution-policy hash, native effective-policy hash and invocation context.
+The [A2A authority proof](evidence/a2a-authority-probe.json) and its
+[signed receipts](evidence/a2a-authority-details.json) exercise successful and refused reads,
+delegation, cancellation and public RARE captures. These signatures do not attest an honest root.
 
 The [example agent](../../examples/agent-manifests/guest-identity.contract.json) is tied to the
 measured Ubuntu guest's runtime files. Paste its JSON into **Build an agent**, review the

@@ -1023,7 +1023,7 @@ async fn handle_client(
                 out.send(&resp).await?;
             }
 
-            "EXECUTE_TOOL" | "EXECUTE_POLICY" | "EXECUTE_AGENT" => {
+            "EXECUTE_TOOL" | "EXECUTE_POLICY" | "EXECUTE_AGENT" | "EXECUTE_BOUND" => {
                 // The session proved the caller before a single field of this was read. It names a
                 // command for a root daemon to run, and until the caller is known none of it is a
                 // request, only an offer.
@@ -1069,6 +1069,14 @@ async fn handle_client(
                 let work_dir = parsed.get("workingDirectory").and_then(|v| v.as_str()).unwrap_or("/tmp");
                 let duration_sec = parsed.get("leaseDurationSeconds").and_then(|v| v.as_u64()).unwrap_or(30) as u32;
                 let ephemeral_workspace = parsed.get("ephemeralWorkspace").and_then(|v| v.as_bool()).unwrap_or(false);
+                let execution_context = match outcome::validate_context(&parsed, lease_mgr.is_enforcing(), outcome_signer.is_some()) {
+                    Ok(context) => context,
+                    Err(error) => {
+                        out.send(&serde_json::json!({"type":"STDERR", "data":format!("SPLAT refused execution context: {error}.\n")})).await?;
+                        out.send(&serde_json::json!({"type":"EXIT", "exitCode":-1})).await?;
+                        continue;
+                    }
+                };
 
                 // Parse and compile before provisioning anything; legacy requests cannot silently
                 // discard a policy, and a development daemon cannot claim this additional boundary.
@@ -1479,6 +1487,20 @@ async fn handle_client(
                     continue;
                 }
 
+                // Bind the installed policy and read-back clamps, including the execution filter,
+                // into the signed receipt. This is not a signature over an uninstalled request.
+                let effective_policy_sha256 = {
+                    use sha2::{Digest, Sha256};
+                    let installed = installed.as_ref().expect("successful installation checked above");
+                    format!("{:x}", Sha256::digest(serde_json::to_vec(&serde_json::json!({
+                        "lease": lease_cfg, "executionPolicySha256": execution_policy.as_ref().map(|p| &p.sha256),
+                        "overlay": enable_cow, "scratchExec": allow_scratch_exec,
+                        "execInodes": installed.allowed_exec_inodes.iter().map(|i| (i.dev, i.ino)).collect::<Vec<_>>(),
+                        "protectedInodes": installed.protected_inodes.iter().map(|i| (i.dev, i.ino)).collect::<Vec<_>>(),
+                        "endpoints": installed.allowed_endpoints.iter().map(|e| (e.addr, e.port)).collect::<Vec<_>>()
+                    }))?))
+                };
+
                 // 2. Spawn Subprocess
                 let effective_work_dir = if Path::new(work_dir).exists() { work_dir } else { "/tmp" };
 
@@ -1851,6 +1873,7 @@ async fn handle_client(
                 // inside the installed policy, then withdraw the policy.
                 let mut pump_error: Option<std::io::Error> = None;
                 let mut watch_client = true;
+                let mut cancellation_accepted = false;
                 loop {
                     tokio::select! {
                         // Silent ordinary steps need EOF detection too. Leave ordinary pipelined
@@ -1858,6 +1881,25 @@ async fn handle_client(
                         // Secret sessions still refuse pipelining to keep grant ownership unambiguous.
                         incoming = buf_reader.fill_buf(), if watch_client => {
                             match incoming {
+                                Ok(bytes) if !bytes.is_empty() && execution_context.is_some() => {
+                                    // Only this authenticated session may cancel this mission. Keep
+                                    // its policy installed until cgroup.events confirms every descendant left.
+                                    let mut control = String::new();
+                                    let result = tokio::time::timeout(Duration::from_secs(2), read_frame(&mut buf_reader, &mut control)).await;
+                                    let valid = match result {
+                                        Ok(Ok(n)) if n > 0 => authenticated_request(control.trim(), &session, &peer_auth, sequence)
+                                            .is_ok_and(|v| v["type"] == "CANCEL" && v["missionId"] == mission_id),
+                                        _ => false,
+                                    };
+                                    if !valid {
+                                        pump_error = Some(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid lease cancellation"));
+                                        break;
+                                    }
+                                    sequence += 1;
+                                    cg.kill_all().context("drain canceled workload while its policy remains installed")?;
+                                    cancellation_accepted = true;
+                                    watch_client = false;
+                                }
                                 Ok(bytes) if !bytes.is_empty() && !secret_step => watch_client = false,
                                 Ok(_) => {
                                     pump_error = Some(std::io::Error::new(std::io::ErrorKind::ConnectionAborted,
@@ -1955,7 +1997,7 @@ async fn handle_client(
                 // bytes, and "rebuild the canonical form" is where that agreement goes wrong. The
                 // public key rides along so a bundle verifies without a second call to this host.
                 if let Some(signer) = outcome_signer.as_ref() {
-                    let canonical = outcome::canonical_outcome(
+                    let mut canonical = outcome::canonical_outcome(
                         &mission_id,
                         cg.cgroup_id,
                         lease_mgr.is_enforcing(),
@@ -1967,6 +2009,16 @@ async fn handle_client(
                         if workspace_created { Some(work_dir) } else { None },
                         if workspace_created { Some(workspace_removed) } else { None },
                     );
+                    if let Some(context) = execution_context {
+                        let policy_hash = execution_policy.as_ref().map_or("none", |p| p.sha256.as_str());
+                        canonical = outcome::bound_outcome(&canonical, policy_hash, context,
+                            &effective_policy_sha256, cgroup_is_real, cancellation_accepted);
+                        exit_chunk["executionPolicySha256"] = serde_json::json!(policy_hash);
+                        exit_chunk["executionContext"] = serde_json::json!(context);
+                        exit_chunk["effectivePolicySha256"] = serde_json::json!(effective_policy_sha256);
+                        exit_chunk["workloadDrained"] = serde_json::json!(cgroup_is_real);
+                        exit_chunk["cancellationAccepted"] = serde_json::json!(cancellation_accepted);
+                    }
                     exit_chunk["outcomeCanonical"] = serde_json::Value::from(canonical.clone());
                     exit_chunk["outcomeSignature"] = serde_json::Value::from(signer.sign(&canonical));
                     exit_chunk["outcomeKeyId"] = serde_json::Value::from(signer.key_id());

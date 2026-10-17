@@ -325,6 +325,28 @@ public sealed class A2aBridgeTests : IAsyncLifetime
         using (var connection = _context.CreateConnection()) SqliteConnection.ClearPool(connection);
         Directory.Delete(_root, recursive: true);
     }
+    [Fact]
+    public async Task ACallerCannotConsumeAnotherCallersRetainedCapacity()
+    {
+        await _bridge.DisposeAsync();
+        _config = _config with { MaxTasks = 6, Callers = _config.Callers.Select(c => c with { MaxRetainedTasks = 1 }).ToArray() };
+        _bridge = CreateBridge();
+        await Call("SendMessage", Message("alice-first"));
+        Assert.Equal(429, (await Assert.ThrowsAsync<A2aException>(() => Call("SendMessage", Message("alice-loop")))).HttpStatus);
+        await Call("SendMessage", Message("bob-first"), BobToken);
+        Assert.Equal(2, _executor.Leases.Count);
+    }
+
+    [Fact]
+    public async Task AnotherProcessRevocationIsSeenWithoutRestart()
+    {
+        await Call("SendMessage", Message());
+        var other = new IncidentRevocationManager(_ledger, new SqliteRevocationStore(_context));
+        await other.RevokeAsync(Caller().Identity.ToLedgerIdentity(), "caller", "Synthetic revocation", "test");
+        Assert.Equal(403, (await Assert.ThrowsAsync<A2aException>(() => Call("SendMessage", Message()))).HttpStatus);
+        Assert.Single(_executor.Leases);
+    }
+
     private sealed class Capture : ILeasedExecutor
     {
         internal readonly ConcurrentQueue<LeaseSpec> Leases = new();

@@ -88,6 +88,9 @@ export LIBBPF_SYS_LIBRARY_PATH="$(pkg-config --variable=libdir libelf)"
 # No --target, which would neither split the copies nor let RUSTFLAGS reach the build script.
 export RUSTFLAGS='-C link-arg=-l:libzstd.a'
 CARGO="$(command -v cargo || echo "$HOME/.cargo/bin/cargo")"
+# DrvFS/restored checkouts can retain mtimes older than Cargo's cached application. Rebuild the
+# application itself; dependency artifacts remain cached. A source inventory cannot detect stale code.
+"$CARGO" clean --release --package splat-agent
 "$CARGO" build --release --features portable
 B="$CARGO_TARGET_DIR/release/splat-agent"
 set +e

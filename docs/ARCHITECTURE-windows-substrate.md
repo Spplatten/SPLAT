@@ -149,8 +149,8 @@ It describes the operator-account Windows sensor path, not the in-progress manag
 Source references establish implementation limits; named tests establish only the behavior their
 assertions exercise. None of these rows claims an independent security assessment.
 
-The catalog census is **61 templates: 8 Windows network-denied, 41 Windows network-capable,
-12 Linux-leased**. The 41 comprise 3 that need network access and 38 that need local Windows
+The catalog census is **61 templates: 8 Windows network-denied, 38 Windows network-capable,
+15 Linux-leased**. The 38 comprise 0 that need network access and 38 that need local Windows
 subsystems. These figures are checked against `CapabilityManifest.CensusOf` by
 `DocumentationDriftTests.TheWindowsNonEnforcementTable_MatchesTheCatalogAndOpenUiGap`.
 

@@ -13,7 +13,9 @@ public record EgressRule(
     int AllowedPort = 443,
     bool EnforceHttpsOnly = true,
     string Description = "Approved outbound destination",
-    EgressScope Scope = EgressScope.ModelGateway)
+    EgressScope Scope = EgressScope.ModelGateway,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? AdditionalFqdns = null)
 {
     /// <summary>
     /// True when no sensor tool needs a network stack to satisfy this rule, so the tool process can
@@ -44,7 +46,9 @@ public record SingleToolDefinition(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     bool PassLeaseEgressAsArguments = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    ExecutionPolicy? ExecutionPolicy = null);
+    ExecutionPolicy? ExecutionPolicy = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    bool PassLeaseHostPinsAsArguments = false);
 
 /// <summary>
 /// The substrate a template's tool runs on. It decides which launcher, jail and job the mission

@@ -22,7 +22,7 @@ public sealed class PublishedA2aFactAttribute : FactAttribute
     }
 }
 
-public sealed class A2aPublishedProofTests
+public sealed partial class A2aPublishedProofTests
 {
     [PublishedA2aFact]
     public async Task PublishedAgentsCannotWidenOrBorrowTemplateLeases()
@@ -59,7 +59,7 @@ public sealed class A2aPublishedProofTests
             string daemonHash = manifest.GetProperty("daemonSha256").GetString()!;
             Check("packaged_daemon_matches_manifest", FileHash(Path.Combine(Path.GetDirectoryName(exe)!, "splat-agent")) == daemonHash);
             var compiled = manifest.GetProperty("sourceInputs").EnumerateArray().Where(item =>
-                new[] { ".cs", ".csproj", ".rs", ".c", ".h", ".toml", ".lock", ".props", ".targets" }
+                new[] { ".cs", ".csproj", ".py", ".rs", ".c", ".h", ".toml", ".lock", ".props", ".targets" }
                     .Contains(Path.GetExtension(item.GetProperty("path").GetString()))).Select(item => item.Clone()).ToArray();
             bool SourcesMatch() => compiled.Length > 0 && compiled.All(item =>
             {

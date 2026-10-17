@@ -243,6 +243,7 @@ public sealed class LiveMissionTests
         // Opt-in because this spends model credit and runs real sensors. Resume only from actual
         // current, accepted recordings; the coverage gate still requires reviewed promotion.
         var templates = SelectCorpusTemplates(Environment.GetEnvironmentVariable(CorpusTemplatesVariable));
+        var parameters = SelectCorpusParameters(Environment.GetEnvironmentVariable(CorpusParametersVariable), templates);
         await RequireKeyAsync(LiveAnthropicScope.Corpus);
         string directory = Environment.GetEnvironmentVariable(MissionFixtureDirectoryRecorder.EnvironmentVariable) ?? "";
         Assert.True(Path.IsPathFullyQualified(directory), "Recording requires an absolute private output directory.");
@@ -255,7 +256,7 @@ public sealed class LiveMissionTests
                 continue;
             try
             {
-                await RecordAndReplayAsync(template.TemplateId);
+                await RecordAndReplayAsync(template.TemplateId, parameters.GetValueOrDefault(template.TemplateId));
                 recorded = Directory.EnumerateFiles(directory, "*.json").Select(MissionFixture.Load).ToList();
                 failures.AddRange(MissionCorpusTests.CoverageProblems(new[] { template }, recorded));
             }
@@ -268,6 +269,31 @@ public sealed class LiveMissionTests
     }
 
     internal const string CorpusTemplatesVariable = "SPLAT_RECORD_CORPUS_TEMPLATES";
+    internal const string CorpusParametersVariable = "SPLAT_RECORD_CORPUS_PARAMETERS";
+
+    internal static Dictionary<string, Dictionary<string, string>> SelectCorpusParameters(
+        string? json, IReadOnlyList<SingleToolTemplate> templates)
+    {
+        var result = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        if (json is null) return result;
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("Corpus parameters must map selected template IDs to string parameters.");
+        foreach (var entry in document.RootElement.EnumerateObject())
+        {
+            var template = templates.SingleOrDefault(t => t.TemplateId == entry.Name)
+                ?? throw new InvalidOperationException("Corpus parameters name a template outside the selected scope.");
+            var arguments = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (entry.Value.ValueKind != JsonValueKind.Object || !result.TryAdd(entry.Name, arguments))
+                throw new InvalidOperationException("Duplicate or invalid corpus parameter map.");
+            foreach (var parameter in entry.Value.EnumerateObject())
+                if (parameter.Value.ValueKind != JsonValueKind.String || !arguments.TryAdd(parameter.Name, parameter.Value.GetString()!))
+                    throw new InvalidOperationException("Corpus parameters require unique string fields.");
+            // Validate before collecting a sensor or checking a provider key; parameters confer no consent.
+            GovernedArgumentBinder.Bind(template, arguments);
+        }
+        return result;
+    }
 
     internal static IReadOnlyList<SingleToolTemplate> SelectCorpusTemplates(string? selection)
     {
@@ -287,7 +313,7 @@ public sealed class LiveMissionTests
             .OrderBy(t => t.TemplateId, StringComparer.Ordinal).ToArray();
     }
 
-    private async Task RecordAndReplayAsync(string templateId)
+    private async Task RecordAndReplayAsync(string templateId, Dictionary<string, string>? parameters = null)
     {
         var template = GovernedTemplateCatalog.All.Single(t => t.TemplateId == templateId);
 
@@ -318,7 +344,7 @@ public sealed class LiveMissionTests
 
             var clock = Stopwatch.StartNew();
             var chunks = new List<MissionChunk>();
-            await foreach (var chunk in engine.ExecuteMissionAsync(template, new Dictionary<string, string>(), "live-test-operator"))
+            await foreach (var chunk in engine.ExecuteMissionAsync(template, parameters ?? new Dictionary<string, string>(), "live-test-operator"))
             {
                 chunks.Add(chunk);
             }

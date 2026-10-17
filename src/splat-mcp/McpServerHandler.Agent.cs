@@ -1,6 +1,7 @@
 using System.Text.Json;
 using MissionController.Core;
 using MissionController.Core.Interfaces;
+using MissionController.Core.Models;
 using MissionController.Infrastructure.Linux;
 using MissionController.Infrastructure.Network.Dlp;
 
@@ -8,6 +9,17 @@ namespace SplatMcp;
 
 public partial class McpServerHandler
 {
+    private LeaseSpec? _agentInvocation;
+    private Action<ProcessExecutionResult>? _agentResult;
+
+    internal void BindAgentInvocation(LeaseSpec lease, Action<ProcessExecutionResult> result)
+    {
+        if (_agentInvocation is not null || _agent is null || lease.ExecutionContext?.AgentId != _agent.AgentId
+            || lease.ExecutionContext.ContractSha256 != _agent.Sha256)
+            throw new InvalidOperationException("An invocation must bind this host's approved agent exactly once.");
+        _agentInvocation = lease;
+        _agentResult = result;
+    }
     private McpJsonRpcMessage ListAgentTools(McpJsonRpcMessage request)
     {
         var tools = _agent!.Manifest.Project.Stages.Select(stage =>
@@ -41,7 +53,7 @@ public partial class McpServerHandler
     private async Task<McpToolCallResult> ExecuteAgentToolAsync(string name, JsonElement args,
         string actor, CancellationToken ct)
     {
-        var mission = Guid.NewGuid();
+        var mission = _agentInvocation?.MissionId ?? Guid.NewGuid();
         var binding = _agent!.Manifest.Project.Stages.SingleOrDefault(s => s.StageId == name);
         var authority = new { agentId = _agent.AgentId, contractSha256 = _agent.Sha256,
             tool = name, templateId = binding?.TemplateId, missionId = mission };
@@ -74,16 +86,11 @@ public partial class McpServerHandler
                 if (string.IsNullOrWhiteSpace(parameters.GetValueOrDefault(field.Key, field.DefaultValue)))
                     throw new InvalidOperationException($"Required parameter '{field.Key}' is missing.");
             var argv = PosixArgumentSplitter.Split(GovernedArgumentBinder.Bind(template, parameters));
-            var lease = _policyCompiler.CompileTemplatePolicy(template, mission,
+            var lease = _agentInvocation ?? _policyCompiler.CompileTemplatePolicy(template, mission,
                 $"{LinuxLeaseSubstrate.DefaultMissionsRoot}/{mission:N}", (uint)template.Tool.TimeoutSeconds);
-            lease = lease with { RequireEnforcing = true };
-            if (template.Tool.PassLeaseEgressAsArguments)
-            {
-                if (!lease.AllowNetwork || lease.AllowedEgressIps.Count == 0
-                    || !lease.AllowedEgressPorts.SequenceEqual(new uint[] { 443 }))
-                    throw new InvalidOperationException("The approved HTTPS sensor requires resolved lease destinations on port 443.");
-                argv = argv.Append(string.Join(",", lease.AllowedEgressIps)).ToArray();
-            }
+            lease = lease with { RequireEnforcing = true, ExecutionContext = lease.ExecutionContext
+                ?? new LeaseExecutionContext(_agent.AgentId, _agent.Sha256, "local", "stdio", mission.ToString("N")) };
+            argv = LeaseEgressArguments.Append(template.Tool, lease, argv);
             // Admission is durable before any effect and includes the exact operator-selected version.
             await AppendScrubbedLogAsync(mission, template.TemplateId, "AGENT_TOOL_AUTHORIZED",
                 JsonSerializer.Serialize(authority), actor, ct);

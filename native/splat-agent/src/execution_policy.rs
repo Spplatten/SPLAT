@@ -45,7 +45,7 @@ pub struct PreparedPolicy {
 pub fn from_request(request: &serde_json::Value, enforcing: bool) -> Result<Option<PreparedPolicy>> {
     let value = request.get("executionPolicy").filter(|v| !v.is_null());
     let explicit = request.get("type").and_then(|v| v.as_str()) == Some("EXECUTE_POLICY");
-    let agent = request.get("type").and_then(|v| v.as_str()) == Some("EXECUTE_AGENT");
+    let agent = matches!(request.get("type").and_then(|v| v.as_str()), Some("EXECUTE_AGENT" | "EXECUTE_BOUND"));
     ensure!(!agent || enforcing, "agent execution requires an enforcing daemon; no development fallback");
     ensure!(agent || explicit == value.is_some(), "executionPolicy requires EXECUTE_POLICY and a non-null contract");
     let Some(value) = value else { return Ok(None); };

@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using MissionController.Core;
 using MissionController.Infrastructure.Data.Catalog;
+using MissionController.Infrastructure.Linux;
 using Xunit;
 
 namespace MissionController.Tests;
@@ -42,22 +43,27 @@ public class ConsumerEvidenceTemplateTests
     {
         var template = GovernedTemplateCatalog.All.Single(t => t.TemplateId == "source-consumer-" + kind);
         string arguments = GovernedArgumentBinder.Bind(template, new Dictionary<string, string> { ["AppId"] = appId });
-        // Replace only the transport in the test process. The production command
-        // has no fixture switch or caller-supplied host. Exercise its real parser
-        // and binder through Windows PowerShell, with success AND refusal controls.
-        string fixture = "@{text=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" +
-            Convert.ToBase64String(Encoding.UTF8.GetBytes(page)) + "'));redirect=" +
-            (redirect is null ? "$null" : "'" + redirect.Replace("'", "''") + "'") + "}";
-        arguments = arguments.Replace("Read-PublicPage $uri 262144", fixture)
-            .Replace("Read-PublicPage $uri 2097152", fixture);
-        var start = new ProcessStartInfo(template.Tool.ExecutablePath, arguments)
+        // Replace transport only in the isolated test process; production has no fixture switch.
+        var argv = PosixArgumentSplitter.Split(arguments).ToArray();
+        string fixture = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(new { text = page, redirect }));
+        argv[3] = argv[3].Replace("if __name__ == '__main__':",
+            "import base64\ndef read_page(url, limit):\n    return json.loads(base64.b64decode('" + fixture + "'))\n\nif __name__ == '__main__':");
+        var start = new ProcessStartInfo(OperatingSystem.IsWindows() ? "python" : "python3")
         {
-            RedirectStandardOutput = true, RedirectStandardError = true,
+            RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
             UseShellExecute = false, CreateNoWindow = true
         };
+        // stdin avoids Windows' command-line limit for deliberately oversized feed fixtures.
+        foreach (string argument in argv.Take(2)) start.ArgumentList.Add(argument);
+        start.ArgumentList.Add("-");
+        foreach (string argument in argv.Skip(4)) start.ArgumentList.Add(argument);
+        start.ArgumentList.Add(JsonSerializer.Serialize(new Dictionary<string, string[]> {
+            [kind == "offers" ? "apps.apple.com" : "itunes.apple.com"] = ["8.8.8.8"] }));
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
+        await process.StandardInput.WriteAsync(argv[3]);
+        process.StandardInput.Close();
         try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20)); }
         catch { process.Kill(entireProcessTree: true); throw; }
         Assert.Equal(0, process.ExitCode);

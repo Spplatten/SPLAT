@@ -12,7 +12,7 @@ nothing on the far end consumed either one.
 
 Protocol version 3. Anything else is refused; see `main.rs`, and `docs/SCHEMA.md` for the frames.
 
-Optional execution policies on `EXECUTE_POLICY` and `EXECUTE_AGENT` have a separate
+Optional execution policies on `EXECUTE_POLICY`, `EXECUTE_AGENT` and `EXECUTE_BOUND` have a separate
 [agent execution contract](EXECUTION_POLICY.md). The source/artifact-bound
 [agent proof](evidence/agent-manifest-probe.json) records 50/50 live checks; the matching
 [lifecycle proof](evidence/lease-isolation-agent-bridge.json) records 51/51. These measured-guest
@@ -21,6 +21,15 @@ In particular, an explicit execution policy's generated seccomp filter refuses n
 AF_NETLINK sockets (`generated_filter_refuses_alternate_abis_unknown_calls_and_local_sockets`).
 The baseline local-IPC row still applies to leases without that policy; inherited descriptors
 and other IPC mechanisms are not thereby eliminated.
+
+The [A2A authority probe](evidence/a2a-authority-probe.json) records 114/114 checks for its named
+published host and daemon; [receipt details](evidence/a2a-authority-details.json) retain the signed
+outcomes. `EXECUTE_BOUND` requires enforcement and a signing key. Outcome v2 covers the exact
+execution-policy hash, effective native-policy hash, host-authenticated invocation identity and
+confirmed cgroup drain. Authenticated cancellation kills and drains before removing policy.
+Identity labels are supplied by the trusted host; this does not establish remote attestation or
+remove the guest-root/shared-daemon-credential trust boundary. The installed service was restored
+to its original binary after the proof; this is not evidence that the new package is deployed.
 
 ---
 

@@ -38,6 +38,10 @@ An ordinary test run skips that live proof; a skip is not an enforcement result.
 | `callers[].tokenSha256` | SHA-256 of the ASCII bearer credential, 64 lowercase hex characters |
 | `callers[].skills` | Explicit subset of the approved manifest's tool names |
 | `callers[].expiresUtc` | Credential expiry as a UTC ISO 8601 timestamp |
+| `callers[].requireDelegation` | Require a verified delegation for every new task; enable for worker-only credentials |
+| `callers[].maxConcurrentTasks`, `maxRetainedTasks` | Per-principal bounds; defaults divide host capacity across configured callers, with a minimum of one |
+| `delegationKeyFile` | Optional absolute path to the operator's P-256 private PEM; required to issue grants |
+| `delegationIssuers` | Explicit `{agentId, contractSha256, publicKey}` trust pins; public key is base64 SPKI P-256 |
 | `maxConcurrentTasks` | Defaults to 4, at most 16 |
 | `maxTasks` | Durable task capacity, defaults to 512, at most 4096 |
 
@@ -78,8 +82,8 @@ An example request for the reviewed guest-identity manifest is:
 ```
 
 Each message creates one task. Declared template parameters must be strings. Optional
-`data.parentTaskId` is recorded as **caller-supplied correlation**, not proof of another agent's
-identity or authority. Natural-language instructions, file parts, remote artifact URLs, command
+`data.parentTaskId` requires `data.delegationToken` and must match its signed parent. A parent ID
+alone is refused. Natural-language instructions, file parts, remote artifact URLs, command
 overrides, arbitrary tenant fields and task continuations are rejected.
 
 `SendMessage` returns `result.task`. With `returnImmediately: true`, poll `GetTask` using
@@ -100,25 +104,48 @@ gRPC, REST and multi-turn task continuation are outside this first profile.
   external effects. A different ID can request another permitted effect.
 - Interrupted tasks become failed with an unconfirmed outcome; they are never automatically
   re-executed. Durable capacity exhaustion refuses new tasks instead of evicting replay records.
-  Operator-managed retention and per-caller scheduling quotas remain unfinished.
+  Per-caller running and retained-task limits are enforced before admission. Operator-managed
+  retention remains unfinished; exhaustion never silently evicts replay records.
 - Task/result access is scoped to both tenant and caller, including list filters and cancellation.
-  Existing incident revocation checks run before access and execution. The persisted revocation
-  list is loaded once per host process; revocations written by another process require a host
-  restart to take effect here. Credential expiry does not
-  revoke a lease already admitted; its existing deadline and containment still apply. There is no
+  Existing incident revocation checks refresh persistent state before each access. Active tasks
+  also check caller/issuer revocation and expiry every 500 ms; an unreadable store cancels work.
+  Cancellation and the bounded native lease are still required to stop an admitted process. There is no
   federated identity, OAuth delegation or automatic credential rotation in this profile.
-- Cancellation cancels the adapter's operation. Its result explicitly marks workload termination
-  **unconfirmed** because the current executor does not provide an authenticated drain receipt.
-  A canceled A2A status is not evidence that every workload descendant has stopped.
+- Cancellation sends an authenticated control frame and waits for the daemon's signed drained
+  outcome. Only a verified receipt for this invocation sets `workloadTerminationConfirmed=true`;
+  transport failure leaves it false. A canceled status alone is not termination evidence.
 - The audit chain connects A2A task/caller/version to the bound tool's trace and lease result.
-  A2A parentage and the execution-policy hash are not covered by the existing native RSA outcome
-  signature. Cross-host delegation attestation remains unfinished.
+  Bound calls require outcome v2, signing the execution-policy hash, effective native-policy hash,
+  receiver contract, authenticated tenant/caller, task, requesting agent/contract, parent and token
+  digest. `BoundLeaseReceiptTests` covers cross-invocation, signature and field tampering. This is
+  a guest-key signature, not remote attestation of a trusted kernel or honest guest root.
 - Request bodies are capped at 64 KiB, result storage at 512 KiB per task, and concurrent HTTP
   connections at 64. The endpoint accepts only loopback host headers and rejects browser Origin
   headers. It is not a remote ingress server or a defense against its privileged Windows owner.
 - A poisoned requester cannot expand the declared grant through this endpoint. Misuse of data or
   actions already permitted by the grant still needs application authorization. The remote agent's
   own execution, prompt-injection detection and semantic correctness are outside this boundary.
+
+## Signed delegation
+
+An authenticated parent-task owner calls the SPLAT extension `splat/DelegateTask` with
+`parentTaskId`, `audience`, `audienceVersion`, `callerId` and `skill`. The host signs only the
+authority actually admitted for that parent, with its original expiry and a maximum depth of four.
+The recipient passes the returned `delegationToken` in its structured `SendMessage` data.
+Configure `requireDelegation=true` on the worker principal: a separately granted unrestricted
+credential remains separate authority and must not be given to that worker.
+
+The receiver verifies P-256/SHA-256, pinned issuer contract/key, exact receiver contract, tenant,
+caller, skill, expiry and parent. It intersects executable paths, freshly resolved host/IP pins,
+ports, resources, duration, syscalls and file grants with its own approved template. It unions
+protected paths and preserves read-only restrictions. Missing required authority refuses admission.
+SQLite consumes each nonce atomically with task insertion. An exact retry returns the same task;
+a new message ID cannot reuse that token, including after restart. `A2aDelegationTests` and
+`LeaseAuthorityTests` exercise narrowing and durable replay refusal.
+
+This is a SPLAT extension, not generic OAuth delegation or an A2A-standard capability token.
+Immediate issuers can be revoked as `a2a-agent:<agentId>@<contractSha256>`. Transitive federated
+revocation, cross-machine trust provisioning and public remote ingress remain outside this profile.
 
 ## Community and Corporate
 
@@ -143,7 +170,58 @@ retry and restart behavior, audit correlation and unchanged enforcing service id
 Diagnostics are retained under `dist/a2a-proof-results`. Set `SPLAT_RECORD_A2A_EVIDENCE=1` to record
 a successful source-bound result in `native/splat-agent/evidence/a2a-bridge-probe.json`.
 
-## Verification recorded 2026-10-14
+## Verification recorded 2026-10-17
+
+The [authority proof](../native/splat-agent/evidence/a2a-authority-probe.json) recorded **114/114
+passing checks** in the run started at 15:57:58 UTC, with [signed receipts and task observations](../native/splat-agent/evidence/a2a-authority-details.json).
+It exercised published Community host SHA-256
+`d35b71b9e35170edbf1dfd76a27af1e499d837c2689c6452a928c84de7a6fbe1` and daemon SHA-256
+`1a340b116c7b90b441058bd8e201fa22592860f8d559bbf1efafba0c1ad67743` against their recorded compiled
+source inventory. The three RARE sensors completed using real public Apple data. Two local HTTPS
+agents demonstrated signed narrowing, wrong/missing grant refusal and durable replay refusal.
+Cancellation and a revocation written by another process both produced a verified signed drain.
+The runner restored the original installed service and checked enforcement afterward; it did
+not deploy the new daemon permanently. It made **zero model API requests**.
+
+The RARE-specific attack cases refused generic tools, forged caller/tenant/command/network policy,
+duplicate and poisoned parameters, and a parent ID without delegation. Other callers and tenants
+could not read, cancel or list the victim's task artifacts. Repeated requests returned the original
+task. A deliberately substituted hostile Python body, run directly under the RARE reviews lease,
+received kernel `EPERM` for both a shell exec and loopback connection. That last probe measures a
+hypothetical compromised runtime below A2A; the endpoint itself never accepts caller-supplied code.
+These cases do not prove that a model resists every prompt injection or that public federation is safe.
+
+To reproduce this approved temporary-service workflow, build the tests and publish the package,
+then run `native/splat-agent/probe-a2a-authority.py` with explicit `--daemon`, `--mcp-exe`,
+`--manifest`, `--client-root`, `--dotnet`, `--test-project` and `--output` paths. The runner refuses
+active leases and validates any `--retire-idle-pins` source hash before replacement. It restores
+the original service on failure as well as success. Do not point the old resident-daemon proof
+above at a different installed binary.
+
+The private Semantic Kernel governance compatibility suite recorded **10 passed, 0 failed** in
+`private/enterprise-proof/SemanticKernelGovernance/TestResults/rare-a2a-sk-governance.trx`, after
+a zero-warning build. This checks compatibility of the private adapter; it does not establish a
+Corporate distribution or remove the commercial licensing and dependency gates.
+
+The 2026-10-17 full managed suite recorded **1,083 passed, 3 failed, 6 skipped** out of 1,092 in
+`tests/MissionController.Tests/TestResults/rare-break-full-20261017.trx` (3m7s). The failures were the
+three gates below. Four model-request tests and two opt-in published proofs were skipped; the
+new published authority proof was run separately and passed. Native component tests recorded
+**97 passed, 0 failed, 10 ignored** out of 107; ignored privileged checks are not runtime proof.
+The complete solution built with zero warnings/errors on 2026-10-17. The local A2A, RARE sensor,
+receipt and archive regressions passed 55/55 in `rare-break-component-20261017.trx`.
+
+Current-definition live-model recordings for `source-consumer-catalog`, `source-consumer-reviews`
+and `source-consumer-offers` remain unproven. The earlier nine-template recording permission does
+not authorize these three transfers. Windows DNS cache observation still needs elevation, and
+the generated Field Guide must actually be republished before its publication record can change.
+The historical failures below describe their dated runs, not the current release gate inventory.
+
+The attempted three-template Anthropic run on 2026-10-17 was refused by automatic approval review
+before execution because it requires separate explicit permission. The Windows elevation launch
+was canceled, so no new elevated DNS result exists. Neither event is a passed test.
+
+## Historical verification recorded 2026-10-14
 
 The [packaged proof](../native/splat-agent/evidence/a2a-bridge-probe.json) recorded **52/52 passing
 checks** at 20:43 UTC. It exercised the published Community host with SHA-256

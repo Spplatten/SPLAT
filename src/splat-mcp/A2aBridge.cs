@@ -4,6 +4,8 @@ using System.Text.Json;
 using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Catalog;
+using MissionController.Core.Models;
+using MissionController.Infrastructure.Linux;
 
 namespace SplatMcp;
 
@@ -14,6 +16,7 @@ internal sealed class A2aBridge : IAsyncDisposable
         internal A2aTaskRecord Record = record;
         internal readonly CancellationTokenSource Cancellation = new();
         internal Task Execution = Task.CompletedTask;
+        internal bool Drained;
     }
 
     private readonly A2aConfiguration _config;
@@ -24,13 +27,17 @@ internal sealed class A2aBridge : IAsyncDisposable
     private readonly SemaphoreSlim _gate = new(1);
     private readonly Dictionary<string, Work> _tasks = new(StringComparer.Ordinal);
     private readonly HashSet<string> _skills;
+    private readonly AgentManifestApproval _approval;
+    private readonly A2aDelegation _delegation;
+    private readonly ITemplatePolicyCompiler _compiler;
     private int _running;
     private bool _stopping;
     private bool _faulted;
     private int _disposed;
 
     internal A2aBridge(A2aConfiguration config, AgentManifestApproval approval, SqliteStorageContext context,
-        IAuditLedger ledger, Func<A2aCaller, McpServerHandler> handler, IIncidentRevocationManager? revocations = null)
+        IAuditLedger ledger, Func<A2aCaller, McpServerHandler> handler, IIncidentRevocationManager? revocations = null,
+        ITemplatePolicyCompiler? compiler = null)
     {
         // Copy the authority snapshot: a caller holding the original arrays cannot widen this server.
         _config = JsonSerializer.Deserialize<A2aConfiguration>(JsonSerializer.Serialize(config, A2aConfiguration.Json), A2aConfiguration.Json)!;
@@ -42,6 +49,9 @@ internal sealed class A2aBridge : IAsyncDisposable
         if (_config.Callers.Any(c => c.Skills.Any(s => !_skills.Contains(s))))
             throw new InvalidOperationException("A caller's skill grant exceeds the approved manifest.");
         _store = new A2aTaskStore(context, config.AgentId, config.AgentVersion);
+        _approval = approval;
+        _delegation = new A2aDelegation(_config);
+        _compiler = compiler ?? new TemplatePolicyCompiler();
         _ledger = ledger; _handler = handler; _revocations = revocations;
         foreach (var saved in _store.Load(config.MaxTasks))
         {
@@ -88,6 +98,7 @@ internal sealed class A2aBridge : IAsyncDisposable
         // The HTTP boundary supplies this exact configuration object. Never accept an equivalent
         // caller record constructed from message fields, including a client-supplied tenant.
         await CheckCallerAsync(caller, ct);
+        if (method == "splat/DelegateTask") return await DelegateAsync(caller, parameters, ct);
         if (method == "SendMessage") return new { task = await SendAsync(caller, parameters, ct) };
         if (method == "GetTask" || method == "CancelTask")
         {
@@ -177,7 +188,7 @@ internal sealed class A2aBridge : IAsyncDisposable
             && (mediaType.ValueKind != JsonValueKind.String || mediaType.GetString() != "application/json"))
             throw new A2aException(-32005, "The skill request must be application/json.");
         if (!parts[0].TryGetProperty("data", out var data)) throw new A2aException(-32005, "A structured skill request is required.");
-        A2aJson.Fields(data, "skill", "parameters", "parentTaskId");
+        A2aJson.Fields(data, "skill", "parameters", "parentTaskId", "delegationToken");
         string skill = A2aJson.Text(data, "skill");
         if (!caller.Skills.Contains(skill, StringComparer.Ordinal))
         {
@@ -190,6 +201,9 @@ internal sealed class A2aBridge : IAsyncDisposable
             throw new A2aException(-32602, "Skill parameters must be declared string values.");
         string? parent = data.TryGetProperty("parentTaskId", out _) ? A2aJson.Text(data, "parentTaskId") : null;
         if (parent is not null && !A2aJson.Identifier(parent)) throw new A2aException(-32602, "Invalid parentTaskId.");
+        string? token = data.TryGetProperty("delegationToken", out _) ? A2aJson.Text(data, "delegationToken") : null;
+        if ((parent is not null || caller.RequireDelegation) && token is null)
+            throw new A2aException(-32000, "A signed delegation is required; parentTaskId is not authority.", 403);
         bool immediate = false;
         if (parameters.TryGetProperty("configuration", out var configuration))
         {
@@ -220,12 +234,39 @@ internal sealed class A2aBridge : IAsyncDisposable
                 if (_stopping || _faulted) throw new A2aException(-32603, "Task execution is unavailable.", 503);
                 if (_running >= _config.MaxConcurrentTasks || _tasks.Count >= _config.MaxTasks)
                     throw new A2aException(-32000, "Task capacity is exhausted; no execution was started.", 429);
-                var record = new A2aTaskRecord(Guid.NewGuid().ToString("N"), Guid.NewGuid().ToString("N"),
+                var owned = _tasks.Values.Where(w => w.Record.TenantId == caller.TenantId && w.Record.CallerId == caller.CallerId).ToArray();
+                int runningLimit = caller.MaxConcurrentTasks ?? Math.Max(1, _config.MaxConcurrentTasks / _config.Callers.Length);
+                int retainedLimit = caller.MaxRetainedTasks ?? Math.Max(1, _config.MaxTasks / _config.Callers.Length);
+                if (owned.Length >= retainedLimit || owned.Count(w => !Terminal(w.Record.State)) >= runningLimit)
+                    throw new A2aException(-32000, "This caller's task capacity is exhausted.", 429);
+                var grant = token is null ? null : _delegation.Verify(token, caller, skill);
+                if (grant is not null && parent is not null && parent != grant.ParentTaskId)
+                    throw new A2aException(-32000, "parentTaskId does not match the signed delegation.", 403);
+                if (grant is not null) await CheckIssuerAsync(grant.Issuer, grant.IssuerVersion, ct);
+                var stage = _approval.Manifest.Project.Stages.Single(s => s.StageId == skill);
+                var template = _approval.Manifest.Templates.Single(t => t.TemplateId == stage.TemplateId);
+                var taskId = Guid.NewGuid();
+                var lease = _compiler.CompileTemplatePolicy(template, taskId,
+                    $"{LinuxLeaseSubstrate.DefaultMissionsRoot}/{taskId:N}", (uint)template.Tool.TimeoutSeconds);
+                var expires = DateTimeOffset.UtcNow.AddSeconds(lease.LeaseDurationSeconds);
+                if (expires > caller.ExpiresUtc) expires = caller.ExpiresUtc;
+                if (grant is not null && expires > grant.ExpiresUtc) expires = grant.ExpiresUtc;
+                try
+                {
+                    lease = (grant?.Authority ?? LeaseAuthority.From(lease)).Narrow(lease, template.Tool.ExecutablePath, expires);
+                }
+                catch (InvalidOperationException) { throw new A2aException(-32000, "Delegation cannot authorize the requested lease.", 403); }
+                lease = lease with { RequireEnforcing = true, ExecutionContext = new(_config.AgentId,
+                    _config.AgentVersion, caller.TenantId, caller.CallerId, taskId.ToString("N"),
+                    grant?.ParentTaskId, token is null ? null : A2aDelegation.Digest(token), grant?.Issuer, grant?.IssuerVersion) };
+                var record = new A2aTaskRecord(taskId.ToString("N"), Guid.NewGuid().ToString("N"),
                     caller.TenantId, caller.CallerId, messageId, fingerprint, skill, parent,
-                    "TASK_STATE_WORKING", DateTimeOffset.UtcNow);
+                    "TASK_STATE_WORKING", DateTimeOffset.UtcNow, AdmittedLease: lease, AuthorityExpiresUtc: expires,
+                    DelegationNonce: grant?.Nonce, DelegationDepth: grant?.Depth ?? 0);
                 await Audit(caller, record, "A2A_TASK_AUTHORIZED", ct);
-                _store.Save(record, insert: true);
+                _store.Save(record, insert: true, delegationIssuer: grant is null ? null : grant.Issuer + "@" + grant.IssuerVersion);
                 work = new Work(record);
+                work.Cancellation.CancelAfter(expires - DateTimeOffset.UtcNow);
                 _tasks.Add(record.Id, work);
                 _running++;
                 work.Execution = Task.Run(() => ExecuteAsync(work, caller, arguments));
@@ -243,11 +284,16 @@ internal sealed class A2aBridge : IAsyncDisposable
         JsonElement? result = null;
         string state = "TASK_STATE_FAILED";
         string? failure = null;
+        using var monitoring = new CancellationTokenSource();
+        Task monitor = MonitorAuthorityAsync(work, caller, monitoring.Token);
         try
         {
             work.Cancellation.Token.ThrowIfCancellationRequested();
             await CheckCallerAsync(caller, work.Cancellation.Token);
-            var response = await _handler(caller).ProcessMessageAsync(new McpJsonRpcMessage
+            var handler = _handler(caller);
+            handler.BindAgentInvocation(work.Record.AdmittedLease!, result =>
+                work.Drained = result.Lease?.WorkloadDrained == true);
+            var response = await handler.ProcessMessageAsync(new McpJsonRpcMessage
             {
                 Id = JsonSerializer.SerializeToElement(work.Record.Id), Method = "tools/call",
                 Params = JsonSerializer.SerializeToElement(new { name = work.Record.Skill,
@@ -267,14 +313,19 @@ internal sealed class A2aBridge : IAsyncDisposable
         }
         catch (OperationCanceledException) { failure = "Task cancellation requested; workload termination is unconfirmed."; }
         catch (Exception) { failure = "Execution failed; consult the operator's audit ledger."; }
+        await monitoring.CancelAsync();
+        await monitor;
         await _gate.WaitAsync();
         try
         {
+            work.Record = work.Record with { WorkloadTerminationConfirmed = work.Drained };
             if (work.Record.CancellationRequested && state != "TASK_STATE_COMPLETED")
             {
                 state = "TASK_STATE_CANCELED";
-                failure = "A2A task canceled; workload termination is unconfirmed.";
-                result = null;
+                failure = work.Record.WorkloadTerminationConfirmed ? "A2A task canceled; signed receipt confirms the workload drained."
+                    : "A2A task canceled; workload termination is unconfirmed.";
+                // Keep the signed EXIT artifact when available so the caller can verify the drain.
+                if (!work.Record.WorkloadTerminationConfirmed) result = null;
             }
             work.Record = work.Record with { State = state, Result = result, Failure = failure, UpdatedUtc = DateTimeOffset.UtcNow };
             try
@@ -296,7 +347,8 @@ internal sealed class A2aBridge : IAsyncDisposable
         _ledger.AppendLogAsync(Guid.ParseExact(record.Id, "N"), "a2a:" + _config.AgentId, action,
             JsonSerializer.Serialize(new { taskId = record.Id, contextId = record.ContextId, caller.TenantId,
                 caller.CallerId, receiverAgentId = _config.AgentId, contractSha256 = _config.AgentVersion,
-                record.Skill, record.CallerSuppliedParentTaskId, record.State, record.CancellationRequested }),
+                record.Skill, record.CallerSuppliedParentTaskId, record.State, record.CancellationRequested,
+                executionContext = record.AdmittedLease?.ExecutionContext, record.WorkloadTerminationConfirmed }),
             caller.Identity.ToLedgerIdentity(), ct);
 
     private bool Owns(A2aCaller caller, A2aTaskRecord task) => task.TenantId == caller.TenantId
@@ -320,7 +372,8 @@ internal sealed class A2aBridge : IAsyncDisposable
         {
             receiverAgentId = _config.AgentId, contractSha256 = _config.AgentVersion, record.TenantId,
             record.CallerId, record.Skill, record.CallerSuppliedParentTaskId, record.CancellationRequested,
-            workloadTerminationConfirmed = record.CancellationRequested ? (bool?)false : null, failure = record.Failure
+            workloadTerminationConfirmed = record.CancellationRequested ? (bool?)record.WorkloadTerminationConfirmed : null,
+            executionContext = record.AdmittedLease?.ExecutionContext, failure = record.Failure
         } }
     };
     private static bool Terminal(string state) => state is "TASK_STATE_COMPLETED" or "TASK_STATE_FAILED" or "TASK_STATE_CANCELED" or "TASK_STATE_REJECTED";
@@ -348,6 +401,77 @@ internal sealed class A2aBridge : IAsyncDisposable
         finally { _gate.Release(); }
         await Task.WhenAll(executions);
         foreach (var work in _tasks.Values) work.Cancellation.Dispose();
+        _delegation.Dispose();
         _gate.Dispose();
+    }
+
+    private async Task CheckIssuerAsync(string agent, string version, CancellationToken ct)
+    {
+        if (_revocations is not null && (await _revocations.CheckRevocationAsync("a2a-agent:" + agent + "@" + version, ct)).IsRevoked)
+            throw new A2aException(-32000, "Delegating agent has been revoked.", 403);
+    }
+
+    private async Task MonitorAuthorityAsync(Work work, A2aCaller caller, CancellationToken stop)
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(500, stop);
+                try
+                {
+                    await CheckCallerAsync(caller, stop);
+                    if (work.Record.AdmittedLease?.ExecutionContext is { RequestingAgentId: { } issuer,
+                        RequestingContractSha256: { } version }) await CheckIssuerAsync(issuer, version, stop);
+                    if (work.Record.AuthorityExpiresUtc <= DateTimeOffset.UtcNow)
+                        throw new A2aException(-32000, "Task authority expired.", 403);
+                }
+                catch (OperationCanceledException) when (stop.IsCancellationRequested) { return; }
+                catch (Exception)
+                {
+                    await _gate.WaitAsync(stop);
+                    try
+                    {
+                        work.Record = work.Record with { CancellationRequested = true };
+                        work.Cancellation.Cancel();
+                        try { _store.Save(work.Record); }
+                        catch { _faulted = true; }
+                    }
+                    finally { _gate.Release(); }
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+    }
+
+    private async Task<object> DelegateAsync(A2aCaller caller, JsonElement parameters, CancellationToken ct)
+    {
+        A2aJson.Fields(parameters, "parentTaskId", "audience", "audienceVersion", "callerId", "skill");
+        string parent = A2aJson.Text(parameters, "parentTaskId"), audience = A2aJson.Text(parameters, "audience"),
+            version = A2aJson.Text(parameters, "audienceVersion"), recipient = A2aJson.Text(parameters, "callerId"),
+            skill = A2aJson.Text(parameters, "skill");
+        if (!A2aJson.Identifier(audience) || !A2aDelegation.Hash(version) || !A2aJson.Identifier(recipient) || !A2aJson.Identifier(skill))
+            throw new A2aException(-32602, "Invalid delegation audience or skill.");
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var record = Owned(caller, parent).Record;
+            if (record.AdmittedLease is not { } lease || record.AuthorityExpiresUtc is not { } expiry
+                || expiry <= DateTimeOffset.UtcNow.AddSeconds(5) || record.DelegationDepth >= 4 || record.CancellationRequested
+                || record.State is "TASK_STATE_FAILED" or "TASK_STATE_CANCELED")
+                throw new A2aException(-32000, "Parent task has no live delegable authority.", 403);
+            var grant = new A2aDelegationGrant(1, _config.AgentId, _config.AgentVersion, audience, version,
+                caller.TenantId, recipient, skill, record.Id, Guid.NewGuid().ToString("N"), expiry,
+                record.DelegationDepth + 1, LeaseAuthority.From(lease));
+            string token = _delegation.Issue(grant);
+            await _ledger.AppendLogAsync(Guid.ParseExact(record.Id, "N"), "a2a:" + _config.AgentId,
+                "A2A_DELEGATION_ISSUED", JsonSerializer.Serialize(new { parentTaskId = record.Id,
+                    issuer = _config.AgentId, issuerVersion = _config.AgentVersion, audience, audienceVersion = version,
+                    caller.TenantId, recipient, skill, grant.ExpiresUtc, grant.Depth, delegationSha256 = A2aDelegation.Digest(token) }),
+                caller.Identity.ToLedgerIdentity(), ct);
+            return new { delegationToken = token, expiresUtc = expiry };
+        }
+        finally { _gate.Release(); }
     }
 }

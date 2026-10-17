@@ -1,12 +1,15 @@
 using System.Text.Json;
 using MissionController.Infrastructure.Data;
+using MissionController.Core.Interfaces;
 
 namespace SplatMcp;
 
 internal sealed record A2aTaskRecord(string Id, string ContextId, string TenantId, string CallerId,
     string MessageId, string RequestSha256, string Skill, string? CallerSuppliedParentTaskId,
     string State, DateTimeOffset UpdatedUtc, JsonElement? Result = null,
-    bool CancellationRequested = false, string? Failure = null);
+    bool CancellationRequested = false, string? Failure = null, LeaseSpec? AdmittedLease = null,
+    DateTimeOffset? AuthorityExpiresUtc = null, string? DelegationNonce = null, int DelegationDepth = 0,
+    bool WorkloadTerminationConfirmed = false);
 
 internal sealed class A2aTaskStore
 {
@@ -25,6 +28,9 @@ internal sealed class A2aTaskStore
                 TenantId TEXT NOT NULL, CallerId TEXT NOT NULL, MessageId TEXT NOT NULL,
                 RecordJson TEXT NOT NULL, PRIMARY KEY (Receiver, Version, TaskId),
                 UNIQUE (Receiver, Version, TenantId, CallerId, MessageId));
+            CREATE TABLE IF NOT EXISTS A2aDelegationUses (
+                Issuer TEXT NOT NULL, Nonce TEXT NOT NULL, TaskId TEXT NOT NULL,
+                PRIMARY KEY (Issuer, Nonce));
             """;
         command.ExecuteNonQuery();
     }
@@ -45,10 +51,23 @@ internal sealed class A2aTaskStore
         return records;
     }
 
-    internal void Save(A2aTaskRecord task, bool insert = false)
+    internal void Save(A2aTaskRecord task, bool insert = false, string? delegationIssuer = null)
     {
         using var connection = _context.CreateConnection();
+        using var transaction = connection.BeginTransaction();
+        if (insert && task.DelegationNonce is not null)
+        {
+            using var consume = connection.CreateCommand();
+            consume.Transaction = transaction;
+            consume.CommandText = "INSERT OR IGNORE INTO A2aDelegationUses VALUES (@issuer,@nonce,@task)";
+            consume.Parameters.AddWithValue("@issuer", delegationIssuer ?? throw new InvalidOperationException("Delegation issuer required."));
+            consume.Parameters.AddWithValue("@nonce", task.DelegationNonce);
+            consume.Parameters.AddWithValue("@task", task.Id);
+            if (consume.ExecuteNonQuery() != 1)
+                throw new A2aException(-32000, "Delegation was already consumed; retry the original messageId.", 403);
+        }
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = insert
             ? "INSERT INTO A2aTasks VALUES (@receiver,@version,@id,@tenant,@caller,@message,@json)"
             : "UPDATE A2aTasks SET RecordJson=@json WHERE Receiver=@receiver AND Version=@version AND TaskId=@id AND TenantId=@tenant AND CallerId=@caller AND MessageId=@message";
@@ -60,5 +79,6 @@ internal sealed class A2aTaskStore
         command.Parameters.AddWithValue("@message", task.MessageId);
         command.Parameters.AddWithValue("@json", JsonSerializer.Serialize(task, A2aConfiguration.Json));
         if (command.ExecuteNonQuery() != 1) throw new InvalidOperationException("A2A task persistence failed.");
+        transaction.Commit();
     }
 }

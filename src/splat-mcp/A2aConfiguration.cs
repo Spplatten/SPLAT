@@ -9,14 +9,16 @@ using MissionController.Infrastructure.Data.Catalog;
 namespace SplatMcp;
 
 internal sealed record A2aCaller(string TenantId, string CallerId, string TokenSha256,
-    string[] Skills, DateTimeOffset ExpiresUtc)
+    string[] Skills, DateTimeOffset ExpiresUtc, bool RequireDelegation = false,
+    int? MaxConcurrentTasks = null, int? MaxRetainedTasks = null)
 {
     internal OperatorIdentity Identity => new(CallerId, $"a2a:{TenantId}:{CallerId}",
         OperatorAuthenticationMethod.ApiKey, "a2a-https");
 }
 
 internal sealed record A2aConfiguration(int SchemaVersion, string AgentId, string AgentVersion,
-    int Port, string CertificateFile, A2aCaller[] Callers, int MaxConcurrentTasks = 4, int MaxTasks = 512)
+    int Port, string CertificateFile, A2aCaller[] Callers, int MaxConcurrentTasks = 4, int MaxTasks = 512,
+    string? DelegationKeyFile = null, A2aDelegationIssuer[]? DelegationIssuers = null)
 {
     internal const string Extension = "urn:splat:a2a:template-lease:v1";
     internal static readonly JsonSerializerOptions Json = new()
@@ -58,7 +60,11 @@ internal sealed record A2aConfiguration(int SchemaVersion, string AgentId, strin
                 || caller.Skills.Any(s => !A2aJson.Identifier(s))
                 || caller.Skills.Distinct(StringComparer.Ordinal).Count() != caller.Skills.Length)
                 throw new InvalidOperationException("A2A callers need unique identities, unique token hashes, expiry and explicit skills.");
+            if (caller.MaxConcurrentTasks is < 1 || caller.MaxConcurrentTasks > MaxConcurrentTasks
+                || caller.MaxRetainedTasks is < 1 || caller.MaxRetainedTasks > MaxTasks)
+                throw new InvalidOperationException("Per-caller capacity must fit within host capacity.");
         }
+        A2aDelegation.ValidateConfiguration(this);
     }
 
     internal A2aCaller? Authenticate(string authorization)
