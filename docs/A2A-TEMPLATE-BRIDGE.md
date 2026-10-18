@@ -204,22 +204,50 @@ a zero-warning build. This checks compatibility of the private adapter; it does 
 Corporate distribution or remove the commercial licensing and dependency gates.
 
 The 2026-10-17 full managed suite recorded **1,083 passed, 3 failed, 6 skipped** out of 1,092 in
-`tests/MissionController.Tests/TestResults/rare-break-full-20261017.trx` (3m7s). The failures were the
-three gates below. Four model-request tests and two opt-in published proofs were skipped; the
+`tests/MissionController.Tests/TestResults/rare-break-full-20261017.trx` (3m7s). The failures were
+DNS cache observation, missing RARE recordings and Field Guide publication. Four model-request
+tests and two opt-in published proofs were skipped; the
 new published authority proof was run separately and passed. Native component tests recorded
 **97 passed, 0 failed, 10 ignored** out of 107; ignored privileged checks are not runtime proof.
 The complete solution built with zero warnings/errors on 2026-10-17. The local A2A, RARE sensor,
 receipt and archive regressions passed 55/55 in `rare-break-component-20261017.trx`.
 
-Current-definition live-model recordings for `source-consumer-catalog`, `source-consumer-reviews`
-and `source-consumer-offers` remain unproven. The earlier nine-template recording permission does
-not authorize these three transfers. Windows DNS cache observation still needs elevation, and
-the generated Field Guide must actually be republished before its publication record can change.
-The historical failures below describe their dated runs, not the current release gate inventory.
-
 The attempted three-template Anthropic run on 2026-10-17 was refused by automatic approval review
 before execution because it requires separate explicit permission. The Windows elevation launch
 was canceled, so no new elevated DNS result exists. Neither event is a passed test.
+
+## RARE model recordings verified 2026-10-18
+
+The operator explicitly authorized only `source-consumer-catalog`, `source-consumer-reviews` and
+`source-consumer-offers` to send their filtered public Apple data and routine mission metadata to
+`api.anthropic.com`. The scoped corpus test passed in `rare-live-corpus-20261018.trx` (1m59s),
+recording one actual `claude-haiku-4-5` answer per template through the real Linux lease and replaying
+each against its live verdict. The reviews and offers used app ID `570060128`.
+
+The reviewed [fixtures](../tests/MissionController.Tests/Fixtures/Missions/) retain mission IDs
+`971e77f1-fcfd-4e3b-90dc-998b1133b9ea` (catalog), `e80517a6-6a55-4e66-818e-49b4309f606b`
+(offers) and `3d531b79-2e17-4bde-92ce-5c1c878656bd` (reviews), with their genuine template/prompt
+hashes, model answers and verdicts. One review title's personal first name and school name were
+replaced with same-width synthetic text; neither appeared in the answer. No expectations were
+blessed. Coverage, privacy, offline replay and corpus adversarial gates passed **9/9** in
+`tests/MissionController.Tests/TestResults/rare-corpus-validation-20261018.trx`.
+
+The test project built with zero warnings/errors. With all provider-consent flags disabled, the
+full managed suite recorded **1,084 passed, 2 failed, 6 skipped** out of 1,092 in
+`tests/MissionController.Tests/TestResults/rare-corpus-full-20261018.trx` (2m46s). The two failures
+are unchanged: DNS cache observation was unavailable and the published Field Guide is stale.
+Four provider tests and two opt-in published proofs were skipped; skips are not passes.
+
+This closes current-definition recording coverage for the 61 shipped templates. It does not
+establish factual accuracy: the accepted catalog answer reports 16 topics/144 apps against a
+capture of 17 cohorts/157 apps; the review answer miscounts ratings and misattributes citations;
+the offer answer infers billing variants without displayed terms and omits required offer citations.
+Each fixture's note preserves these limitations. This recording pass does not establish live
+prompt-injection resistance or approve the analyses for RARE publication.
+
+Windows DNS cache observation still needs elevation, and the generated Field Guide must actually
+be republished before its publication record can change. The earlier failed runs remain historical
+evidence; the three-recording permission does not authorize other templates or host telemetry.
 
 ## Historical verification recorded 2026-10-14
 

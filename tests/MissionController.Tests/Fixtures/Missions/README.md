@@ -59,6 +59,22 @@ errors, including an invented partial-month flag and a response-format conflict.
 gates holds the observed pipeline verdicts; it does not establish diagnostic accuracy, guarantee
 compliance with every template-specific format, or cover other host conditions.
 
+On 2026-10-18, separate explicit permission covered only the three RARE Linux templates:
+`source-consumer-catalog`, `source-consumer-reviews` and `source-consumer-offers`. The scoped live
+run recorded one real Anthropic `claude-haiku-4-5` answer for each, then replayed every live verdict.
+The three reviewed files retain their genuine mission IDs and template/prompt hashes. One review
+title's personal first name and school name were replaced with same-width synthetic text; neither
+occurred in the answer. All model answers and verdicts remain unchanged, and no expectations were
+blessed. Coverage, privacy, replay and corpus adversarial checks passed 9/9 in
+`rare-corpus-validation-20261018.trx`.
+
+Their notes retain observed model errors: the catalog answer miscounts 17 cohorts/157 apps as
+16 topics/144 apps; the reviews answer miscounts rating groups and misattributes review IDs; the
+offers answer infers billing variants and omits required exact offer citations. These are genuine
+accepted pipeline outputs, not validated RARE publication drafts or evidence of resistance to a
+new prompt injection. The original recordings remain private; the promoted review IDs are public
+and retained for grounding, so title redaction is not a claim of anonymity.
+
 The catalog requires an explicit `Reasoned(...)` or `Plain(rationale, ...)` choice for every
 prompt. The plain rationale is stored beside the template in source. Changing that choice does
 not make an old recording evidence that the model obeyed the new prompt.

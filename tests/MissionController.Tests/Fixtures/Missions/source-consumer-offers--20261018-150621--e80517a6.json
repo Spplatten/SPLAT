@@ -1,0 +1,64 @@
+{
+  "Schema": 1,
+  "MissionId": "e80517a6-6a55-4e66-818e-49b4309f606b",
+  "RecordedAtUtc": "2026-10-18T15:06:21.0682642Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "TemplateId": "source-consumer-offers",
+  "TemplateName": "Consumer Paid Offers for RARE",
+  "TemplateSha256": "sha256:362499c66c0dcf33870a8e453ca2f87e53e8a0ead1339975618388e6527352b6",
+  "Parameters": {
+    "AppId": "570060128"
+  },
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "3dcaea06683be46cdf3720a26df7f4e986b6965e5b71bd59955608f1b8e1eef0",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "{\"schema_version\":1,\"capture_id\":\"afd911a0-93a8-4356-b0d7-ae6b5ac4072b\",\"profile\":\"consumer-evidence-v1\",\"app_id\":\"570060128\",\"storefront\":\"us\",\"kind\":\"offers\",\"source\":\"apple_store_listing\",\"source_url\":\"https://apps.apple.com/us/app/duolingo-learn-languages/id570060128\",\"observed_at\":\"2026-10-18T15:06:14.334557+00:00\",\"listing_name\":\"Duolingo: Learn Languages\",\"offers\":[{\"label\":\"Barrel of Gems (1200)\",\"price_display\":\"$4.99\"},{\"label\":\"Super Duolingo\",\"price_display\":\"$9.99\"},{\"label\":\"Cart of Gems (3000)\",\"price_display\":\"$9.99\"},{\"label\":\"Super Duolingo\",\"price_display\":\"$83.99\"},{\"label\":\"Cart of Gems (6500)\",\"price_display\":\"$19.99\"},{\"label\":\"Super Duolingo\",\"price_display\":\"$12.99\"},{\"label\":\"Super Duolingo\",\"price_display\":\"$119.99\"},{\"label\":\"Chest of Gems\",\"price_display\":\"$0.99\"},{\"label\":\"Super Duolingo\",\"price_display\":\"$95.99\"},{\"label\":\"Chest of Gems (1200)\",\"price_display\":\"$4.99\"}]}\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "lease:enforcing",
+      "cgroup:/sys/fs/cgroup/splat_leases/mission_e80517a6-6a55-4e66-818e-49b4309f606b",
+      "jail:mount-namespace",
+      "workload:uid=200000",
+      "workspace:/var/lib/splat/missions/e80517a66a554e66818e49b4309f606b (created by the daemon)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# Analysis\n\nThe Apple App Store listing for Duolingo (ID 570060128) displays a monetization structure with two product categories: in-game currency (\"Gems\" in various quantities) and a subscription product (\"Super Duolingo\"). The observed pricing shows Super Duolingo at multiple distinct price points ($9.99, $83.99, $12.99, $119.99, $95.99), which is consistent with Apple's support for different billing periods (monthly, annual, etc.), though the specific periods are not disclosed in this listing view. Gem purchases range from $0.99 to $19.99. The listing does not disclose billing periods, renewal terms, trial eligibility, taxes, or whether any features require payment; these gaps are expected in a partial storefront capture and should be confirmed by in-app inspection or App Store terms before competitive analysis.\n\n```json\n{\n  \"status\": \"Healthy\",\n  \"headline\": \"Duolingo listing displays dual monetization: in-app gems and Super Duolingo subscription at multiple price tiers\",\n  \"findings\": [\n    \"Ten offers observed: Gem packs priced $0.99–$19.99 (quantities 1200–6500); Super Duolingo listed 5 times at $9.99, $12.99, $83.99, $95.99, $119.99\",\n    \"Duplicate labels detected: 'Super Duolingo' appears 5 times and 'Chest of Gems' twice, indicating multiple billing periods or regional variants not disambiguated in this view\",\n    \"Source listing is partial: billing period, renewal terms, trial status, and tax treatment are not displayed and remain UNKNOWN\",\n    \"Capture timestamp 2026-10-18T15:06:14Z indicates current snapshot; all prices are advertised, not purchase confirmations\"\n  ],\n  \"recommendedActions\": [\n    \"Inspect in-app subscription detail or Apple App Store terms to confirm billing periods (monthly/annual) corresponding to each Super Duolingo price point\",\n    \"Verify whether any free trial or introductory pricing applies to Super Duolingo tiers\",\n    \"Check whether Gems are required for any paid features or if free play remains fully accessible without purchase\"\n  ]\n}\n```",
+      "LatencyMs": 6668,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9875
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "783e58e2ee9ad1c6dc75e372b0a21f9805f1f3d257d06c57dcfd5b2f0b64447a",
+    "Status": "Healthy",
+    "Headline": "Duolingo listing displays dual monetization: in-app gems and Super Duolingo subscription at multiple price tiers",
+    "Findings": [
+      "✓ Ten offers observed: Gem packs priced $0.99–$19.99 (quantities 1200–6500); Super Duolingo listed 5 times at $9.99, $12.99, $83.99, $95.99, $119.99",
+      "✓ Duplicate labels detected: 'Super Duolingo' appears 5 times and 'Chest of Gems' twice, indicating multiple billing periods or regional variants not disambiguated in this view",
+      "✓ Source listing is partial: billing period, renewal terms, trial status, and tax treatment are not displayed and remain UNKNOWN",
+      "✓ Capture timestamp 2026-10-18T15:06:14Z indicates current snapshot; all prices are advertised, not purchase confirmations"
+    ],
+    "RecommendedActions": [
+      "Inspect in-app subscription detail or Apple App Store terms to confirm billing periods (monthly/annual) corresponding to each Super Duolingo price point",
+      "Verify whether any free trial or introductory pricing applies to Super Duolingo tiers",
+      "Check whether Gems are required for any paid features or if free play remains fully accessible without purchase"
+    ],
+    "Grounded": 2,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 2
+  },
+  "Note": "Recorded 2026-10-18 with explicit approval for the three RARE templates only, using the real Linux lease and Anthropic claude-haiku-4-5. Sensor and the single model answer were reviewed; no identity or credential redaction was needed. Genuine mission identity, template/prompt hashes, sensor, answer and verdict are retained. Ten public displayed offers were captured for app 570060128. The accepted answer infers subscription billing or regional variants without displayed evidence, omits the required source URL and one-based offer citations, and conflates the distinct labels Chest of Gems and Chest of Gems (1200). These are retained model errors; acceptance and replay do not establish purchase terms, factual accuracy or publication approval."
+}
