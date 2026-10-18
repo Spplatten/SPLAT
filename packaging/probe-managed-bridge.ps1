@@ -78,9 +78,12 @@ try {
         $health = Invoke-Bridge @($first)
         if ($health.Exit -ne 0) { throw $health.Error }
         $response = $health.Output.Trim() | ConvertFrom-Json
+        # The reply is recorded before it is read: an error reply used to throw "Cannot index into a
+        # null array" here and leave an INCOMPLETE record that never said what the bridge answered.
+        $result.Responses += $response
+        if (-not $response.result.content) { throw "The bridge answered get_substrate_health without a result: $($health.Output.Trim())" }
         $status = $response.result.content[0].text | ConvertFrom-Json
         $result.Checks.OwnerPositiveControl = $status.Authenticated -and $status.Enforcing
-        $result.Responses += $response
         # This exercises the exact root/token bypass from row 2.4 under the same caller SID that
         # subsequently obtains a governed lease. No token content is retained on accidental access.
         $direct = & (Join-Path $env:SystemRoot 'System32\wsl.exe') -d $config.Distribution -u root -e /bin/cat /etc/splat/agent.token 2>&1 | Out-String
