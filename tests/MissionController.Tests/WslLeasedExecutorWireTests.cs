@@ -885,7 +885,7 @@ public class WslLeasedExecutorWireTests
             byte[]? clientNonce = StandInAgent.ClientNonce(await StandInAgent.ReadLineAsync(stream, raw, default));
             byte[] key = Encoding.UTF8.GetBytes(TestToken);
             byte[] serverNonce = RandomNumberGenerator.GetBytes(WslAgentSession.ProofBytes);
-            await StandInAgent.WriteLineAsync(stream, StandInAgent.Challenge(serverNonce, WslAgentSession.DaemonProof(key, clientNonce!, serverNonce)), default);
+            await StandInAgent.WriteLineAsync(stream, StandInAgent.Challenge(serverNonce, WslAgentSession.DaemonProof(key, clientNonce!, serverNonce, provesFrames: true), framesProven: true), default);
             string? frame = await StandInAgent.ReadLineAsync(stream, raw, default);
             barrier.SetResult(true);
             try

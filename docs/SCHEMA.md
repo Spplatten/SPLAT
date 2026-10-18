@@ -125,8 +125,9 @@ took the daemon's port learns one nonce and nothing more.
 asks for every frame the daemon answers with to be proven; a daemon that agrees says so with the
 second and proves its `CHALLENGE` under the `daemon+frames` label below, so the agreement is in the
 proof and a relay that stripped the field would leave a `CHALLENGE` the bridge refuses. A daemon that
-predates the field ignores it, proves its `CHALLENGE` under the plain label, and answers unwrapped;
-the bridge accepts that and reports `FramesProven` as false, which `doctor` prints.
+predates the field ignores it, proves its `CHALLENGE` under the plain label, and answers unwrapped.
+Since 2026-10-15 the bridge refuses that answer: the `HELLO` is unproven, so a relay that stripped
+`proveFrames` from it draws the same honest plain-label `CHALLENGE` from a current daemon.
 
 ### Proofs
 
