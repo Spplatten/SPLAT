@@ -213,7 +213,28 @@ public partial class McpServerHandler
         }
         catch (Exception ex)
         {
-            return CreateErrorResponse(request.Id, -32603, Scrub($"Internal server error: {ex.Message}"));
+            RecordInternalError(ex);
+            // The type is named because an empty or scrubbed message otherwise leaves the caller nothing.
+            // The first managed gate run read "Internal server error: " and no more (2026-10-18).
+            return CreateErrorResponse(request.Id, -32603, Scrub($"Internal server error ({ex.GetType().Name}): {ex.Message}"));
+        }
+    }
+
+    /// <summary>
+    /// Keeps the whole failure for whoever administers this host, in the data root of the account the
+    /// server runs as; for the managed service that is its private state directory. The message is
+    /// scrubbed like everything else this server writes, and the stack trace carries code locations,
+    /// not data. A log that cannot be written must not turn one failure into two.
+    /// </summary>
+    private void RecordInternalError(Exception ex)
+    {
+        try
+        {
+            File.AppendAllText(Path.Combine(SplatDataRoot.Current.Root, "internal-errors.log"),
+                $"{DateTimeOffset.UtcNow:o} {ex.GetType().FullName}: {Scrub(ex.Message)}{Environment.NewLine}{ex.StackTrace}{Environment.NewLine}");
+        }
+        catch (Exception logFailure) when (logFailure is IOException or UnauthorizedAccessException)
+        {
         }
     }
 
