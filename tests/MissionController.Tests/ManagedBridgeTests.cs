@@ -112,6 +112,32 @@ public sealed class ManagedBridgeTests
         Assert.Equal((PipeAccessRights)0, admitted.PipeAccessRights & PipeAccessRights.ChangePermissions);
     }
 
+    /// <summary>
+    /// An admitted operator holds only ClientRights on the bridge pipe, so a pipe that grants this account
+    /// nothing else must still open. Until 2026-10-18 it did not. CreateFile adds FILE_READ_ATTRIBUTES to
+    /// every open, ClientRights lacked it, and the first live gate run refused the admitted operator. The
+    /// service's own account, which holds full control, was never affected.
+    /// </summary>
+    [Fact]
+    public async Task AnOperatorHoldingOnlyClientRightsCanOpenThePipe()
+    {
+        var self = WindowsIdentity.GetCurrent().User!;
+        var security = new PipeSecurity();
+        security.SetAccessRuleProtection(true, false);
+        security.SetOwner(self);
+        security.AddAccessRule(new PipeAccessRule(self, ManagedBridgeHost.ClientRights, AccessControlType.Allow));
+        string name = "splat-test-" + Guid.NewGuid().ToString("N");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var server = NamedPipeServerStreamAcl.Create(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 4096, 4096, security);
+        var accept = server.WaitForConnectionAsync(cancellation.Token);
+        using var client = new NamedPipeClientStream(".", name, ManagedBridgeHost.ClientRights, PipeOptions.Asynchronous,
+            TokenImpersonationLevel.Identification, HandleInheritability.None);
+        await client.ConnectAsync(5000, cancellation.Token);
+        await accept;
+        Assert.True(client.IsConnected);
+    }
+
     [Fact]
     public async Task CounterfeitServerReceivesNoRequestOrHandshakeBytes()
     {

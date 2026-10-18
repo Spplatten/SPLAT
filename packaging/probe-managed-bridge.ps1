@@ -63,9 +63,11 @@ try {
         $result.Checks.OwnerControlPassed = $config.Verdict -eq 'PASS' -and [bool]$config.PipeName -and
             $config.CallerSid -ne $identity.User.Value -and $ownerAge -ge [TimeSpan]::Zero -and $ownerAge -lt [TimeSpan]::FromHours(1)
         # ACCESS_DENIED from CreateFile means the pipe exists and its ACL refused this SID. A stopped
-        # service or an absent pipe ends in a timeout instead, which is not a denial.
+        # service or an absent pipe ends in a timeout instead, which is not a denial. The rights are the
+        # client's own (ManagedBridgeClient.ClientRights). Before ReadAttributes joined them, an admitted
+        # SID was refused too, so this denial proved nothing.
         $client = [IO.Pipes.NamedPipeClientStream]::new('.', $config.PipeName,
-            [IO.Pipes.PipeAccessRights]'ReadData, WriteData, ReadPermissions, Synchronize', [IO.Pipes.PipeOptions]::None,
+            [IO.Pipes.PipeAccessRights]'ReadData, WriteData, ReadAttributes, ReadPermissions, Synchronize', [IO.Pipes.PipeOptions]::None,
             [Security.Principal.TokenImpersonationLevel]::Identification, [IO.HandleInheritability]::None)
         $aclDenied = $false
         try { $client.Connect(3000) } catch [UnauthorizedAccessException] { $aclDenied = $true } catch { } finally { $client.Dispose() }
