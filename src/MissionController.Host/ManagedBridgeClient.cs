@@ -12,8 +12,13 @@ namespace MissionController.Host;
 public sealed class ManagedBridgeClient(ManagedBridgeConfiguration configuration) : ILeasedExecutor
 {
     public const string ConfigurationEnvironmentVariable = "SPLAT_MANAGED_CONFIGURATION";
+    // What the pipe grants an admitted operator, and what the client asks for. ReadAttributes is in it
+    // because CreateFile adds FILE_READ_ATTRIBUTES to every open. Without it every admitted operator was
+    // refused "Access to the path is denied" before the owner check ran (2026-10-18). Never
+    // WriteAttributes or CreateNewInstance: those would let an operator change pipe state or host a
+    // counterfeit server instance.
     public const PipeAccessRights ClientRights = PipeAccessRights.ReadData | PipeAccessRights.WriteData |
-        PipeAccessRights.ReadPermissions | PipeAccessRights.Synchronize;
+        PipeAccessRights.ReadAttributes | PipeAccessRights.ReadPermissions | PipeAccessRights.Synchronize;
     private const int MaxRequestChars = 1024 * 1024;
     // Two bounded process captures may expand sixfold when JSON escapes control characters.
     private const int MaxResponseBytes = 64 * 1024 * 1024;
