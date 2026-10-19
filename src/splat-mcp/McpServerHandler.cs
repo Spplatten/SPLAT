@@ -101,6 +101,12 @@ public partial class McpServerHandler
     /// <summary>The endpoints a run_command lease may name. See <see cref="McpEgressPolicy"/>.</summary>
     private readonly McpEgressPolicy _egressPolicy;
 
+    /// <summary>
+    /// Where <see cref="RecordInternalError"/> keeps failures; null keeps none. The entry point names it,
+    /// so a test that provokes a failure never writes into the data root of whoever runs the suite.
+    /// </summary>
+    private readonly string? _internalErrorLog;
+
     public McpServerHandler(
         ILeasedExecutor leasedExecutor,
         ITemplatePolicyCompiler policyCompiler,
@@ -121,8 +127,10 @@ public partial class McpServerHandler
         IIncidentRevocationManager? revocationManager = null,
         RunRecordLedgerVerifier? recordVerifier = null,
         ICredentialSanitizer? credentialSanitizer = null,
-        IDataLossPreventionSanitizer? dlpSanitizer = null)
+        IDataLossPreventionSanitizer? dlpSanitizer = null,
+        string? internalErrorLog = null)
     {
+        _internalErrorLog = internalErrorLog;
         _runRecords = runRecords;
         _recordVerifier = recordVerifier;
         _leasedExecutor = leasedExecutor ?? throw new ArgumentNullException(nameof(leasedExecutor));
@@ -221,17 +229,19 @@ public partial class McpServerHandler
     }
 
     /// <summary>
-    /// Keeps the whole failure for whoever administers this host, in the data root of the account the
-    /// server runs as; for the managed service that is its private state directory. The message is
-    /// scrubbed like everything else this server writes, and the stack trace carries code locations,
-    /// not data. A log that cannot be written must not turn one failure into two.
+    /// Keeps the whole failure, inner exceptions included, for whoever administers this host, in the log
+    /// the entry point named: the data root of the account the server runs as, which for the managed
+    /// service is its private state directory. It is scrubbed like everything else this server writes.
+    /// A log that cannot be written must not turn one failure into two, and one past a mebibyte takes no
+    /// more: the first failures say what broke, and an admitted caller repeating one must not fill the disk.
     /// </summary>
-    private void RecordInternalError(Exception ex)
+    internal void RecordInternalError(Exception ex)
     {
+        if (_internalErrorLog is null) return;
         try
         {
-            File.AppendAllText(Path.Combine(SplatDataRoot.Current.Root, "internal-errors.log"),
-                $"{DateTimeOffset.UtcNow:o} {ex.GetType().FullName}: {Scrub(ex.Message)}{Environment.NewLine}{ex.StackTrace}{Environment.NewLine}");
+            if (new FileInfo(_internalErrorLog) is { Exists: true, Length: > 1024 * 1024 }) return;
+            File.AppendAllText(_internalErrorLog, $"{DateTimeOffset.UtcNow:o} {Scrub(ex.ToString())}{Environment.NewLine}");
         }
         catch (Exception logFailure) when (logFailure is IOException or UnauthorizedAccessException)
         {
