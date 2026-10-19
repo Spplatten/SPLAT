@@ -281,7 +281,9 @@ public static class Program
             // not merely by a holder of the key the bundle carries with it.
             recordVerifier: new RunRecordLedgerVerifier(auditLedger, merkleEngine, runRecordSigner),
             credentialSanitizer: credSanitizer,
-            dlpSanitizer: dlpSanitizer);
+            dlpSanitizer: dlpSanitizer,
+            // The managed service's data root is its private state directory, readable by administrators.
+            internalErrorLog: Path.Combine(SplatDataRoot.Current.Root, "internal-errors.log"));
 
         using (runRecordSigner)
         {

@@ -20,23 +20,33 @@ public sealed class ManagedBridgeTests
         JsonRpc = "2.0", Id = JsonSerializer.SerializeToElement(1), Method = "tools/call",
         Params = JsonSerializer.SerializeToElement(new { name = tool, arguments })
     };
-    private static (McpServerHandler Handler, ManagedPipeIdentity Identity, Executor Executor, Ledger Ledger) Host(McpEgressPolicy? egress = null)
+    private static (McpServerHandler Handler, ManagedPipeIdentity Identity, Executor Executor, Ledger Ledger) Host(
+        McpEgressPolicy? egress = null, string? internalErrorLog = null)
     {
         var identity = new ManagedPipeIdentity();
         var ledger = new Ledger();
         var executor = new Executor(ledger);
-        return (new McpServerHandler(executor, new TemplatePolicyCompiler(), ledger, identityProvider: identity, egressPolicy: egress), identity, executor, ledger);
+        return (new McpServerHandler(executor, new TemplatePolicyCompiler(), ledger, identityProvider: identity, egressPolicy: egress,
+            internalErrorLog: internalErrorLog), identity, executor, ledger);
     }
 
     [Fact]
     public async Task AdmissionFailurePreventsExecutionAndDoesNotDisclosePrivatePath()
     {
-        var host = Host(); host.Identity.Set(Caller); host.Ledger.Fail = true;
-        var response = await ManagedBridgeHost.DispatchAsync(Request("run_command", new { command = "/bin/echo", args = new[] { "hi" } }),
-            host.Handler, host.Ledger, host.Identity, default);
-        Assert.Equal(-32001, response.Error?.Code);
-        Assert.DoesNotContain("private-path", response.Error!.Message);
-        Assert.Equal(0, host.Executor.Calls);
+        string log = Path.Combine(Path.GetTempPath(), $"splat-internal-errors-{Guid.NewGuid():N}.log");
+        try
+        {
+            var host = Host(internalErrorLog: log); host.Identity.Set(Caller); host.Ledger.Fail = true;
+            var response = await ManagedBridgeHost.DispatchAsync(Request("run_command", new { command = "/bin/echo", args = new[] { "hi" } }),
+                host.Handler, host.Ledger, host.Identity, default);
+            Assert.Equal(-32001, response.Error?.Code);
+            Assert.DoesNotContain("private-path", response.Error!.Message);
+            Assert.Equal(0, host.Executor.Calls);
+            // The caller learns which failure it was; the service's administrator learns the rest.
+            Assert.Contains("(IOException)", response.Error.Message);
+            Assert.Contains("System.IO.IOException: private-path", File.ReadAllText(log));
+        }
+        finally { File.Delete(log); }
     }
 
     [Theory]
