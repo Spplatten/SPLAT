@@ -221,10 +221,9 @@ public partial class McpServerHandler
         }
         catch (Exception ex)
         {
-            RecordInternalError(ex);
-            // The type is named because an empty or scrubbed message otherwise leaves the caller nothing.
+            // Named and placed, because an empty or scrubbed message otherwise leaves the caller nothing.
             // The first managed gate run read "Internal server error: " and no more (2026-10-18).
-            return CreateErrorResponse(request.Id, -32603, Scrub($"Internal server error ({ex.GetType().Name}): {ex.Message}"));
+            return CreateErrorResponse(request.Id, -32603, Scrub($"Internal server error ({RecordInternalError(ex)}): {ex.Message}"));
         }
     }
 
@@ -235,16 +234,52 @@ public partial class McpServerHandler
     /// A log that cannot be written must not turn one failure into two, and one past a mebibyte takes no
     /// more: the first failures say what broke, and an admitted caller repeating one must not fill the disk.
     /// </summary>
-    internal void RecordInternalError(Exception ex)
+    /// <returns>
+    /// What a reply may say about it: the type, the method that threw it, the first method of this tree it
+    /// passed through, and whether it was kept. Method names are code locations in a public tree and carry
+    /// no deployment data. The message can name a private path, so each caller decides whether to add it.
+    /// </returns>
+    internal string RecordInternalError(Exception ex)
     {
-        if (_internalErrorLog is null) return;
+        string unkept = "";
+        if (_internalErrorLog is not null)
+        {
+            try
+            {
+                if (new FileInfo(_internalErrorLog) is { Exists: true, Length: > 1024 * 1024 }) unkept = "; the error log is full";
+                else File.AppendAllText(_internalErrorLog, $"{DateTimeOffset.UtcNow:o} {Scrub(ex.ToString())}{Environment.NewLine}");
+            }
+            catch (Exception logFailure) when (logFailure is IOException or UnauthorizedAccessException)
+            {
+                // Said in the reply: on 2026-10-19 the managed service could not create this log, and the
+                // failure it was meant to keep left no trace at all.
+                unkept = $"; not kept: {logFailure.GetType().Name}";
+            }
+        }
+
+        return DescribeFailure(ex) + unkept;
+    }
+
+    private static string DescribeFailure(Exception ex)
+    {
         try
         {
-            if (new FileInfo(_internalErrorLog) is { Exists: true, Length: > 1024 * 1024 }) return;
-            File.AppendAllText(_internalErrorLog, $"{DateTimeOffset.UtcNow:o} {Scrub(ex.ToString())}{Environment.NewLine}");
+            var methods = new System.Diagnostics.StackTrace(ex, false).GetFrames()
+                .Select(frame => frame.GetMethod()).OfType<System.Reflection.MethodBase>().ToList();
+            static string Name(System.Reflection.MethodBase method) => $"{method.DeclaringType?.FullName}.{method.Name}";
+            string? thrown = methods.Count > 0 ? Name(methods[0]) : null;
+            string? ours = methods.Where(method => method.DeclaringType?.Namespace is { } ns
+                    && (ns.StartsWith("SplatMcp", StringComparison.Ordinal) || ns.StartsWith("MissionController", StringComparison.Ordinal)))
+                .Select(Name).FirstOrDefault();
+            // An assembly that failed to load is named by its display name, which holds no path. A file is
+            // named by its path, which can be private, so only the first kind is said.
+            string file = ex is FileNotFoundException { FileName: { } name } && name.IndexOfAny(['\\', '/']) < 0 ? $" '{name}'" : "";
+            return ex.GetType().Name + file + (thrown is null ? "" : $" at {thrown}") + (ours is null || ours == thrown ? "" : $", from {ours}");
         }
-        catch (Exception logFailure) when (logFailure is IOException or UnauthorizedAccessException)
+        catch (Exception)
         {
+            // Describing a failure must not become a second one.
+            return ex.GetType().Name;
         }
     }
 
