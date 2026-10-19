@@ -145,8 +145,8 @@ public sealed class LinuxLeaseSubstrate : IMissionSubstrateSelector
                 argv = argv.Append(string.Join(",", lease.AllowedEgressIps)).ToArray();
             }
 
-            var violations = new List<LeaseViolationEvent>();
-            var collect = new SynchronousProgress<LeaseViolationEvent>(v => { lock (violations) violations.Add(v); });
+            var violations = new BoundedViolationLog();
+            var collect = new SynchronousProgress<LeaseViolationEvent>(violations.Add);
 
             ProcessExecutionResult result = await _executor.ExecuteLeasedAsync(
                 lease,
@@ -164,16 +164,18 @@ public sealed class LinuxLeaseSubstrate : IMissionSubstrateSelector
             // in the live stream: a sensor that was refused something said so, and the model and the
             // record both need to read it.
             string stderr = result.StandardError;
-            if (violations.Count > 0)
+            if (violations.Total > 0)
             {
                 var sb = new StringBuilder(stderr);
                 if (sb.Length > 0 && !stderr.EndsWith('\n')) sb.Append('\n');
-                foreach (var v in violations.OrderBy(v => v.Sequence))
+                foreach (var v in violations.Retained.OrderBy(v => v.Sequence))
                 {
                     sb.Append("[KERNEL -EPERM BLOCK] [").Append(v.ProcessComm).Append(" pid ").Append(v.ProcessId).Append("] ")
                       .Append(v.Hook).Append(' ').Append(v.DetailText).Append('\n');
                 }
 
+                if (violations.OmittedNote is { } omitted)
+                    sb.Append(omitted).Append('\n');
                 stderr = sb.ToString();
             }
 

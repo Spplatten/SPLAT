@@ -814,14 +814,8 @@ public partial class McpServerHandler
             // operator's in policy.json, each of which may only lower what this asks for.
             Limits: new LeaseResourceLimits());
 
-        var violations = new List<LeaseViolationEvent>();
-        var violationProgress = new SynchronousProgress<LeaseViolationEvent>(v =>
-        {
-            lock (violations)
-            {
-                violations.Add(v);
-            }
-        });
+        var violations = new BoundedViolationLog();
+        var violationProgress = new SynchronousProgress<LeaseViolationEvent>(violations.Add);
 
         var execResult = await _leasedExecutor.ExecuteLeasedAsync(
             lease,
@@ -854,13 +848,15 @@ public partial class McpServerHandler
         outputSb.AppendLine(RecalledContext.Delimit(
             $"SANDBOXED PROCESS OUTPUT - '{Scrub(command, facts)}'", commandBoundary, Scrub(sandboxOutput.ToString(), facts)));
 
-        if (violations.Count > 0)
+        if (violations.Total > 0)
         {
             outputSb.AppendLine("\n[KERNEL VIOLATION CONTAINMENT REPORT]");
-            foreach (var v in violations)
+            foreach (var v in violations.Retained)
             {
                 outputSb.AppendLine(Scrub($"  -EPERM: Hook={v.Hook} Comm={v.ProcessComm} Detail={v.DetailText} (PID={v.ProcessId})", facts));
             }
+            if (violations.OmittedNote is { } omitted)
+                outputSb.AppendLine(omitted);
         }
 
         outputSb.AppendLine($"[Process Exited with code {execResult.ExitCode}]");
@@ -870,7 +866,7 @@ public partial class McpServerHandler
             missionId,
             ledgerTool,
             "EXECUTED_LEASABLE_COMMAND",
-            $"Command='{command}' Args='{argumentsForLog}' ExitCode={execResult.ExitCode} Violations={violations.Count}",
+            $"Command='{command}' Args='{argumentsForLog}' ExitCode={execResult.ExitCode} Violations={violations.Total}",
             actor,
             ct);
 
