@@ -235,7 +235,7 @@ SPLAT/
 
 | Framework | Mapping |
 | :--- | :--- |
-| SOC 2 Type II | CC6.1 restricted tokens & privilege separation · CC6.8 egress allow-listing · CC7.2 continuous audit |
+| SOC 2 Type II | CC6.1 restricted tokens & privilege separation · CC6.6 / CC6.7 per-lease egress allow-listing · CC6.8 per-lease executable allow-listing · CC7.2 chained audit of governed runs |
 | HIPAA Security Rule | § 164.312(b) cryptographic chained audit controls · § 164.312(e)(1) transmission security & DLP masking |
 | NIST SP 800-171 / CMMC 2.0 | AU.2.041–042 attributed, chained audit logs · SC.3.177 strict egress isolation |
 
