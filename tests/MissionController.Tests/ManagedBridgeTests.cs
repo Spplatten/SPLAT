@@ -42,9 +42,15 @@ public sealed class ManagedBridgeTests
             Assert.Equal(-32001, response.Error?.Code);
             Assert.DoesNotContain("private-path", response.Error!.Message);
             Assert.Equal(0, host.Executor.Calls);
-            // The caller learns which failure it was; the service's administrator learns the rest.
-            Assert.Contains("(IOException)", response.Error.Message);
+            // The caller learns which failure it was and where; the service's administrator learns the rest.
+            Assert.Contains("(IOException at MissionController.Tests.ManagedBridgeTests+Ledger.AppendLogAsync)", response.Error.Message);
             Assert.Contains("System.IO.IOException: private-path", File.ReadAllText(log));
+
+            // A log that cannot be written says so, rather than leaving the failure without a trace.
+            var unlogged = Host(internalErrorLog: Path.Combine(log + ".missing", "internal-errors.log"));
+            unlogged.Identity.Set(Caller); unlogged.Ledger.Fail = true;
+            Assert.Contains("; not kept: DirectoryNotFoundException)", (await ManagedBridgeHost.DispatchAsync(Request("run_command", new { command = "/bin/echo" }),
+                unlogged.Handler, unlogged.Ledger, unlogged.Identity, default)).Error!.Message);
         }
         finally { File.Delete(log); }
     }

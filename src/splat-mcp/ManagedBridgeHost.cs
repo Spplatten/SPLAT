@@ -165,11 +165,10 @@ internal static class ManagedBridgeHost
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
-                // The reply names only the type, which carries no private data; the message and stack stay
-                // with the service. The refusal used to drop both, and a gate run got nothing to act on (2026-10-19).
-                handler.RecordInternalError(ex);
+                // The reply says what failed and where, never the message, which can name a private path; the
+                // service keeps the rest. The refusal used to drop both, and a gate run had nothing to act on (2026-10-19).
                 return new McpJsonRpcMessage { JsonRpc = "2.0", Id = request.Id,
-                    Error = new McpError { Code = -32001, Message = $"The managed audit admission could not be committed ({ex.GetType().Name}); no tool was run." } };
+                    Error = new McpError { Code = -32001, Message = $"The managed audit admission could not be committed ({handler.RecordInternalError(ex)}); no tool was run." } };
             }
             if (executeLease)
                 return await handler.ExecuteManagedLeaseAsync(request, actor.ToLedgerIdentity(), ct);
