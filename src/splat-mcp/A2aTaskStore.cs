@@ -32,6 +32,15 @@ internal sealed class A2aTaskStore
             CREATE TABLE IF NOT EXISTS A2aDelegationUses (
                 Issuer TEXT NOT NULL, Nonce TEXT NOT NULL, TaskId TEXT NOT NULL,
                 PRIMARY KEY (Issuer, Nonce));
+            -- Finished tasks moved out of active capacity. Rows are never deleted: a messageId is
+            -- recognised forever, so a retry can return its task but never execute again, and spent
+            -- delegation nonces stay in A2aDelegationUses.
+            CREATE TABLE IF NOT EXISTS A2aTaskArchive (
+                Receiver TEXT NOT NULL, Version TEXT NOT NULL, TaskId TEXT NOT NULL,
+                TenantId TEXT NOT NULL, CallerId TEXT NOT NULL, MessageId TEXT NOT NULL,
+                RequestSha256 TEXT NOT NULL, ArchivedUtc TEXT NOT NULL, RecordJson TEXT NOT NULL,
+                PRIMARY KEY (Receiver, Version, TaskId),
+                UNIQUE (Receiver, Version, TenantId, CallerId, MessageId));
             """;
         command.ExecuteNonQuery();
     }
@@ -64,6 +73,8 @@ internal sealed class A2aTaskStore
     {
         using var connection = _context.CreateConnection();
         using var transaction = connection.BeginTransaction();
+        if (FindArchived(connection, transaction, task.TenantId, task.CallerId, task.MessageId) is not null)
+            throw new A2aException(-32602, "messageId already names a different request.");
         try
         {
             Write(connection, transaction, task, insert: true, delegationIssuer);
@@ -78,6 +89,80 @@ internal sealed class A2aTaskStore
         await authorize(connection, transaction);
         ct.ThrowIfCancellationRequested();
         transaction.Commit();
+    }
+
+    /// <summary>
+    /// Moves a finished task out of A2aTasks into the archive, and appends its archival entry, in one
+    /// transaction. Its result stays readable through <see cref="ReadArchived"/>.
+    /// </summary>
+    internal async Task ArchiveAsync(A2aTaskRecord task, Func<SqliteConnection, SqliteTransaction, Task> audit,
+        CancellationToken ct)
+    {
+        using var connection = _context.CreateConnection();
+        using var transaction = connection.BeginTransaction();
+        using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO A2aTaskArchive VALUES (@receiver,@version,@id,@tenant,@caller,@message,@sha,@at,@json)";
+            insert.Parameters.AddWithValue("@receiver", _receiver);
+            insert.Parameters.AddWithValue("@version", _version);
+            insert.Parameters.AddWithValue("@id", task.Id);
+            insert.Parameters.AddWithValue("@tenant", task.TenantId);
+            insert.Parameters.AddWithValue("@caller", task.CallerId);
+            insert.Parameters.AddWithValue("@message", task.MessageId);
+            insert.Parameters.AddWithValue("@sha", task.RequestSha256);
+            insert.Parameters.AddWithValue("@at", DateTimeOffset.UtcNow.ToString("O"));
+            insert.Parameters.AddWithValue("@json", JsonSerializer.Serialize(task, A2aConfiguration.Json));
+            insert.ExecuteNonQuery();
+        }
+        using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM A2aTasks WHERE Receiver=@receiver AND Version=@version AND TaskId=@id";
+            delete.Parameters.AddWithValue("@receiver", _receiver);
+            delete.Parameters.AddWithValue("@version", _version);
+            delete.Parameters.AddWithValue("@id", task.Id);
+            if (delete.ExecuteNonQuery() != 1) throw new InvalidOperationException("A2A task to archive was not retained.");
+        }
+        await audit(connection, transaction);
+        ct.ThrowIfCancellationRequested();
+        transaction.Commit();
+    }
+
+    /// <summary>An archived task's id and request fingerprint for a caller's messageId, or null.</summary>
+    internal (string TaskId, string RequestSha256)? FindArchived(string tenant, string caller, string messageId)
+    {
+        using var connection = _context.CreateConnection();
+        return FindArchived(connection, null, tenant, caller, messageId);
+    }
+
+    private (string TaskId, string RequestSha256)? FindArchived(SqliteConnection connection, SqliteTransaction? transaction,
+        string tenant, string caller, string messageId)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT TaskId, RequestSha256 FROM A2aTaskArchive WHERE Receiver=@receiver AND Version=@version AND TenantId=@tenant AND CallerId=@caller AND MessageId=@message";
+        command.Parameters.AddWithValue("@receiver", _receiver);
+        command.Parameters.AddWithValue("@version", _version);
+        command.Parameters.AddWithValue("@tenant", tenant);
+        command.Parameters.AddWithValue("@caller", caller);
+        command.Parameters.AddWithValue("@message", messageId);
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? (reader.GetString(0), reader.GetString(1)) : null;
+    }
+
+    /// <summary>An archived task owned by this tenant and caller, or null.</summary>
+    internal A2aTaskRecord? ReadArchived(string taskId, string tenant, string caller)
+    {
+        using var connection = _context.CreateConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT RecordJson FROM A2aTaskArchive WHERE Receiver=@receiver AND Version=@version AND TaskId=@id AND TenantId=@tenant AND CallerId=@caller";
+        command.Parameters.AddWithValue("@receiver", _receiver);
+        command.Parameters.AddWithValue("@version", _version);
+        command.Parameters.AddWithValue("@id", taskId);
+        command.Parameters.AddWithValue("@tenant", tenant);
+        command.Parameters.AddWithValue("@caller", caller);
+        return command.ExecuteScalar() is string json ? JsonSerializer.Deserialize<A2aTaskRecord>(json, A2aConfiguration.Json) : null;
     }
 
     internal void Save(A2aTaskRecord task, bool insert = false, string? delegationIssuer = null)

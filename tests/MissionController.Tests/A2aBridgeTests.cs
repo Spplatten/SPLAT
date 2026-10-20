@@ -245,17 +245,34 @@ public sealed class A2aBridgeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task DurableCapacityRefusesNewEffectsWhilePreservingExistingRetries()
+    public async Task FinishedTasksGiveTheirCapacityBackAndTheirMessagesNeverExecuteAgain()
     {
+        // Until 2026-10-20 a full host stayed full forever once its tasks had finished (A2A_STRESS.md,
+        // the six-slot host). A finished task is now archived to make room; its messageId stays known.
         await _bridge.DisposeAsync();
         _config = _config with { MaxConcurrentTasks = 1, MaxTasks = 1 };
         _bridge = CreateBridge();
         var message = Message("only-effect");
         var original = await Call("SendMessage", message);
-        var error = await Assert.ThrowsAsync<A2aException>(() => Call("SendMessage", Message()));
-        Assert.Equal(429, error.HttpStatus);
+        var next = await Call("SendMessage", Message("next-effect"));
+        Assert.Equal("TASK_STATE_COMPLETED", next.GetProperty("task").GetProperty("status").GetProperty("state").GetString());
+        Assert.Equal(2, _executor.Leases.Count);
+
+        // The archived original is answered from the archive - same task, no new execution - including
+        // after a restart, and a different request under its messageId is refused.
         Assert.Equal(original.GetRawText(), (await Call("SendMessage", message)).GetRawText());
-        Assert.Single(_executor.Leases);
+        string originalId = original.GetProperty("task").GetProperty("id").GetString()!;
+        Assert.Equal(originalId, (await Call("GetTask", new { id = originalId })).GetProperty("id").GetString());
+        await _bridge.DisposeAsync();
+        _bridge = CreateBridge();
+        Assert.Equal(original.GetRawText(), (await Call("SendMessage", message)).GetRawText());
+        var changed = Json(new { message = new { messageId = "only-effect", role = "ROLE_USER",
+            parts = new[] { new { data = new { skill = "inspect_disk", parameters = new { } } } },
+            extensions = new[] { A2aConfiguration.Extension } } });
+        Assert.Equal(-32602, (await Assert.ThrowsAsync<A2aException>(() => Call("SendMessage", changed))).Code);
+        Assert.Equal(2, _executor.Leases.Count);
+        Assert.Single(await _ledger.GetAuditLogsAsync(null, 200), r => r.Action == "A2A_TASK_ARCHIVED"
+            && r.Details.Contains(originalId));
     }
 
     [Fact]
@@ -331,10 +348,13 @@ public sealed class A2aBridgeTests : IAsyncLifetime
         await _bridge.DisposeAsync();
         _config = _config with { MaxTasks = 6, Callers = _config.Callers.Select(c => c with { MaxRetainedTasks = 1 }).ToArray() };
         _bridge = CreateBridge();
-        await Call("SendMessage", Message("alice-first"));
-        Assert.Equal(429, (await Assert.ThrowsAsync<A2aException>(() => Call("SendMessage", Message("alice-loop")))).HttpStatus);
+        var first = await Call("SendMessage", Message("alice-first"));
+        // Alice's finished task is archived to make room for her next one, never one of Bob's.
+        await Call("SendMessage", Message("alice-loop"));
         await Call("SendMessage", Message("bob-first"), BobToken);
-        Assert.Equal(2, _executor.Leases.Count);
+        Assert.Equal(3, _executor.Leases.Count);
+        Assert.Equal(first.GetRawText(), (await Call("SendMessage", Message("alice-first"))).GetRawText());
+        Assert.Equal(3, _executor.Leases.Count);
     }
 
     [Fact]

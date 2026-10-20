@@ -119,6 +119,11 @@ internal sealed class A2aBridge : IAsyncDisposable
             await _gate.WaitAsync(ct);
             try
             {
+                if (!_tasks.ContainsKey(id) && _store.ReadArchived(id, caller.TenantId, caller.CallerId) is { } archived)
+                {
+                    if (method == "GetTask") return Snapshot(archived);
+                    throw new A2aException(-32002, "Task is no longer cancelable.");
+                }
                 work = Owned(caller, id);
                 if (method == "GetTask") return Snapshot(work.Record);
                 if (Terminal(work.Record.State)) throw new A2aException(-32002, "Task is no longer cancelable.");
@@ -235,6 +240,13 @@ internal sealed class A2aBridge : IAsyncDisposable
         try
         {
             work = _tasks.Values.FirstOrDefault(w => Owns(caller, w.Record) && w.Record.MessageId == messageId)!;
+            // An archived messageId is answered from the archive, never executed again.
+            if (work is null && _store.FindArchived(caller.TenantId, caller.CallerId, messageId) is { } kept)
+            {
+                if (kept.RequestSha256 != fingerprint) throw new A2aException(-32602, "messageId already names a different request.");
+                return Snapshot(_store.ReadArchived(kept.TaskId, caller.TenantId, caller.CallerId)
+                    ?? throw new A2aException(-32001, "Task not found."));
+            }
             if (work is not null)
             {
                 if (work.Record.RequestSha256 != fingerprint) throw new A2aException(-32602, "messageId already names a different request.");
@@ -242,11 +254,19 @@ internal sealed class A2aBridge : IAsyncDisposable
             else
             {
                 if (_stopping || _faulted) throw new A2aException(-32603, "Task execution is unavailable.", 503);
-                if (_running >= _config.MaxConcurrentTasks || _tasks.Count >= _config.MaxTasks)
+                if (_running >= _config.MaxConcurrentTasks)
                     throw new A2aException(-32000, "Task capacity is exhausted; no execution was started.", 429);
-                var owned = _tasks.Values.Where(w => w.Record.TenantId == caller.TenantId && w.Record.CallerId == caller.CallerId).ToArray();
+                // Finished tasks give their slots back: archive the oldest before refusing. Only
+                // unfinished work can hold capacity now (the stress run's six-slot host stayed full
+                // forever once its tasks had completed).
+                if (_tasks.Count >= _config.MaxTasks) await ArchiveOldestAsync(_ => true, ct);
+                if (_tasks.Count >= _config.MaxTasks)
+                    throw new A2aException(-32000, "Task capacity is exhausted; no execution was started.", 429);
+                bool Mine(A2aTaskRecord r) => r.TenantId == caller.TenantId && r.CallerId == caller.CallerId;
                 int runningLimit = caller.MaxConcurrentTasks ?? Math.Max(1, _config.MaxConcurrentTasks / _config.Callers.Length);
                 int retainedLimit = caller.MaxRetainedTasks ?? Math.Max(1, _config.MaxTasks / _config.Callers.Length);
+                if (_tasks.Values.Count(w => Mine(w.Record)) >= retainedLimit) await ArchiveOldestAsync(Mine, ct);
+                var owned = _tasks.Values.Where(w => Mine(w.Record)).ToArray();
                 if (owned.Length >= retainedLimit || owned.Count(w => !Terminal(w.Record.State)) >= runningLimit)
                     throw new A2aException(-32000, "This caller's task capacity is exhausted.", 429);
                 var grant = token is null ? null : _delegation.Verify(token, caller, skill);
@@ -375,8 +395,32 @@ internal sealed class A2aBridge : IAsyncDisposable
     {
         await CheckCallerAsync(caller, ct);
         await _gate.WaitAsync(ct);
-        try { return Snapshot(Owned(caller, id).Record); }
+        try
+        {
+            // Another caller's admission may have archived this task since it finished.
+            return Snapshot(_tasks.ContainsKey(id) ? Owned(caller, id).Record
+                : _store.ReadArchived(id, caller.TenantId, caller.CallerId) ?? throw new A2aException(-32001, "Task not found."));
+        }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>
+    /// Archives the oldest finished task matching <paramref name="belongs"/>, with its archival entry, in
+    /// one transaction. Only a terminal task whose execution has returned is eligible. Runs under _gate.
+    /// </summary>
+    private async Task ArchiveOldestAsync(Func<A2aTaskRecord, bool> belongs, CancellationToken ct)
+    {
+        var oldest = _tasks.Values.Where(w => belongs(w.Record) && Terminal(w.Record.State) && w.Execution.IsCompleted)
+            .OrderBy(w => w.Record.UpdatedUtc).ThenBy(w => w.Record.Id, StringComparer.Ordinal).FirstOrDefault();
+        if (oldest is null) return;
+        var record = oldest.Record;
+        await _store.ArchiveAsync(record, (connection, transaction) => _admissionLedger.AppendWithinAsync(
+            connection, transaction, Guid.ParseExact(record.Id, "N"), "a2a:" + _config.AgentId, "A2A_TASK_ARCHIVED",
+            JsonSerializer.Serialize(new { taskId = record.Id, record.TenantId, record.CallerId, record.MessageId,
+                record.State, receiverAgentId = _config.AgentId, contractSha256 = _config.AgentVersion }),
+            $"a2a-host:{_config.AgentId}", ct), ct);
+        _tasks.Remove(record.Id);
+        oldest.Cancellation.Dispose();
     }
     private object Snapshot(A2aTaskRecord record, bool includeArtifacts = true) => new
     {

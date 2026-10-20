@@ -94,7 +94,11 @@ gRPC, REST and multi-turn task continuation are outside this first profile.
 
 ## Guarantees and limits
 
-- Admission is logged and saved before execution. The fixed agent/version and each caller's skill
+- Admission is logged and saved before execution, in one SQLite transaction: the delegation nonce,
+  the task row and its `A2A_TASK_AUTHORIZED` entry commit together or not at all, and execution
+  starts only after the commit. A refused replay or a failed authorization write leaves no
+  authorization row (`TwoAgentDelegationCarriesOnlyTheParentTaskAuthorityAndSurvivesReceiverRestart`).
+  The audit ledger must therefore be the chained ledger in the task database. The fixed agent/version and each caller's skill
   grant are checked independently. The bound handler requires an enforcing lease; an execution
   policy additionally requires its installation acknowledgement.
 - Task IDs, request fingerprints and results persist in SQLite. Exact retries of a message ID by
@@ -103,9 +107,13 @@ gRPC, REST and multi-turn task continuation are outside this first profile.
   preserve it when retrying. This is at-most-once admission for retained IDs, not exactly-once
   external effects. A different ID can request another permitted effect.
 - Interrupted tasks become failed with an unconfirmed outcome; they are never automatically
-  re-executed. Durable capacity exhaustion refuses new tasks instead of evicting replay records.
-  Per-caller running and retained-task limits are enforced before admission. Operator-managed
-  retention remains unfinished; exhaustion never silently evicts replay records.
+  re-executed. Per-caller running and retained-task limits are enforced before admission. When a
+  limit is reached, the oldest finished task in scope (the caller's, or the host's for `maxTasks`)
+  is moved to `A2aTaskArchive` with an `A2A_TASK_ARCHIVED` entry in the same transaction, before any
+  refusal. Unfinished tasks are never archived, so only running work can hold capacity. An archived
+  task stays readable through `GetTask`, a retry of its message ID returns it without executing, and
+  a different request under that ID is refused; archive rows and spent delegation nonces are never
+  deleted, so a retry never expires into a second execution. `ListTasks` lists retained tasks only.
 - Task/result access is scoped to both tenant and caller, including list filters and cancellation.
   Existing incident revocation checks refresh persistent state before each access. Active tasks
   also check caller/issuer revocation and expiry every 500 ms; an unreadable store cancels work.
