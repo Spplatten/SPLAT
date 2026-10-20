@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Data;
+using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Core.Models;
 using MissionController.Infrastructure.Linux;
@@ -22,6 +23,7 @@ internal sealed class A2aBridge : IAsyncDisposable
     private readonly A2aConfiguration _config;
     private readonly A2aTaskStore _store;
     private readonly IAuditLedger _ledger;
+    private readonly SqliteChainedAuditLedger _admissionLedger;
     private readonly Func<A2aCaller, McpServerHandler> _handler;
     private readonly IIncidentRevocationManager? _revocations;
     private readonly SemaphoreSlim _gate = new(1);
@@ -48,6 +50,14 @@ internal sealed class A2aBridge : IAsyncDisposable
         _skills = approval.Manifest.Project.Stages.Select(s => s.StageId).ToHashSet(StringComparer.Ordinal);
         if (_config.Callers.Any(c => c.Skills.Any(s => !_skills.Contains(s))))
             throw new InvalidOperationException("A caller's skill grant exceeds the approved manifest.");
+        // Admission commits the task and its authorization row together, so both must live in one
+        // database. A ledger elsewhere could only be written before or after the task, never with it.
+        _admissionLedger = ledger as SqliteChainedAuditLedger is { } chained
+            && string.Equals(Path.GetFullPath(chained.DatabasePath), Path.GetFullPath(context.DatabasePath),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
+            ? chained
+            : throw new InvalidOperationException(
+                "A2A admission needs the chained audit ledger in the task database, so a task and its authorization commit together.");
         _store = new A2aTaskStore(context, config.AgentId, config.AgentVersion);
         _approval = approval;
         _delegation = new A2aDelegation(_config);
@@ -263,8 +273,12 @@ internal sealed class A2aBridge : IAsyncDisposable
                     caller.TenantId, caller.CallerId, messageId, fingerprint, skill, parent,
                     "TASK_STATE_WORKING", DateTimeOffset.UtcNow, AdmittedLease: lease, AuthorityExpiresUtc: expires,
                     DelegationNonce: grant?.Nonce, DelegationDepth: grant?.Depth ?? 0);
-                await Audit(caller, record, "A2A_TASK_AUTHORIZED", ct);
-                _store.Save(record, insert: true, delegationIssuer: grant is null ? null : grant.Issuer + "@" + grant.IssuerVersion);
+                // One transaction: nonce, task and authorization row commit together or not at all, and
+                // nothing executes until they have.
+                await _store.AdmitAsync(record, grant is null ? null : grant.Issuer + "@" + grant.IssuerVersion,
+                    (connection, transaction) => _admissionLedger.AppendWithinAsync(connection, transaction,
+                        Guid.ParseExact(record.Id, "N"), "a2a:" + _config.AgentId, "A2A_TASK_AUTHORIZED",
+                        AuditDetails(caller, record), caller.Identity.ToLedgerIdentity(), ct), ct);
                 work = new Work(record);
                 work.Cancellation.CancelAfter(expires - DateTimeOffset.UtcNow);
                 _tasks.Add(record.Id, work);
@@ -345,11 +359,13 @@ internal sealed class A2aBridge : IAsyncDisposable
 
     private Task Audit(A2aCaller caller, A2aTaskRecord record, string action, CancellationToken ct) =>
         _ledger.AppendLogAsync(Guid.ParseExact(record.Id, "N"), "a2a:" + _config.AgentId, action,
-            JsonSerializer.Serialize(new { taskId = record.Id, contextId = record.ContextId, caller.TenantId,
-                caller.CallerId, receiverAgentId = _config.AgentId, contractSha256 = _config.AgentVersion,
-                record.Skill, record.CallerSuppliedParentTaskId, record.State, record.CancellationRequested,
-                executionContext = record.AdmittedLease?.ExecutionContext, record.WorkloadTerminationConfirmed }),
-            caller.Identity.ToLedgerIdentity(), ct);
+            AuditDetails(caller, record), caller.Identity.ToLedgerIdentity(), ct);
+
+    private string AuditDetails(A2aCaller caller, A2aTaskRecord record) =>
+        JsonSerializer.Serialize(new { taskId = record.Id, contextId = record.ContextId, caller.TenantId,
+            caller.CallerId, receiverAgentId = _config.AgentId, contractSha256 = _config.AgentVersion,
+            record.Skill, record.CallerSuppliedParentTaskId, record.State, record.CancellationRequested,
+            executionContext = record.AdmittedLease?.ExecutionContext, record.WorkloadTerminationConfirmed });
 
     private bool Owns(A2aCaller caller, A2aTaskRecord task) => task.TenantId == caller.TenantId
         && task.CallerId == caller.CallerId && caller.Skills.Contains(task.Skill, StringComparer.Ordinal);

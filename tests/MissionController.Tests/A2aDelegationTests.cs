@@ -101,6 +101,30 @@ public sealed class A2aDelegationTests : IAsyncLifetime
         Assert.Equal(2, _capture.Leases.Count);
         await Assert.ThrowsAsync<A2aException>(() => Call(_worker, "SendMessage", Message("replayed", grant.Token)));
         Assert.Equal(2, _capture.Leases.Count);
+
+        // A refused replay leaves no authorization behind. Admission wrote A2A_TASK_AUTHORIZED before
+        // the store rejected the spent nonce, so the 2026-10-20 A2A stress run found 16 authorization
+        // rows with no task; nonce, task and authorization now commit in one transaction.
+        await Task.WhenAll(Enumerable.Range(0, 8).Select(i =>
+            Assert.ThrowsAsync<A2aException>(() => Call(_worker, "SendMessage", Message($"replayed-{i}", grant.Token)))));
+        Assert.Equal(2, _capture.Leases.Count);
+        var authorized = (await _workerLedger.GetAuditLogsAsync(null, 500)).Count(r => r.Action == "A2A_TASK_AUTHORIZED");
+        Assert.Equal(1, authorized);
+
+        // An authorization that cannot be written admits nothing. Keying the worker's ledger makes the
+        // unkeyed bridge's append fail mid-admission; a fresh, valid grant must then leave no task row,
+        // no authorization row and no execution behind.
+        await new SqliteChainedAuditLedger(_workerDb, new byte[32]).AppendLogAsync(Guid.Empty, "test", "KEYED", "", "test");
+        var fresh = await Grant();
+        await Assert.ThrowsAnyAsync<Exception>(() => Call(_worker, "SendMessage", Message("unauditable", fresh.Token, fresh.Parent)));
+        Assert.Equal(3, _capture.Leases.Count); // the parent's lease for the fresh grant; the worker ran nothing
+        using var connection = _workerDb.CreateConnection();
+        using var tasks = connection.CreateCommand();
+        tasks.CommandText = "SELECT COUNT(*) FROM A2aTasks WHERE MessageId = 'unauditable'";
+        Assert.Equal(0L, (long)tasks.ExecuteScalar()!);
+        using var uses = connection.CreateCommand();
+        uses.CommandText = "SELECT COUNT(*) FROM A2aDelegationUses";
+        Assert.Equal(1L, (long)uses.ExecuteScalar()!); // only the first grant's nonce was ever consumed
     }
 
     [Fact]

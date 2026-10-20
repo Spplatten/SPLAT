@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using MissionController.Infrastructure.Data;
 using MissionController.Core.Interfaces;
 
@@ -51,10 +52,45 @@ internal sealed class A2aTaskStore
         return records;
     }
 
+    /// <summary>
+    /// Admits a new task in ONE transaction: consume its delegation nonce, insert the task, then let
+    /// <paramref name="authorize"/> append the authorization row on the same connection. Execution may
+    /// start only after this returns. A consumed nonce or a reused messageId rolls back everything,
+    /// authorization included - the order audit-then-save left an A2A_TASK_AUTHORIZED row for every
+    /// refused delegation replay.
+    /// </summary>
+    internal async Task AdmitAsync(A2aTaskRecord task, string? delegationIssuer,
+        Func<SqliteConnection, SqliteTransaction, Task> authorize, CancellationToken ct)
+    {
+        using var connection = _context.CreateConnection();
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            Write(connection, transaction, task, insert: true, delegationIssuer);
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
+        {
+            // UNIQUE(Receiver, Version, Tenant, Caller, MessageId): a retained task already holds this
+            // messageId - e.g. one whose skill this caller is no longer granted, so the replay lookup
+            // could not see it. A refusal, not a server fault, and nothing is written.
+            throw new A2aException(-32602, "messageId already names a different request.");
+        }
+        await authorize(connection, transaction);
+        ct.ThrowIfCancellationRequested();
+        transaction.Commit();
+    }
+
     internal void Save(A2aTaskRecord task, bool insert = false, string? delegationIssuer = null)
     {
         using var connection = _context.CreateConnection();
         using var transaction = connection.BeginTransaction();
+        Write(connection, transaction, task, insert, delegationIssuer);
+        transaction.Commit();
+    }
+
+    private void Write(SqliteConnection connection, SqliteTransaction transaction, A2aTaskRecord task, bool insert,
+        string? delegationIssuer)
+    {
         if (insert && task.DelegationNonce is not null)
         {
             using var consume = connection.CreateCommand();
@@ -79,6 +115,5 @@ internal sealed class A2aTaskStore
         command.Parameters.AddWithValue("@message", task.MessageId);
         command.Parameters.AddWithValue("@json", JsonSerializer.Serialize(task, A2aConfiguration.Json));
         if (command.ExecuteNonQuery() != 1) throw new InvalidOperationException("A2A task persistence failed.");
-        transaction.Commit();
     }
 }
