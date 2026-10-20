@@ -77,6 +77,8 @@ public sealed class ManagedBridgeClient(ManagedBridgeConfiguration configuration
         stdout?.Report(result.Process.StandardOutput);
         stderr?.Report(result.Process.StandardError);
         foreach (var violation in result.Violations) violations?.Report(violation);
+        if (result.ViolationsOmitted > 0)
+            stderr?.Report($"[KERNEL REFUSALS NOT LISTED] {result.ViolationsOmitted} further refusal(s) were counted by the managed service and not sent; the lease receipt's counts are authoritative.\n");
         return result.Process;
     }
 

@@ -36,10 +36,9 @@ public partial class McpServerHandler
                 Error = new McpError { Code = -32602, Message = "The managed lease request is invalid or exceeds the service policy." } };
         }
 
-        var violations = new List<LeaseViolationEvent>();
-        var collect = new SynchronousProgress<LeaseViolationEvent>(value => { lock (violations) violations.Add(value); });
+        var violations = new MissionController.Core.BoundedViolationLog();
         ProcessExecutionResult process = await _leasedExecutor.ExecuteLeasedAsync(request.Lease, request.Command,
-            request.Arguments, violations: collect, ct: ct);
+            request.Arguments, violations: violations, ct: ct);
         // The service records its measured outcome under the same mission ID that the desktop seals.
         // No stdout, argv or credential-bearing response is copied into this admission ledger.
         await _auditLedger.AppendLogAsync(request.Lease.MissionId, "managed-linux-lease", "MANAGED_LEASE_COMPLETED",
@@ -47,6 +46,6 @@ public partial class McpServerHandler
             + $"ViolationsCounted={process.Lease?.ViolationsCounted}; ViolationsComplete={process.Lease?.ViolationsComplete}",
             actor, CancellationToken.None);
         return new McpJsonRpcMessage { JsonRpc = "2.0", Id = message.Id,
-            Result = JsonSerializer.SerializeToElement(new ManagedLeaseResult(process, violations)) };
+            Result = JsonSerializer.SerializeToElement(new ManagedLeaseResult(process, violations.Retained, violations.Omitted)) };
     }
 }

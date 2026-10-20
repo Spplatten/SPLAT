@@ -14,7 +14,7 @@ namespace MissionController.Core;
 /// and says how much it left out rather than reading as the whole of it. The lease receipt's own
 /// counts (counted, reported, complete) stay the authoritative totals.
 /// </summary>
-public sealed class BoundedViolationLog
+public sealed class BoundedViolationLog : System.IProgress<LeaseViolationEvent>
 {
     public const int DefaultCapacity = 200;
 
@@ -52,6 +52,16 @@ public sealed class BoundedViolationLog
             if (_retained.Count < Capacity)
                 _retained.Add(violation);
         }
+    }
+
+    // A synchronous sink: Progress<T> posts each report to the thread pool, so a caller reading the
+    // log right after the lease returned could miss refusals still in flight.
+    void System.IProgress<LeaseViolationEvent>.Report(LeaseViolationEvent value) => Add(value);
+
+    /// <summary>Refusals counted but not kept for listing.</summary>
+    public long Omitted
+    {
+        get { lock (_gate) return _total - _retained.Count; }
     }
 
     /// <summary>
