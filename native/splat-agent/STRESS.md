@@ -116,3 +116,7 @@ stale published page. The test result is retained locally at
 The next measured improvements should target bounded event aggregation and response size while
 preserving exact kernel totals and explicit loss reporting. Those improvements are not implemented
 by this probe.
+
+The subsequent [bounded A2A round](A2A_STRESS.md) exercises four callers, delegation/retry races,
+quotas, revocation and cancellation. Its overall result is FAIL because rejected delegation
+replays leave misleading authorization rows; it does not change this native telemetry result.

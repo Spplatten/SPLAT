@@ -1,0 +1,36 @@
+{
+  "checks": {
+    "published_is_exact_live_report": true,
+    "preserved_live_audit_failure": true,
+    "probeSha256": true,
+    "runnerSha256": true,
+    "client_source_matches": true,
+    "all_compiled_sources_match": true,
+    "all_native_sources_match": true,
+    "full_receipt_archive_hash_matches": true,
+    "all_original_signatures_verify": true,
+    "all_altered_signatures_rejected": true,
+    "receipt_count_matches": true,
+    "published_receipt_samples_match_archive": true,
+    "orphaned_authorizations_reproduced": true,
+    "orphaned_requests_have_no_execution_facts": true,
+    "unconfirmed_count_matches": true,
+    "unconfirmed_without_facts_matches": true,
+    "installed_service_active_now": true,
+    "installed_service_enforcing_now": true,
+    "installed_service_idle_now": true
+  },
+  "liveEvidenceSha256": "82a35b36cc8a0f2b30c2fb5bdf58d339dfc8b58769d75024c08e4e767fbce022",
+  "verifiedSignatures": 467,
+  "alteredSignaturesRejected": 467,
+  "orphanedAuthorizations": 16,
+  "unconfirmedCanceled": 16,
+  "unconfirmedWithoutRunFacts": 15,
+  "unconfirmedWithRunFacts": [
+    {
+      "exitCode": -3,
+      "terminalReason": "CallerCancelled",
+      "hasSignedOutcome": false
+    }
+  ]
+}
