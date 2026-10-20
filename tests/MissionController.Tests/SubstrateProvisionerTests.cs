@@ -259,6 +259,31 @@ public sealed class SubstrateProvisionerTests
         Assert.Contains("||", directive, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The unit must make systemd enable the cpu controller, or a lease cannot be clamped and the daemon
+    /// refuses it. A content check for the same reason as the bpffs one: on a guest where something
+    /// else happened to enable cpu, nothing downstream notices that the unit never asked. On
+    /// 2026-10-20 nothing else did, and every lease of the managed gate run was refused.
+    /// </summary>
+    [Fact]
+    public async Task TheUnitNeedsTheCpuController_SoALeaseCanBeClamped()
+    {
+        using var daemon = new SubstrateDoctorTests.StandInDaemon(EnforcingAnswer);
+        var guest = new ScriptedGuest();
+        using var shipped = new ShippedAgent();
+
+        await Provision(
+            new ProvisionOptions(Apply: true), new StringWriter(), guest.RunAsync,
+            new WslSubstrateHealthChecker("127.0.0.1", daemon.Port, HermeticToken, ReplyBudget),
+            agentBinaryPath: shipped.Path);
+
+        string unit = Assert.Single(guest.Commands, c => c.Contains("[Unit]", StringComparison.Ordinal)
+                                                      || c.Contains("SPLAT_UNIT", StringComparison.Ordinal));
+        // Any CPU property systemd realizes through the cpu controller would do. The weight is the one
+        // that changes no scheduling. Split on (char)10 for the reason the bpffs test gives.
+        Assert.Contains(unit.Split((char)10), line => line.StartsWith("CPUWeight=", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task EveryChangeAnApplyMakes_IsRecordedInAMountManifest()
     {

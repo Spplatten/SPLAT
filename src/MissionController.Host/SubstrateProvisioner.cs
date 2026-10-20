@@ -54,6 +54,15 @@ public static class SubstrateProvisioner
         // absent-then-mount pair is not atomic, which is why the mount is allowed to fail.
         "ExecStartPre=/bin/sh -c 'mountpoint -q /sys/fs/bpf || mount -t bpf bpffs /sys/fs/bpf'\n" +
         "ExecStart=" + AgentPath + " --listen 127.0.0.1:50051\n" +
+        // The cpu controller, which the daemon cannot enable for itself. It creates its leases under
+        // /sys/fs/cgroup/splat_leases and refuses one it cannot clamp. That cgroup receives a
+        // controller only if the root's subtree_control enables it, and systemd enables cpu there only
+        // for a unit that needs it. What needed it was root's user session: user@.service delegates
+        // cpu, so user.slice turned it on at the root. That was incidental. Under the managed
+        // service's account on the Debian guest nothing turned it on, and every lease of the
+        // 2026-10-20 gate run was refused. A weight makes this unit need cpu, so systemd enables it
+        // from the root down. 100 is the default weight, so no task is scheduled differently.
+        "CPUWeight=100\n" +
         "Restart=on-failure\n" +
         "RestartSec=2\n" +
         "\n" +
