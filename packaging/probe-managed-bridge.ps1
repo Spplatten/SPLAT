@@ -123,7 +123,11 @@ try {
         } finally { $tcp.Dispose() }
         # The claimed principal is scored by run 3: the admission row must name this caller instead.
         $spoof = Tool 2 'run_command' @{ command = '/usr/bin/id'; args = @(); operatorIdentity = 'SYSTEM'; principalId = 'S-1-5-18' }
-        $code = Tool 3 'run_code' @{ language = 'python'; code = "import socket`ns=socket.socket()`ntry:`n s.connect(('127.0.0.1',9))`n print('UNEXPECTED_CONNECT')`nexcept OSError as e:`n print('DENIED_ERRNO',e.errno)" }
+        # http.client rather than socket. The host's pre-flight validator refuses "import socket"
+        # before any lease exists, so this check never reached the kernel (2026-10-20). http.client
+        # makes the same connect() from inside the lease, and the regex validator does not stand
+        # between that call and the kernel.
+        $code = Tool 3 'run_code' @{ language = 'python'; code = "import http.client`ntry:`n http.client.HTTPConnection('127.0.0.1',9,timeout=5).connect()`n print('UNEXPECTED_CONNECT')`nexcept OSError as e:`n print('DENIED_ERRNO',e.errno)" }
         $hostTool = Tool 4 'fs_read' @{ path = (Join-Path $config.StateDirectory 'ledger.key') }
         # 203.0.113.7 is documentation space (RFC 5737), outside any real operator egress policy.
         $egress = Tool 5 'run_command' @{ command = '/bin/echo'; args = @('egress-bypass'); allowNetwork = $true; allowedEgressIps = @('203.0.113.7') }
