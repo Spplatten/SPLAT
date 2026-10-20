@@ -154,6 +154,34 @@ public sealed class ManagedBridgeTests
         Assert.True(client.IsConnected);
     }
 
+    /// <summary>
+    /// The service read its caller's name while impersonating it. Every await after that resumed under
+    /// the caller's Identification token, which opens nothing, so each call failed wherever it first
+    /// opened a file or loaded an assembly (2026-10-20). A continuation must run as the service.
+    /// </summary>
+    [Fact]
+    public async Task ACallersTokenDoesNotFollowTheConnectionPastTheHandshake()
+    {
+        string sid = WindowsIdentity.GetCurrent().User!.Value;
+        string name = "splat-test-" + Guid.NewGuid().ToString("N");
+        var config = new ManagedBridgeConfiguration(1, "SplatTest", sid, name, "SplatTest", 1, Path.GetTempPath(), Path.GetTempPath(), new[] { sid });
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var server = new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 64, 64);
+        var accept = server.WaitForConnectionAsync(cancellation.Token);
+        using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Identification);
+        await client.ConnectAsync(5000, cancellation.Token);
+        await accept;
+        await client.WriteAsync(new byte[] { 1 }, cancellation.Token);
+        await server.ReadExactlyAsync(new byte[1], cancellation.Token);
+
+        Assert.Equal(sid, ManagedBridgeHost.IdentifyCaller(server, config).PrincipalId);
+        await Task.Delay(1, cancellation.Token);
+        Assert.Null(WindowsIdentity.GetCurrent(true));
+        string probe = Path.Combine(Path.GetTempPath(), $"splat-token-{Guid.NewGuid():N}");
+        File.WriteAllText(probe, "");
+        File.Delete(probe);
+    }
+
     [Fact]
     public async Task CounterfeitServerReceivesNoRequestOrHandshakeBytes()
     {
