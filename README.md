@@ -64,6 +64,10 @@ Technical evaluations of agent sandboxes tend to blur together into generic "iso
 
 That table is the contract: nothing above it is aspirational, and nothing below it is hidden.
 
+The [2026-10-20 bounded stress run](native/splat-agent/STRESS.md) kept unauthorized operations
+denied and restored the installed service, but lost 92.01% of native flood event details. Its
+containment checks passed; lossless telemetry under those loads did not.
+
 ## Architecture
 
 ```mermaid
