@@ -53,4 +53,20 @@ public sealed class ManagedDeploymentTests
         Assert.Contains("[Text.UTF8Encoding]::new($false).GetBytes($Script.Replace(\"`r\", '')", script);
         Assert.Contains("-RedirectStandardInput $scriptFile", script);
     }
+
+    /// <summary>
+    /// The daemon refuses a lease when one of the paths it always guards does not resolve. /etc/sudoers
+    /// is one of them, and the minimal guest has no sudo, so every lease of the 2026-10-20 gate run was
+    /// refused. The managed bootstrap gives the guest one: only when it is absent, and only root may
+    /// read it.
+    /// </summary>
+    [Fact]
+    public void TheManagedGuestHasEveryFileTheDaemonGuards()
+    {
+        using var resource = typeof(ManagedBridgeCommand).Assembly.GetManifestResourceStream("managed-deployment.ps1");
+        Assert.NotNull(resource);
+        string script = new StreamReader(resource).ReadToEnd();
+
+        Assert.Contains("test -e /etc/sudoers || install -m 0440 -o root -g root /dev/null /etc/sudoers", script);
+    }
 }

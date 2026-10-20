@@ -74,10 +74,16 @@ if ($Mode -in @('GuestInstall', 'GuestUpgrade', 'GuestRemove')) {
     # 0700 and disabled Windows interop keep leased uid 65534 away from it meanwhile, and the final
     # configuration is restored even when the bootstrap fails, so a failed run never leaves the
     # Windows drives mounted in the guest.
+    # The daemon guards /etc/sudoers in every lease and refuses a lease whose guarded path does not
+    # resolve, so a guest without sudo could run no lease at all (2026-10-20). This guest belongs to
+    # SPLAT and has no sudo, so it gets an empty, root-only sudoers: nothing reads it, and a lease has an
+    # inode to protect. Only here, never on an operator's own distro, where a stray sudoers would keep
+    # a later sudo install from bringing its own.
     function Invoke-Bootstrap([string]$LogName) {
         Invoke-Guest @'
 set -eu
 printf '[boot]\nsystemd=true\n[automount]\noptions="umask=077"\n[interop]\nenabled=false\nappendWindowsPath=false\n' > /etc/wsl.conf
+test -e /etc/sudoers || install -m 0440 -o root -g root /dev/null /etc/sudoers
 '@
         & $wsl --terminate $Instance
         if ($LASTEXITCODE -ne 0) { throw 'Could not restart the managed distro.' }
