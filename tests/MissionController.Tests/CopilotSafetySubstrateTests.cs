@@ -157,31 +157,6 @@ public class CopilotSafetySubstrateTests
         Assert.NotEmpty(mockLedger.Entries);
         Assert.Equal("COPILOT_TOOL_SUCCESS", mockLedger.Entries[^1].Action);
         Assert.NotNull(result.MerkleEntryHash);
-
-        // The leased path: a tool that exits 0 after the kernel refused it is not a success, however
-        // the refusals arrive. They were collected through Progress<T>, posted to the thread pool, so
-        // the success check could run before they landed; now they are synchronous and bounded.
-        var leased = new CopilotSafetySubstrate(processLauncher: mockLauncher, tokenProvider: mockTokenProvider,
-            jailManager: mockJailManager, auditLedger: mockLedger, leasedExecutor: new RefusingLeasedExecutor(205));
-        var refused = await leased.ExecuteSafeToolAsync(
-            context with { PreferredEnvironment = CopilotExecutionEnvironment.LinuxBpfLsmLease }, _defaultPolicy);
-        Assert.False(refused.IsSuccess);
-        Assert.True(refused.PolicyBlocked);
-        Assert.Equal(MissionController.Core.BoundedViolationLog.DefaultCapacity + 1, refused.Violations.Count);
-        Assert.Equal("KERNEL_BPF_LSM_NOT_LISTED", refused.Violations[^1].ViolationType);
-        Assert.Contains("5 further refusal(s)", refused.Violations[^1].Description);
-    }
-
-    private sealed class RefusingLeasedExecutor(int refusals) : ILeasedExecutor
-    {
-        public Task<ProcessExecutionResult> ExecuteLeasedAsync(LeaseSpec lease, string command, IReadOnlyList<string> argv,
-            IProgress<string>? stdout = null, IProgress<string>? stderr = null, IProgress<LeaseViolationEvent>? violations = null,
-            CancellationToken ct = default)
-        {
-            for (uint pid = 1; pid <= refusals; pid++)
-                violations?.Report(new LeaseViolationEvent(42, pid, KernelViolationHook.Open, 1, "denied", "cat", DateTime.UtcNow));
-            return Task.FromResult(new ProcessExecutionResult(0, "", "", false, JobResourceMetrics.Unavailable));
-        }
     }
 
     [Fact]
@@ -217,6 +192,22 @@ public class CopilotSafetySubstrateTests
         Assert.NotEmpty(mockLedger.Entries);
         Assert.Equal("COPILOT_POLICY_BLOCKED", mockLedger.Entries[^1].Action);
         Assert.Equal(0, mockLauncher.LaunchCount); // Verified: Tool was NEVER launched!
+
+        // The leased path blocks a call the kernel refused, however the refusals arrive. They were
+        // collected through Progress<T>, posted to the thread pool, so the success check could run
+        // before they landed; now they are synchronous and bounded.
+        var leased = new CopilotSafetySubstrate(processLauncher: mockLauncher, tokenProvider: mockTokenProvider,
+            jailManager: mockJailManager, auditLedger: mockLedger, leasedExecutor: new RefusingLeasedExecutor(205));
+        var refused = await leased.ExecuteSafeToolAsync(new CopilotToolCallContext(
+            SessionId: Guid.NewGuid(), AgentId: "copilot-secops", ToolName: "GetHostname",
+            ExecutableOrCommand: "whoami.exe", Arguments: "", WorkingDirectory: @"C:\Temp",
+            OperatorIdentity: "corp\\secops_user", PreferredEnvironment: CopilotExecutionEnvironment.LinuxBpfLsmLease),
+            _defaultPolicy);
+        Assert.False(refused.IsSuccess);
+        Assert.True(refused.PolicyBlocked);
+        Assert.Equal(MissionController.Core.BoundedViolationLog.DefaultCapacity + 1, refused.Violations.Count);
+        Assert.Equal("KERNEL_BPF_LSM_NOT_LISTED", refused.Violations[^1].ViolationType);
+        Assert.Contains("5 further refusal(s)", refused.Violations[^1].Description);
     }
 
     [Fact]
@@ -524,5 +515,17 @@ public class CopilotSafetySubstrateTests
 
         public Task<bool> TestConnectionAsync(SiemConfiguration config, CancellationToken cancellationToken = default) =>
             Task.FromResult(true);
+    }
+
+    private sealed class RefusingLeasedExecutor(int refusals) : ILeasedExecutor
+    {
+        public Task<ProcessExecutionResult> ExecuteLeasedAsync(LeaseSpec lease, string command, IReadOnlyList<string> argv,
+            IProgress<string>? stdout = null, IProgress<string>? stderr = null, IProgress<LeaseViolationEvent>? violations = null,
+            CancellationToken ct = default)
+        {
+            for (uint pid = 1; pid <= refusals; pid++)
+                violations?.Report(new LeaseViolationEvent(42, pid, KernelViolationHook.Open, 1, "denied", "cat", DateTime.UtcNow));
+            return Task.FromResult(new ProcessExecutionResult(0, "", "", false, JobResourceMetrics.Unavailable));
+        }
     }
 }
