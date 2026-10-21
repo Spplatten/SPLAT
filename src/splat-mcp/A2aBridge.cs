@@ -70,8 +70,13 @@ internal sealed class A2aBridge : IAsyncDisposable
             {
                 // Never replay an external effect after a crash. A lease receipt, not a restart,
                 // would be needed to establish what happened before the connection disappeared.
+                // Dispatch was saved before the executor was reached, so an undispatched task provably
+                // never started; a dispatched one stays unresolved until a receipt says otherwise.
                 record = record with { State = "TASK_STATE_FAILED", UpdatedUtc = DateTimeOffset.UtcNow,
-                    Failure = "Server restarted; previous execution outcome is unconfirmed. No automatic replay." };
+                    CancellationEvidence = record.Dispatched == false ? "not-started" : "unresolved",
+                    Failure = record.Dispatched != false
+                        ? "Server restarted; previous execution outcome is unconfirmed. No automatic replay."
+                        : "Server restarted before dispatch; no workload was started. No automatic replay." };
                 _store.Save(record);
             }
             _tasks.Add(record.Id, new Work(record));
@@ -292,7 +297,7 @@ internal sealed class A2aBridge : IAsyncDisposable
                 var record = new A2aTaskRecord(taskId.ToString("N"), Guid.NewGuid().ToString("N"),
                     caller.TenantId, caller.CallerId, messageId, fingerprint, skill, parent,
                     "TASK_STATE_WORKING", DateTimeOffset.UtcNow, AdmittedLease: lease, AuthorityExpiresUtc: expires,
-                    DelegationNonce: grant?.Nonce, DelegationDepth: grant?.Depth ?? 0);
+                    DelegationNonce: grant?.Nonce, DelegationDepth: grant?.Depth ?? 0, Dispatched: false);
                 // One transaction: nonce, task and authorization row commit together or not at all, and
                 // nothing executes until they have.
                 await _store.AdmitAsync(record, grant is null ? null : grant.Issuer + "@" + grant.IssuerVersion,
@@ -324,6 +329,16 @@ internal sealed class A2aBridge : IAsyncDisposable
         {
             work.Cancellation.Token.ThrowIfCancellationRequested();
             await CheckCallerAsync(caller, work.Cancellation.Token);
+            // Dispatch is recorded durably, under the lock CancelTask takes, before anything reaches the
+            // executor: a cancellation that wins this race provably started nothing.
+            await _gate.WaitAsync(work.Cancellation.Token);
+            try
+            {
+                work.Cancellation.Token.ThrowIfCancellationRequested();
+                work.Record = work.Record with { Dispatched = true };
+                _store.Save(work.Record);
+            }
+            finally { _gate.Release(); }
             var handler = _handler(caller);
             handler.BindAgentInvocation(work.Record.AdmittedLease!, result =>
                 work.Drained = result.Lease?.WorkloadDrained == true);
@@ -356,8 +371,15 @@ internal sealed class A2aBridge : IAsyncDisposable
             if (work.Record.CancellationRequested && state != "TASK_STATE_COMPLETED")
             {
                 state = "TASK_STATE_CANCELED";
-                failure = work.Record.WorkloadTerminationConfirmed ? "A2A task canceled; signed receipt confirms the workload drained."
-                    : "A2A task canceled; workload termination is unconfirmed.";
+                string evidence = work.Record.Dispatched == false ? "not-started"
+                    : work.Record.WorkloadTerminationConfirmed ? "termination-verified" : "unresolved";
+                work.Record = work.Record with { CancellationEvidence = evidence };
+                failure = evidence switch
+                {
+                    "not-started" => "A2A task canceled before dispatch; no workload was started.",
+                    "termination-verified" => "A2A task canceled; signed receipt confirms the workload drained.",
+                    _ => "A2A task canceled; workload termination is unconfirmed."
+                };
                 // Keep the signed EXIT artifact when available so the caller can verify the drain.
                 if (!work.Record.WorkloadTerminationConfirmed) result = null;
             }
@@ -433,6 +455,7 @@ internal sealed class A2aBridge : IAsyncDisposable
             receiverAgentId = _config.AgentId, contractSha256 = _config.AgentVersion, record.TenantId,
             record.CallerId, record.Skill, record.CallerSuppliedParentTaskId, record.CancellationRequested,
             workloadTerminationConfirmed = record.CancellationRequested ? (bool?)record.WorkloadTerminationConfirmed : null,
+            record.Dispatched, record.CancellationEvidence,
             executionContext = record.AdmittedLease?.ExecutionContext, failure = record.Failure
         } }
     };

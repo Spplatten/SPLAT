@@ -210,7 +210,21 @@ public sealed class A2aBridgeTests : IAsyncLifetime
         Assert.Equal("TASK_STATE_FAILED", recovered.GetProperty("status").GetProperty("state").GetString());
         Assert.Contains("unconfirmed", recovered.GetRawText());
         Assert.Empty(_executor.Leases);
+        // A record from before dispatch was tracked is unknown, never "not started".
+        Assert.Equal("unresolved", Metadata(recovered).GetProperty("cancellationEvidence").GetString());
+
+        // One saved as admitted but never dispatched provably started nothing.
+        await _bridge.DisposeAsync();
+        var undispatched = record with { Id = Guid.NewGuid().ToString("N"), MessageId = "admitted-only", Dispatched = false };
+        new A2aTaskStore(_context, _approval.AgentId, _approval.Sha256).Save(undispatched, insert: true);
+        _bridge = CreateBridge();
+        var notStarted = await Call("GetTask", new { id = undispatched.Id });
+        Assert.Equal("not-started", Metadata(notStarted).GetProperty("cancellationEvidence").GetString());
+        Assert.Contains("no workload was started", notStarted.GetRawText());
+        Assert.Empty(_executor.Leases);
     }
+
+    private static JsonElement Metadata(JsonElement task) => task.GetProperty("metadata").GetProperty(A2aConfiguration.Extension);
 
     [Fact]
     public async Task CancellationDoesNotClaimAnUnobservedKernelTerminationAndCapacityFailsClosed()
@@ -226,6 +240,10 @@ public sealed class A2aBridgeTests : IAsyncLifetime
         var canceled = await Call("CancelTask", new { id = pending.GetProperty("id").GetString() });
         Assert.Equal("TASK_STATE_CANCELED", canceled.GetProperty("status").GetProperty("state").GetString());
         Assert.False(canceled.GetProperty("metadata").GetProperty(A2aConfiguration.Extension).GetProperty("workloadTerminationConfirmed").GetBoolean());
+        // Dispatched, and no signed drain came back: unresolved, not "terminated" and not "not started".
+        Assert.True(canceled.GetProperty("metadata").GetProperty(A2aConfiguration.Extension).GetProperty("dispatched").GetBoolean());
+        Assert.Equal("unresolved", canceled.GetProperty("metadata").GetProperty(A2aConfiguration.Extension)
+            .GetProperty("cancellationEvidence").GetString());
         Assert.Single(_executor.Leases);
     }
 

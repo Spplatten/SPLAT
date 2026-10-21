@@ -10,7 +10,14 @@ internal sealed record A2aTaskRecord(string Id, string ContextId, string TenantI
     string State, DateTimeOffset UpdatedUtc, JsonElement? Result = null,
     bool CancellationRequested = false, string? Failure = null, LeaseSpec? AdmittedLease = null,
     DateTimeOffset? AuthorityExpiresUtc = null, string? DelegationNonce = null, int DelegationDepth = 0,
-    bool WorkloadTerminationConfirmed = false);
+    bool WorkloadTerminationConfirmed = false,
+    // Saved before the request reaches the lease executor, under the same lock that records a
+    // cancellation, so "never started" is a fact rather than a guess. Null on a record written before
+    // the field existed: unknown, never read as "not dispatched".
+    bool? Dispatched = null,
+    // For a canceled or interrupted task: not-started (never dispatched), termination-verified (a
+    // signed drain receipt), or unresolved (dispatched, and nothing proves how it ended).
+    string? CancellationEvidence = null);
 
 internal sealed class A2aTaskStore
 {

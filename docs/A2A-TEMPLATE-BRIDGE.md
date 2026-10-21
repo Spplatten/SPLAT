@@ -122,6 +122,11 @@ gRPC, REST and multi-turn task continuation are outside this first profile.
 - Cancellation sends an authenticated control frame and waits for the daemon's signed drained
   outcome. Only a verified receipt for this invocation sets `workloadTerminationConfirmed=true`;
   transport failure leaves it false. A canceled status alone is not termination evidence.
+  Dispatch is saved before a task reaches the executor, under the lock cancellation takes, and every
+  canceled or interrupted task reports `cancellationEvidence`: `not-started` (never dispatched, so
+  no workload ran), `termination-verified` (a signed drain receipt) or `unresolved` (dispatched,
+  nothing proves the end). A task saved before dispatch was tracked reads as `unresolved`.
+  Recovering a receipt after a lost connection needs a daemon receipt lookup and is not implemented.
 - The audit chain connects A2A task/caller/version to the bound tool's trace and lease result.
   Bound calls require outcome v2, signing the execution-policy hash, effective native-policy hash,
   receiver contract, authenticated tenant/caller, task, requesting agent/contract, parent and token
