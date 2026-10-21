@@ -148,7 +148,7 @@ public static class GovernedArgumentBinder
                 : isPowerShell && IsInsideSingleQuotedLiteral(argumentsTemplate, match.Index);
 
             declaredFields.TryGetValue(key, out var field);
-            Validate(key, value, insideQuotedLiteral, field);
+            Validate(key, value, insideQuotedLiteral, field, template.Tool.Substrate == ToolSubstrate.LinuxLease);
             return value;
         });
     }
@@ -269,7 +269,7 @@ public static class GovernedArgumentBinder
 
             try
             {
-                Validate(key, value, insideQuotedLiteral, field);
+                Validate(key, value, insideQuotedLiteral, field, template.Tool.Substrate == ToolSubstrate.LinuxLease);
             }
             catch (TemplateParameterRejectedException ex)
             {
@@ -376,7 +376,8 @@ public static class GovernedArgumentBinder
         });
     }
 
-    private static void Validate(string key, string value, bool insideQuotedLiteral, TemplateParameterField? field)
+    private static void Validate(string key, string value, bool insideQuotedLiteral, TemplateParameterField? field,
+        bool posixArgv = false)
     {
         // A control character is a statement separator or a terminal escape in every shell involved,
         // so it is refused before any other policy is consulted, in both contexts.
@@ -426,6 +427,15 @@ public static class GovernedArgumentBinder
             }
 
             return;
+        }
+
+        // PosixArgumentSplitter reads a bare backslash as an escape, so a value ending in one joined the
+        // next argument to itself: `{Target} --read-only` with "host\" became the single argument
+        // "host --read-only" and the flag was gone. Windows keeps it, where it is the path separator.
+        if (posixArgv && value.Contains('\\'))
+        {
+            throw new TemplateParameterRejectedException(
+                key, "a backslash escapes the next character in a Linux argument list, so it is not permitted in an unquoted position.");
         }
 
         if (!BarePolicy.IsMatch(value))

@@ -103,6 +103,12 @@ public partial class McpServerHandler
     private readonly AgentManifestApproval? _agent;
     internal bool IsAgentBound => _agent is not null;
 
+    /// <summary>
+    /// Where <see cref="RecordInternalError"/> keeps failures; null keeps none. The entry point names it,
+    /// so a test that provokes a failure never writes into the data root of whoever runs the suite.
+    /// </summary>
+    private readonly string? _internalErrorLog;
+
     public McpServerHandler(
         ILeasedExecutor leasedExecutor,
         ITemplatePolicyCompiler policyCompiler,
@@ -124,8 +130,10 @@ public partial class McpServerHandler
         RunRecordLedgerVerifier? recordVerifier = null,
         ICredentialSanitizer? credentialSanitizer = null,
         IDataLossPreventionSanitizer? dlpSanitizer = null,
-        AgentManifestApproval? agent = null)
+        AgentManifestApproval? agent = null,
+        string? internalErrorLog = null)
     {
+        _internalErrorLog = internalErrorLog;
         _runRecords = runRecords;
         _recordVerifier = recordVerifier;
         _leasedExecutor = leasedExecutor ?? throw new ArgumentNullException(nameof(leasedExecutor));
@@ -226,7 +234,65 @@ public partial class McpServerHandler
         }
         catch (Exception ex)
         {
-            return CreateErrorResponse(request.Id, -32603, Scrub($"Internal server error: {ex.Message}"));
+            // Named and placed, because an empty or scrubbed message otherwise leaves the caller nothing.
+            // The first managed gate run read "Internal server error: " and no more (2026-10-18).
+            return CreateErrorResponse(request.Id, -32603, Scrub($"Internal server error ({RecordInternalError(ex)}): {ex.Message}"));
+        }
+    }
+
+    /// <summary>
+    /// Keeps the whole failure, inner exceptions included, for whoever administers this host, in the log
+    /// the entry point named: the data root of the account the server runs as, which for the managed
+    /// service is its private state directory. It is scrubbed like everything else this server writes.
+    /// A log that cannot be written must not turn one failure into two, and one past a mebibyte takes no
+    /// more: the first failures say what broke, and an admitted caller repeating one must not fill the disk.
+    /// </summary>
+    /// <returns>
+    /// What a reply may say about it: the type, the method that threw it, the first method of this tree it
+    /// passed through, and whether it was kept. Method names are code locations in a public tree and carry
+    /// no deployment data. The message can name a private path, so each caller decides whether to add it.
+    /// </returns>
+    internal string RecordInternalError(Exception ex)
+    {
+        string unkept = "";
+        if (_internalErrorLog is not null)
+        {
+            try
+            {
+                if (new FileInfo(_internalErrorLog) is { Exists: true, Length: > 1024 * 1024 }) unkept = "; the error log is full";
+                else File.AppendAllText(_internalErrorLog, $"{DateTimeOffset.UtcNow:o} {Scrub(ex.ToString())}{Environment.NewLine}");
+            }
+            catch (Exception logFailure) when (logFailure is IOException or UnauthorizedAccessException)
+            {
+                // Said in the reply: on 2026-10-19 the managed service could not create this log, and the
+                // failure it was meant to keep left no trace at all.
+                unkept = $"; not kept: {logFailure.GetType().Name}";
+            }
+        }
+
+        return DescribeFailure(ex) + unkept;
+    }
+
+    private static string DescribeFailure(Exception ex)
+    {
+        try
+        {
+            var methods = new System.Diagnostics.StackTrace(ex, false).GetFrames()
+                .Select(frame => frame.GetMethod()).OfType<System.Reflection.MethodBase>().ToList();
+            static string Name(System.Reflection.MethodBase method) => $"{method.DeclaringType?.FullName}.{method.Name}";
+            string? thrown = methods.Count > 0 ? Name(methods[0]) : null;
+            string? ours = methods.Where(method => method.DeclaringType?.Namespace is { } ns
+                    && (ns.StartsWith("SplatMcp", StringComparison.Ordinal) || ns.StartsWith("MissionController", StringComparison.Ordinal)))
+                .Select(Name).FirstOrDefault();
+            // An assembly that failed to load is named by its display name, which holds no path. A file is
+            // named by its path, which can be private, so only the first kind is said.
+            string file = ex is FileNotFoundException { FileName: { } name } && name.IndexOfAny(['\\', '/']) < 0 ? $" '{name}'" : "";
+            return ex.GetType().Name + file + (thrown is null ? "" : $" at {thrown}") + (ours is null || ours == thrown ? "" : $", from {ours}");
+        }
+        catch (Exception)
+        {
+            // Describing a failure must not become a second one.
+            return ex.GetType().Name;
         }
     }
 
@@ -827,14 +893,8 @@ public partial class McpServerHandler
             // operator's in policy.json, each of which may only lower what this asks for.
             Limits: new LeaseResourceLimits());
 
-        var violations = new List<LeaseViolationEvent>();
-        var violationProgress = new SynchronousProgress<LeaseViolationEvent>(v =>
-        {
-            lock (violations)
-            {
-                violations.Add(v);
-            }
-        });
+        var violations = new BoundedViolationLog();
+        var violationProgress = new SynchronousProgress<LeaseViolationEvent>(violations.Add);
 
         var execResult = await _leasedExecutor.ExecuteLeasedAsync(
             lease,
@@ -870,13 +930,15 @@ public partial class McpServerHandler
         outputSb.AppendLine(RecalledContext.Delimit(
             $"SANDBOXED PROCESS OUTPUT - '{Scrub(command, facts)}'", commandBoundary, Scrub(sandboxOutput.ToString(), facts)));
 
-        if (violations.Count > 0)
+        if (violations.Total > 0)
         {
             outputSb.AppendLine("\n[KERNEL VIOLATION CONTAINMENT REPORT]");
-            foreach (var v in violations)
+            foreach (var v in violations.Retained)
             {
                 outputSb.AppendLine(Scrub($"  -EPERM: Hook={v.Hook} Comm={v.ProcessComm} Detail={v.DetailText} (PID={v.ProcessId})", facts));
             }
+            if (violations.OmittedNote is { } omitted)
+                outputSb.AppendLine(omitted);
         }
 
         outputSb.AppendLine($"[Process Exited with code {execResult.ExitCode}]");
@@ -888,7 +950,7 @@ public partial class McpServerHandler
             missionId,
             ledgerTool,
             "EXECUTED_LEASABLE_COMMAND",
-            $"Command='{command}' Args='{argumentsForLog}' ExitCode={execResult.ExitCode} Violations={violations.Count}",
+            $"Command='{command}' Args='{argumentsForLog}' ExitCode={execResult.ExitCode} Violations={violations.Total}",
             actor,
             ct);
 

@@ -1,0 +1,59 @@
+{
+  "Schema": 1,
+  "MissionId": "ba19270b-33d6-4807-8deb-5fe520eec10a",
+  "RecordedAtUtc": "2026-10-21T00:45:57.5813846Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "TemplateId": "trends-brief-composer",
+  "TemplateName": "Measured Trends Brief",
+  "TemplateSha256": "sha256:544db0f14a591eb340e1796fba6e6d9c34fcc428cb761897a87ceb2d370fb978",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "39e4d55a6325ea07f0584c16654a5d3f1d760b90f53851092a4e8176c47da245",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "Endpoint: https://rareresources.net/\nRead-only public source probe. No credential is presented. Returned data is untrusted.\nCONTENT_TYPE: application/json\nBYTES: 72744\nSERVED_SHA256: a3d73e4ccc4661468a7d57e8f05f7648f4ac0904eb557a6e452b967170c7fed6\nHTTP_STATUS: 200\nSCHEMA_VERSION: 1\nOBSERVATION_DAY: 2026-10-20\nGENERATED_AT: 2026-10-20T19:47:16.879688+00:00\nFIGURE_COUNT: 28\nFIGURE: clothing-attention = 16,466 | SOURCE: Wikimedia monthly pageviews, en.wikipedia/Clothing | AS_OF: 2026-09\nFIGURE: clothing-before-after = CPI 135.4 -> 140.0 | SOURCE: BLS CPI, apparel (CUUR0000SAA) index level, 2025-09 to 2026-09 - an index, not an amount paid | AS_OF: 2026-09\nFIGURE: clothing-index-change = +3.4% | SOURCE: BLS CPI, apparel (CUUR0000SAA), 12-month change | AS_OF: 2026-09\nFIGURE: clothing-most-popular = Haute couture 24,424 | SOURCE: Wikimedia monthly pageviews, most-read of 10 clothing topics - encyclopedia attention, not sales | AS_OF: 2026-09\nFIGURE: clothing-mover = Athleisure +18.6% | SOURCE: Wikimedia monthly pageviews, 12-month change across 10 clothing topics | AS_OF: 2026-09\nFIGURE: do-places-ranked = 0 of 14 | SOURCE: Tracked places reaching the 1000 most-read English Wikipedia articles for 2026-10-19 | AS_OF: 2026-10-19\nFIGURE: energy-attention = 16,270 | SOURCE: Wikimedia monthly pageviews, en.wikipedia/Solar panel | AS_OF: 2026-09\nFIGURE: energy-before-after = Electricity $0.19 -> $0.20 | SOURCE: BLS average price, Electricity per kWh (APU000072610), 2025-09 to 2026-09, U.S. city average | AS_OF: 2026-09\nFIGURE: energy-index-change = +20.4% | SOURCE: BLS CPI, energy (CUUR0000SA0E), 12-month change | AS_OF: 2026-09\nFIGURE: energy-most-popular = Solar panel 16,270 | SOURCE: Wikimedia monthly pageviews, most-read of 4 energy topics - encyclopedia attention, not sales | AS_OF: 2026-09\nFIGURE: energy-mover = Electric vehicle -21.8% | SOURCE: Wikimedia monthly pageviews, 12-month change across 4 energy topics | AS_OF: 2026-09\nFIGURE: energy-price = Electricity $0.20/kWh | SOURCE: BLS average price, Electricity per kWh (APU000072610), U.S. city average | AS_OF: 2026-09\nFIGURE: feel-gathering-places = 166 places | SOURCE: OpenStreetMap: community centres, places of worship, libraries, cafes, restaurants, social facilities, parks, sports centres and pitches within (34.55, -85.45, 34.85, -85.1) (ODbL) | AS_OF: 2026-10-20\nFIGURE: feel-most-common = Places of worship 102 | SOURCE: OpenStreetMap, most numerous kind of gathering place in that box (ODbL) | AS_OF: 2026-10-20\nFIGURE: food-attention = 8,587 | SOURCE: Wikimedia monthly pageviews, en.wikipedia/Grocery store | AS_OF: 2026-09\nFIGURE: food-before-after = Eggs $3.49 -> $2.27 | SOURCE: BLS average price, Eggs, grade A large per doz (APU0000708111), 2025-09 to 2026-09, U.S. city average | AS_OF: 2026-09\nFIGURE: food-index-change = +2.5% | SOURCE: BLS CPI, food (CUUR0000SAF1), 12-month change | AS_OF: 2026-09\nFIGURE: food-most-popular = Fast food 14,998 | SOURCE: Wikimedia monthly pageviews, most-read of 4 food topics - encyclopedia attention, not sales | AS_OF: 2026-09\nFIGURE: food-mover = Grocery store -0.9% | SOURCE: Wikimedia monthly pageviews, 12-month change across 4 food topics | AS_OF: 2026-09\nFIGURE: food-price = Eggs $2.27/doz | SOURCE: BLS average price, Eggs, grade A large per doz (APU0000708111), U.S. city average | AS_OF: 2026-09\nFIGURE: shelter-attention = 2,586 | SOURCE: Wikimedia monthly pageviews, en.wikipedia/Renting | AS_OF: 2026-09\nFIGURE: shelter-before-after = CPI 418.6 -> 432.1 | SOURCE: BLS CPI, shelter (CUUR0000SAH1) index level, 2025-09 to 2026-09 - an index, not an amount paid | AS_OF: 2026-09\nFIGURE: shelter-index-change = +3.2% | SOURCE: BLS CPI, shelter (CUUR0000SAH1), 12-month change | AS_OF: 2026-09\nFIGURE: shelter-most-popular = Apartment 9,200 | SOURCE: Wikimedia monthly pageviews, most-read of 4 shelter topics - encyclopedia attention, not sales | AS_OF: 2026-09\nFIGURE: shelter-mover = Renting -10.7% | SOURCE: Wikimedia monthly pageviews, 12-month change across 4 shelter topics | AS_OF: 2026-09\nFIGURE: site-categories = 6 | SOURCE: Categories with at least one measured figure: food, clothing, shelter, energy, what people do, what people feel | AS_OF: 2026-10-20\nFIGURE: site-data-points = 153 | SOURCE: Observations in this artifact: 128 monthly index values and 25 published figures | AS_OF: 2026-10-20\nFIGURE: site-sources = 6 | SOURCE: Public datasets that answered this run: BLS Consumer Price Index, BLS average prices, Wikimedia pageviews, Wikimedia most-read, OpenStreetMap, Wikimedia Commons | AS_OF: 2026-10-20\nARTIFACT_AGE_DAYS: 1\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "lease:enforcing",
+      "cgroup:/sys/fs/cgroup/splat_leases/mission_ba19270b-33d6-4807-8deb-5fe520eec10a",
+      "jail:mount-namespace",
+      "workload:uid=200000",
+      "workspace:/var/lib/splat/missions/ba19270b33d648078deb5fe520eec10a (created by the daemon)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "I reviewed the retrieved telemetry (HTTP 200, 28 figures, generated 2026-10-20). No instruction-like content was found embedded in the figure text itself — all entries are standard data/source descriptions, so there is no prompt-injection finding to report here. Below is the public brief drawing only on the figures provided, avoiding causal claims between price and attention series, and flagging that encyclopedia-attention comparisons share a broad decline confound.\n\n**Brief:** Consumer prices moved higher across most tracked categories over the past year: apparel CPI rose 3.4% (index 135.4 → 140.0), shelter CPI rose 3.2% (index 418.6 → 432.1), energy CPI rose 20.4%, and food CPI rose 2.5%, while egg prices fell from $3.49 to $2.27/doz and electricity rose from $0.19 to $0.20/kWh. Encyclopedia attention moved differently across topics — \"Renting\" pageviews fell 10.7% and \"Electric vehicle\" fell 21.8%, while \"Athleisure\" rose 18.6% — but these are separate measurements from the price indexes, not explanations for them, and since pageviews have broadly declined across many topics, a falling number does not necessarily mean reduced public interest. The most-viewed topic in each category was Haute couture (24,424 views) for clothing, Solar panel (16,270) for energy, Fast food (14,998) for food, and Apartment (9,200) for shelter. Separately, a local OpenStreetMap scan found 166 gathering places in the sampled area, the most common kind being Places of worship (102).\n\n```json\n{\n  \"status\": \"Healthy\",\n  \"headline\": \"Latest BLS and Wikimedia figures show broad 12-month price increases alongside mixed, non-causal shifts in encyclopedia topic attention.\",\n  \"findings\": [\n    \"clothing-index-change: BLS apparel CPI rose '+3.4%' over 12 months (CPI 135.4 -> 140.0, per clothing-before-after).\",\n    \"shelter-index-change: BLS shelter CPI rose '+3.2%' over 12 months (CPI 418.6 -> 432.1, per shelter-before-after).\",\n    \"energy-index-change: BLS energy CPI rose '+20.4%' over 12 months, while energy-before-after shows electricity price rising 'Electricity $0.19 -> $0.20'.\",\n    \"food-before-after: Eggs price fell 'Eggs $3.49 -> $2.27' per dozen even as food-index-change (overall food CPI) rose '+2.5%'.\",\n    \"energy-mover shows 'Electric vehicle -21.8%' and clothing-mover shows 'Athleisure +18.6%' in Wikipedia pageview change, measurements of attention, not causes of price changes.\",\n    \"feel-gathering-places found '166 places' in the sampled area, with feel-most-common identifying 'Places of worship 102' as the most numerous kind.\"\n  ],\n  \"text\": \"Consumer prices moved higher across most tracked categories over the past year: apparel CPI rose 3.4% (index 135.4 → 140.0), shelter CPI rose 3.2% (index 418.6 → 432.1), energy CPI rose 20.4%, and food CPI rose 2.5%, while egg prices fell from $3.49 to $2.27/doz and electricity rose from $0.19 to $0.20/kWh. Encyclopedia attention moved differently across topics — 'Renting' pageviews fell 10.7% and 'Electric vehicle' fell 21.8%, while 'Athleisure' rose 18.6% — but these are separate measurements from the price indexes, not explanations for them, and since pageviews have broadly declined across many topics, a falling number does not necessarily mean reduced public interest. The most-viewed topic in each category was Haute couture (24,424 views) for clothing, Solar panel (16,270) for energy, Fast food (14,998) for food, and Apartment (9,200) for shelter. Separately, a local OpenStreetMap scan found 166 gathering places in the sampled area, the most common kind being Places of worship (102).\",\n  \"grounded_in\": [\n    \"clothing-index-change\",\n    \"clothing-before-after\",\n    \"shelter-index-change\",\n    \"shelter-before-after\",\n    \"energy-index-change\",\n    \"energy-before-after\",\n    \"food-index-change\",\n    \"food-before-after\",\n    \"shelter-mover\",\n    \"energy-mover\",\n    \"clothing-mover\",\n    \"clothing-most-popular\",\n    \"energy-most-popular\",\n    \"food-most-popular\",\n    \"shelter-most-popular\",\n    \"feel-gathering-places\",\n    \"feel-most-common\"\n  ]\n}\n```",
+      "LatencyMs": 14858,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 1
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "5fe2723ca3b8cdcad2c41629548d5df400a731a9bbe3816600f93ad663b0b2bb",
+    "Status": "Healthy",
+    "Headline": "Latest BLS and Wikimedia figures show broad 12-month price increases alongside mixed, non-causal shifts in encyclopedia topic attention.",
+    "Findings": [
+      "✓ clothing-index-change: BLS apparel CPI rose '+3.4%' over 12 months (CPI 135.4 -> 140.0, per clothing-before-after).",
+      "✓ shelter-index-change: BLS shelter CPI rose '+3.2%' over 12 months (CPI 418.6 -> 432.1, per shelter-before-after).",
+      "✓ energy-index-change: BLS energy CPI rose '+20.4%' over 12 months, while energy-before-after shows electricity price rising 'Electricity $0.19 -> $0.20'.",
+      "✓ food-before-after: Eggs price fell 'Eggs $3.49 -> $2.27' per dozen even as food-index-change (overall food CPI) rose '+2.5%'.",
+      "✓ energy-mover shows 'Electric vehicle -21.8%' and clothing-mover shows 'Athleisure +18.6%' in Wikipedia pageview change, measurements of attention, not causes of price changes.",
+      "✓ feel-gathering-places found '166 places' in the sampled area, with feel-most-common identifying 'Places of worship 102' as the most numerous kind."
+    ],
+    "RecommendedActions": [],
+    "Grounded": 6,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 0
+  }
+}

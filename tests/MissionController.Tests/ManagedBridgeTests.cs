@@ -20,23 +20,39 @@ public sealed class ManagedBridgeTests
         JsonRpc = "2.0", Id = JsonSerializer.SerializeToElement(1), Method = "tools/call",
         Params = JsonSerializer.SerializeToElement(new { name = tool, arguments })
     };
-    private static (McpServerHandler Handler, ManagedPipeIdentity Identity, Executor Executor, Ledger Ledger) Host(McpEgressPolicy? egress = null)
+    private static (McpServerHandler Handler, ManagedPipeIdentity Identity, Executor Executor, Ledger Ledger) Host(
+        McpEgressPolicy? egress = null, string? internalErrorLog = null)
     {
         var identity = new ManagedPipeIdentity();
         var ledger = new Ledger();
         var executor = new Executor(ledger);
-        return (new McpServerHandler(executor, new TemplatePolicyCompiler(), ledger, identityProvider: identity, egressPolicy: egress), identity, executor, ledger);
+        return (new McpServerHandler(executor, new TemplatePolicyCompiler(), ledger, identityProvider: identity, egressPolicy: egress,
+            internalErrorLog: internalErrorLog), identity, executor, ledger);
     }
 
     [Fact]
     public async Task AdmissionFailurePreventsExecutionAndDoesNotDisclosePrivatePath()
     {
-        var host = Host(); host.Identity.Set(Caller); host.Ledger.Fail = true;
-        var response = await ManagedBridgeHost.DispatchAsync(Request("run_command", new { command = "/bin/echo", args = new[] { "hi" } }),
-            host.Handler, host.Ledger, host.Identity, default);
-        Assert.Equal(-32001, response.Error?.Code);
-        Assert.DoesNotContain("private-path", response.Error!.Message);
-        Assert.Equal(0, host.Executor.Calls);
+        string log = Path.Combine(Path.GetTempPath(), $"splat-internal-errors-{Guid.NewGuid():N}.log");
+        try
+        {
+            var host = Host(internalErrorLog: log); host.Identity.Set(Caller); host.Ledger.Fail = true;
+            var response = await ManagedBridgeHost.DispatchAsync(Request("run_command", new { command = "/bin/echo", args = new[] { "hi" } }),
+                host.Handler, host.Ledger, host.Identity, default);
+            Assert.Equal(-32001, response.Error?.Code);
+            Assert.DoesNotContain("private-path", response.Error!.Message);
+            Assert.Equal(0, host.Executor.Calls);
+            // The caller learns which failure it was and where; the service's administrator learns the rest.
+            Assert.Contains("(IOException at MissionController.Tests.ManagedBridgeTests+Ledger.AppendLogAsync)", response.Error.Message);
+            Assert.Contains("System.IO.IOException: private-path", File.ReadAllText(log));
+
+            // A log that cannot be written says so, rather than leaving the failure without a trace.
+            var unlogged = Host(internalErrorLog: Path.Combine(log + ".missing", "internal-errors.log"));
+            unlogged.Identity.Set(Caller); unlogged.Ledger.Fail = true;
+            Assert.Contains("; not kept: DirectoryNotFoundException)", (await ManagedBridgeHost.DispatchAsync(Request("run_command", new { command = "/bin/echo" }),
+                unlogged.Handler, unlogged.Ledger, unlogged.Identity, default)).Error!.Message);
+        }
+        finally { File.Delete(log); }
     }
 
     [Theory]
@@ -110,6 +126,60 @@ public sealed class ManagedBridgeTests
         var admitted = Assert.Single(rules, x => x.IdentityReference.Value == Caller.PrincipalId);
         Assert.Equal((PipeAccessRights)0, admitted.PipeAccessRights & PipeAccessRights.CreateNewInstance);
         Assert.Equal((PipeAccessRights)0, admitted.PipeAccessRights & PipeAccessRights.ChangePermissions);
+    }
+
+    /// <summary>
+    /// An admitted operator holds only ClientRights on the bridge pipe, so a pipe that grants this account
+    /// nothing else must still open. Until 2026-10-18 it did not. CreateFile adds FILE_READ_ATTRIBUTES to
+    /// every open, ClientRights lacked it, and the first live gate run refused the admitted operator. The
+    /// service's own account, which holds full control, was never affected.
+    /// </summary>
+    [Fact]
+    public async Task AnOperatorHoldingOnlyClientRightsCanOpenThePipe()
+    {
+        var self = WindowsIdentity.GetCurrent().User!;
+        var security = new PipeSecurity();
+        security.SetAccessRuleProtection(true, false);
+        security.SetOwner(self);
+        security.AddAccessRule(new PipeAccessRule(self, ManagedBridgeHost.ClientRights, AccessControlType.Allow));
+        string name = "splat-test-" + Guid.NewGuid().ToString("N");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var server = NamedPipeServerStreamAcl.Create(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 4096, 4096, security);
+        var accept = server.WaitForConnectionAsync(cancellation.Token);
+        using var client = new NamedPipeClientStream(".", name, ManagedBridgeHost.ClientRights, PipeOptions.Asynchronous,
+            TokenImpersonationLevel.Identification, HandleInheritability.None);
+        await client.ConnectAsync(5000, cancellation.Token);
+        await accept;
+        Assert.True(client.IsConnected);
+    }
+
+    /// <summary>
+    /// The service read its caller's name while impersonating it. Every await after that resumed under
+    /// the caller's Identification token, which opens nothing, so each call failed wherever it first
+    /// opened a file or loaded an assembly (2026-10-20). A continuation must run as the service.
+    /// </summary>
+    [Fact]
+    public async Task ACallersTokenDoesNotFollowTheConnectionPastTheHandshake()
+    {
+        string sid = WindowsIdentity.GetCurrent().User!.Value;
+        string name = "splat-test-" + Guid.NewGuid().ToString("N");
+        var config = new ManagedBridgeConfiguration(1, "SplatTest", sid, name, "SplatTest", 1, Path.GetTempPath(), Path.GetTempPath(), new[] { sid });
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var server = new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 64, 64);
+        var accept = server.WaitForConnectionAsync(cancellation.Token);
+        using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Identification);
+        await client.ConnectAsync(5000, cancellation.Token);
+        await accept;
+        await client.WriteAsync(new byte[] { 1 }, cancellation.Token);
+        await server.ReadExactlyAsync(new byte[1], cancellation.Token);
+
+        Assert.Equal(sid, ManagedBridgeHost.IdentifyCaller(server, config).PrincipalId);
+        await Task.Delay(1, cancellation.Token);
+        Assert.Null(WindowsIdentity.GetCurrent(true));
+        string probe = Path.Combine(Path.GetTempPath(), $"splat-token-{Guid.NewGuid():N}");
+        File.WriteAllText(probe, "");
+        File.Delete(probe);
     }
 
     [Fact]

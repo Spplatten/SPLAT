@@ -35,4 +35,38 @@ public sealed class ManagedDeploymentTests
         Assert.Throws<ArgumentException>(() => Parse("unmount", "--managed", "--operator-sid", "S-1-5-21-1-2-3-1001"));
         Assert.Throws<ArgumentException>(() => Parse("provision", "--managed", "--instance", "NotSplat", "--upgrade"));
     }
+
+    /// <summary>
+    /// Pins the shipped script against the defect that failed the first live 2.4 install. Guest
+    /// scripts went to sh through Process.StandardInput. On a UTF-8 system the writer prefixed a BOM,
+    /// and WriteLine ended the text with CRLF, so /etc/wsl.conf was written as 'wsl.conf\r' and systemd
+    /// never started. They now reach sh from a BOM-less UTF-8 file.
+    /// </summary>
+    [Fact]
+    public void GuestScriptsReachShAsExactBytes()
+    {
+        using var resource = typeof(ManagedBridgeCommand).Assembly.GetManifestResourceStream("managed-deployment.ps1");
+        Assert.NotNull(resource);
+        string script = new StreamReader(resource).ReadToEnd();
+
+        Assert.DoesNotContain("StandardInput.WriteLine", script);
+        Assert.Contains("[Text.UTF8Encoding]::new($false).GetBytes($Script.Replace(\"`r\", '')", script);
+        Assert.Contains("-RedirectStandardInput $scriptFile", script);
+    }
+
+    /// <summary>
+    /// The daemon refuses a lease when one of the paths it always guards does not resolve. /etc/sudoers
+    /// is one of them, and the minimal guest has no sudo, so every lease of the 2026-10-20 gate run was
+    /// refused. The managed bootstrap gives the guest one: only when it is absent, and only root may
+    /// read it.
+    /// </summary>
+    [Fact]
+    public void TheManagedGuestHasEveryFileTheDaemonGuards()
+    {
+        using var resource = typeof(ManagedBridgeCommand).Assembly.GetManifestResourceStream("managed-deployment.ps1");
+        Assert.NotNull(resource);
+        string script = new StreamReader(resource).ReadToEnd();
+
+        Assert.Contains("test -e /etc/sudoers || install -m 0440 -o root -g root /dev/null /etc/sudoers", script);
+    }
 }

@@ -16,10 +16,9 @@ scanned for unmeasured claims and broken links exactly as before. It cannot be a
 Finished is not the same as removed. Five build plans were deleted outright on 2026-09-09 and are
 recorded at the bottom of this file; those had nothing left citing them.
 
-Last reconciled **2026-10-01**, when three internal commercial documents moved out of this directory to the untracked `private/` — the row at the bottom of this file says which, and why. Before that, **2026-09-26**: model-proposed parameter targeting landed in the ReAct loop ([ARCHITECTURE-control-plane.md](ARCHITECTURE-control-plane.md)) and the README's last-hop claim was restored against the kernel program that ships; the two governance templates and the status-gate record date from 2026-09-23, and the architecture, context and module reference from 2026-09-10.
-Read [the OEM subtraction plan](audits/2026-09-09-oem-subtraction-plan.md) first; everything else
-is either an input to it, an artifact it produces, or a record of how the project got here. To
-change the code rather than the plan, start with [CONTEXT.md](CONTEXT.md).
+Last reconciled **2026-10-14**, when the business documents — plans, briefs, handoffs, the governance templates and the coursework — moved to the untracked `private/`; the 2026-10-14 table below says which. Before that, **2026-10-01**, three internal commercial documents moved out the same way, and **2026-09-26**: model-proposed parameter targeting landed in the ReAct loop ([ARCHITECTURE-control-plane.md](ARCHITECTURE-control-plane.md)) and the README's last-hop claim was restored against the kernel program that ships; the two governance templates and the status-gate record date from 2026-09-23, and the architecture, context and module reference from 2026-09-10.
+Read [ROADMAP.md](ROADMAP.md) first: it is the status record, and the plan that ordered it moved
+out of the repository on 2026-10-14. To change the code, start with [CONTEXT.md](CONTEXT.md).
 
 ---
 
@@ -27,18 +26,14 @@ change the code rather than the plan, start with [CONTEXT.md](CONTEXT.md).
 
 | Document | What it is |
 | --- | --- |
-| [END-GOAL.md](END-GOAL.md) | **The destination.** SPLAT as a kit you mount from a drive or a download, and unmount cleanly: what it takes, what exists, and what is yours to decide. A design, never a claim. |
 | [SCOPE-acting-agents.md](SCOPE-acting-agents.md) | **What SPLAT is for.** Agents that act, not only read: where each part runs, why every action goes through the Linux lease, how a secret lives for one step, and the order of work. Roadmap P5 tracks it. |
 | [AYA.md](AYA.md) | Whether to replace `libbpf-rs` with Aya: what it would give and cost, the 2026-10-11 decision (not now), and the loader-only trial to run when the daemon is packaged for Linux hosts. A plan, not a claim. |
-| [DAEMON-PRODUCT-PLAN.md](DAEMON-PRODUCT-PLAN.md) | The 2026-10-10 daemon priorities and acceptance gates: step secrets, concurrent platforms, hostname enforcement, local inference and a licensed Linux service. Planned capabilities, with the current proof boundary retained. |
 | [audits/2026-10-10-desktop-substrate.md](audits/2026-10-10-desktop-substrate.md) | Local 5.0 verification, the remaining live proof and the exact external-data scope awaiting approval. |
 | [ROADMAP.md](ROADMAP.md) | **The status record.** Every open item, who can do it, what "done" means, and the evidence for its current state — checked against the tree, not carried forward from older plans. |
-| [audits/2026-09-09-oem-subtraction-plan.md](audits/2026-09-09-oem-subtraction-plan.md) | **The current plan.** Phases P0–P3, the monetization argument, the term-sheet defects. Supersedes every plan document below it. |
 | [RUNBOOK-human-steps.md](RUNBOOK-human-steps.md) | What only a human can do — the `sudo` steps, the SDK installs, the reboots. Nothing in it is open right now — Part 0, the .NET 10 SDK, closed 2026-09-09. |
 | [GUIDE-operator.md](GUIDE-operator.md) | For the operator, after the 2026-09-20 substrate audit: what changed and why, a reading order for the Linux side, and the root steps that are theirs, with commands and expected output. |
 | [audits/2026-09-23-status-gate-and-gap-analysis.md](audits/2026-09-23-status-gate-and-gap-analysis.md) | The five-layer status gate read out of the tree at `40caaa0` — sandbox, telemetry, state machine, auth broker, audit trail — with the top three critical-path fixes, the pragmatism-versus-decoupling verdict, and the minimal demonstration set for an external evaluator. |
 | [audits/2026-09-20-substrate-hardening.md](audits/2026-09-20-substrate-hardening.md) | The five weaknesses of the Linux lease after the audit — deny-list not jail, UDP unpoliced, nothing survives the daemon, the shared secret, the unproven record change — with a recommendation, an order and a proof for each. Feeds P2 of the plan. |
-| [audits/2026-09-05-orchestration-plan.md](audits/2026-09-05-orchestration-plan.md) | Re-sequenced, not retired. Its Phase 1 was subtracted and its Phase 2 rescoped, but its ordering argument still holds. |
 
 ## How the code is put together
 
@@ -58,22 +53,6 @@ Reference, not plan: these describe the tree as it is, and are corrected when th
 | [RUNBOOK.md](RUNBOOK.md) | What a kernel and a guest need for the daemon to enforce, copy-paste setup for WSL2, the installed unit, and where a developer's shortcuts diverge from a hardened deployment. Added 2026-09-20. |
 | [MODULE_INFO.md](MODULE_INFO.md) | Every buildable unit: target, references, packages, what it owns, its tests, and whether it ships. |
 
-## Governance templates
-
-Reusable shapes for the two kinds of document this project writes, added 2026-09-23. Both are
-scanned by `DocumentationDriftTests` like every other file here.
-
-| Document | Audience | What it is |
-| --- | --- | --- |
-| [...RFC_TEMPLATE.md](...RFC_TEMPLATE.md) | Systems engineers, kernel programmers, core contributors | The technical design specification: continuum placement with a trade-off matrix, a memory and concurrency contract, kernel and host invariants, a byte-level interface and wire specification, and an evidence plan. Copy to `docs/rfcs/RFC-NNNN-<slug>.md`. |
-| [...EXECUTIVE_STATUS_TEMPLATE.md](...EXECUTIVE_STATUS_TEMPLATE.md) | Enterprise buyers, CISOs, compliance officers, executive sponsors | The readiness and governance report: an attested executive summary, the auditability and non-repudiation scorecard, reliability and SLA tracking, and the milestone and risk heatmap. Every cell carries an attestation level. Copy to `docs/status/<date>-executive-status.md`. |
-
-## Coursework
-
-| Document | What it is |
-| --- | --- |
-| [course/README.md](course/README.md) | Ten-week bottom-up systems and cybersecurity course, with eight- and twelve-week options, executable interface labs, source traces and current repair assignments. |
-
 ## Prospect-facing
 
 Machine-checked: `DocumentationDriftTests` reads every non-`PLAN-` file in this directory and fails
@@ -82,10 +61,8 @@ exist. Write accordingly.
 
 | Document | Audience | Status |
 | --- | --- | --- |
-| [BRIEF-technical-one-pager.md](BRIEF-technical-one-pager.md) | An engineer who will decide in thirty minutes | **Current.** The one to send. Its "what is NOT proven" section is the reason it works. |
 | [SPLAT-Field-Guide.html](SPLAT-Field-Guide.html) | Someone learning what SPLAT does, from zero | **Current, and the source of truth** for [TUTORIAL.md](TUTORIAL.md) and the published artifact. Change this one first, then re-sync the other two. |
 | [TUTORIAL.md](TUTORIAL.md) | Same reader, in the repo | Derived from the Field Guide. Do not edit independently. |
-| [...SPLAT-Enterprise-Executive-Brief.md](...SPLAT-Enterprise-Executive-Brief.md) | A direct enterprise buyer | **Audience superseded.** Kept as long-form positioning and as source material for an OEM licensee's own materials. |
 
 ## The record — audits, and why they stay
 
@@ -97,9 +74,33 @@ comments, commit messages and the live plan all use.
 | --- | --- |
 | [audits/2026-09-04-clinical-audit.md](audits/2026-09-04-clinical-audit.md) | Findings `F01`–`F24`. The origin of the numbering. |
 | [audits/2026-09-05-antigravity-deep-audit.md](audits/2026-09-05-antigravity-deep-audit.md) | Findings `AG-F01`–`AG-F08`, from a second agent auditing the same tree. |
-| [audits/2026-09-04-competition-and-scope.md](audits/2026-09-04-competition-and-scope.md) | The positioning corrections, and the contradiction table that forced the F15/F17 decision. |
 | [audits/2026-09-04-roadmap.md](audits/2026-09-04-roadmap.md) | **Superseded as a plan.** Retained for the work-package → F-number map and the six-group evidence contract that P3's run record fills in. |
 | [audits/WAVE-PLAN.md](audits/WAVE-PLAN.md) | What each remediation wave contained and which commit closed it. Waves 1–4 done; Wave 5 open behind the runtime floor. |
+
+## Moved out of the repository 2026-10-14
+
+The operator's business documents, to the untracked `private/docs/`, keeping their paths. They are
+plans, positioning, coursework and handoffs between agents, written for us rather than for a reader
+of this tree, and the operator decided they do not belong in a public one. Git history still holds
+every version published before this date.
+
+The technical record stays: the clinical, antigravity, claims, substrate and status audits, the
+evidence they cite, and every reference document above. Where a document here linked to a moved
+one, it now says what the claim was and that the file moved.
+
+| Moved | What it was |
+| --- | --- |
+| `audits/2026-09-09-oem-subtraction-plan.md` | The plan of record: phases P0–P3, the monetization argument, the term-sheet defects. |
+| `audits/2026-09-05-orchestration-plan.md` | The orchestration strategy: the verifiable run record before connector breadth. |
+| `audits/2026-09-04-competition-and-scope.md` | The positioning corrections, and the contradiction table that forced the F15/F17 decision. |
+| `END-GOAL.md` | The destination: SPLAT as a kit you mount and unmount. A design, never a claim. |
+| `DAEMON-PRODUCT-PLAN.md` | The 2026-10-10 daemon priorities and acceptance gates, including a licensed Linux service. |
+| `BRIEF-technical-one-pager.md` | The prospect-facing one-pager. |
+| `...SPLAT-Enterprise-Executive-Brief.md` | Long-form positioning for a direct enterprise buyer. |
+| `...ARCHITECTURAL-BREAKTHROUGHS.md` | The lineage brief: what SPLAT builds on and what it adds. |
+| `...EXECUTIVE_STATUS_TEMPLATE.md`, `...RFC_TEMPLATE.md` | The two governance templates. |
+| `HANDOFF-caller-identity.md`, `HANDOFF-community-exposure.md`, `HANDOFF-community-feedback-survey.md`, `...HANDOFF-first-remediation.md` | Handoffs between agents. The caller-identity threat model the 2.4 handoff assumed stays in [THREAT-MODEL.md](THREAT-MODEL.md). |
+| `course/` (16 files), `textbook/` (15 files) | The ten-week systems and cybersecurity course, and the textbook. |
 
 ## Moved out of the repository 2026-10-01
 
@@ -141,4 +142,4 @@ Five build plans for work that has since shipped. Git has them —
 | --- | --- |
 | [`../native/splat-agent/SUPPORTED_POLICY.md`](../native/splat-agent/SUPPORTED_POLICY.md) | What a lease actually enforces, what the daemon refuses, and what is reachable and not claimed. The most load-bearing document in the repository, and the one to attach to any commercial conversation. |
 | [`../README.md`](../README.md) | The repository's own front page. Test-bound: claims about kernel enforcement are checked against the hash of the BPF source that ships. |
-| [`../scope.md`](../scope.md) | Early scope capture. Historical; the contradiction table in the competition audit is where it was reconciled against the tree. Its companion idea ledger moved to the untracked `private/` on 2026-10-01 — see the row below. |
+| [`../scope.md`](../scope.md) | Early scope capture. Historical; the competition audit that reconciled it against the tree moved to the untracked `private/` on 2026-10-14. Its companion idea ledger moved to the untracked `private/` on 2026-10-01 — see the row below. |

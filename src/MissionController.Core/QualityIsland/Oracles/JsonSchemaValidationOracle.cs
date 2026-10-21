@@ -77,6 +77,11 @@ public sealed class JsonSchemaValidationOracle : IValidationOracle
             {
                 case SchemaContractType.StructuredDiagnosis:
                     ValidateStructuredDiagnosis(root, rejectionReasons);
+                    foreach (string field in options.RequiredResponseFields ?? Array.Empty<string>())
+                    {
+                        if (!TryGetPropertyInsensitive(root, field, out _))
+                            rejectionReasons.Add($"Missing '{field}', which this template requires in the closing JSON block.");
+                    }
                     break;
 
                 case SchemaContractType.ReActDecision:

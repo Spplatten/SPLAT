@@ -195,16 +195,10 @@ public sealed class CopilotSafetySubstrate : ICopilotSafetySubstrate
                 MaxCpuPercent: (uint)policy.MaxCpuPercent,
                 MaxPids: 100));
 
-        var kernelViolations = new List<CopilotSecurityViolation>();
-        var violationProgress = new Progress<LeaseViolationEvent>(v =>
-        {
-            kernelViolations.Add(new CopilotSecurityViolation(
-                ViolationType: $"KERNEL_BPF_LSM_{v.Hook.ToString().ToUpperInvariant()}",
-                Description: v.DetailText,
-                Severity: CopilotSecuritySeverity.Critical,
-                OffendingValue: $"PID={v.ProcessId} Comm={v.ProcessComm}",
-                TimestampUtc: v.TimestampUtc));
-        });
+        // Synchronous and bounded. This was a Progress<T>, which posts each refusal to the thread pool:
+        // the List was written concurrently, and the success check below could run before a refusal
+        // still in flight had been added - a lease the kernel refused could come back as a success.
+        var refusals = new MissionController.Core.BoundedViolationLog();
 
         // The Windows job-object path above still takes a command line, because CreateProcessW
         // does. The leased path does not: splitting happens here, where the sanitized text is
@@ -225,16 +219,36 @@ public sealed class CopilotSafetySubstrate : ICopilotSafetySubstrate
             lease: lease,
             command: context.ExecutableOrCommand,
             argv: argv,
-            violations: violationProgress,
+            violations: refusals,
             ct: cancellationToken);
 
-        bool isSuccess = execResult.ExitCode == 0 && !execResult.TimedOut && kernelViolations.Count == 0;
+        var kernelViolations = new List<CopilotSecurityViolation>();
+        foreach (var v in refusals.Retained)
+        {
+            kernelViolations.Add(new CopilotSecurityViolation(
+                ViolationType: $"KERNEL_BPF_LSM_{v.Hook.ToString().ToUpperInvariant()}",
+                Description: v.DetailText,
+                Severity: CopilotSecuritySeverity.Critical,
+                OffendingValue: $"PID={v.ProcessId} Comm={v.ProcessComm}",
+                TimestampUtc: v.TimestampUtc));
+        }
+        if (refusals.OmittedNote is { } omitted)
+        {
+            kernelViolations.Add(new CopilotSecurityViolation(
+                ViolationType: "KERNEL_BPF_LSM_NOT_LISTED",
+                Description: omitted,
+                Severity: CopilotSecuritySeverity.Critical,
+                OffendingValue: $"{refusals.Omitted} further refusal(s)",
+                TimestampUtc: DateTime.UtcNow));
+        }
+
+        bool isSuccess = execResult.ExitCode == 0 && !execResult.TimedOut && refusals.Total == 0;
 
         await _auditLedger.AppendLogAsync(
             context.SessionId,
             $"copilot-tool-{context.ToolName}",
             isSuccess ? "COPILOT_TOOL_SUCCESS" : "COPILOT_TOOL_FAILED",
-            $"AgentId={context.AgentId} Command='{context.ExecutableOrCommand}' ExitCode={execResult.ExitCode} Violations={kernelViolations.Count}",
+            $"AgentId={context.AgentId} Command='{context.ExecutableOrCommand}' ExitCode={execResult.ExitCode} Violations={refusals.Total}",
             context.OperatorIdentity,
             cancellationToken);
 
@@ -243,7 +257,7 @@ public sealed class CopilotSafetySubstrate : ICopilotSafetySubstrate
 
         return new CopilotExecutionResult(
             IsSuccess: isSuccess,
-            PolicyBlocked: kernelViolations.Count > 0,
+            PolicyBlocked: refusals.Total > 0,
             ExitCode: execResult.ExitCode,
             StandardOutput: execResult.StandardOutput,
             StandardError: execResult.StandardError,

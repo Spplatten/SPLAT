@@ -112,14 +112,25 @@ internal static class ManagedBridgeCommand
             // Created by the elevated installer in its private temp directory, removed after use.
             await using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 await script.CopyToAsync(file);
+            // The installer's own words reach the operator. It ran with no console and nothing
+            // redirected, so everything it printed - including why it failed - went nowhere, and a
+            // failed install looked exactly like one that worked (2026-10-14).
             var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"))
-                { UseShellExecute = false, CreateNoWindow = true };
+                { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (string arg in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", temporary,
                 "-Mode", request.Mode, "-Instance", request.Instance, "-Executable", executable }) start.ArgumentList.Add(arg);
             foreach (var pair in new[] { ("--rootfs", "-Rootfs"), ("--rootfs-sha256", "-RootfsSha256"), ("--operator-sid", "-OperatorSid"), ("--egress", "-Egress") })
                 if (request.Options.TryGetValue(pair.Item1, out string? value)) { start.ArgumentList.Add(pair.Item2); start.ArgumentList.Add(value); }
-            using var process = Process.Start(start) ?? throw new IOException("Managed installer did not start.");
+            using var process = new Process { StartInfo = start };
+            process.OutputDataReceived += (_, e) => { if (e.Data is not null) Console.Out.WriteLine(e.Data); };
+            process.ErrorDataReceived += (_, e) => { if (e.Data is not null) Console.Error.WriteLine(e.Data); };
+            if (!process.Start()) throw new IOException("Managed installer did not start.");
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
             await process.WaitForExitAsync();
+            if (process.ExitCode != 0)
+                Console.Error.WriteLine($"Managed {request.Mode} of {request.Instance} failed with exit code {process.ExitCode}. " +
+                    "Its receipts are in the instance's private state directory, which administrators can read.");
             return process.ExitCode;
         }
         finally { File.Delete(temporary); }

@@ -1,6 +1,6 @@
 # Runbook — what you verify, and what only you can do
 
-Companion to [the current plan](audits/2026-09-09-oem-subtraction-plan.md). Every command here was
+Companion to the current plan, which moved out of the repository on 2026-10-14. Every command here was
 run on this machine on the date it is marked with, so the expected output is what actually came
 back, not what should theoretically happen.
 
@@ -111,7 +111,7 @@ What actually came back on 2026-09-09:
 ```
 
 Everything after that was ordinary editing and is done — see
-[P0 of the plan](audits/2026-09-09-oem-subtraction-plan.md#5-sequence).
+P0 of the plan, which moved out of the repository on 2026-10-14.
 
 ---
 
@@ -137,8 +137,8 @@ packaged A2A proof is skipped by default; explicitly select its artifact as desc
 Anthropic tests also skip by default, including when a funded key is stored. Separate explicit
 consent flags govern synthetic requests, host telemetry and corpus recording; see
 [the recording guide](../tests/MissionController.Tests/Fixtures/Missions/README.md). A skip is
-not a passing live-model result. The current-definition corpus coverage gate passed after the
-nine-template renewal on 2026-10-14; see
+not a passing live-model result. The live corpus coverage gate currently fails for missing or stale
+recordings; see
 [the recording guide](../tests/MissionController.Tests/Fixtures/Missions/README.md). Do not bless
 old answers to claim that a changed prompt was exercised. The `dotnet` on this
 box is not on `PATH`, which is why the full path is used; the leading `&` is PowerShell's call

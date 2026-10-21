@@ -584,7 +584,7 @@ public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
     /// run. Now only a refused connection means nothing is listening, and the one thing started is the
     /// unit `splat-mcp provision` installs, whose binary is root's own under /opt/splat.
     /// </summary>
-    private async Task<TcpClient> ConnectToDaemonAsync(CancellationToken ct)
+    public async Task<TcpClient> ConnectToDaemonAsync(CancellationToken ct)
     {
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(DaemonStartBudget);

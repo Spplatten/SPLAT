@@ -54,7 +54,7 @@ Technical evaluations of agent sandboxes tend to blur together into generic "iso
 | Component | State |
 | :--- | :--- |
 | Windows containment substrate (Job Objects, restricted tokens, ACL jails) | **Shipped** — in the tested control plane |
-| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Built, unproven beyond the reviewed corpus** — 1104 automated tests; the three RARE Linux definitions were recorded, reviewed and replayed on 2026-10-18, closing current catalog coverage. Fixture notes retain observed model errors (see verification below) |
+| Governance plane (1:1:1 templates, DLP, egress firewall, audit ledger, semantic memory) | **Built, unproven beyond the reviewed corpus** — 968 automated tests; current-definition live corpus coverage is incomplete after template changes (see verification below) |
 | Zero-warning build gate | **Enforced** — [`src`](src/Directory.Build.props) and [`tests`](tests/Directory.Build.props) compile with `TreatWarningsAsErrors`, so a cold solution build reports 0 warnings and 0 errors. No project is exempt: the console joined on 2026-09-18, when it moved to Windows App SDK 2.5.1 on .NET 10 and built without a warning, and `WarningGateTests` fails if an exemption appears |
 | `splat-mcp` — MCP server exposing governed execution to agent clients | **Implemented; the hop is Demonstrated end to end against the program that ships** — stdio JSON-RPC, 12 tools. Re-recorded PASS on 2026-10-06 against kernel program `6fc637d8`, which is the source in this tree ([evidence](native/splat-agent/evidence/last-hop-probe.json)): a client's command travelled to the kernel and was refused there, the permitted one ran as `uid=65534`, an undeclared exec and a connect outside the lease each returned `-EPERM`, and a destination outside the host's egress policy was refused before any lease was requested. This claim was withdrawn twice before, on 2026-09-20 and again on 2026-09-25, each time because the kernel program changed hours after a passing run - once by our own edit. A proof cannot outlive the program it tested, including when the change is ours and the same day; what is new is that the hash comparison now runs on a schedule instead of waiting to be noticed. `packaging\reprove-substrate.ps1` restores it. `run_command` / `run_code` route to the Linux lease daemon and are therefore gated on the substrate below; the remaining ten run on the Windows control plane today |
 | Linux kernel substrate (BPF-LSM lease enforcement) | **Proven in isolation** — canary recorded all three hooks returning `-EPERM` on stock WSL2 `6.18.33.2`, machine-checked, evidence committed |
@@ -243,7 +243,7 @@ SPLAT/
 ├── native/
 │   ├── splat-agent/                             # Rust eBPF daemon: lease_lsm.bpf.c + libbpf-rs loader
 │   └── splat-canary/                            # Minimal -EPERM proof harness (preflight → canary)
-├── tests/MissionController.Tests/               # 1104 xUnit unit / integration / security tests
+├── tests/MissionController.Tests/               # 968 xUnit unit / integration / security tests
 ├── packaging/                                   # Signed MSIX build + Intune/SCCM silent install scripts
 └── docs/                                        # Architecture, context and module maps; briefs, plans, audits - index in docs/README.md
 ```
@@ -252,7 +252,7 @@ SPLAT/
 
 | Framework | Mapping |
 | :--- | :--- |
-| SOC 2 Type II | CC6.1 restricted tokens & privilege separation · CC6.8 egress allow-listing · CC7.2 continuous audit |
+| SOC 2 Type II | CC6.1 restricted tokens & privilege separation · CC6.6 / CC6.7 per-lease egress allow-listing · CC6.8 per-lease executable allow-listing · CC7.2 chained audit of governed runs |
 | HIPAA Security Rule | § 164.312(b) cryptographic chained audit controls · § 164.312(e)(1) transmission security & DLP masking |
 | NIST SP 800-171 / CMMC 2.0 | AU.2.041–042 attributed, chained audit logs · SC.3.177 strict egress isolation |
 
@@ -282,7 +282,7 @@ plans. In order:
    supply; unkeyed is still the default, as the compliance note above says.
 5. **A kit you mount** — SPLAT on a flash drive or from one downloaded script. It mounts onto a host
    only after showing what that host can enforce and what mounting will change, and it unmounts
-   cleanly. None of it is built yet; the design is [docs/END-GOAL.md](docs/END-GOAL.md).
+   cleanly. None of it is built yet; its design document moved out of the repository on 2026-10-14.
 
 ## License
 

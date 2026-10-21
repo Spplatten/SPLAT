@@ -722,7 +722,7 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
         // operator-supplied text, and a redaction landing inside the schema would hand the model a
         // corrupted format spec. Applied here (not per-client) so every provider is asked for the
         // one shape JsonFindingsExtractor parses.
-        effectiveSystemPrompt += StructuredDiagnosisContract.SystemPromptSuffix;
+        effectiveSystemPrompt += StructuredDiagnosisContract.For(template.EffectiveOutputContract);
 
         // Probe for a live model FIRST. If none is connected, emit a loud SimulatedNotice so the
         // analysis that follows can never be mistaken for genuine model output.
@@ -769,6 +769,9 @@ public sealed class MissionExecutionEngine : IMissionExecutionEngine
             UserPayload: RecalledContext.Delimit("SENSOR OUTPUT", sensorBoundary, sanitizedPayload),
             OperatorIdentity: operatorIdentity,
             RequiredSchema: SchemaContractType.StructuredDiagnosis,
+            Options: template.EffectiveOutputContract.ResponseFields is { Count: > 0 } fields
+                ? new QualityIslandOptions(RequiredResponseFields: fields.Select(f => f.Name).ToArray())
+                : null,
             // The haystack stays UNDELIMITED. Grounding asks whether a claim is supported by what
             // the sensor actually said; handing it the wrapper would let a model earn its grounding
             // score by quoting SPLAT's own banner back.

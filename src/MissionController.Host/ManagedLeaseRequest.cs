@@ -39,4 +39,8 @@ public sealed record ManagedLeaseRequest(LeaseSpec Lease, string Command, IReadO
     }
 }
 
-public sealed record ManagedLeaseResult(ProcessExecutionResult Process, IReadOnlyList<LeaseViolationEvent> Violations);
+// Violations holds at most BoundedViolationLog.DefaultCapacity refusals; ViolationsOmitted counts the
+// rest. Unbounded, a lease that kept provoking refusals could push this response past the client's
+// 64 MiB frame limit and lose the whole result - exit code, receipt and all.
+public sealed record ManagedLeaseResult(ProcessExecutionResult Process, IReadOnlyList<LeaseViolationEvent> Violations,
+    long ViolationsOmitted = 0);

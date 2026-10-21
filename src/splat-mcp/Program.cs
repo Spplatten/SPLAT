@@ -239,8 +239,9 @@ public static class Program
         var leasedExecutor = guest is null ? new WslLeasedExecutor()
             : new WslLeasedExecutor("127.0.0.1", managed!.Port, guestToken!, guest.StartDaemonAsync, guest.HoldAwake);
         var policyCompiler = new TemplatePolicyCompiler();
+        // The managed service owns its guest, so its health check reaches the daemon the way a lease does.
         var healthChecker = managed is null ? new WslSubstrateHealthChecker()
-            : new WslSubstrateHealthChecker("127.0.0.1", managed.Port, guestToken);
+            : new WslSubstrateHealthChecker("127.0.0.1", managed.Port, guestToken, connect: leasedExecutor.ConnectToDaemonAsync);
         var leaseSubstrate = new LinuxLeaseSubstrate(leasedExecutor, policyCompiler);
 
         // 4. Core Cognitive Engine
@@ -315,7 +316,9 @@ public static class Program
             recordVerifier: new RunRecordLedgerVerifier(auditLedger, merkleEngine, runRecordSigner),
             credentialSanitizer: credSanitizer,
             dlpSanitizer: dlpSanitizer,
-            agent: agent);
+            agent: agent,
+            // The managed service's data root is its private state directory, readable by administrators.
+            internalErrorLog: Path.Combine(SplatDataRoot.Current.Root, "internal-errors.log"));
 
         using (runRecordSigner)
         {

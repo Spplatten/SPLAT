@@ -103,17 +103,7 @@ internal static class ManagedBridgeHost
         handshake.CancelAfter(TimeSpan.FromSeconds(10));
         var hello = new byte[1];
         if (await pipe.ReadAsync(hello, handshake.Token) != 1 || hello[0] != 1) return;
-        OperatorIdentity? caller = null;
-        // Impersonate only long enough to query the OS token, then revert before any async work,
-        // database write or guest launch. The client supplies Identification-level impersonation.
-        pipe.RunAsClient(() =>
-        {
-            using var token = WindowsIdentity.GetCurrent(true) ?? throw new UnauthorizedAccessException("Missing client token.");
-            string sid = token.User?.Value ?? throw new UnauthorizedAccessException("Missing client SID.");
-            if (!config.OperatorSids.Contains(sid, StringComparer.Ordinal)) throw new UnauthorizedAccessException("Caller is not admitted.");
-            caller = new OperatorIdentity(token.Name, sid, OperatorAuthenticationMethod.WindowsAuthenticated, Transport);
-        });
-        identity.Set(caller ?? throw new UnauthorizedAccessException("Missing pipe identity."));
+        identity.Set(IdentifyCaller(pipe, config));
         await pipe.WriteAsync(new byte[] { 1 }, handshake.Token);
         using var reader = new StreamReader(pipe, new UTF8Encoding(false, true), leaveOpen: true);
         // Bound a connection independently of the caller. Lease expiry is also enforced by the guest.
@@ -122,6 +112,29 @@ internal static class ManagedBridgeHost
         await Program.ServeAsync(reader, pipe, handler, lifetime.Token,
             (request, token) => DispatchAsync(request, handler, ledger, identity, token,
                 cancellation => CheckManagedAsync(config, cancellation)));
+    }
+
+    /// <summary>
+    /// The caller, read from its own token. The client supplies Identification-level impersonation,
+    /// which names a principal but can open nothing, and the service impersonates only for this read.
+    /// </summary>
+    internal static OperatorIdentity IdentifyCaller(NamedPipeServerStream pipe, ManagedBridgeConfiguration config)
+    {
+        OperatorIdentity? caller = null;
+        // Run in a copy of the context, because without one the client's token outlived the call.
+        // WindowsIdentity.Name goes through RunImpersonated, which keeps the thread's current token, here
+        // the client's, in an AsyncLocal of the caller's ExecutionContext. Every await after it then
+        // resumed impersonating that token, so while it served a call the service could not open a file:
+        // SQLite, the error log and the runtime's own assembly loader all failed (2026-10-20).
+        ExecutionContext.Run(ExecutionContext.Capture() ?? throw new InvalidOperationException("Execution context flow is suppressed."),
+            _ => pipe.RunAsClient(() =>
+            {
+                using var token = WindowsIdentity.GetCurrent(true) ?? throw new UnauthorizedAccessException("Missing client token.");
+                string sid = token.User?.Value ?? throw new UnauthorizedAccessException("Missing client SID.");
+                if (!config.OperatorSids.Contains(sid, StringComparer.Ordinal)) throw new UnauthorizedAccessException("Caller is not admitted.");
+                caller = new OperatorIdentity(token.Name, sid, OperatorAuthenticationMethod.WindowsAuthenticated, Transport);
+            }), null);
+        return caller ?? throw new UnauthorizedAccessException("Missing pipe identity.");
     }
 
     private static async Task<SubstrateReport> CheckManagedAsync(ManagedBridgeConfiguration config, CancellationToken ct)
@@ -163,10 +176,12 @@ internal static class ManagedBridgeHost
                 await ledger.AppendLogAsync(Guid.NewGuid(), "mcp-tool-" + tool, AdmissionAction,
                     AdmissionDetails(tool, digest), actor.ToLedgerIdentity(), ct);
             }
-            catch (Exception) when (!ct.IsCancellationRequested)
+            catch (Exception ex) when (!ct.IsCancellationRequested)
             {
+                // The reply says what failed and where, never the message, which can name a private path; the
+                // service keeps the rest. The refusal used to drop both, and a gate run had nothing to act on (2026-10-19).
                 return new McpJsonRpcMessage { JsonRpc = "2.0", Id = request.Id,
-                    Error = new McpError { Code = -32001, Message = "The managed audit admission could not be committed; no tool was run." } };
+                    Error = new McpError { Code = -32001, Message = $"The managed audit admission could not be committed ({handler.RecordInternalError(ex)}); no tool was run." } };
             }
             if (executeLease)
                 return await handler.ExecuteManagedLeaseAsync(request, actor.ToLedgerIdentity(), ct);

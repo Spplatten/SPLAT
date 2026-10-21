@@ -316,6 +316,17 @@ public class McpServerTests
         string outputText = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString()!;
         Assert.Contains("[KERNEL VIOLATION CONTAINMENT REPORT]", outputText);
         Assert.Contains("-EPERM", outputText);
+        Assert.DoesNotContain("[KERNEL REFUSALS NOT LISTED]", outputText);
+
+        // The in-band listing is bounded: past its capacity a refusal is counted, not listed, and the
+        // listing says how many it left out rather than reading as the whole of it (2026-10-19).
+        var bounded = new BoundedViolationLog(capacity: 3);
+        for (uint pid = 1; pid <= 5; pid++)
+            bounded.Add(new LeaseViolationEvent(42, pid, KernelViolationHook.Open, 1, "denied", "probe", DateTime.UtcNow, Sequence: pid));
+        Assert.Equal(5, bounded.Total);
+        Assert.Equal(new uint[] { 1, 2, 3 }, bounded.Retained.Select(v => v.ProcessId));
+        Assert.Contains("2 further refusal(s)", bounded.OmittedNote);
+        Assert.Null(new BoundedViolationLog().OmittedNote);
     }
 
     /// <summary>

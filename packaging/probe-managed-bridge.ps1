@@ -63,9 +63,11 @@ try {
         $result.Checks.OwnerControlPassed = $config.Verdict -eq 'PASS' -and [bool]$config.PipeName -and
             $config.CallerSid -ne $identity.User.Value -and $ownerAge -ge [TimeSpan]::Zero -and $ownerAge -lt [TimeSpan]::FromHours(1)
         # ACCESS_DENIED from CreateFile means the pipe exists and its ACL refused this SID. A stopped
-        # service or an absent pipe ends in a timeout instead, which is not a denial.
+        # service or an absent pipe ends in a timeout instead, which is not a denial. The rights are the
+        # client's own (ManagedBridgeClient.ClientRights). Before ReadAttributes joined them, an admitted
+        # SID was refused too, so this denial proved nothing.
         $client = [IO.Pipes.NamedPipeClientStream]::new('.', $config.PipeName,
-            [IO.Pipes.PipeAccessRights]'ReadData, WriteData, ReadPermissions, Synchronize', [IO.Pipes.PipeOptions]::None,
+            [IO.Pipes.PipeAccessRights]'ReadData, WriteData, ReadAttributes, ReadPermissions, Synchronize', [IO.Pipes.PipeOptions]::None,
             [Security.Principal.TokenImpersonationLevel]::Identification, [IO.HandleInheritability]::None)
         $aclDenied = $false
         try { $client.Connect(3000) } catch [UnauthorizedAccessException] { $aclDenied = $true } catch { } finally { $client.Dispose() }
@@ -76,9 +78,12 @@ try {
         $health = Invoke-Bridge @($first)
         if ($health.Exit -ne 0) { throw $health.Error }
         $response = $health.Output.Trim() | ConvertFrom-Json
+        # The reply is recorded before it is read: an error reply used to throw "Cannot index into a
+        # null array" here and leave an INCOMPLETE record that never said what the bridge answered.
+        $result.Responses += $response
+        if (-not $response.result.content) { throw "The bridge answered get_substrate_health without a result: $($health.Output.Trim())" }
         $status = $response.result.content[0].text | ConvertFrom-Json
         $result.Checks.OwnerPositiveControl = $status.Authenticated -and $status.Enforcing
-        $result.Responses += $response
         # This exercises the exact root/token bypass from row 2.4 under the same caller SID that
         # subsequently obtains a governed lease. No token content is retained on accidental access.
         $direct = & (Join-Path $env:SystemRoot 'System32\wsl.exe') -d $config.Distribution -u root -e /bin/cat /etc/splat/agent.token 2>&1 | Out-String
@@ -118,7 +123,11 @@ try {
         } finally { $tcp.Dispose() }
         # The claimed principal is scored by run 3: the admission row must name this caller instead.
         $spoof = Tool 2 'run_command' @{ command = '/usr/bin/id'; args = @(); operatorIdentity = 'SYSTEM'; principalId = 'S-1-5-18' }
-        $code = Tool 3 'run_code' @{ language = 'python'; code = "import socket`ns=socket.socket()`ntry:`n s.connect(('127.0.0.1',9))`n print('UNEXPECTED_CONNECT')`nexcept OSError as e:`n print('DENIED_ERRNO',e.errno)" }
+        # http.client rather than socket. The host's pre-flight validator refuses "import socket"
+        # before any lease exists, so this check never reached the kernel (2026-10-20). http.client
+        # makes the same connect() from inside the lease, and the regex validator does not stand
+        # between that call and the kernel.
+        $code = Tool 3 'run_code' @{ language = 'python'; code = "import http.client`ntry:`n http.client.HTTPConnection('127.0.0.1',9,timeout=5).connect()`n print('UNEXPECTED_CONNECT')`nexcept OSError as e:`n print('DENIED_ERRNO',e.errno)" }
         $hostTool = Tool 4 'fs_read' @{ path = (Join-Path $config.StateDirectory 'ledger.key') }
         # 203.0.113.7 is documentation space (RFC 5737), outside any real operator egress policy.
         $egress = Tool 5 'run_command' @{ command = '/bin/echo'; args = @('egress-bypass'); allowNetwork = $true; allowedEgressIps = @('203.0.113.7') }

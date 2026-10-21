@@ -130,8 +130,10 @@ including a protocol 2 request carrying the token itself — is refused, and the
 Since 2026-09-23 the answers are proven the same way (roadmap 2.6): a bridge that asks in its
 `HELLO` gets every later frame wrapped as `PROVEN`, proven over both nonces, the frame's number on
 the connection and its exact bytes, and refuses the session at the first frame that does not hold.
-An older bridge that does not ask is answered unwrapped; an older daemon that cannot agree is
-believed as before, and `doctor` says so.
+An older bridge that does not ask is answered unwrapped. Since 2026-10-15 the bridge refuses a
+daemon that does not agree: nothing proves the `HELLO`'s request, so a relay that deleted it would
+get a genuine plain-label `CHALLENGE` and could then write the lease's frames. That relay was
+reproduced against `WslLeasedExecutor`; `WslAgentSessionTests` now refuses the plain answer.
 
 **`EXECUTE_TOOL`, in order:**
 
@@ -308,7 +310,7 @@ the daemon, the BPF program or the lease path, the root probe is the test.
 
 ## Where it goes next
 
-The workload's mount namespace — P2 of [the live plan](audits/2026-09-09-oem-subtraction-plan.md)
+The workload's mount namespace — P2 of the live plan, which moved out of the repository on 2026-10-14
 — was built on 2026-09-20 and was proven under root on 2026-09-29, on all five checks: the host's own `/home` and `/mnt` as the control, both absent from the workload's root (along with `/root`, `/var` and `/sys`), the system directories read-only, the working directory and a fresh `/tmp` writable with `/etc` visible, and `readOnlyFs` making the working directory read-only.
 `readOnlyFs` left the refused list with it. Two things still stand on that namespace:
 `overlayFs.enableCow`, which is `cow.rs` mounted as the working directory inside the jail and is
