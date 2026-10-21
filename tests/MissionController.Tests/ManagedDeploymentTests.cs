@@ -71,6 +71,24 @@ public sealed class ManagedDeploymentTests
     }
 
     /// <summary>
+    /// A removal ends by moving the deployment root aside, which Windows refuses while a program inside it
+    /// runs. Run from the installed copy, the gate's unmount removed everything else and left the root,
+    /// which the reinstall then refused (2026-10-21). It is refused before anything is removed.
+    /// </summary>
+    [Fact]
+    public void ARemovalRefusesToRunFromTheCopyItMovesAside()
+    {
+        using var resource = typeof(ManagedBridgeCommand).Assembly.GetManifestResourceStream("managed-deployment.ps1");
+        Assert.NotNull(resource);
+        string script = new StreamReader(resource).ReadToEnd();
+
+        int remove = script.IndexOf("if ($Mode -eq 'Remove') {", StringComparison.Ordinal);
+        int refusal = script.IndexOf("Run the unmount from a published splat-mcp.exe, not the installed copy", StringComparison.Ordinal);
+        int firstEffect = script.IndexOf("Stop-Service -Name $Instance -ErrorAction Stop", remove, StringComparison.Ordinal);
+        Assert.True(remove >= 0 && refusal > remove && refusal < firstEffect, "The refusal must come before the removal changes anything.");
+    }
+
+    /// <summary>
     /// The first gate unmount (2026-10-21) removed the service, the account and the distro, then stopped
     /// on the account's profile, which WSL still held. The removal now waits for it, bounded, and one
     /// that still cannot finish says it is to be re-run rather than leaving a half-removed instance silent.
