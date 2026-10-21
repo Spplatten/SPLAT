@@ -179,6 +179,31 @@ public class SubstrateHealthHonestyTests
         }
     }
 
+    /// <summary>
+    /// A host that may start the daemon reaches it the way a lease does. The managed service's first
+    /// health check after an upgrade met a daemon that was not yet listening, and read "unreachable"
+    /// while the lease right after it ran (2026-10-21). Nothing listens at the checker's own port here,
+    /// so an enforcing answer can only have come through the connect it was given.
+    /// </summary>
+    [Fact]
+    public async Task AHostThatMayStartTheDaemon_ReachesItTheWayALeaseDoes()
+    {
+        using var daemon = new FakeDaemon(EnforcingBody);
+        int connects = 0;
+        var checker = new WslSubstrateHealthChecker("127.0.0.1", 1, HermeticToken, ReplyBudget, connect: async ct =>
+        {
+            connects++;
+            var client = new TcpClient();
+            await client.ConnectAsync("127.0.0.1", daemon.Port, ct);
+            return client;
+        });
+
+        var status = await checker.CheckHealthAsync();
+
+        Assert.True(status.Enforcing);
+        Assert.Equal(1, connects);
+    }
+
     [Fact]
     public async Task AnUnreachableDaemon_ReportsNeitherReachableNorEnforcing()
     {
