@@ -72,17 +72,23 @@ internal static class ManagedLedgerAudit
             int admissions = 0;
             if (probe.TryGetProperty("Admissions", out var list) && list.ValueKind == JsonValueKind.Array)
             {
+                // How many times the probe sent each request. It asks get_substrate_health first and last
+                // with the same arguments, and the service admits both with identical details, so a rule of
+                // exactly one row failed both of them (2026-10-21).
+                var sent = list.EnumerateArray().GroupBy(admission => (Text(admission, "Tool"), Text(admission, "RequestSha256")))
+                    .ToDictionary(request => request.Key, request => request.Count());
                 foreach (var admission in list.EnumerateArray())
                 {
                     admissions++;
                     string? tool = Text(admission, "Tool");
                     string? digest = Text(admission, "RequestSha256");
                     if (Text(admission, "ClaimedPrincipal") is string principal) claimed.Add(principal);
-                    // Exactly one: a request admitted twice, or never, is not this run's record of it.
+                    // One row per time it was sent: a request admitted more often, or less, than the probe
+                    // sent it is not this run's record of it.
                     var rows = window.Where(row => row.Action == ManagedBridgeHost.AdmissionAction && tool is not null
                         && digest is not null && row.Details == ManagedBridgeHost.AdmissionDetails(tool, digest)).ToList();
                     string label = admission.TryGetProperty("Id", out var id) ? id.ToString() : "?";
-                    checks[$"Admitted:{label}:{tool}"] = rows.Count == 1 && rows[0].OperatorIdentity == expected;
+                    checks[$"Admitted:{label}:{tool}"] = rows.Count == sent[(tool, digest)] && rows.All(row => row.OperatorIdentity == expected);
                 }
             }
 

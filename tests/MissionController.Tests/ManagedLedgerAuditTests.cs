@@ -74,6 +74,37 @@ public sealed class ManagedLedgerAuditTests : IDisposable
         Assert.True(report.Verdict == "PASS", string.Join(", ", report.Checks.Where(check => !check.Value).Select(check => check.Key)));
     }
 
+    /// <summary>
+    /// The gate probe asks get_substrate_health first and last with the same arguments, so the service
+    /// admits two rows with identical details. The audit wanted exactly one row per claim and failed both
+    /// (2026-10-21). Each claim needs its own row: as many rows as the probe sent, and not one more.
+    /// </summary>
+    [Fact]
+    public async Task TheAudit_CountsARequestSentTwice_AsTwoAdmissions()
+    {
+        var started = DateTimeOffset.UtcNow;
+        string digest = new('c', 64);
+        var ledger = Ledger();
+        for (int sent = 0; sent < 2; sent++)
+        {
+            await ledger.AppendLogAsync(Guid.NewGuid(), "mcp-tool-get_substrate_health", ManagedBridgeHost.AdmissionAction,
+                ManagedBridgeHost.AdmissionDetails("get_substrate_health", digest), Caller.ToLedgerIdentity());
+        }
+        JsonElement Claiming(int times) => JsonSerializer.SerializeToElement(new
+        {
+            Verdict = "PASS", ServiceSid, CallerSid = Caller.PrincipalId, CallerName = Caller.DisplayName,
+            At = started.ToString("o"), FinishedAt = DateTimeOffset.UtcNow.ToString("o"),
+            Admissions = Enumerable.Range(1, times).Select(id => new { Id = id, Tool = "get_substrate_health", RequestSha256 = digest }).ToArray()
+        });
+
+        var both = await Audit(Claiming(2));
+        Assert.True(both.Checks["Admitted:1:get_substrate_health"]);
+        Assert.True(both.Checks["Admitted:2:get_substrate_health"]);
+
+        // A row the probe did not claim is still a failure.
+        Assert.False((await Audit(Claiming(1))).Checks["Admitted:1:get_substrate_health"]);
+    }
+
     [Fact]
     public async Task TheAudit_FailsAnAdmissionRowThatNamesTheClaimedPrincipal()
     {
