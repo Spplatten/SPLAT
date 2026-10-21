@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using MissionController.Core;
 using MissionController.Core.Enums;
 using MissionController.Core.Models;
+using MissionController.Core.QualityIsland;
+using MissionController.Core.QualityIsland.Oracles;
 using MissionController.Infrastructure.Data.Catalog;
 using Xunit;
 
@@ -37,7 +41,7 @@ public class SourceDiscoveryTemplateTests
     /// costs the whole brief. The page enforces it; this is the instruction that matches.
     /// </summary>
     [Fact]
-    public void TheBriefComposer_MustCiteEveryFigureItUses_AndWriteNothingWhenThereAreNone()
+    public async Task TheBriefComposer_MustCiteEveryFigureItUses_AndWriteNothingWhenThereAreNone()
     {
         var composer = Assert.Single(GovernedTemplateCatalog.All, t => t.TemplateId == "trends-brief-composer");
 
@@ -53,6 +57,24 @@ public class SourceDiscoveryTemplateTests
         // Nothing measured means no brief, not a shorter one.
         Assert.Contains("NO_FIGURES", composer.Tool.ArgumentsTemplate, StringComparison.Ordinal);
         Assert.Contains("write no brief", composer.SystemPrompt, StringComparison.Ordinal);
+
+        // The brief rides in the engine's ONE closing block. Asking for a second object lost to the
+        // engine's "nothing after it" rule on 2026-10-20; the schema the model is shown now carries both
+        // keys, and the island rejects an answer that drops them, so the next model runs instead.
+        Assert.Equal(new[] { "text", "grounded_in" }, composer.EffectiveOutputContract.ResponseFields!.Select(f => f.Name));
+        string suffix = StructuredDiagnosisContract.For(composer.EffectiveOutputContract);
+        Assert.Contains("\"grounded_in\": [\"exact-figure-name\"]\n}", suffix, StringComparison.Ordinal);
+        Assert.Contains("This template also requires \"text\"", suffix, StringComparison.Ordinal);
+        var plain = GovernedTemplateCatalog.All.First(t => t.EffectiveOutputContract.ResponseFields is null);
+        Assert.Equal(StructuredDiagnosisContract.SystemPromptSuffix, StructuredDiagnosisContract.For(plain.EffectiveOutputContract));
+
+        var oracle = new JsonSchemaValidationOracle();
+        var options = new QualityIslandOptions(RequiredResponseFields: new[] { "text", "grounded_in" });
+        const string withoutBrief = "Brief.\n```json\n{\"status\":\"Healthy\",\"headline\":\"Figures retrieved\",\"findings\":[\"food +2.5%\"]}\n```";
+        const string withBrief = "Brief.\n```json\n{\"status\":\"Healthy\",\"headline\":\"Figures retrieved\",\"findings\":[\"food +2.5%\"],\"text\":\"Food rose 2.5%.\",\"grounded_in\":[\"food-index-change\"]}\n```";
+        Assert.False((await oracle.ValidateAsync(withoutBrief, SchemaContractType.StructuredDiagnosis, options)).IsProgrammaticallyValid);
+        Assert.True((await oracle.ValidateAsync(withBrief, SchemaContractType.StructuredDiagnosis, options)).IsProgrammaticallyValid);
+        Assert.True((await oracle.ValidateAsync(withoutBrief, SchemaContractType.StructuredDiagnosis, new QualityIslandOptions())).IsProgrammaticallyValid);
     }
 
     [Fact]
