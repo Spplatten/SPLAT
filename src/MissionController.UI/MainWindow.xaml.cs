@@ -57,7 +57,7 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         // Read from the runtime the app is on: typed into the XAML, it said ".NET 9" through the move to 10.
-        RuntimeLabel.Text = $"GOVERNED APPLIANCE  ·  .NET {Environment.Version.Major}";
+        RuntimeLabel.Text = $"PLATTEN INDUSTRIES LLC  ·  GOVERNED APPLIANCE  ·  .NET {Environment.Version.Major}";
         ConfigureWindow();
         _selfCheck = RunSelfCheckAsync();
         NavigateTo(typeof(QuickDiagnosticianView), SlideNavigationTransitionEffect.FromRight);

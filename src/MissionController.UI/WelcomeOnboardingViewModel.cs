@@ -1,6 +1,8 @@
+using System;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MissionController.Core;
 using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Network.Ai;
 
@@ -36,6 +38,29 @@ public partial class WelcomeOnboardingViewModel : ObservableObject
     [ObservableProperty]
     private bool _egressFirewallReady = true;
 
+    [ObservableProperty]
+    private bool _hasAcceptedLegalTerms;
+
+    [ObservableProperty]
+    private bool _isLegalViewerExpanded;
+
+    [ObservableProperty]
+    private string _selectedLegalKey = "eula";
+
+    [ObservableProperty]
+    private string _activeLegalTitle = SplatLegalTerms.EulaTitle;
+
+    [ObservableProperty]
+    private string _activeLegalSummary = SplatLegalTerms.AllDocuments[0].Summary;
+
+    [ObservableProperty]
+    private string _activeLegalText = SplatLegalTerms.EulaText;
+
+    [ObservableProperty]
+    private string _legalAcceptanceNotice = string.Empty;
+
+    public string LegalShortNotice => SplatLegalTerms.ShortNotice;
+
     public WelcomeOnboardingViewModel(
         ICredentialVault vault,
         GeminiStreamClient geminiClient,
@@ -44,6 +69,42 @@ public partial class WelcomeOnboardingViewModel : ObservableObject
         _vault = vault;
         _geminiClient = geminiClient;
         _claudeClient = claudeClient;
+    }
+
+    partial void OnHasAcceptedLegalTermsChanged(bool value)
+    {
+        if (value)
+        {
+            LegalAcceptanceNotice = string.Empty;
+        }
+    }
+
+    [RelayCommand]
+    public void SelectLegalDocument(string? key)
+    {
+        string normalized = string.IsNullOrWhiteSpace(key) ? "eula" : key.Trim().ToLowerInvariant();
+        if (string.Equals(normalized, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            SelectedLegalKey = "all";
+            ActiveLegalTitle = "SPLAT EULA, Terms of Use and Privacy Policy";
+            ActiveLegalSummary = "All three documents in full.";
+            ActiveLegalText = SplatLegalTerms.FormatAll();
+            IsLegalViewerExpanded = true;
+            return;
+        }
+
+        var doc = SplatLegalTerms.TryGetByKeyOrUri(normalized) ?? SplatLegalTerms.AllDocuments[0];
+        SelectedLegalKey = doc.Key;
+        ActiveLegalTitle = doc.Title;
+        ActiveLegalSummary = doc.Summary;
+        ActiveLegalText = doc.FullText;
+        IsLegalViewerExpanded = true;
+    }
+
+    [RelayCommand]
+    public void ToggleLegalViewer()
+    {
+        IsLegalViewerExpanded = !IsLegalViewerExpanded;
     }
 
     private System.Threading.CancellationTokenSource? _autoValidationCts;
@@ -158,6 +219,14 @@ public partial class WelcomeOnboardingViewModel : ObservableObject
     [RelayCommand]
     public void NextStep()
     {
+        if (CurrentStep == 1 && !HasAcceptedLegalTerms)
+        {
+            IsLegalViewerExpanded = true;
+            LegalAcceptanceNotice = "Read and accept the SPLAT EULA, Terms of Use and Privacy Policy to continue.";
+            return;
+        }
+
+        LegalAcceptanceNotice = string.Empty;
         if (CurrentStep < 3)
         {
             CurrentStep++;
