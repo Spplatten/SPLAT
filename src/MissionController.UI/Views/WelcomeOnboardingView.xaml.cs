@@ -23,6 +23,10 @@ public sealed partial class WelcomeOnboardingView : Page
     public Visibility GetStep2Visibility(int step) => step == 2 ? Visibility.Visible : Visibility.Collapsed;
     public Visibility GetStep3Visibility(int step) => step == 3 ? Visibility.Visible : Visibility.Collapsed;
     public Visibility GetBackVisibility(int step) => step > 1 ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility GetBoolVisibility(bool visible) => visible ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility GetNoticeVisibility(string? notice) => string.IsNullOrWhiteSpace(notice) ? Visibility.Collapsed : Visibility.Visible;
+
+    public string GetLegalExpandButtonText(bool expanded) => expanded ? "Hide Legal Text" : "Read Full Agreements";
 
     public string GetNextButtonText(int step)
     {

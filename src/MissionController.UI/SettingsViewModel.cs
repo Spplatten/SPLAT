@@ -1,5 +1,7 @@
+using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MissionController.Core;
 using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Network.Ai;
 
@@ -36,6 +38,20 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private string _keyValidationStatus = string.Empty;
 
+    [ObservableProperty]
+    private string _selectedLegalKey = "eula";
+
+    [ObservableProperty]
+    private string _selectedLegalTitle = SplatLegalTerms.EulaTitle;
+
+    [ObservableProperty]
+    private string _selectedLegalSummary = SplatLegalTerms.AllDocuments[0].Summary;
+
+    [ObservableProperty]
+    private string _selectedLegalText = SplatLegalTerms.EulaText;
+
+    public string LegalShortNotice => SplatLegalTerms.ShortNotice;
+
     // Vault key names are surfaced as bindable properties so the Remove buttons pass the SAME
     // identifier the readers use. Hardcoding these strings in XAML would let the delete path drift
     // away from the store path, producing a button that reports success and removes nothing.
@@ -69,6 +85,26 @@ public partial class SettingsViewModel : ObservableObject
         _lifecycleManager = lifecycleManager;
         _geminiClient = geminiClient;
         _claudeClient = claudeClient;
+    }
+
+    [RelayCommand]
+    public void SelectLegalDocument(string? key)
+    {
+        string normalized = string.IsNullOrWhiteSpace(key) ? "eula" : key.Trim().ToLowerInvariant();
+        if (string.Equals(normalized, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            SelectedLegalKey = "all";
+            SelectedLegalTitle = "SPLAT EULA, Terms of Use and Privacy Policy";
+            SelectedLegalSummary = "All three documents in full.";
+            SelectedLegalText = SplatLegalTerms.FormatAll();
+            return;
+        }
+
+        var doc = SplatLegalTerms.TryGetByKeyOrUri(normalized) ?? SplatLegalTerms.AllDocuments[0];
+        SelectedLegalKey = doc.Key;
+        SelectedLegalTitle = doc.Title;
+        SelectedLegalSummary = doc.Summary;
+        SelectedLegalText = doc.FullText;
     }
 
     private System.Threading.CancellationTokenSource? _autoValidationCts;
@@ -266,4 +302,3 @@ public partial class SettingsViewModel : ObservableObject
     private static string MaskKey(string key) =>
         key.Length <= 8 ? "••••" : $"{key.Substring(0, 8)}…";
 }
-

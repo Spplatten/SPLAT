@@ -16,7 +16,7 @@
         </Grid.RowDefinitions>
 
         <!-- Top Welcome Header -->
-        <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,28,0,16" Spacing="6">
+        <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,20,0,12" Spacing="4">
             <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
                 <FontIcon Glyph="&#xE756;" FontSize="28" Foreground="#00E5FF" />
                 <TextBlock Text="Welcome to SPLAT" Style="{StaticResource SplatPageTitleStyle}" FontSize="26" FontWeight="Bold" />
@@ -25,177 +25,219 @@
         </StackPanel>
 
         <!-- Main Wizard Content (Cards by Step) -->
-        <Border Grid.Row="1" MaxWidth="780" MaxHeight="540" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{StaticResource ElectricBorderGlowBrush}" BorderThickness="1" CornerRadius="12" Padding="28" VerticalAlignment="Center">
-            <Grid>
-                <!-- STEP 1: Meet Your AI Agent Squad -->
-                <StackPanel Spacing="16" Visibility="{x:Bind GetStep1Visibility(ViewModel.CurrentStep), Mode=OneWay}">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="Step 1 of 3: Meet Your Autonomous AI Agent Squad" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock Text="Each AI agent is a specialized expert configured with a dedicated reasoning model and sandboxed Windows tools." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                    </StackPanel>
-
-                    <Grid ColumnSpacing="12" RowSpacing="10" Margin="0,6,0,0">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-
-                        <!-- Agent 1: Atlas-Net -->
-                        <Border Grid.Row="0" Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="12">
-                            <StackPanel Spacing="4">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="🌐" FontSize="16" />
-                                    <TextBlock Text="Atlas-Net" FontWeight="Bold" FontSize="13" Foreground="#00E5FF" />
-                                    <Border Background="#2000E5FF" CornerRadius="4" Padding="4,1">
-                                        <TextBlock Text="Network Agent" FontSize="9" FontWeight="SemiBold" Foreground="#00E5FF" />
-                                    </Border>
-                                </StackPanel>
-                                <TextBlock Text="Diagnoses Wi-Fi/Ethernet drops, packet loss, DNS latency, and rogue listening sockets." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Agent 2: Sentinel-SecOps -->
-                        <Border Grid.Row="0" Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="12">
-                            <StackPanel Spacing="4">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="🛡️" FontSize="16" />
-                                    <TextBlock Text="Sentinel-SecOps" FontWeight="Bold" FontSize="13" Foreground="#FF7043" />
-                                    <Border Background="#20FF7043" CornerRadius="4" Padding="4,1">
-                                        <TextBlock Text="Security Agent" FontSize="9" FontWeight="SemiBold" Foreground="#FF7043" />
-                                    </Border>
-                                </StackPanel>
-                                <TextBlock Text="Hunts for brute-force attacks, Event 4625 failed login surges, and account intrusions." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Agent 3: Titan-SysOps -->
-                        <Border Grid.Row="1" Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="12">
-                            <StackPanel Spacing="4">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="💾" FontSize="16" />
-                                    <TextBlock Text="Titan-SysOps" FontWeight="Bold" FontSize="13" Foreground="#AB47BC" />
-                                    <Border Background="#20AB47BC" CornerRadius="4" Padding="4,1">
-                                        <TextBlock Text="Storage Agent" FontSize="9" FontWeight="SemiBold" Foreground="#AB47BC" />
-                                    </Border>
-                                </StackPanel>
-                                <TextBlock Text="Monitors disk drive capacity, finds bloated caches, and suggests safe cleanup targets." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Agent 4: Aegis-Endpoint -->
-                        <Border Grid.Row="1" Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="12">
-                            <StackPanel Spacing="4">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="🔒" FontSize="16" />
-                                    <TextBlock Text="Aegis-Endpoint" FontWeight="Bold" FontSize="13" Foreground="#6CCB5F" />
-                                    <Border Background="#206CCB5F" CornerRadius="4" Padding="4,1">
-                                        <TextBlock Text="Compliance Agent" FontSize="9" FontWeight="SemiBold" Foreground="#6CCB5F" />
-                                    </Border>
-                                </StackPanel>
-                                <TextBlock Text="Verifies Microsoft Defender real-time protection, signature freshness, and SChannel TLS." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-                    </Grid>
-
-                    <!-- Sandboxed Protection Guarantee -->
-                    <Border Background="#1000E5FF" BorderBrush="#3000E5FF" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,4,0,0">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE815;" FontSize="16" Foreground="#00E5FF" VerticalAlignment="Center" />
-                            <TextBlock Text="Agent Safety Guarantee: Every agent executes inside a locked Win32 Job Object sandbox with Admin privileges stripped." FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+        <Border Grid.Row="1" MaxWidth="820" MaxHeight="610" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{StaticResource ElectricBorderGlowBrush}" BorderThickness="1" CornerRadius="12" Padding="24" VerticalAlignment="Center">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <Grid>
+                    <!-- STEP 1: Meet Your AI Agent Squad & Read the Legal Terms -->
+                    <StackPanel Spacing="12" Visibility="{x:Bind GetStep1Visibility(ViewModel.CurrentStep), Mode=OneWay}">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Step 1 of 3: Meet Your Autonomous AI Agent Squad &amp; License Terms" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="Each AI agent is a specialized expert configured with a dedicated reasoning model and sandboxed OS containment." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                         </StackPanel>
-                    </Border>
-                </StackPanel>
 
-                <!-- STEP 2: Connect AI Provider -->
-                <StackPanel Spacing="18" Visibility="{x:Bind GetStep2Visibility(ViewModel.CurrentStep), Mode=OneWay}">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="Step 2 of 3: Connect Your Agents' Reasoning Brain" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock Text="Connect an Anthropic (sk-ant-…) or Google Gemini (AIza…) API key to give your agents real diagnostic intelligence — the key is verified live and routed to the right provider automatically." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                    </StackPanel>
-
-                    <StackPanel Spacing="10" Margin="0,8,0,0">
-                        <TextBlock Text="AI Provider API Key (Anthropic or Gemini)" FontSize="12" FontWeight="SemiBold" />
-                        <Grid ColumnSpacing="8">
+                        <Grid ColumnSpacing="12" RowSpacing="10" Margin="0,2,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <PasswordBox
-                                Grid.Column="0"
-                                PlaceholderText="Paste Anthropic (sk-ant-...) or Gemini (AIza...) key"
-                                Password="{x:Bind ViewModel.ApiKeyInput, Mode=TwoWay}"
-                                PasswordChanged="PasswordBox_PasswordChanged"
-                                KeyDown="PasswordBox_KeyDown"
-                                Height="36" />
-                            <Button
-                                Grid.Column="1"
-                                Content="Verify &amp; Save Key"
-                                Style="{StaticResource AccentButtonStyle}"
-                                IsEnabled="{x:Bind ViewModel.IsTestingKey, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}"
-                                Command="{x:Bind ViewModel.ValidateKeyCommand}" />
+
+                            <!-- Agent 1: Atlas-Net -->
+                            <Border Grid.Row="0" Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="10">
+                                <StackPanel Spacing="4">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="🌐" FontSize="15" />
+                                        <TextBlock Text="Atlas-Net" FontWeight="Bold" FontSize="13" Foreground="#00E5FF" />
+                                        <Border Background="#2000E5FF" CornerRadius="4" Padding="4,1">
+                                            <TextBlock Text="Network Agent" FontSize="9" FontWeight="SemiBold" Foreground="#00E5FF" />
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Text="Diagnoses Wi-Fi/Ethernet drops, packet loss, DNS latency, and rogue listening sockets." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Agent 2: Sentinel-SecOps -->
+                            <Border Grid.Row="0" Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="10">
+                                <StackPanel Spacing="4">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="🛡️" FontSize="15" />
+                                        <TextBlock Text="Sentinel-SecOps" FontWeight="Bold" FontSize="13" Foreground="#FF7043" />
+                                        <Border Background="#20FF7043" CornerRadius="4" Padding="4,1">
+                                            <TextBlock Text="Security Agent" FontSize="9" FontWeight="SemiBold" Foreground="#FF7043" />
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Text="Hunts for brute-force attacks, Event 4625 failed login surges, and account intrusions." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Agent 3: Titan-SysOps -->
+                            <Border Grid.Row="1" Grid.Column="0" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="10">
+                                <StackPanel Spacing="4">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="💾" FontSize="15" />
+                                        <TextBlock Text="Titan-SysOps" FontWeight="Bold" FontSize="13" Foreground="#AB47BC" />
+                                        <Border Background="#20AB47BC" CornerRadius="4" Padding="4,1">
+                                            <TextBlock Text="Storage Agent" FontSize="9" FontWeight="SemiBold" Foreground="#AB47BC" />
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Text="Monitors disk drive capacity, finds bloated caches, and suggests safe cleanup targets." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Agent 4: Aegis-Endpoint -->
+                            <Border Grid.Row="1" Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="10">
+                                <StackPanel Spacing="4">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="🔒" FontSize="15" />
+                                        <TextBlock Text="Aegis-Endpoint" FontWeight="Bold" FontSize="13" Foreground="#6CCB5F" />
+                                        <Border Background="#206CCB5F" CornerRadius="4" Padding="4,1">
+                                            <TextBlock Text="Compliance Agent" FontSize="9" FontWeight="SemiBold" Foreground="#6CCB5F" />
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Text="Verifies Microsoft Defender real-time protection, signature freshness, and SChannel TLS." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
                         </Grid>
 
-                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
-                            <ProgressRing IsActive="{x:Bind ViewModel.IsTestingKey, Mode=OneWay}" Width="14" Height="14" />
-                            <TextBlock Text="{x:Bind ViewModel.KeyStatusMessage, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource SplatAccentBrush}" TextWrapping="Wrap" />
-                        </StackPanel>
+                        <!-- Sandboxed Protection Guarantee -->
+                        <Border Background="#1000E5FF" BorderBrush="#3000E5FF" BorderThickness="1" CornerRadius="8" Padding="10">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE815;" FontSize="16" Foreground="#00E5FF" VerticalAlignment="Center" />
+                                <TextBlock Text="Agent Safety Guarantee: Every agent executes inside a locked Win32 Job Object or Linux BPF-LSM capability lease with Admin privileges stripped." FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- PLATTEN INDUSTRIES LLC Hardcoded Legal & Licensing Panel -->
+                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" BorderBrush="{ThemeResource SplatBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                            <StackPanel Spacing="8">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock Text="PLATTEN INDUSTRIES LLC — EULA, TERMS OF USE &amp; PRIVACY POLICY" FontSize="10" FontWeight="Bold" Foreground="#00E5FF" />
+                                        <TextBlock Text="{x:Bind ViewModel.LegalShortNotice, Mode=OneWay}" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="{x:Bind GetLegalExpandButtonText(ViewModel.IsLegalViewerExpanded), Mode=OneWay}" FontSize="11" Padding="8,4" Command="{x:Bind ViewModel.ToggleLegalViewerCommand}" VerticalAlignment="Top" />
+                                </Grid>
+
+                                <!-- Selector Tabs for EULA, Terms of Use, Privacy Policy -->
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Button Content="EULA" FontSize="11" Padding="8,4" Command="{x:Bind ViewModel.SelectLegalDocumentCommand}" CommandParameter="eula" />
+                                    <Button Content="Terms of Use" FontSize="11" Padding="8,4" Command="{x:Bind ViewModel.SelectLegalDocumentCommand}" CommandParameter="terms" />
+                                    <Button Content="Privacy Policy" FontSize="11" Padding="8,4" Command="{x:Bind ViewModel.SelectLegalDocumentCommand}" CommandParameter="privacy" />
+                                    <Button Content="All Agreements" FontSize="11" Padding="8,4" Command="{x:Bind ViewModel.SelectLegalDocumentCommand}" CommandParameter="all" />
+                                </StackPanel>
+
+                                <!-- Expandable Scrollable Full Legal Text -->
+                                <Border Background="{ThemeResource SplatSurfaceMutedBrush}" BorderBrush="{ThemeResource SplatBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10" Visibility="{x:Bind GetBoolVisibility(ViewModel.IsLegalViewerExpanded), Mode=OneWay}">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Text="{x:Bind ViewModel.ActiveLegalTitle, Mode=OneWay}" FontSize="12" FontWeight="Bold" Foreground="{ThemeResource SplatAccentBrush}" TextWrapping="Wrap" />
+                                        <TextBlock Text="{x:Bind ViewModel.ActiveLegalSummary, Mode=OneWay}" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                        <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                            <TextBlock Text="{x:Bind ViewModel.ActiveLegalText, Mode=OneWay}" FontFamily="Consolas" FontSize="10" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                        </ScrollViewer>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Explicit Acceptance CheckBox -->
+                                <CheckBox IsChecked="{x:Bind ViewModel.HasAcceptedLegalTerms, Mode=TwoWay}" FontSize="11" Content="I have read and accept the SPLAT EULA, Terms of Use and Privacy Policy." />
+                                <TextBlock Text="{x:Bind ViewModel.LegalAcceptanceNotice, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource SplatWarningBrush}" TextWrapping="Wrap" Visibility="{x:Bind GetNoticeVisibility(ViewModel.LegalAcceptanceNotice), Mode=OneWay}" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
-                    <Border Background="#1500E5FF" BorderBrush="#3000E5FF" BorderThickness="1" CornerRadius="8" Padding="12">
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <FontIcon Glyph="&#xE783;" FontSize="18" Foreground="#00E5FF" VerticalAlignment="Center" />
-                            <TextBlock Text="Encrypted via Windows DPAPI. Your credentials never touch unencrypted storage." FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                    <!-- STEP 2: Connect AI Provider -->
+                    <StackPanel Spacing="18" Visibility="{x:Bind GetStep2Visibility(ViewModel.CurrentStep), Mode=OneWay}">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Step 2 of 3: Connect Your Agents' Reasoning Brain" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock Text="Connect an Anthropic (sk-ant-…) or Google Gemini (AIza…) API key to give your agents real diagnostic intelligence — the key is verified live and routed to the right provider automatically." FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                         </StackPanel>
-                    </Border>
-                </StackPanel>
 
-                <!-- STEP 3: Ready to Launch -->
-                <StackPanel Spacing="18" Visibility="{x:Bind GetStep3Visibility(ViewModel.CurrentStep), Mode=OneWay}">
-                    <StackPanel HorizontalAlignment="Center" Spacing="6">
-                        <FontIcon Glyph="&#xEC0A;" FontSize="38" Foreground="#00E5FF" HorizontalAlignment="Center" />
-                        <TextBlock Text="Your AI Agent Squad Is Ready!" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center" />
-                        <TextBlock Text="Your autonomous agents are pre-configured, hardened, and ready for dispatch." FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+                        <StackPanel Spacing="10" Margin="0,8,0,0">
+                            <TextBlock Text="AI Provider API Key (Anthropic or Gemini)" FontSize="12" FontWeight="SemiBold" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <PasswordBox
+                                    Grid.Column="0"
+                                    PlaceholderText="Paste Anthropic (sk-ant-...) or Gemini (AIza...) key"
+                                    Password="{x:Bind ViewModel.ApiKeyInput, Mode=TwoWay}"
+                                    PasswordChanged="PasswordBox_PasswordChanged"
+                                    KeyDown="PasswordBox_KeyDown"
+                                    Height="36" />
+                                <Button
+                                    Grid.Column="1"
+                                    Content="Verify &amp; Save Key"
+                                    Style="{StaticResource AccentButtonStyle}"
+                                    IsEnabled="{x:Bind ViewModel.IsTestingKey, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}"
+                                    Command="{x:Bind ViewModel.ValidateKeyCommand}" />
+                            </Grid>
+
+                            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                                <ProgressRing IsActive="{x:Bind ViewModel.IsTestingKey, Mode=OneWay}" Width="14" Height="14" />
+                                <TextBlock Text="{x:Bind ViewModel.KeyStatusMessage, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource SplatAccentBrush}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Border Background="#1500E5FF" BorderBrush="#3000E5FF" BorderThickness="1" CornerRadius="8" Padding="12">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <FontIcon Glyph="&#xE783;" FontSize="18" Foreground="#00E5FF" VerticalAlignment="Center" />
+                                <TextBlock Text="Encrypted via Windows DPAPI. SPLAT sends Platten Industries nothing: your keys and ledgers stay on this machine." FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
-                    <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="16">
-                        <StackPanel Spacing="8">
-                            <TextBlock Text="⚡ WHAT YOUR AGENTS WILL DO FOR YOU:" FontWeight="Bold" FontSize="12" Foreground="#00E5FF" />
-                            <TextBlock Text="• Investigate slow internet, latency, and socket anomalies automatically." FontSize="12" />
-                            <TextBlock Text="• Audit authentication logs to defend against unauthorized logins and attacks." FontSize="12" />
-                            <TextBlock Text="• Explain every technical finding in plain, easy-to-understand English." FontSize="12" />
+                    <!-- STEP 3: Ready to Launch -->
+                    <StackPanel Spacing="16" Visibility="{x:Bind GetStep3Visibility(ViewModel.CurrentStep), Mode=OneWay}">
+                        <StackPanel HorizontalAlignment="Center" Spacing="6">
+                            <FontIcon Glyph="&#xEC0A;" FontSize="38" Foreground="#00E5FF" HorizontalAlignment="Center" />
+                            <TextBlock Text="Your AI Agent Squad Is Ready!" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center" />
+                            <TextBlock Text="Your autonomous agents are pre-configured, hardened, and ready for dispatch under PLATTEN INDUSTRIES LLC governance." FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
                         </StackPanel>
-                    </Border>
 
-                    <!-- Deep-dive companion to this wizard. Opens the copy that shipped inside this
-                         build, not a URL: the source repository is private, and this console is
-                         expected to run on machines with no egress. -->
-                    <HyperlinkButton
-                        Click="FieldGuideButton_Click"
-                        HorizontalAlignment="Center"
-                        Padding="8,4">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE736;" FontSize="14" Foreground="#00E5FF" />
-                            <TextBlock Text="Read the SPLAT Field Guide — the whole system explained in plain English" FontSize="12" />
-                        </StackPanel>
-                    </HyperlinkButton>
+                        <Border Background="{ThemeResource LayerFillColorDefaultBrush}" CornerRadius="8" Padding="16">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="⚡ WHAT YOUR AGENTS WILL DO FOR YOU:" FontWeight="Bold" FontSize="12" Foreground="#00E5FF" />
+                                <TextBlock Text="• Investigate slow internet, latency, and socket anomalies automatically." FontSize="12" />
+                                <TextBlock Text="• Audit authentication logs to defend against unauthorized logins and attacks." FontSize="12" />
+                                <TextBlock Text="• Explain every technical finding in plain, easy-to-understand English." FontSize="12" />
+                            </StackPanel>
+                        </Border>
 
-                    <TextBlock
-                        x:Name="FieldGuideStatus"
-                        Visibility="Collapsed"
-                        FontSize="11"
-                        TextWrapping="Wrap"
-                        HorizontalAlignment="Center"
-                        Foreground="{ThemeResource SplatWarningBrush}" />
-                </StackPanel>
-            </Grid>
+                        <!-- Deep-dive companion to this wizard. Opens the copy that shipped inside this
+                             build, not a URL: the source repository is private, and this console is
+                             expected to run on machines with no egress. -->
+                        <HyperlinkButton
+                            Click="FieldGuideButton_Click"
+                            HorizontalAlignment="Center"
+                            Padding="8,4">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE736;" FontSize="14" Foreground="#00E5FF" />
+                                <TextBlock Text="Read the SPLAT Field Guide — the whole system explained in plain English" FontSize="12" />
+                            </StackPanel>
+                        </HyperlinkButton>
+
+                        <TextBlock
+                            x:Name="FieldGuideStatus"
+                            Visibility="Collapsed"
+                            FontSize="11"
+                            TextWrapping="Wrap"
+                            HorizontalAlignment="Center"
+                            Foreground="{ThemeResource SplatWarningBrush}" />
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
         </Border>
 
         <!-- Bottom Electric Action Bar -->
-        <Grid Grid.Row="2" MaxWidth="780" Margin="0,16,0,28">
+        <Grid Grid.Row="2" MaxWidth="820" Margin="0,12,0,24">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />

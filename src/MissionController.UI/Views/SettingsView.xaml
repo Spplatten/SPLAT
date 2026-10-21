@@ -7,19 +7,20 @@
     Style="{StaticResource SplatPageStyle}"
     mc:Ignorable="d">
 
-    <Grid RowSpacing="16">
+    <Grid RowSpacing="14">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <!-- Header -->
         <StackPanel Grid.Row="0" Spacing="4">
-            <TextBlock Text="Enterprise Cloud Tenant &amp; DPAPI Settings" Style="{StaticResource SplatPageTitleStyle}" />
-            <TextBlock Text="Manage AI provider API keys, OAuth 2.0 PKCE loopback, and Windows DPAPI credential storage" Style="{StaticResource SplatPageSubtitleStyle}" />
+            <TextBlock Text="Enterprise Cloud Tenant, DPAPI &amp; Legal Governance" Style="{StaticResource SplatPageTitleStyle}" />
+            <TextBlock Text="Manage AI provider API keys, Windows DPAPI credential storage, and the SPLAT legal terms" Style="{StaticResource SplatPageSubtitleStyle}" />
         </StackPanel>
 
-        <!-- Settings Dual Column Hub (Non-scrollable, fits viewport) -->
+        <!-- Settings Dual Column Hub -->
         <Grid Grid.Row="1" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -27,8 +28,8 @@
             </Grid.ColumnDefinitions>
 
             <!-- Column 1: DPAPI Credential Vault & Live Key Management -->
-            <Border Grid.Column="0" Style="{StaticResource SplatCardStyle}" Padding="18">
-                <StackPanel Spacing="12">
+            <Border Grid.Column="0" Style="{StaticResource SplatCardStyle}" Padding="16">
+                <StackPanel Spacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE72E;" FontSize="16" Foreground="{ThemeResource SplatAccentBrush}" />
                         <TextBlock Text="Windows DPAPI Credential Vault" FontSize="15" FontWeight="Bold" />
@@ -36,8 +37,8 @@
                     <TextBlock Text="Secrets are encrypted at rest using Windows DPAPI (CurrentUser scope) with in-memory zeroing on dispose." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
 
                     <!-- Live Key Entry & Verification -->
-                    <Border Background="{ThemeResource SplatSurfaceMutedBrush}" BorderBrush="{StaticResource ElectricBorderGlowBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
-                        <StackPanel Spacing="8">
+                    <Border Background="{ThemeResource SplatSurfaceMutedBrush}" BorderBrush="{StaticResource ElectricBorderGlowBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+                        <StackPanel Spacing="6">
                             <TextBlock Text="CONNECT / UPDATE AI API KEY" FontSize="11" FontWeight="Bold" Foreground="{ThemeResource SplatAccentBrush}" />
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
@@ -112,13 +113,13 @@
                         </Border>
                     </StackPanel>
 
-                    <Button Content="Refresh Vault Status" Click="RefreshVault_Click" HorizontalAlignment="Left" FontSize="11" Margin="0,2,0,0" />
+                    <Button Content="Refresh Vault Status" Click="RefreshVault_Click" HorizontalAlignment="Left" FontSize="11" />
                 </StackPanel>
             </Border>
 
             <!-- Column 2: Enterprise Network SChannel & Identity Posture -->
-            <Border Grid.Column="1" Style="{StaticResource SplatCardStyle}" Padding="18">
-                <StackPanel Spacing="12">
+            <Border Grid.Column="1" Style="{StaticResource SplatCardStyle}" Padding="16">
+                <StackPanel Spacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE968;" FontSize="16" Foreground="{ThemeResource SplatSuccessBrush}" />
                         <TextBlock Text="Enterprise SChannel &amp; Zero-Trust Tokens" FontSize="15" FontWeight="Bold" />
@@ -126,7 +127,7 @@
                     <TextBlock Text="Active network configuration uses SocketsHttpHandler with Online CRL checking, Default Network Credentials, and automatic WPAD/PAC proxy discovery (Zscaler/Netskope MITM compatible)." FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
 
                     <!-- Stored Tokens -->
-                    <StackPanel Spacing="6" Margin="0,4,0,0">
+                    <StackPanel Spacing="6" Margin="0,2,0,0">
                         <Border Style="{StaticResource SplatSubtleCardStyle}" Padding="8,6">
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
@@ -182,5 +183,47 @@
                 </StackPanel>
             </Border>
         </Grid>
+
+        <!-- Row 2: EULA, Terms of Use & Privacy Policy -->
+        <Border Grid.Row="2" Style="{StaticResource SplatCardStyle}" Padding="16">
+            <Grid RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Spacing="2">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE8A1;" FontSize="15" Foreground="{ThemeResource SplatAccentBrush}" />
+                            <TextBlock Text="EULA, Terms of Use &amp; Privacy Policy" FontSize="14" FontWeight="Bold" />
+                        </StackPanel>
+                        <TextBlock Text="{x:Bind ViewModel.LegalShortNotice, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Button Content="EULA" FontSize="11" Padding="8,4" Command="{x:Bind ViewModel.SelectLegalDocumentCommand}" CommandParameter="eula" />
+                        <Button Content="Terms of Use" FontSize="11" Padding="8,4" Command="{x:Bind ViewModel.SelectLegalDocumentCommand}" CommandParameter="terms" />
+                        <Button Content="Privacy Policy" FontSize="11" Padding="8,4" Command="{x:Bind ViewModel.SelectLegalDocumentCommand}" CommandParameter="privacy" />
+                        <Button Content="All" FontSize="11" Padding="8,4" Command="{x:Bind ViewModel.SelectLegalDocumentCommand}" CommandParameter="all" />
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel Grid.Row="1" Spacing="2">
+                    <TextBlock Text="{x:Bind ViewModel.SelectedLegalTitle, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource SplatAccentBrush}" />
+                    <TextBlock Text="{x:Bind ViewModel.SelectedLegalSummary, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+
+                <Border Grid.Row="2" Background="{ThemeResource SplatSurfaceMutedBrush}" BorderBrush="{ThemeResource SplatBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="12">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <TextBlock Text="{x:Bind ViewModel.SelectedLegalText, Mode=OneWay}" FontFamily="Consolas" FontSize="11" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+        </Border>
     </Grid>
 </Page>
