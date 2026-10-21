@@ -1,0 +1,140 @@
+{
+  "schema": 1,
+  "verdict": "PASS",
+  "local_date": "2026-10-21",
+  "timezone": "America/New_York",
+  "roadmap_2_4_closed": true,
+  "build": {
+    "commit": "98f621eeb8ff9b2aca437f37d4f1035870ce443e",
+    "based_on_main": "0aa4dd5f44a43948cf9a24597e45967331ee1129",
+    "carried_by": "pull request #19 (the ledger audit counts a request sent twice as two admissions)",
+    "artifact": "splat-mcp.exe, self-contained single file with the daemon embedded",
+    "artifact_sha256": "797B589CC3F67E97C069AD92FF4FFCA833920F140A4A365851C0A0FFAEF5936C"
+  },
+  "guest": {
+    "rootfs": "SPLAT Guest, Debian 13 minimal (packaging/build-splat-guest.sh)",
+    "rootfs_sha256": "f238c13abf4586ce56e6b56d59c905fd7bd64d5a9aebea34ffef2183bb20a09f",
+    "kernel": "stock WSL2 6.18.33.2-microsoft-standard-WSL2"
+  },
+  "probe": "packaging/probe-managed-bridge.ps1",
+  "probe_sha256": "111bdc8e90d1af5ec5fe3bd0b897f5d0883c77bbf4418847582cb9e90574c74f",
+  "actors": {
+    "operator_is_standard_account": true,
+    "service_account_is_not_the_operator": true,
+    "reinstall_created_a_new_service_account": true,
+    "same_operator_after_reinstall": true
+  },
+  "runs": [
+    {
+      "step": "run 1: admitted standard account, after the upgrade to this build",
+      "file": "owner.json",
+      "verdict": "PASS",
+      "recorded_utc": "2026-10-21T16:51:41.1006700+00:00",
+      "finished_utc": "2026-10-21T16:51:56.0836775+00:00",
+      "checks": {
+        "OwnerPositiveControl": true,
+        "DirectDistroTokenDenied": true,
+        "PrivateFileDenied:ledger.key": true,
+        "PrivateFileDenied:ledger.db": true,
+        "PrivateFileDenied:distro\\ext4.vhdx": true,
+        "ConfigurationWriteDenied": true,
+        "PipeInstanceInjectionDenied": true,
+        "DirectDaemonUnauthenticatedDenied": true,
+        "GovernedLeaseRunsAsNobody": true,
+        "LiveKernelConnectDenial": true,
+        "PrivilegedHostToolDenied": true,
+        "EgressOutsidePolicyRefused": true,
+        "OwnerStillEnforcing": true
+      },
+      "raw_sha256": "f6a92bcd1f2683b425356ecebcb46de9a7ab6e660402d98fd049055876731279"
+    },
+    {
+      "step": "run 2: standard account that is not admitted, within the hour of run 1",
+      "file": "denied.json",
+      "verdict": "PASS",
+      "recorded_utc": "2026-10-21T16:51:51.0168340+00:00",
+      "finished_utc": "2026-10-21T16:51:51.0889243+00:00",
+      "checks": {
+        "OwnerControlPassed": true,
+        "UnadmittedSidDenied": true
+      },
+      "raw_sha256": "6070eee0ca20f110b076b7438d268ffe423ed0d011fa851114fa3b0d24c966eb"
+    },
+    {
+      "step": "run 3: elevated audit of the service's keyed ledger against run 1",
+      "file": "audit.json",
+      "verdict": "PASS",
+      "recorded_utc": "2026-10-21T16:59:45.2851726+00:00",
+      "finished_utc": null,
+      "checks": {
+        "Admitted:1:get_substrate_health": true,
+        "Admitted:2:run_command": true,
+        "Admitted:3:run_code": true,
+        "Admitted:5:run_command": true,
+        "Admitted:6:get_substrate_health": true,
+        "ChainVerifies": true,
+        "ClaimedIdentityIgnored": true,
+        "LedgerKeyedByTheServiceKey": true,
+        "ProbeIsAnAdmittedOwnerPass": true,
+        "ProbeListsItsAdmissions": true
+      },
+      "raw_sha256": "a408f1f2197968b201aa441fbbb5856e0ec0b95c2553ce416bb47a87e458dd1a"
+    },
+    {
+      "step": "run 1 again, after Restart-Service",
+      "file": "owner-after-restart.json",
+      "verdict": "PASS",
+      "recorded_utc": "2026-10-21T17:00:21.6184550+00:00",
+      "finished_utc": "2026-10-21T17:00:36.2156189+00:00",
+      "checks": {
+        "OwnerPositiveControl": true,
+        "DirectDistroTokenDenied": true,
+        "PrivateFileDenied:ledger.key": true,
+        "PrivateFileDenied:ledger.db": true,
+        "PrivateFileDenied:distro\\ext4.vhdx": true,
+        "ConfigurationWriteDenied": true,
+        "PipeInstanceInjectionDenied": true,
+        "DirectDaemonUnauthenticatedDenied": true,
+        "GovernedLeaseRunsAsNobody": true,
+        "LiveKernelConnectDenial": true,
+        "PrivilegedHostToolDenied": true,
+        "EgressOutsidePolicyRefused": true,
+        "OwnerStillEnforcing": true
+      },
+      "raw_sha256": "28dd4b7c7f5e9a2696b6786e45be3f5b718ecc302820c55182db8fef210b56ac"
+    },
+    {
+      "step": "run 1 again, after unmount and a fresh install",
+      "file": "owner-after-reinstall.json",
+      "verdict": "PASS",
+      "recorded_utc": "2026-10-21T18:46:09.0054130+00:00",
+      "finished_utc": "2026-10-21T18:46:25.4893731+00:00",
+      "checks": {
+        "OwnerPositiveControl": true,
+        "DirectDistroTokenDenied": true,
+        "PrivateFileDenied:ledger.key": true,
+        "PrivateFileDenied:ledger.db": true,
+        "PrivateFileDenied:distro\\ext4.vhdx": true,
+        "ConfigurationWriteDenied": true,
+        "PipeInstanceInjectionDenied": true,
+        "DirectDaemonUnauthenticatedDenied": true,
+        "GovernedLeaseRunsAsNobody": true,
+        "LiveKernelConnectDenial": true,
+        "PrivilegedHostToolDenied": true,
+        "EgressOutsidePolicyRefused": true,
+        "OwnerStillEnforcing": true
+      },
+      "raw_sha256": "7a733dc8b60d7b6966d8f29a4e5acf9ab96ac72f909d03bf70fa3310b513e191"
+    }
+  ],
+  "raw_records": "Kept by the operator outside the repository. They name the machine and its account SIDs; this summary pins each by SHA-256.",
+  "limits": [
+    "The managed service excludes standard Windows accounts that are not admitted. An administrator can reach the service account by other means and is not excluded.",
+    "Only the managed service identifies its caller. The stdio bridge still authenticates with protocol 3, which proves the peer holds a secret every process running as the operator can read.",
+    "The upgrade step's own output was not recorded. Run 3 shows the service ran this build: only this build's audit counts a request sent twice."
+  ],
+  "incidents": [
+    "The first unmount stopped on the removed account's profile, still in use, until Windows restarted; 369f3d4 (pull request #19) retries and then says to restart and run it again.",
+    "The unmount was then run from the installed copy and could not move the root aside; the operator moved it by hand, and e8c66ec (pull request #19) refuses to run from that copy."
+  ]
+}
