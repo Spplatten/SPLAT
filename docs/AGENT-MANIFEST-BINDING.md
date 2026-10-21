@@ -77,7 +77,8 @@ the tested daemon SHA-256 is
 Its build manifest labels the artifact `AGPL-3.0-only`. No Corporate artifact was produced or
 certified by this proof.
 
-A separate [resident-service check](../dist/agent-bridge-proof-results/resident-audit-2cc43f2d511f4e8d84e6ad45083e2e5c/resident-audit.json)
+A separate resident-service check (kept locally, not in git, at
+`dist/agent-bridge-proof-results/resident-audit-2cc43f2d511f4e8d84e6ad45083e2e5c/resident-audit.json`)
 at 15:56:25 UTC passes 15/15 checks without restarting the service or changing pins or policy.
 The running `/opt/splat/splat-agent` matches the tested daemon, its pin directory is
 `6fc637d8e30f375e7b64a51a2438202515cf12cf008fff78b2f8b719a9a8b4f1`, and authenticated health reports
