@@ -154,9 +154,10 @@ and outranks the process that would be doing the excluding.
 
 **What the daemon enforces, and what it must not claim.** Today the daemon enforces possession of
 the token, the protocol version, and the operator's ceiling over every lease it is asked to install.
-It does not enforce, and must not report, anything about *who* asked. Until one of the three above
-ships, no part of SPLAT may describe the bridge's authentication as identifying a caller: it
-establishes that the peer holds a secret every process running as the operator can obtain.
+It does not enforce, and must not report, anything about *who* asked. Option 1 shipped on 2026-10-21
+as the managed service, and that service names its caller (below). Everywhere else the rule stands:
+no part of SPLAT may describe the stdio bridge's authentication as identifying a caller. It
+establishes only that the peer holds a secret every process running as the operator can obtain.
 
 **The decision is the operator's**, and it is really a decision about the product shape. On a
 workstation the operator already outranks everything here, and 3 is honest. On the OEM shape the
@@ -177,6 +178,32 @@ marker within three seconds. Port 50051 was already occupied on Windows and lack
 marker control, so its result is inconclusive. These are transport observations, not a daemon
 authentication test. Token-file exclusion, service authorization and an audited lease remain
 unmeasured; **roadmap 2.4 remains open**.
+
+### Managed-service gate — 2026-10-21, America/New_York
+
+Option 1 shipped as the managed service (`splat-mcp provision --managed`):
+- A dedicated non-administrator Windows account owns the distro, the daemon's token and the keyed
+  ledger.
+- A Windows service running as that account serves a named pipe whose ACL admits only the listed
+  operator accounts.
+- The service names each caller from the caller's own Windows token. It impersonates the caller at
+  Identification level, and only for that read.
+- Policy and the ledger's admission row are applied behind that boundary before any lease runs.
+
+[The gate summary](audits/evidence/2026-10-21-managed-bridge-gate.json) records five passing runs on
+one build:
+1. An admitted standard account ran a lease as `nobody` and met a live kernel denial of `connect()`.
+2. A standard account that is not admitted was refused at the pipe.
+3. An elevated audit of the keyed ledger found each of the first run's admissions under the pipe
+   caller. None carried the principal its request claimed.
+4. The first run passed again after a service restart.
+5. It passed again after an unmount and a fresh install, under a new service account.
+
+The raw records stay with the operator and are pinned by hash.
+
+As option 1 said, this does not exclude a local administrator, who can reach the service account by
+other means. The stdio bridge on the operator's own distro is unchanged, and the finding above still
+holds for it.
 
 ---
 
