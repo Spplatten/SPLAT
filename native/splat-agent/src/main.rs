@@ -2066,12 +2066,21 @@ async fn handle_client(
 
                 // 3. Atomically revoke lease upon exit
                 lease_mgr.revoke_lease(cg.cgroup_id);
+                let mut retained = true;
                 if let Some(context) = execution_context {
-                    receipt_store.as_ref().context("receipt cache unavailable")?
-                        .finish(mission_id, context, &lease_frame, &exit_chunk)?;
+                    // The cache serves a caller who lost the connection. A connected caller is owed
+                    // its signed EXIT whether or not the copy could be written; the reservation
+                    // stays pending, so a lookup reports the mission unresolved and the mission ID
+                    // still cannot be admitted again.
+                    if let Err(error) = receipt_store.as_ref().context("receipt cache unavailable")
+                        .and_then(|store| store.finish(mission_id, context, &lease_frame, &exit_chunk)) {
+                        error!("Bound outcome for mission {mission_id} could not be retained: {error:#}");
+                        retained = false;
+                    }
                 }
                 if let Some(error) = pump_error {
-                    return Err(anyhow::Error::from(error).context("client disconnected; terminal outcome retained"));
+                    let state = if retained { "terminal outcome retained" } else { "terminal outcome lost" };
+                    return Err(anyhow::Error::from(error).context(format!("client disconnected; {state}")));
                 }
                 out.send(&exit_chunk).await?;
                 info!("Completed tool execution for mission {mission_id} (exit code {exit_code})");
