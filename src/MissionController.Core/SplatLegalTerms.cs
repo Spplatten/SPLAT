@@ -25,15 +25,13 @@ public sealed record LegalDocumentSection(
 public static class SplatLegalTerms
 {
     public const string OwnerEntity = "Platten Industries LLC";
-    public const string Jurisdiction = "State of Georgia, United States";
     // The address the company publishes on rareresources.net/contact. Pinned by a test: an earlier
     // draft of these documents shipped a near miss that belongs to nobody we know.
     public const string ContactEmail = "platten.industries@gmail.com";
-    public const string DirectDamagesCapUsd = "$5.00";
 
     public const string ShortNotice =
         "SPLAT Community is free software under the GNU AGPL-3.0. The EULA, Terms of Use and Privacy Policy " +
-        "below add a warranty disclaimer and a U.S. $5.00 liability limit, explain your responsibilities, and " +
+        "below add a warranty disclaimer and a limit on indirect damages, explain your responsibilities, and " +
         "state that SPLAT sends Platten Industries nothing. They never restrict a right the AGPL gives you.";
 
     public const string EulaTitle = "SPLAT End-User License Agreement";
@@ -77,9 +75,9 @@ public static class SplatLegalTerms
         To the extent the law allows, Platten Industries and its members, managers and contributors
         are not liable for indirect, incidental, special, consequential or punitive damages, including
         lost profits, lost data, downtime, terminated workloads or third-party AI charges, however
-        caused. Their total liability for all claims together is limited to U.S. $5.00, or to the cap
-        in a signed commercial agreement with Platten Industries if you have one. Some places do not
-        allow these limits, and they do not take away consumer rights the law gives you.
+        caused. If you have a signed commercial agreement with Platten Industries, its liability terms
+        apply instead. Some places do not allow these limits, and they do not take away consumer
+        rights the law gives you.
 
         6. HIGH-RISK USE
         SPLAT is not designed for systems where a failure could cause death, injury or serious damage,
@@ -88,11 +86,7 @@ public static class SplatLegalTerms
         7. EXPORT LAW
         You are responsible for complying with the export laws that apply to you and the software.
 
-        8. GOVERNING LAW
-        The laws of the State of Georgia, United States, govern this agreement, without regard to
-        conflict-of-law rules, except where the law of your country requires otherwise.
-
-        9. CONTACT
+        8. CONTACT
         platten.industries@gmail.com
         """;
 
@@ -130,7 +124,7 @@ public static class SplatLegalTerms
         trademark rights (AGPL section 7(e)); a modified version should not be presented as ours.
 
         7. THE EULA
-        The warranty disclaimer and the U.S. $5.00 liability limit in the EULA apply to your use.
+        The warranty disclaimer and the limit of liability in the EULA apply to your use.
         Contact: platten.industries@gmail.com.
         """;
 
@@ -177,7 +171,7 @@ public static class SplatLegalTerms
             Uri: "splat://legal/eula",
             ShortTitle: "EULA",
             Title: EulaTitle,
-            Summary: "Your licence is the AGPL-3.0; this adds the warranty disclaimer and a U.S. $5.00 liability limit.",
+            Summary: "Your licence is the AGPL-3.0; this adds the warranty disclaimer and a limit on indirect damages.",
             FullText: EulaText),
         new LegalDocumentSection(
             Key: "terms",
