@@ -187,7 +187,10 @@ public sealed record QualityIslandOptions(
     string? FrontierEscalationModel = "claude-opus-4-8",
     string? DynamicLanguage = "bash",
     IReadOnlyCollection<string>? AllowedTemplateIds = null,
-    bool EarlyStreamAbortOnSyntaxError = false);
+    bool EarlyStreamAbortOnSyntaxError = false,
+    // Template-declared keys the closing StructuredDiagnosis block must also carry
+    // (TemplateOutputContract.ResponseFields); an attempt without one is rejected so the next model runs.
+    IReadOnlyCollection<string>? RequiredResponseFields = null);
 
 /// <summary>
 /// Request to execute an isolated generation within the Quality Island.

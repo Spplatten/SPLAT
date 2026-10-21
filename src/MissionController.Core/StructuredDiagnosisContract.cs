@@ -1,3 +1,5 @@
+using MissionController.Core.Models;
+
 namespace MissionController.Core;
 
 /// <summary>
@@ -59,4 +61,34 @@ Rules:
   analysis and in recommendedActions, labelled as knowledge. A finding quotes only what the output
   contains; a finding that names a value the output does not contain is reported as unsupported.
 """;
+
+    private const string SchemaTail = """
+    "A specific next step, or omit this array entirely when no action is warranted"
+  ]
+}
+""";
+
+    /// <summary>
+    /// The suffix for one template: <see cref="SystemPromptSuffix"/> with the template's own
+    /// <see cref="TemplateOutputContract.ResponseFields"/> written into the same schema block, so the
+    /// model is shown one shape to produce rather than two that compete for "nothing after it".
+    /// </summary>
+    public static string For(TemplateOutputContract contract)
+    {
+        ArgumentNullException.ThrowIfNull(contract);
+        if (contract.ResponseFields is not { Count: > 0 } fields)
+            return SystemPromptSuffix;
+
+        // A checkout's line endings reach these raw literals; work in \n so the splice always matches.
+        string suffix = SystemPromptSuffix.ReplaceLineEndings("\n");
+        string tail = SchemaTail.ReplaceLineEndings("\n");
+        string extra = string.Concat(fields.Select(f => $",\n  \"{f.Name}\": {f.ExampleJson}"));
+        string schema = tail.Replace("  ]\n}", "  ]" + extra + "\n}", StringComparison.Ordinal);
+        if (!suffix.Contains(tail, StringComparison.Ordinal))
+            throw new InvalidOperationException("The response schema no longer ends where template fields are spliced in.");
+        string rule = "\n- This template also requires "
+            + string.Join(", ", fields.Select(f => $"\"{f.Name}\" ({f.Meaning})"))
+            + " in that same block. They are part of SPLAT's format, not a second object; an answer without them is rejected.\n";
+        return suffix.Replace(tail, schema, StringComparison.Ordinal).TrimEnd('\n') + rule;
+    }
 }

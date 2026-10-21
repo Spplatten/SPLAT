@@ -78,7 +78,17 @@ public record TemplateOutputContract(
     string Objective,
     IReadOnlyList<string> Deliverables,
     IReadOnlyList<string> SuccessCriteria,
-    string OutputFormat = "Executive summary with evidence, risks, and next actions.");
+    string OutputFormat = "Executive summary with evidence, risks, and next actions.",
+    // Fields this template needs in the engine's ONE closing JSON block, beside status, headline and
+    // findings: written into the schema the model is shown, and required by the quality island. A
+    // template asking for its own second object competed with the engine's "nothing after it" rule
+    // and lost (trends-brief-composer, 2026-10-20). Omitted when null so every template without any
+    // keeps the hash its recordings were made against (MissionRunFacts.HashTemplate).
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<TemplateResponseField>? ResponseFields = null);
+
+/// <summary>One template-required field in the closing JSON block: its key, an example value as JSON, and what it holds.</summary>
+public record TemplateResponseField(string Name, string ExampleJson, string Meaning);
 
 public enum RemediationRiskLevel
 {
