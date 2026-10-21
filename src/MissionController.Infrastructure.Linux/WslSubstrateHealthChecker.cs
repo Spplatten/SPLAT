@@ -52,6 +52,7 @@ public class WslSubstrateHealthChecker
     private readonly int _port;
     private readonly WslAgentToken _token;
     private readonly TimeSpan _timeout;
+    private readonly Func<CancellationToken, Task<TcpClient>>? _connect;
 
     /// <param name="timeout">
     /// How long the exchange with the daemon gets; the token is read before it, under a budget of its
@@ -62,16 +63,23 @@ public class WslSubstrateHealthChecker
     /// alone and 363ms under the suite's own parallel load, and the one that lost that race read
     /// as an unreachable daemon, which is indistinguishable from the bug this class exists to catch.
     /// </param>
+    /// <param name="connect">
+    /// How a host that may start the daemon reaches it: the way a lease does, starting the unit when
+    /// nothing listens and waiting until it does, under its own budget. Null connects once and reports
+    /// what it finds, which is what doctor and a status badge want.
+    /// </param>
     public WslSubstrateHealthChecker(
         string host = "127.0.0.1",
         int port = 50051,
         WslAgentToken? token = null,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        Func<CancellationToken, Task<TcpClient>>? connect = null)
     {
         _host = host;
         _port = port;
         _token = token ?? WslAgentToken.Default;
         _timeout = timeout ?? TimeSpan.FromSeconds(2);
+        _connect = connect;
     }
 
     public bool IsWslConfiguredForBpf()
@@ -111,11 +119,16 @@ public class WslSubstrateHealthChecker
                 token = await _token.GetAsync(tokenCts.Token);
             }
 
+            // A daemon this host may start is reached first, outside the exchange's budget. The managed
+            // service's guest stops at the end of every upgrade, so its first health check met a daemon
+            // that was not yet listening. A refused loopback connect costs Windows about two seconds,
+            // which was the whole budget, so the check read "unreachable", while the lease right after it
+            // started the daemon and ran (2026-10-21).
+            using var client = _connect is null ? new TcpClient() : await _connect(ct);
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(_timeout);
 
-            using var client = new TcpClient();
-            await client.ConnectAsync(_host, _port, cts.Token);
+            if (_connect is null) await client.ConnectAsync(_host, _port, cts.Token);
             using var stream = client.GetStream();
 
             // Something is listening. Without the token this host can neither check that it is the daemon
