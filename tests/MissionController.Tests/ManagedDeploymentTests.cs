@@ -69,4 +69,21 @@ public sealed class ManagedDeploymentTests
 
         Assert.Contains("test -e /etc/sudoers || install -m 0440 -o root -g root /dev/null /etc/sudoers", script);
     }
+
+    /// <summary>
+    /// The first gate unmount (2026-10-21) removed the service, the account and the distro, then stopped
+    /// on the account's profile, which WSL still held. The removal now waits for it, bounded, and one
+    /// that still cannot finish says it is to be re-run rather than leaving a half-removed instance silent.
+    /// </summary>
+    [Fact]
+    public void ARemovalWaitsForTheRemovedAccountsProfile()
+    {
+        using var resource = typeof(ManagedBridgeCommand).Assembly.GetManifestResourceStream("managed-deployment.ps1");
+        Assert.NotNull(resource);
+        string script = new StreamReader(resource).ReadToEnd();
+
+        Assert.DoesNotContain("if ($profile) { $profile | Remove-CimInstance }", script);
+        Assert.Contains("for ($attempt = 1; $profile; $attempt++)", script);
+        Assert.Contains("run this unmount again to finish", script);
+    }
 }
