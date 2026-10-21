@@ -167,6 +167,12 @@ function Assert-Manifest {
 
 if ($Mode -eq 'Remove') {
     Assert-Manifest
+    # The removal ends by moving this root aside, and Windows will not move a folder while a program
+    # inside it is running. Started from the installed copy, a removal took everything else away, then
+    # could not move the root, and the reinstall refused the root it left (2026-10-21).
+    if ($Executable -and [IO.Path]::GetFullPath($Executable).StartsWith("$root\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Run the unmount from a published splat-mcp.exe, not the installed copy under $root."
+    }
     $account = Get-LocalUser -Name $Instance -ErrorAction SilentlyContinue
     if ($account -and $account.SID.Value -ne $manifest.AccountSid) { throw 'Account was substituted; refusing removal.' }
     $service = Get-CimInstance Win32_Service -Filter "Name='$Instance'"
