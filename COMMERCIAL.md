@@ -8,8 +8,12 @@ The AGPL is a deliberate choice rather than a default. Read it before you build 
 ## What the AGPL gives you, free
 
 Everything, if you are willing to be bound by it: run it, read it, change it, ship it, embed it.
-There is no evaluation period, no seat count, no feature held back, and no telemetry. The daemon in
+The published core has no evaluation period, no seat count, and no telemetry. The daemon in
 `native/splat-agent` is the whole thing, not a crippled edition of it.
+
+Separately supplied Corporate extensions are outside this Community source grant and require their
+own commercial agreement. Their availability does not restrict the AGPL rights already granted
+for the published core. Third-party components keep their own licenses.
 
 ## What it asks in return
 

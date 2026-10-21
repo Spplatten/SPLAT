@@ -17,7 +17,7 @@ internal sealed record A2aTaskRecord(string Id, string ContextId, string TenantI
     bool? Dispatched = null,
     // For a canceled or interrupted task: not-started (never dispatched), termination-verified (a
     // signed drain receipt), or unresolved (dispatched, and nothing proves how it ended).
-    string? CancellationEvidence = null);
+    string? CancellationEvidence = null, bool ReceiptRecovered = false);
 
 internal sealed class A2aTaskStore
 {
@@ -170,6 +170,33 @@ internal sealed class A2aTaskStore
         command.Parameters.AddWithValue("@tenant", tenant);
         command.Parameters.AddWithValue("@caller", caller);
         return command.ExecuteScalar() is string json ? JsonSerializer.Deserialize<A2aTaskRecord>(json, A2aConfiguration.Json) : null;
+    }
+
+    internal async Task RecoverAsync(A2aTaskRecord task,
+        Func<SqliteConnection, SqliteTransaction, Task> audit, CancellationToken ct)
+    {
+        using var connection = _context.CreateConnection();
+        using var transaction = connection.BeginTransaction();
+        int updated = 0;
+        // Archival can finish while lookup is in flight. Update whichever table owns the task;
+        // never recreate an active row or give a consumed message/nonce another admission.
+        foreach (string table in new[] { "A2aTasks", "A2aTaskArchive" })
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = $"UPDATE {table} SET RecordJson=@json WHERE Receiver=@receiver AND Version=@version AND TaskId=@id AND TenantId=@tenant AND CallerId=@caller";
+            command.Parameters.AddWithValue("@receiver", _receiver);
+            command.Parameters.AddWithValue("@version", _version);
+            command.Parameters.AddWithValue("@id", task.Id);
+            command.Parameters.AddWithValue("@tenant", task.TenantId);
+            command.Parameters.AddWithValue("@caller", task.CallerId);
+            command.Parameters.AddWithValue("@json", JsonSerializer.Serialize(task, A2aConfiguration.Json));
+            updated += command.ExecuteNonQuery();
+        }
+        if (updated != 1) throw new InvalidOperationException("Receipt recovery requires exactly one persisted task.");
+        await audit(connection, transaction);
+        ct.ThrowIfCancellationRequested();
+        transaction.Commit();
     }
 
     internal void Save(A2aTaskRecord task, bool insert = false, string? delegationIssuer = null)

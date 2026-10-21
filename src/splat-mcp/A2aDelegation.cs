@@ -52,8 +52,10 @@ internal sealed class A2aDelegation : IDisposable
     {
         if (_signer is null) throw new A2aException(-32000, "Delegation signing is not configured.", 403);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(grant, A2aConfiguration.Json);
-        return Encode(bytes) + "." + Encode(_signer.SignData(bytes, HashAlgorithmName.SHA256,
-            DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
+        // Different tasks can delegate concurrently; the shared platform key is not thread-safe.
+        lock (_signer)
+            return Encode(bytes) + "." + Encode(_signer.SignData(bytes, HashAlgorithmName.SHA256,
+                DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
     }
 
     internal A2aDelegationGrant Verify(string token, A2aCaller caller, string skill)

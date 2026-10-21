@@ -2,6 +2,8 @@
 """Windows HTTPS load client for the packaged SPLAT host; no model or external HTTP calls."""
 import argparse
 import base64
+import ctypes
+from ctypes import wintypes
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -19,6 +21,35 @@ import time
 import uuid
 
 EXTENSION = "urn:splat:a2a:template-lease:v1"
+
+
+def wsl_children():
+    # Inspect only process name/PID/parent PID. No command lines, credentials or host telemetry leave
+    # this local proof; the published result contains counts for the two synthetic hosts only.
+    class Entry(ctypes.Structure):
+        _fields_ = [("size", wintypes.DWORD), ("usage", wintypes.DWORD), ("pid", wintypes.DWORD),
+            ("heap", ctypes.c_size_t), ("module", wintypes.DWORD), ("threads", wintypes.DWORD),
+            ("parent", wintypes.DWORD), ("priority", wintypes.LONG), ("flags", wintypes.DWORD),
+            ("name", wintypes.WCHAR * 260)]
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel.Process32FirstW.argtypes = kernel.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    snapshot = kernel.CreateToolhelp32Snapshot(2, 0)
+    if snapshot == ctypes.c_void_p(-1).value:
+        raise OSError(ctypes.get_last_error(), "process snapshot unavailable")
+    result = {}
+    try:
+        entry = Entry()
+        entry.size = ctypes.sizeof(entry)
+        found = kernel.Process32FirstW(snapshot, ctypes.byref(entry))
+        while found:
+            if entry.name.lower() == "wsl.exe":
+                result.setdefault(entry.parent, []).append(entry.pid)
+            found = kernel.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel.CloseHandle(snapshot)
+    return result
 
 
 def digest(value):
@@ -137,9 +168,12 @@ class Host:
         body = json.dumps({"jsonrpc": "2.0", "id": uuid.uuid4().hex, "method": method, "params": parameters})
         return self.request(self.suite.tokens[caller], body.encode())
 
-    def records(self):
+    def records(self, archived=False):
         with sqlite3.connect("file:" + self.database.as_posix() + "?mode=ro", uri=True) as db:
-            return [json.loads(row[0]) for row in db.execute("SELECT RecordJson FROM A2aTasks")]
+            sql = "SELECT RecordJson FROM A2aTasks"
+            if archived:
+                sql += " UNION ALL SELECT RecordJson FROM A2aTaskArchive"
+            return [json.loads(row[0]) for row in db.execute(sql)]
 
 
 class Suite:
@@ -304,6 +338,23 @@ class Suite:
     def sustained(self):
         started = time.monotonic()
         deadline = started + self.seconds
+        stop_holds = threading.Event()
+        holds = {host.name: {"maximum": 0, "pids": set()} for host in (self.parent, self.worker)}
+        samples, errors = [], []
+        def sample_holds():
+            while not stop_holds.is_set():
+                try:
+                    children = wsl_children()
+                    for host in (self.parent, self.worker):
+                        pids = children.get(host.process.pid, [])
+                        holds[host.name]["maximum"] = max(holds[host.name]["maximum"], len(pids))
+                        holds[host.name]["pids"].update(pids)
+                    samples.append(True)
+                except Exception as error:
+                    errors.append(type(error).__name__)
+                stop_holds.wait(.05)
+        monitor = threading.Thread(target=sample_holds, daemon=True)
+        monitor.start()
         def caller_loop(caller):
             completed = errors = 0
             while time.monotonic() < deadline and completed + errors < 128:
@@ -318,7 +369,16 @@ class Suite:
                 # Bound retained evidence and CPU while maintaining four independent active callers.
                 time.sleep(max(0, .5 - (time.monotonic() - iteration)))
             return {"caller": caller, "delegatedCompleted": completed, "refused": errors}
-        results = self.parallel(4, caller_loop)
+        try:
+            results = self.parallel(4, caller_loop)
+        finally:
+            stop_holds.set()
+            monitor.join(5)
+            self.observations["sharedGuestHolds"] = {"samples": len(samples), "errors": errors,
+                "hosts": {name: {"maximumConcurrent": value["maximum"], "distinctProcesses": len(value["pids"])}
+                    for name, value in holds.items()}}
+        self.check("one_guest_hold_per_host_during_sustained_leases", len(samples) >= 10 and not errors
+            and all(value["maximum"] == 1 and len(value["pids"]) == 1 for value in holds.values()))
         elapsed = time.monotonic() - started
         self.observations["sustained"] = {"requestedSeconds": self.seconds, "elapsedSeconds": elapsed,
             "callers": results, "pairLimitPerCaller": 128, "minimumIterationSeconds": .5}
@@ -326,7 +386,7 @@ class Suite:
         self.check("sustained_each_caller_progressed", all(r["delegatedCompleted"] >= 5 and r["refused"] == 0 for r in results))
 
     def cancellations(self):
-        outcomes = {"confirmedCanceled": 0, "unconfirmedCanceled": 0, "completedBeforeCancel": 0}
+        outcomes = {"confirmedCanceled": 0, "unconfirmedCanceled": 0, "notStarted": 0, "completedBeforeCancel": 0}
         for index in range(24):
             task = self.task(self.parent.rpc(0, "SendMessage", message(uuid.uuid4().hex, immediate=True)))
             time.sleep((0, .002, .01, .03, .08, .15)[index % 6])
@@ -344,7 +404,12 @@ class Suite:
             else:
                 self.check("cancel_terminal_state", state == "TASK_STATE_CANCELED")
                 confirmed = task["metadata"][EXTENSION]["workloadTerminationConfirmed"]
-                outcomes["confirmedCanceled" if confirmed else "unconfirmedCanceled"] += 1
+                evidence = task["metadata"][EXTENSION]["cancellationEvidence"]
+                not_started = evidence == "not-started"
+                self.check("cancellation_evidence_is_explicit", evidence in ("not-started", "termination-verified", "unresolved")
+                    and (not not_started or task["metadata"][EXTENSION]["dispatched"] is False)
+                    and (not confirmed or evidence == "termination-verified"))
+                outcomes["notStarted" if not_started else "confirmedCanceled" if confirmed else "unconfirmedCanceled"] += 1
                 receipt = self.record(self.parent, 0, task, expected=state, optional=not confirmed)
                 self.check("cancel_drain_claim_has_receipt", not confirmed or receipt)
         self.observations["cancellationRaces"] = outcomes
@@ -356,21 +421,49 @@ class Suite:
         ids = [uuid.uuid4().hex for _ in range(2)]
         for identifier in ids:
             self.record(host, 0, self.task(host.rpc(0, "SendMessage", message(identifier))))
-        # Caller A's retained quota is full; B must still progress during A's rejected burst.
+        # Completed tasks archive before admission; active quotas still reject a concurrent burst.
         replies = self.parallel(16, lambda i: host.rpc(1 if i == 15 else 0, "SendMessage", message(uuid.uuid4().hex)))
-        self.check("retained_quota_burst_refused", all(status == 429 for status, _ in replies[:15]))
+        self.check("retained_quota_burst_bounded", all(status in (200, 429) for status, _ in replies[:15]))
         self.record(host, 1, self.task(replies[15]))
-        self.check("quota_did_not_consume_extra_slots", len(host.records()) == 3)
+        self.check("quota_did_not_consume_extra_slots", len(host.records()) <= 6
+            and sum(r["callerId"] == callers[0]["callerId"] for r in host.records()) <= 2)
         self.record(host, 1, self.task(host.rpc(1, "SendMessage", message(uuid.uuid4().hex))))
         for _ in range(2):
             self.record(host, 2, self.task(host.rpc(2, "SendMessage", message(uuid.uuid4().hex))))
-        self.check("global_retained_capacity_refused", host.rpc(0, "SendMessage", message(uuid.uuid4().hex))[0] == 429)
+        self.record(host, 0, self.task(host.rpc(0, "SendMessage", message(uuid.uuid4().hex))))
+        self.check("completed_tasks_release_capacity", len(host.records()) <= 6 and len(host.records(archived=True)) > 6)
         host.stop()
         host.start()
-        self.check("restart_does_not_reset_quotas", host.rpc(0, "SendMessage", message(uuid.uuid4().hex))[0] == 429)
+        self.record(host, 0, self.task(host.rpc(0, "SendMessage", message(uuid.uuid4().hex))))
+        before = len(host.records(archived=True))
         self.record(host, 0, self.task(host.rpc(0, "SendMessage", message(ids[0]))))
+        self.check("archived_retry_does_not_execute", len(host.records(archived=True)) == before)
         self.observations["retainedCapacity"] = {"configured": 6, "persisted": len(host.records()),
-            "newTasksRefusedAfterCompletionAndRestart": True}
+            "activeAndArchived": before, "capacityReusableAfterCompletionAndRestart": True}
+
+    def lost_connections(self):
+        for boundary in ("POLICY_APPLIED", "EXIT"):
+            request = message(uuid.uuid4().hex)
+            marker = self.directory / "drop-connection.once"
+            marker.write_text(boundary)
+            task = self.task(self.parent.rpc(0, "SendMessage", request))
+            self.check("proxy_fault_was_consumed", not marker.exists())
+            # A failed stream remains a failed task even when the recovered receipt says exit 0.
+            deadline = time.monotonic() + 10
+            while not task["metadata"][EXTENSION].get("receiptRecovered") and time.monotonic() < deadline:
+                time.sleep(.1)
+                task = self.parent.rpc(0, "GetTask", {"id": task["id"]})[1]["result"]
+            self.check("lost_connection_receipt_recovered", task["metadata"][EXTENSION].get("receiptRecovered") is True
+                and task["status"]["state"] == "TASK_STATE_FAILED")
+            self.record(self.parent, 0, task, expected="TASK_STATE_FAILED")
+            before = len(self.parent.records(archived=True))
+            self.parent.stop()
+            self.parent.start()
+            retried = self.task(self.parent.rpc(0, "SendMessage", request))
+            self.check("recovered_task_retry_survives_host_restart", retried["id"] == task["id"]
+                and retried["metadata"][EXTENSION].get("receiptRecovered") is True
+                and len(self.parent.records(archived=True)) == before)
+            self.record(self.parent, 0, retried, expected="TASK_STATE_FAILED")
 
     def running_quotas(self):
         callers = [dict(c, maxConcurrentTasks=1, maxRetainedTasks=128) for c in self.callers[:2]]
@@ -426,10 +519,10 @@ class Suite:
         self.parent = Host(self, "parent", self.original, self.callers)
         self.worker = Host(self, "worker", self.original,
             [dict(c, requireDelegation=True) for c in self.callers], issuer=self.parent)
-        for name in ("retry_races", "delegation_races", "isolation_and_input", "sustained", "cancellations", "running_quotas", "quotas", "revocation"):
+        for name in ("retry_races", "delegation_races", "isolation_and_input", "sustained", "cancellations", "running_quotas", "quotas", "lost_connections", "revocation"):
             self.phase(name, getattr(self, name))
         for host in self.hosts:
-            records = host.records()
+            records = host.records(archived=True)
             self.check(host.name + "_no_working_tasks", all(r["state"] != "TASK_STATE_WORKING" for r in records))
             with sqlite3.connect("file:" + host.database.as_posix() + "?mode=ro", uri=True) as database:
                 facts = database.execute("SELECT Details FROM AuditLedger WHERE Action='MISSION_RUN_FACTS'").fetchall()
@@ -443,7 +536,7 @@ class Suite:
             # Retain all independent findings when audit consistency fails; never bless the row labels.
             self.checks[host.name + "_admission_audit_matches_tasks"] = not orphaned
             unconfirmed = [r for r in records if r["state"] == "TASK_STATE_CANCELED"
-                and not r["workloadTerminationConfirmed"]]
+                and not r["workloadTerminationConfirmed"] and r.get("cancellationEvidence") != "not-started"]
             self.observations[host.name + "Persistence"] = {"tasks": len(records), "sealedRuns": len(facts),
                 "databaseBytes": host.database.stat().st_size, "authorizationRows": len(admissions),
                 "authorizedWithoutRetainedTask": orphaned,

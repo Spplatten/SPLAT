@@ -28,6 +28,7 @@ mod identities;
 mod jail;
 mod lease;
 mod outcome;
+mod receipts;
 mod pinning;
 mod secret_memory;
 mod secret_recovery;
@@ -163,6 +164,10 @@ struct Args {
     /// second is no reason to stop keeping the first.
     #[arg(long, default_value = outcome::DEFAULT_KEY_PATH)]
     outcome_key_file: String,
+
+    /// Private durable cache for recovering signed bound outcomes after transport loss.
+    #[arg(long, default_value = "/var/lib/splat/receipts")]
+    receipt_root: String,
 
     /// Legacy identity for mock execution; enforcing leases use the reserved per-lease pool.
     ///
@@ -489,6 +494,10 @@ async fn main() -> Result<()> {
     // refusing to run them.
     let outcome_signer: Option<Arc<outcome::OutcomeSigner>> =
         outcome::OutcomeSigner::load_or_create(Path::new(&args.outcome_key_file)).map(Arc::new);
+    let receipt_store = match receipts::Store::open(Path::new(&args.receipt_root)) {
+        Ok(store) => Some(store),
+        Err(error) => { error!("Bound execution unavailable: receipt cache: {error:#}"); None }
+    };
 
     // The ceiling, before anything is served. Its absence is loud because it is the one thing
     // that makes a stolen token worth less than the daemon's whole authority.
@@ -649,12 +658,13 @@ async fn main() -> Result<()> {
                 let ceiling_for_client = lease_ceiling.clone();
                 let missions_root_for_client = missions_root.clone();
                 let signer_for_client = outcome_signer.clone();
+                let receipts_for_client = receipt_store.clone();
                 let broker_for_client = secret_broker.clone();
                 let identities_for_client = identities.clone();
                 let recovery_for_client = workspace_recovery.clone();
                 tokio::spawn(async move {
                     let _client_slot = client_slot;
-                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids, ceiling_for_client, missions_root_for_client, signer_for_client, broker_for_client, identities_for_client, recovery_for_client).await {
+                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids, ceiling_for_client, missions_root_for_client, signer_for_client, receipts_for_client, broker_for_client, identities_for_client, recovery_for_client).await {
                         error!("Client session error: {e:#}");
                     }
                 });
@@ -930,6 +940,7 @@ async fn handle_client(
     lease_ceiling: Option<Arc<Ceiling>>,
     missions_root: Arc<str>,
     outcome_signer: Option<Arc<outcome::OutcomeSigner>>,
+    receipt_store: Option<receipts::Store>,
     secret_broker: Option<secrets::Broker>,
     identities: Option<identities::IdentityPool>,
     workspace_recovery: Option<secret_recovery::Registry>,
@@ -1018,9 +1029,22 @@ async fn handle_client(
                     // authorizes whatever a request names.
                     "ceiling": lease_ceiling.is_some(),
                     "explicitEnvironment": true,
-                    "secretStdinSupported": secret_broker.is_some() && lease_mgr.is_enforcing()
+                    "secretStdinSupported": secret_broker.is_some() && lease_mgr.is_enforcing(),
+                    "boundReceiptLookup": receipt_store.is_some() && outcome_signer.is_some() && lease_mgr.is_enforcing()
                 });
                 out.send(&resp).await?;
+            }
+
+            "RECEIPT_LOOKUP" => {
+                // Lookup authenticates a fresh session and requires the original exact binding.
+                // Missing/expired evidence never authorizes executing the mission again.
+                let response = match (&receipt_store, parsed["missionId"].as_str(),
+                    parsed["executionContext"].as_str(), parsed["executionPolicySha256"].as_str()) {
+                    (Some(store), Some(mission), Some(context), Some(policy)) if session.prove_frames =>
+                        store.lookup(mission, context, policy)?,
+                    _ => serde_json::json!({"type":"RECEIPT_RESPONSE", "status":"unavailable"}),
+                };
+                out.send(&response).await?;
             }
 
             "EXECUTE_TOOL" | "EXECUTE_POLICY" | "EXECUTE_AGENT" | "EXECUTE_BOUND" => {
@@ -1097,6 +1121,16 @@ async fn handle_client(
                         continue;
                     }
                 };
+                if let Some(context) = execution_context {
+                    let reserved = receipt_store.as_ref().context("receipt cache unavailable")
+                        .and_then(|store| store.reserve(mission_id, context,
+                            execution_policy.as_ref().map_or("none", |p| p.sha256.as_str())));
+                    if let Err(error) = reserved {
+                        out.send(&serde_json::json!({"type":"STDERR", "data":format!("SPLAT refused bound admission: {error}.\n")})).await?;
+                        out.send(&serde_json::json!({"type":"EXIT", "exitCode":-1})).await?;
+                        continue;
+                    }
+                }
                 // Arguments may contain caller data; the service journal is not a transcript.
                 info!("Executing tool for mission {mission_id}");
 
@@ -1724,11 +1758,12 @@ async fn handle_client(
                     }
                 };
 
+                let mut pump_error: Option<std::io::Error> = None;
                 if let Some(policy) = &execution_policy {
                     // spawn succeeds only after the pre-exec restriction calls and exec succeed.
                     // Prepared policy in a LEASE frame would otherwise overstate installation.
-                    out.send(&serde_json::json!({"type":"POLICY_APPLIED", "sha256":policy.sha256,
-                        "landlockAbi":policy.landlock_abi, "syscallFilter":"seccomp-cbpf-v1"})).await?;
+                    pump_error = out.send(&serde_json::json!({"type":"POLICY_APPLIED", "sha256":policy.sha256,
+                        "landlockAbi":policy.landlock_abi, "syscallFilter":"seccomp-cbpf-v1"})).await.err();
                 }
 
                 // The child joined its cgroup in pre_exec, before exec, so there is nothing to attach
@@ -1780,7 +1815,7 @@ async fn handle_client(
                 let forwarded = Arc::new(AtomicU64::new(0));
                 let forwarded_in_task = forwarded.clone();
                 let lease_mgr_for_drain = lease_mgr.clone();
-                tokio::spawn(async move {
+                let violation_forwarder = tokio::spawn(async move {
                     loop {
                         tokio::select! {
                             _ = &mut done_rx => {
@@ -1871,10 +1906,9 @@ async fn handle_client(
                 // the expiry reaper came round - and that reaper then unpoliced it rather than
                 // killing it. A lost client ends the lease, in the same order expiry uses: kill
                 // inside the installed policy, then withdraw the policy.
-                let mut pump_error: Option<std::io::Error> = None;
                 let mut watch_client = true;
                 let mut cancellation_accepted = false;
-                loop {
+                while pump_error.is_none() {
                     tokio::select! {
                         // Silent ordinary steps need EOF detection too. Leave ordinary pipelined
                         // bytes queued for the next request without repeatedly polling a ready buffer.
@@ -1919,18 +1953,18 @@ async fn handle_client(
                     }
                 }
 
-                if let Some(e) = pump_error {
-                    let drained = !cgroup_is_real || cg.kill_all().is_ok();
-                    if drained {
-                        lease_mgr.revoke_lease(cg.cgroup_id);
-                        let _ = waiter.await;
-                    } else {
+                if pump_error.is_some() {
+                    if cgroup_is_real && cg.kill_all().is_err() {
                         error!("Disconnected lease could not be drained; retaining policy for the expiry reaper");
+                        return Err(anyhow::anyhow!("disconnected workload could not be drained"));
                     }
-                    return Err(anyhow::Error::from(e).context("client write failed; lease terminated"));
+                    // Release blocked output producers, then follow the same signed completion
+                    // path as a connected caller. Transport loss must not discard drain evidence.
+                    drop(rx);
                 }
 
                 let status = waiter.await.context("join child reaper")??;
+                violation_forwarder.await.context("join violation forwarder before signing its counters")?;
                 let exit_code = status.code().unwrap_or(-1);
                 if cgroup_is_real {
                     cg.kill_all().context("drain workload before removing overlay scratch")?;
@@ -2030,10 +2064,16 @@ async fn handle_client(
                     }
                 }
 
-                out.send(&exit_chunk).await?;
-
                 // 3. Atomically revoke lease upon exit
                 lease_mgr.revoke_lease(cg.cgroup_id);
+                if let Some(context) = execution_context {
+                    receipt_store.as_ref().context("receipt cache unavailable")?
+                        .finish(mission_id, context, &lease_frame, &exit_chunk)?;
+                }
+                if let Some(error) = pump_error {
+                    return Err(anyhow::Error::from(error).context("client disconnected; terminal outcome retained"));
+                }
+                out.send(&exit_chunk).await?;
                 info!("Completed tool execution for mission {mission_id} (exit code {exit_code})");
             }
 

@@ -117,13 +117,14 @@
                 <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE8B7;" FontSize="13" Foreground="{ThemeResource SplatVioletBrush}" />
-                        <TextBlock Text="EXPORT COMPLIANCE AUDIT EVIDENCE (MERKLE PROOFS + OFFLINE SCRIPT)" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource SplatVioletBrush}" />
+                        <TextBlock Text="EXPORT AUDIT EVIDENCE (UNSIGNED)" FontSize="10" FontWeight="Bold" Foreground="{ThemeResource SplatVioletBrush}" />
                     </StackPanel>
-                    <TextBlock Text="{x:Bind ViewModel.ComplianceExportStatus, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="{x:Bind ViewModel.ComplianceExportStatus, Mode=OneWay}" FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                     <Button Content="Export SOC 2" FontSize="11" Click="ExportSoc2_Click" IsEnabled="{x:Bind ViewModel.IsProcessing, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}" />
+                    <Button Content="Export ISO 27001" FontSize="11" Click="ExportIso27001_Click" IsEnabled="{x:Bind ViewModel.IsProcessing, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}" />
                     <Button Content="Export HIPAA" FontSize="11" Click="ExportHipaa_Click" IsEnabled="{x:Bind ViewModel.IsProcessing, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}" />
                     <Button Content="Export CMMC 2" FontSize="11" Style="{StaticResource LuminousAccentButtonStyle}" Click="ExportCmmc_Click" IsEnabled="{x:Bind ViewModel.IsProcessing, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}" />
                 </StackPanel>

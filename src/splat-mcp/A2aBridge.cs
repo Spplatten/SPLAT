@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -10,11 +11,12 @@ using MissionController.Infrastructure.Linux;
 
 namespace SplatMcp;
 
-internal sealed class A2aBridge : IAsyncDisposable
+internal sealed partial class A2aBridge : IAsyncDisposable
 {
     private sealed class Work(A2aTaskRecord record)
     {
-        internal A2aTaskRecord Record = record;
+        internal volatile A2aTaskRecord Record = record;
+        internal readonly SemaphoreSlim Gate = new(1);
         internal readonly CancellationTokenSource Cancellation = new();
         internal Task Execution = Task.CompletedTask;
         internal bool Drained;
@@ -26,20 +28,25 @@ internal sealed class A2aBridge : IAsyncDisposable
     private readonly SqliteChainedAuditLedger _admissionLedger;
     private readonly Func<A2aCaller, McpServerHandler> _handler;
     private readonly IIncidentRevocationManager? _revocations;
-    private readonly SemaphoreSlim _gate = new(1);
-    private readonly Dictionary<string, Work> _tasks = new(StringComparer.Ordinal);
+    // Only admission and archival share a lock: quota and replay decisions must remain atomic.
+    // Execution, cancellation, delegation, polling and compilation do not hold it.
+    private readonly SemaphoreSlim _admissionGate = new(1);
+    private readonly ConcurrentDictionary<string, Work> _tasks = new(StringComparer.Ordinal);
+    private readonly ILeaseReceiptLookup? _receiptLookup;
+    private readonly SemaphoreSlim _receiptSlots = new(4);
+    private readonly SemaphoreSlim[] _receiptGates = Enumerable.Range(0, 32).Select(_ => new SemaphoreSlim(1)).ToArray();
     private readonly HashSet<string> _skills;
     private readonly AgentManifestApproval _approval;
     private readonly A2aDelegation _delegation;
     private readonly ITemplatePolicyCompiler _compiler;
-    private int _running;
+    private volatile int _running;
     private bool _stopping;
-    private bool _faulted;
+    private volatile bool _faulted;
     private int _disposed;
 
     internal A2aBridge(A2aConfiguration config, AgentManifestApproval approval, SqliteStorageContext context,
         IAuditLedger ledger, Func<A2aCaller, McpServerHandler> handler, IIncidentRevocationManager? revocations = null,
-        ITemplatePolicyCompiler? compiler = null)
+        ITemplatePolicyCompiler? compiler = null, ILeaseReceiptLookup? receiptLookup = null)
     {
         // Copy the authority snapshot: a caller holding the original arrays cannot widen this server.
         _config = JsonSerializer.Deserialize<A2aConfiguration>(JsonSerializer.Serialize(config, A2aConfiguration.Json), A2aConfiguration.Json)!;
@@ -62,7 +69,7 @@ internal sealed class A2aBridge : IAsyncDisposable
         _approval = approval;
         _delegation = new A2aDelegation(_config);
         _compiler = compiler ?? new TemplatePolicyCompiler();
-        _ledger = ledger; _handler = handler; _revocations = revocations;
+        _ledger = ledger; _handler = handler; _revocations = revocations; _receiptLookup = receiptLookup;
         foreach (var saved in _store.Load(config.MaxTasks))
         {
             var record = saved;
@@ -79,7 +86,7 @@ internal sealed class A2aBridge : IAsyncDisposable
                         : "Server restarted before dispatch; no workload was started. No automatic replay." };
                 _store.Save(record);
             }
-            _tasks.Add(record.Id, new Work(record));
+            _tasks.TryAdd(record.Id, new Work(record));
         }
     }
 
@@ -120,24 +127,20 @@ internal sealed class A2aBridge : IAsyncDisposable
             A2aJson.Fields(parameters, "id", "historyLength");
             ValidateHistory(parameters);
             var id = A2aJson.Text(parameters, "id");
-            Work work;
-            await _gate.WaitAsync(ct);
+            if (method == "GetTask") return await ReadAsync(caller, id, ct);
+            if (!_tasks.ContainsKey(id) && _store.ReadArchived(id, caller.TenantId, caller.CallerId) is { } archived
+                && Owns(caller, archived)) throw new A2aException(-32002, "Task is no longer cancelable.");
+            Work work = Owned(caller, id);
+            await work.Gate.WaitAsync(ct);
             try
             {
-                if (!_tasks.ContainsKey(id) && _store.ReadArchived(id, caller.TenantId, caller.CallerId) is { } archived)
-                {
-                    if (method == "GetTask") return Snapshot(archived);
-                    throw new A2aException(-32002, "Task is no longer cancelable.");
-                }
-                work = Owned(caller, id);
-                if (method == "GetTask") return Snapshot(work.Record);
                 if (Terminal(work.Record.State)) throw new A2aException(-32002, "Task is no longer cancelable.");
                 await Audit(caller, work.Record, "A2A_CANCEL_REQUESTED", CancellationToken.None);
                 work.Record = work.Record with { CancellationRequested = true };
                 _store.Save(work.Record);
                 work.Cancellation.Cancel();
             }
-            finally { _gate.Release(); }
+            finally { work.Gate.Release(); }
             await work.Execution.WaitAsync(ct);
             return await ReadAsync(caller, id, ct);
         }
@@ -168,19 +171,14 @@ internal sealed class A2aBridge : IAsyncDisposable
             if (parameters.TryGetProperty("statusTimestampAfter", out var timestamp)
                 && (timestamp.ValueKind != JsonValueKind.String || !timestamp.TryGetDateTimeOffset(out after)))
                 throw new A2aException(-32602, "Invalid statusTimestampAfter.");
-            await _gate.WaitAsync(ct);
-            try
-            {
-                var owned = _tasks.Values.Select(w => w.Record).Where(r => Owns(caller, r)
-                    && (context is null || r.ContextId == context) && (state is null || r.State == state)
-                    && r.UpdatedUtc >= after)
-                    .OrderByDescending(r => r.UpdatedUtc).ThenBy(r => r.Id, StringComparer.Ordinal).ToArray();
-                if (cursor.Length > 0 && !owned.Any(r => r.Id == cursor)) throw new A2aException(-32602, "Invalid pagination.");
-                var page = (cursor.Length == 0 ? owned : owned.SkipWhile(r => r.Id != cursor).Skip(1)).Take(size + 1).ToArray();
-                return new { tasks = page.Take(size).Select(r => Snapshot(r, includeArtifacts)).ToArray(), pageSize = size,
-                    nextPageToken = page.Length > size ? page[size - 1].Id : "", totalSize = owned.Length };
-            }
-            finally { _gate.Release(); }
+            var owned = _tasks.Values.Select(w => w.Record).Where(r => Owns(caller, r)
+                && (context is null || r.ContextId == context) && (state is null || r.State == state)
+                && r.UpdatedUtc >= after)
+                .OrderByDescending(r => r.UpdatedUtc).ThenBy(r => r.Id, StringComparer.Ordinal).ToArray();
+            if (cursor.Length > 0 && !owned.Any(r => r.Id == cursor)) throw new A2aException(-32602, "Invalid pagination.");
+            var page = (cursor.Length == 0 ? owned : owned.SkipWhile(r => r.Id != cursor).Skip(1)).Take(size + 1).ToArray();
+            return new { tasks = page.Take(size).Select(r => Snapshot(r, includeArtifacts)).ToArray(), pageSize = size,
+                nextPageToken = page.Length > size ? page[size - 1].Id : "", totalSize = owned.Length };
         }
         if (method is "SendStreamingMessage" or "SubscribeToTask" or "GetExtendedAgentCard")
             throw new A2aException(-32004, "This endpoint supports one-shot tasks and polling.");
@@ -241,7 +239,28 @@ internal sealed class A2aBridge : IAsyncDisposable
         }
         string fingerprint = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(message.GetRawText())));
         Work work;
-        await _gate.WaitAsync(ct);
+        // DNS resolution and signature validation may be slow. Perform them outside admission,
+        // then recheck replay/capacity/expiry while committing the one authoritative decision.
+        var existing = _tasks.Values.FirstOrDefault(w => Owns(caller, w.Record) && w.Record.MessageId == messageId);
+        var archivedMessage = _store.FindArchived(caller.TenantId, caller.CallerId, messageId);
+        if (existing is not null || archivedMessage is not null)
+        {
+            string previous = existing?.Record.RequestSha256 ?? archivedMessage!.Value.RequestSha256;
+            if (previous != fingerprint) throw new A2aException(-32602, "messageId already names a different request.");
+            if (!immediate && existing is not null) await existing.Execution.WaitAsync(ct);
+            return await ReadAsync(caller, existing?.Record.Id ?? archivedMessage!.Value.TaskId, ct);
+        }
+        var grant = token is null ? null : _delegation.Verify(token, caller, skill);
+        if (grant is not null && parent is not null && parent != grant.ParentTaskId)
+            throw new A2aException(-32000, "parentTaskId does not match the signed delegation.", 403);
+        if (grant is not null) await CheckIssuerAsync(grant.Issuer, grant.IssuerVersion, ct);
+        var stage = _approval.Manifest.Project.Stages.Single(s => s.StageId == skill);
+        var template = _approval.Manifest.Templates.Single(t => t.TemplateId == stage.TemplateId);
+        var taskId = Guid.NewGuid();
+        var lease = _compiler.CompileTemplatePolicy(template, taskId,
+            $"{LinuxLeaseSubstrate.DefaultMissionsRoot}/{taskId:N}", (uint)template.Tool.TimeoutSeconds);
+        await CheckCallerAsync(caller, ct);
+        await _admissionGate.WaitAsync(ct);
         try
         {
             work = _tasks.Values.FirstOrDefault(w => Owns(caller, w.Record) && w.Record.MessageId == messageId)!;
@@ -274,15 +293,6 @@ internal sealed class A2aBridge : IAsyncDisposable
                 var owned = _tasks.Values.Where(w => Mine(w.Record)).ToArray();
                 if (owned.Length >= retainedLimit || owned.Count(w => !Terminal(w.Record.State)) >= runningLimit)
                     throw new A2aException(-32000, "This caller's task capacity is exhausted.", 429);
-                var grant = token is null ? null : _delegation.Verify(token, caller, skill);
-                if (grant is not null && parent is not null && parent != grant.ParentTaskId)
-                    throw new A2aException(-32000, "parentTaskId does not match the signed delegation.", 403);
-                if (grant is not null) await CheckIssuerAsync(grant.Issuer, grant.IssuerVersion, ct);
-                var stage = _approval.Manifest.Project.Stages.Single(s => s.StageId == skill);
-                var template = _approval.Manifest.Templates.Single(t => t.TemplateId == stage.TemplateId);
-                var taskId = Guid.NewGuid();
-                var lease = _compiler.CompileTemplatePolicy(template, taskId,
-                    $"{LinuxLeaseSubstrate.DefaultMissionsRoot}/{taskId:N}", (uint)template.Tool.TimeoutSeconds);
                 var expires = DateTimeOffset.UtcNow.AddSeconds(lease.LeaseDurationSeconds);
                 if (expires > caller.ExpiresUtc) expires = caller.ExpiresUtc;
                 if (grant is not null && expires > grant.ExpiresUtc) expires = grant.ExpiresUtc;
@@ -305,13 +315,13 @@ internal sealed class A2aBridge : IAsyncDisposable
                         Guid.ParseExact(record.Id, "N"), "a2a:" + _config.AgentId, "A2A_TASK_AUTHORIZED",
                         AuditDetails(caller, record), caller.Identity.ToLedgerIdentity(), ct), ct);
                 work = new Work(record);
-                work.Cancellation.CancelAfter(expires - DateTimeOffset.UtcNow);
-                _tasks.Add(record.Id, work);
-                _running++;
+                work.Cancellation.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(0, (expires - DateTimeOffset.UtcNow).TotalMilliseconds)));
+                Interlocked.Increment(ref _running);
                 work.Execution = Task.Run(() => ExecuteAsync(work, caller, arguments));
+                _tasks.TryAdd(record.Id, work);
             }
         }
-        finally { _gate.Release(); }
+        finally { _admissionGate.Release(); }
         // HTTP disconnect does not cancel an accepted asynchronous task. Its owner uses CancelTask;
         // retrying the same messageId returns this task rather than executing the effect twice.
         if (!immediate) await work.Execution.WaitAsync(ct);
@@ -331,14 +341,14 @@ internal sealed class A2aBridge : IAsyncDisposable
             await CheckCallerAsync(caller, work.Cancellation.Token);
             // Dispatch is recorded durably, under the lock CancelTask takes, before anything reaches the
             // executor: a cancellation that wins this race provably started nothing.
-            await _gate.WaitAsync(work.Cancellation.Token);
+            await work.Gate.WaitAsync(work.Cancellation.Token);
             try
             {
                 work.Cancellation.Token.ThrowIfCancellationRequested();
                 work.Record = work.Record with { Dispatched = true };
                 _store.Save(work.Record);
             }
-            finally { _gate.Release(); }
+            finally { work.Gate.Release(); }
             var handler = _handler(caller);
             handler.BindAgentInvocation(work.Record.AdmittedLease!, result =>
                 work.Drained = result.Lease?.WorkloadDrained == true);
@@ -364,7 +374,7 @@ internal sealed class A2aBridge : IAsyncDisposable
         catch (Exception) { failure = "Execution failed; consult the operator's audit ledger."; }
         await monitoring.CancelAsync();
         await monitor;
-        await _gate.WaitAsync();
+        await work.Gate.WaitAsync();
         try
         {
             work.Record = work.Record with { WorkloadTerminationConfirmed = work.Drained };
@@ -396,7 +406,7 @@ internal sealed class A2aBridge : IAsyncDisposable
                     Failure = "Task evidence could not be persisted; execution outcome is unconfirmed." };
             }
         }
-        finally { _running--; _gate.Release(); }
+        finally { Interlocked.Decrement(ref _running); work.Gate.Release(); }
     }
 
     private Task Audit(A2aCaller caller, A2aTaskRecord record, string action, CancellationToken ct) =>
@@ -416,33 +426,34 @@ internal sealed class A2aBridge : IAsyncDisposable
     private async Task<object> ReadAsync(A2aCaller caller, string id, CancellationToken ct)
     {
         await CheckCallerAsync(caller, ct);
-        await _gate.WaitAsync(ct);
-        try
-        {
-            // Another caller's admission may have archived this task since it finished.
-            return Snapshot(_tasks.ContainsKey(id) ? Owned(caller, id).Record
-                : _store.ReadArchived(id, caller.TenantId, caller.CallerId) ?? throw new A2aException(-32001, "Task not found."));
-        }
-        finally { _gate.Release(); }
+        var record = ReadOwned(caller, id);
+        record = await RecoverAsync(caller, record, ct);
+        await CheckCallerAsync(caller, ct);
+        return Snapshot(record);
     }
 
     /// <summary>
     /// Archives the oldest finished task matching <paramref name="belongs"/>, with its archival entry, in
-    /// one transaction. Only a terminal task whose execution has returned is eligible. Runs under _gate.
+    /// one transaction. Only a terminal task whose execution has returned is eligible. Runs under admission.
     /// </summary>
     private async Task ArchiveOldestAsync(Func<A2aTaskRecord, bool> belongs, CancellationToken ct)
     {
         var oldest = _tasks.Values.Where(w => belongs(w.Record) && Terminal(w.Record.State) && w.Execution.IsCompleted)
             .OrderBy(w => w.Record.UpdatedUtc).ThenBy(w => w.Record.Id, StringComparer.Ordinal).FirstOrDefault();
         if (oldest is null) return;
-        var record = oldest.Record;
-        await _store.ArchiveAsync(record, (connection, transaction) => _admissionLedger.AppendWithinAsync(
-            connection, transaction, Guid.ParseExact(record.Id, "N"), "a2a:" + _config.AgentId, "A2A_TASK_ARCHIVED",
-            JsonSerializer.Serialize(new { taskId = record.Id, record.TenantId, record.CallerId, record.MessageId,
-                record.State, receiverAgentId = _config.AgentId, contractSha256 = _config.AgentVersion }),
-            $"a2a-host:{_config.AgentId}", ct), ct);
-        _tasks.Remove(record.Id);
-        oldest.Cancellation.Dispose();
+        await oldest.Gate.WaitAsync(ct);
+        try
+        {
+            var record = oldest.Record;
+            await _store.ArchiveAsync(record, (connection, transaction) => _admissionLedger.AppendWithinAsync(
+                connection, transaction, Guid.ParseExact(record.Id, "N"), "a2a:" + _config.AgentId, "A2A_TASK_ARCHIVED",
+                JsonSerializer.Serialize(new { taskId = record.Id, record.TenantId, record.CallerId, record.MessageId,
+                    record.State, receiverAgentId = _config.AgentId, contractSha256 = _config.AgentVersion }),
+                $"a2a-host:{_config.AgentId}", ct), ct);
+            _tasks.TryRemove(record.Id, out _);
+            oldest.Cancellation.Dispose();
+        }
+        finally { oldest.Gate.Release(); }
     }
     private object Snapshot(A2aTaskRecord record, bool includeArtifacts = true) => new
     {
@@ -454,8 +465,9 @@ internal sealed class A2aBridge : IAsyncDisposable
         {
             receiverAgentId = _config.AgentId, contractSha256 = _config.AgentVersion, record.TenantId,
             record.CallerId, record.Skill, record.CallerSuppliedParentTaskId, record.CancellationRequested,
-            workloadTerminationConfirmed = record.CancellationRequested ? (bool?)record.WorkloadTerminationConfirmed : null,
-            record.Dispatched, record.CancellationEvidence,
+            workloadTerminationConfirmed = record.CancellationRequested || record.ReceiptRecovered
+                ? (bool?)record.WorkloadTerminationConfirmed : null,
+            record.Dispatched, record.CancellationEvidence, record.ReceiptRecovered,
             executionContext = record.AdmittedLease?.ExecutionContext, failure = record.Failure
         } }
     };
@@ -469,23 +481,29 @@ internal sealed class A2aBridge : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        Task[] executions;
-        await _gate.WaitAsync();
+        Work[] active;
+        await _admissionGate.WaitAsync();
         try
         {
             _stopping = true;
-            executions = _tasks.Values.Select(w => w.Execution).ToArray();
-            foreach (var work in _tasks.Values.Where(w => !Terminal(w.Record.State)))
+            active = _tasks.Values.ToArray();
+        }
+        finally { _admissionGate.Release(); }
+        foreach (var work in active)
+        {
+            await work.Gate.WaitAsync();
+            try
             {
+                if (Terminal(work.Record.State)) continue;
                 work.Record = work.Record with { CancellationRequested = true };
                 work.Cancellation.Cancel();
             }
+            finally { work.Gate.Release(); }
         }
-        finally { _gate.Release(); }
-        await Task.WhenAll(executions);
+        await Task.WhenAll(active.Select(w => w.Execution));
         foreach (var work in _tasks.Values) work.Cancellation.Dispose();
         _delegation.Dispose();
-        _gate.Dispose();
+        _admissionGate.Dispose();
     }
 
     private async Task CheckIssuerAsync(string agent, string version, CancellationToken ct)
@@ -512,7 +530,7 @@ internal sealed class A2aBridge : IAsyncDisposable
                 catch (OperationCanceledException) when (stop.IsCancellationRequested) { return; }
                 catch (Exception)
                 {
-                    await _gate.WaitAsync(stop);
+                    await work.Gate.WaitAsync(stop);
                     try
                     {
                         work.Record = work.Record with { CancellationRequested = true };
@@ -520,7 +538,7 @@ internal sealed class A2aBridge : IAsyncDisposable
                         try { _store.Save(work.Record); }
                         catch { _faulted = true; }
                     }
-                    finally { _gate.Release(); }
+                    finally { work.Gate.Release(); }
                     return;
                 }
             }
@@ -536,10 +554,11 @@ internal sealed class A2aBridge : IAsyncDisposable
             skill = A2aJson.Text(parameters, "skill");
         if (!A2aJson.Identifier(audience) || !A2aDelegation.Hash(version) || !A2aJson.Identifier(recipient) || !A2aJson.Identifier(skill))
             throw new A2aException(-32602, "Invalid delegation audience or skill.");
-        await _gate.WaitAsync(ct);
+        var work = Owned(caller, parent);
+        await work.Gate.WaitAsync(ct);
         try
         {
-            var record = Owned(caller, parent).Record;
+            var record = work.Record;
             if (record.AdmittedLease is not { } lease || record.AuthorityExpiresUtc is not { } expiry
                 || expiry <= DateTimeOffset.UtcNow.AddSeconds(5) || record.DelegationDepth >= 4 || record.CancellationRequested
                 || record.State is "TASK_STATE_FAILED" or "TASK_STATE_CANCELED")
@@ -555,6 +574,6 @@ internal sealed class A2aBridge : IAsyncDisposable
                 caller.Identity.ToLedgerIdentity(), ct);
             return new { delegationToken = token, expiresUtc = expiry };
         }
-        finally { _gate.Release(); }
+        finally { work.Gate.Release(); }
     }
 }

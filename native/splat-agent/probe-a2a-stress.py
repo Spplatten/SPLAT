@@ -13,6 +13,9 @@ import uuid
 spec = importlib.util.spec_from_file_location("a2a_stress_runner", Path(__file__).with_name("probe-secrets.py"))
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+proxy_spec = importlib.util.spec_from_file_location("a2a_fault_proxy", Path(__file__).with_name("a2a-fault-proxy.py"))
+proxy_module = importlib.util.module_from_spec(proxy_spec)
+proxy_spec.loader.exec_module(proxy_module)
 
 
 def windows_path(path):
@@ -32,11 +35,11 @@ class A2aStressProof(runner.Proof):
         assert runner.digest(args.mcp_exe.read_bytes()) == self.build["sha256"], "MCP artifact mismatch"
         assert runner.digest(args.daemon.read_bytes()) == self.build["daemonSha256"], "daemon artifact mismatch"
         assert args.windows_python.is_file() and args.contract.is_file()
-        self.port = 50051
-        self.command[self.command.index("--listen") + 1] = "127.0.0.1:50051"
+        self.command.extend(["--receipt-root", str(root / "receipts")])
         self.command[self.command.index("--missions-root") + 1] = "/var/lib/splat/missions"
         self.artifacts = args.client_root.resolve() / ("a2a-stress-" + uuid.uuid4().hex)
         self.artifacts.mkdir(parents=True)
+        self.proxy = proxy_module.FaultProxy(self.port, self.artifacts / "drop-connection.once")
         self.observations = {"scope": "Packaged local Windows HTTPS A2A hosts and real Linux template leases; synthetic callers, read-only guest metadata, no model API or external HTTP.",
             "mcpExecutableSha256": self.build["sha256"], "artifactLicenseLabel": self.build["license"],
             "buildManifestSha256": runner.digest(args.build_manifest.read_bytes()),
@@ -44,6 +47,16 @@ class A2aStressProof(runner.Proof):
             "requestedSustainedSeconds": args.seconds, "modelApiRequests": 0, "clientArtifacts": str(self.artifacts)}
         self.stop_monitor = threading.Event()
         self.health_samples, self.health_errors = [], []
+
+    def start(self):
+        super().start()
+        self.proxy.start()
+
+    def stop(self, crash=False):
+        try:
+            self.proxy.stop()
+        finally:
+            super().stop(crash)
 
     def sources_match(self):
         return bool(self.inputs) and all(self.repo in (self.repo / item["path"]).resolve().parents
@@ -89,6 +102,9 @@ class A2aStressProof(runner.Proof):
                     env=environment, stdout=stdout, stderr=stderr, text=True, timeout=270)
             client = json.loads((self.artifacts / "a2a-stress.json").read_text())
             self.observations["client"] = client["observations"]
+            self.observations["transportFaults"] = self.proxy.drops
+            self.check("two_authenticated_connections_dropped", len(self.proxy.drops) == 2
+                and {drop["boundary"] for drop in self.proxy.drops} == {"POLICY_APPLIED", "EXIT"})
             self.checks.update({"client_" + name: value for name, value in client["checks"].items()})
             # Verify evidence even when an independent load category failed; retain the actual failure.
             receipts_path = self.artifacts / "receipts.json"
@@ -129,6 +145,29 @@ class A2aStressProof(runner.Proof):
         self.check("health_remained_enforcing", len(self.health_samples) > 10 and not self.health_errors
             and all(s["enforcing"] for s in self.health_samples))
         runner.assert_idle()
+        # Restart only the temporary proof daemon after load has ended. The original installed
+        # service is still restored by the outer runner, including if cache recovery fails here.
+        runner.Proof.stop(self)
+        runner.Proof.start(self)
+        session = self.session()
+        self.check("receipt_lookup_advertised_after_daemon_restart", session.health.get("boundReceiptLookup") is True)
+        recovered = 0
+        for drop in self.proxy.drops:
+            receipt = receipts[drop["mission"].replace("-", "")]
+            fields = dict(part.split("=", 1) for part in receipt["SignedOutcome"].split("|")[1:])
+            request = {"type": "RECEIPT_LOOKUP", "missionId": drop["mission"],
+                "executionContext": fields["executionContext"], "executionPolicySha256": fields["executionPolicySha256"]}
+            session.send(request)
+            response = session.receive()
+            self.check("signed_receipt_survives_daemon_restart", response.get("status") == "complete"
+                and response["outcome"]["outcomeCanonical"] == receipt["SignedOutcome"]
+                and response["outcome"]["outcomeSignature"] == receipt["OutcomeSignature"])
+            for changed in (dict(request, executionContext=fields["executionContext"] + " "),
+                            dict(request, executionPolicySha256="0" * 64)):
+                session.send(changed)
+                self.check("receipt_lookup_cannot_cross_binding", session.receive().get("status") == "unavailable")
+            recovered += 1
+        self.check("both_dropped_receipts_recovered_after_daemon_restart", recovered == 2)
         self.check("no_populated_leases_remain", self.session().health["activeLeaseCount"] == 0)
         self.check("windows_client_passed", result.returncode == 0 and client["verdict"] == "PASS")
 

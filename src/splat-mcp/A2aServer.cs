@@ -59,7 +59,8 @@ internal static class A2aServer
             var compiler = new TemplatePolicyCompiler();
             await using var bridge = new A2aBridge(config, approval, context, ledger, caller =>
                 new McpServerHandler(executor, compiler, ledger, agent: approval, runRecords: records,
-                    revocationManager: revocations, identityProvider: new StaticOperatorIdentityProvider(caller.Identity)), revocations);
+                    revocationManager: revocations, identityProvider: new StaticOperatorIdentityProvider(caller.Identity)), revocations,
+                receiptLookup: executor);
             await using var app = CreateApplication(config, bridge, certificate);
             Console.Error.WriteLine($"splat-mcp: A2A 1.0 on https://127.0.0.1:{config.Port}/a2a; approved agent {config.AgentId}@{config.AgentVersion}");
             await app.RunAsync();

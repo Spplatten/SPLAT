@@ -19,7 +19,7 @@ namespace MissionController.Infrastructure.Linux;
 /// Executes a sandboxed command inside the WSL2 / eBPF guest daemon over Hyper-V VSOCK / TCP transport.
 /// Handles structured tool output streaming and surfaces in-kernel BPF-LSM violation events.
 /// </summary>
-public class WslLeasedExecutor : ILeasedExecutor
+public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
 {
     private readonly string _host;
     private readonly int _port;
@@ -40,6 +40,10 @@ public class WslLeasedExecutor : ILeasedExecutor
     /// exit -1). Neither the daemon nor the lease's own connection counts as a session; a wsl.exe does.
     /// </summary>
     private readonly Func<IDisposable> _holdGuestAwake;
+    private static readonly SharedGuestHold GuestHold = new(IdleGuestSession.Open,
+        session => ((IdleGuestSession)session).IsAlive);
+
+    static WslLeasedExecutor() => AppDomain.CurrentDomain.ProcessExit += (_, _) => GuestHold.Dispose();
 
     /// <summary>
     /// For reaching a daemon whose port refused the first connection: long enough to boot a stopped
@@ -95,7 +99,7 @@ public class WslLeasedExecutor : ILeasedExecutor
         _port = port;
         _token = token;
         _startDaemon = startDaemon ?? StartInstalledServiceAsync;
-        _holdGuestAwake = holdGuestAwake ?? IdleGuestSession.Open;
+        _holdGuestAwake = holdGuestAwake ?? GuestHold.Acquire;
     }
 
     public async Task<ProcessExecutionResult> ExecuteLeasedAsync(
@@ -676,6 +680,8 @@ public class WslLeasedExecutor : ILeasedExecutor
         private readonly Process? _process;
 
         private IdleGuestSession(Process? process) => _process = process;
+
+        internal bool IsAlive => _process is not null && !_process.HasExited;
 
         public static IDisposable Open()
         {

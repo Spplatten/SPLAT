@@ -42,6 +42,11 @@ public sealed partial class SecurityAuditView : Page
         await ViewModel.ExportSoc2CompliancePackageAsync();
     }
 
+    private async void ExportIso27001_Click(object sender, RoutedEventArgs e)
+    {
+        await ViewModel.ExportIso27001CompliancePackageAsync();
+    }
+
     private async void ExportHipaa_Click(object sender, RoutedEventArgs e)
     {
         await ViewModel.ExportHipaaCompliancePackageAsync();

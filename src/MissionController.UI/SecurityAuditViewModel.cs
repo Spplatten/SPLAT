@@ -29,7 +29,7 @@ public partial class SecurityAuditViewModel : ObservableObject
     /// <summary>
     /// The actor recorded against a compliance export or an emergency revocation. These used to pass
     /// Environment.UserName, which is a display string with no provenance behind it - and the
-    /// compliance package SIGNS over this value, so it is the one place attribution matters most.
+    /// compliance package records this value, so its provenance must not be caller-controlled.
     /// </summary>
     private async Task<string> ResolveActorAsync() =>
         (await _identityProvider.ResolveAsync()).ToLedgerIdentity();
@@ -62,7 +62,7 @@ public partial class SecurityAuditViewModel : ObservableObject
     private string _merkleVerificationStatus = "Merkle Tree Unverified";
 
     [ObservableProperty]
-    private string _complianceExportStatus = "Ready for Compliance Export";
+    private string _complianceExportStatus = "Export selected rows as unsigned evidence; this is not an assessment or continuous coverage report.";
 
     [ObservableProperty]
     private string _lastExportedPackagePath = string.Empty;
@@ -227,6 +227,12 @@ public partial class SecurityAuditViewModel : ObservableObject
     }
 
     [RelayCommand]
+    public async Task ExportIso27001CompliancePackageAsync()
+    {
+        await ExportPackageInternalAsync(ComplianceFramework.Iso27001);
+    }
+
+    [RelayCommand]
     public async Task ExportHipaaCompliancePackageAsync()
     {
         await ExportPackageInternalAsync(ComplianceFramework.Hipaa);
@@ -285,7 +291,7 @@ public partial class SecurityAuditViewModel : ObservableObject
             var entries = AuditLogs.Count > 0 ? AuditLogs.ToList() : (await _auditLedger.GetAuditLogsAsync(null, 500)).ToList();
             string zipPath = await _archiveExporter.ExportCompliancePackageAsync(framework, "", entries, await ResolveActorAsync());
             LastExportedPackagePath = zipPath;
-            ComplianceExportStatus = $"SUCCESS: Exported {framework} bundle to {System.IO.Path.GetFileName(zipPath)}";
+            ComplianceExportStatus = $"Exported {entries.Count} selected rows for {framework} (unsigned): {System.IO.Path.GetFileName(zipPath)}";
         }
         catch (Exception ex)
         {

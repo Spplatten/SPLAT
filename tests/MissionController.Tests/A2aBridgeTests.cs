@@ -19,7 +19,7 @@ using SplatMcp;
 
 namespace MissionController.Tests;
 
-public sealed class A2aBridgeTests : IAsyncLifetime
+public sealed partial class A2aBridgeTests : IAsyncLifetime
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "splat-a2a-test-" + Guid.NewGuid().ToString("N"));
     private readonly Capture _executor = new();
@@ -55,10 +55,10 @@ public sealed class A2aBridgeTests : IAsyncLifetime
         _bridge = CreateBridge();
     }
 
-    private A2aBridge CreateBridge() => new(_config, _approval, _context, _ledger, caller =>
+    private A2aBridge CreateBridge(ILeaseReceiptLookup? lookup = null, ITemplatePolicyCompiler? compiler = null) => new(_config, _approval, _context, _ledger, caller =>
         new McpServerHandler(_executor, new TemplatePolicyCompiler(), _ledger, workspaceRoot: _root,
             agent: _approval, identityProvider: new StaticOperatorIdentityProvider(caller.Identity),
-            revocationManager: _revocations), _revocations);
+            revocationManager: _revocations), _revocations, compiler, lookup);
     private A2aCaller Caller(string? token = null) => _bridge.Authenticate("Bearer " + (token ?? AliceToken))!;
     private static string Hash(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     private static JsonElement Json(object value) => JsonSerializer.SerializeToElement(value, A2aConfiguration.Json);
@@ -390,12 +390,14 @@ public sealed class A2aBridgeTests : IAsyncLifetime
         internal readonly ConcurrentQueue<LeaseSpec> Leases = new();
         internal readonly TaskCompletionSource Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal bool Block;
+        internal bool Disconnect;
         public async Task<ProcessExecutionResult> ExecuteLeasedAsync(LeaseSpec lease, string command, IReadOnlyList<string> argv,
             IProgress<string>? stdout = null, IProgress<string>? stderr = null, IProgress<LeaseViolationEvent>? violations = null,
             CancellationToken ct = default)
         {
             Leases.Enqueue(lease);
             Started.TrySetResult();
+            if (Disconnect) throw new IOException("Synthetic lost daemon connection");
             if (Block) await Task.Delay(Timeout.InfiniteTimeSpan, ct);
             return new ProcessExecutionResult(0, "synthetic local reading", "", false, JobResourceMetrics.Unavailable);
         }

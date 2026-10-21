@@ -702,6 +702,12 @@ public static class LeaseControls
 /// Executes a tool command inside a hardware-isolated WSL2 guest VM under an in-kernel BPF-LSM capability lease.
 /// Do NOT overload IProcessLauncher (which is intrinsically Win32 job-object shaped).
 /// </summary>
+/// <summary>Retrieves terminal evidence only; a missing receipt never permits replaying a workload.</summary>
+public interface ILeaseReceiptLookup
+{
+    Task<LeaseOutcome?> RecoverReceiptAsync(LeaseSpec lease, CancellationToken ct = default);
+}
+
 public interface ILeasedExecutor
 {
     /// <param name="argv">
