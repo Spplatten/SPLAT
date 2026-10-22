@@ -560,7 +560,7 @@ public class DocumentationDriftTests
                 // the first recorded attempt scored every refusal against a stale binary.
                 foreach (var required in new[]
                          {
-                             "permitted_command_ran_as_nobody",
+                             "permitted_command_ran_unprivileged",
                              "permitted_endpoint_reached_the_syscall",
                              "unleased_second_exec_blocked_by_kernel",
                              "egress_outside_the_lease_blocked_by_kernel",
