@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Catalog\LeasedWebProbe.py" LogicalName="LeasedWebProbe.py" />
+    <EmbeddedResource Include="Catalog\LeasedConsumerProbe.py" LogicalName="LeasedConsumerProbe.py" />
   </ItemGroup>
 
 </Project>

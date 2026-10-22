@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MissionController.Core\MissionController.Core.csproj" />
+    <InternalsVisibleTo Include="MissionController.Tests" />
   </ItemGroup>
 
 </Project>

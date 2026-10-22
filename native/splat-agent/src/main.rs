@@ -23,15 +23,18 @@ mod ceiling;
 mod cgroup;
 mod cow;
 mod execution;
+mod execution_policy;
 mod identities;
 mod jail;
 mod lease;
 mod outcome;
+mod receipts;
 mod pinning;
 mod secret_memory;
 mod secret_recovery;
 mod secrets;
 mod violation;
+mod workload;
 mod workspace;
 
 /// The protocol this daemon speaks: its handshake, and the EXECUTE_TOOL envelope inside it.
@@ -162,7 +165,11 @@ struct Args {
     #[arg(long, default_value = outcome::DEFAULT_KEY_PATH)]
     outcome_key_file: String,
 
-    /// The uid a leased tool runs as. Defaults to nobody.
+    /// Private durable cache for recovering signed bound outcomes after transport loss.
+    #[arg(long, default_value = "/var/lib/splat/receipts")]
+    receipt_root: String,
+
+    /// Legacy identity for mock execution; enforcing leases use the reserved per-lease pool.
     ///
     /// The daemon needs root to load BPF programs and write the cgroup tree; the WORKLOAD needs
     /// none of that. It used to inherit the daemon's uid 0, so every containment claim rested on
@@ -171,7 +178,7 @@ struct Args {
     #[arg(long, default_value_t = 65534)]
     workload_uid: u32,
 
-    /// The gid a leased tool runs as. Defaults to nogroup.
+    /// Legacy mock-execution gid, excluded from the private lease identity pool.
     #[arg(long, default_value_t = 65534)]
     workload_gid: u32,
 
@@ -191,10 +198,10 @@ struct Args {
     #[arg(long)]
     secret_socket: Option<std::path::PathBuf>,
 
-    /// Operator-reserved UID/GID range, distinct from accounts and ordinary workloads.
-    #[arg(long, default_value_t = 200000)]
+    /// Operator-reserved UID/GID range shared by ordinary leases and pending secret grants.
+    #[arg(long = "lease-uid-start", visible_alias = "secret-uid-start", default_value_t = 200000)]
     secret_uid_start: u32,
-    #[arg(long, default_value_t = 64)]
+    #[arg(long = "lease-uid-count", visible_alias = "secret-uid-count", default_value_t = 256)]
     secret_uid_count: u32,
 
     /// Issue a grant using public binding metadata from this file and secret bytes from stdin.
@@ -487,6 +494,10 @@ async fn main() -> Result<()> {
     // refusing to run them.
     let outcome_signer: Option<Arc<outcome::OutcomeSigner>> =
         outcome::OutcomeSigner::load_or_create(Path::new(&args.outcome_key_file)).map(Arc::new);
+    let receipt_store = match receipts::Store::open(Path::new(&args.receipt_root)) {
+        Ok(store) => Some(store),
+        Err(error) => { error!("Bound execution unavailable: receipt cache: {error:#}"); None }
+    };
 
     // The ceiling, before anything is served. Its absence is loud because it is the one thing
     // that makes a stolen token worth less than the daemon's whole authority.
@@ -554,14 +565,21 @@ async fn main() -> Result<()> {
 
     let lease_manager = LeaseManager::new(bpf_sync);
 
+    // Recovery precedes reuse: a dead daemon may have left private workspaces owned by this range.
+    // Mock mode never claims this boundary, and a full pool never falls back to the legacy UID.
+    let identities = if is_root && lease_manager.is_enforcing() {
+        Some(identities::IdentityPool::reserved(
+            args.secret_uid_start, args.secret_uid_count, args.workload_uid, args.workload_gid)?)
+    } else { None };
+    let workspace_recovery = identities.as_ref().map(|_|
+        secret_recovery::Registry::recover(Path::new(missions_root.as_ref()))).transpose()?;
+
     let secret_broker = if let Some(path) = &args.secret_socket {
         if !is_root || !lease_manager.is_enforcing() {
             bail!("secret delivery requires a root daemon with enforcing BPF");
         }
-        let identities = identities::IdentityPool::reserved(
-            args.secret_uid_start, args.secret_uid_count, args.workload_uid, args.workload_gid)?;
-        let recovery = secret_recovery::Registry::recover(Path::new(missions_root.as_ref()))?;
-        let broker = secrets::Broker::new(identities).with_recovery(recovery);
+        let broker = secrets::Broker::new(identities.as_ref().expect("enforcing identity pool").clone())
+            .with_recovery(workspace_recovery.as_ref().expect("enforcing workspace recovery").clone());
         let listener = secrets::bind(path)?;
         tokio::spawn(secrets::serve(listener, broker.clone()));
         Some(broker)
@@ -640,10 +658,13 @@ async fn main() -> Result<()> {
                 let ceiling_for_client = lease_ceiling.clone();
                 let missions_root_for_client = missions_root.clone();
                 let signer_for_client = outcome_signer.clone();
+                let receipts_for_client = receipt_store.clone();
                 let broker_for_client = secret_broker.clone();
+                let identities_for_client = identities.clone();
+                let recovery_for_client = workspace_recovery.clone();
                 tokio::spawn(async move {
                     let _client_slot = client_slot;
-                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids, ceiling_for_client, missions_root_for_client, signer_for_client, broker_for_client).await {
+                    if let Err(e) = handle_client(socket, mgr, viol_tx_clone, auth, workload_ids, ceiling_for_client, missions_root_for_client, signer_for_client, receipts_for_client, broker_for_client, identities_for_client, recovery_for_client).await {
                         error!("Client session error: {e:#}");
                     }
                 });
@@ -919,7 +940,10 @@ async fn handle_client(
     lease_ceiling: Option<Arc<Ceiling>>,
     missions_root: Arc<str>,
     outcome_signer: Option<Arc<outcome::OutcomeSigner>>,
+    receipt_store: Option<receipts::Store>,
     secret_broker: Option<secrets::Broker>,
+    identities: Option<identities::IdentityPool>,
+    workspace_recovery: Option<secret_recovery::Registry>,
 ) -> Result<()> {
     let (reader, mut writer) = socket.into_split();
     let mut buf_reader = BufReader::new(reader);
@@ -1005,12 +1029,25 @@ async fn handle_client(
                     // authorizes whatever a request names.
                     "ceiling": lease_ceiling.is_some(),
                     "explicitEnvironment": true,
-                    "secretStdinSupported": secret_broker.is_some() && lease_mgr.is_enforcing()
+                    "secretStdinSupported": secret_broker.is_some() && lease_mgr.is_enforcing(),
+                    "boundReceiptLookup": receipt_store.is_some() && outcome_signer.is_some() && lease_mgr.is_enforcing()
                 });
                 out.send(&resp).await?;
             }
 
-            "EXECUTE_TOOL" => {
+            "RECEIPT_LOOKUP" => {
+                // Lookup authenticates a fresh session and requires the original exact binding.
+                // Missing/expired evidence never authorizes executing the mission again.
+                let response = match (&receipt_store, parsed["missionId"].as_str(),
+                    parsed["executionContext"].as_str(), parsed["executionPolicySha256"].as_str()) {
+                    (Some(store), Some(mission), Some(context), Some(policy)) if session.prove_frames =>
+                        store.lookup(mission, context, policy)?,
+                    _ => serde_json::json!({"type":"RECEIPT_RESPONSE", "status":"unavailable"}),
+                };
+                out.send(&response).await?;
+            }
+
+            "EXECUTE_TOOL" | "EXECUTE_POLICY" | "EXECUTE_AGENT" | "EXECUTE_BOUND" => {
                 // The session proved the caller before a single field of this was read. It names a
                 // command for a root daemon to run, and until the caller is known none of it is a
                 // request, only an offer.
@@ -1056,6 +1093,25 @@ async fn handle_client(
                 let work_dir = parsed.get("workingDirectory").and_then(|v| v.as_str()).unwrap_or("/tmp");
                 let duration_sec = parsed.get("leaseDurationSeconds").and_then(|v| v.as_u64()).unwrap_or(30) as u32;
                 let ephemeral_workspace = parsed.get("ephemeralWorkspace").and_then(|v| v.as_bool()).unwrap_or(false);
+                let execution_context = match outcome::validate_context(&parsed, lease_mgr.is_enforcing(), outcome_signer.is_some()) {
+                    Ok(context) => context,
+                    Err(error) => {
+                        out.send(&serde_json::json!({"type":"STDERR", "data":format!("SPLAT refused execution context: {error}.\n")})).await?;
+                        out.send(&serde_json::json!({"type":"EXIT", "exitCode":-1})).await?;
+                        continue;
+                    }
+                };
+
+                // Parse and compile before provisioning anything; legacy requests cannot silently
+                // discard a policy, and a development daemon cannot claim this additional boundary.
+                let execution_policy = match execution_policy::from_request(&parsed, lease_mgr.is_enforcing()) {
+                    Ok(policy) => policy.map(Arc::new),
+                    Err(error) => {
+                        out.send(&serde_json::json!({"type":"STDERR", "data":format!("SPLAT refused executionPolicy: {error}.\n")})).await?;
+                        out.send(&serde_json::json!({"type":"EXIT", "exitCode":-1})).await?;
+                        continue;
+                    }
+                };
 
                 let environment = match execution::environment(&parsed) {
                     Ok(environment) => environment,
@@ -1065,6 +1121,16 @@ async fn handle_client(
                         continue;
                     }
                 };
+                if let Some(context) = execution_context {
+                    let reserved = receipt_store.as_ref().context("receipt cache unavailable")
+                        .and_then(|store| store.reserve(mission_id, context,
+                            execution_policy.as_ref().map_or("none", |p| p.sha256.as_str())));
+                    if let Err(error) = reserved {
+                        out.send(&serde_json::json!({"type":"STDERR", "data":format!("SPLAT refused bound admission: {error}.\n")})).await?;
+                        out.send(&serde_json::json!({"type":"EXIT", "exitCode":-1})).await?;
+                        continue;
+                    }
+                }
                 // Arguments may contain caller data; the service journal is not a transcript.
                 info!("Executing tool for mission {mission_id}");
 
@@ -1234,9 +1300,22 @@ async fn handle_client(
                     }
                 } else { None };
                 let secret_step = step_secret.is_some();
-                let workload = step_secret.as_ref().map_or(workload, |secret| WorkloadIdentity {
-                    uid: secret.identity.id(), gid: secret.identity.id(),
-                });
+                let mut ordinary_workload = if !secret_step {
+                    if let Some(pool) = &identities {
+                        match pool.acquire() {
+                            Ok(identity) => Some(workload::Workload::new(identity,
+                                workspace_recovery.as_ref().expect("enforcing workspace recovery").clone())),
+                            Err(_) => {
+                                out.send(&serde_json::json!({"type":"STDERR", "data":"SPLAT refused execution: private lease identity capacity is unavailable.\n"})).await?;
+                                out.send(&serde_json::json!({"type":"EXIT", "exitCode":-1})).await?;
+                                continue;
+                            }
+                        }
+                    } else { None }
+                } else { None };
+                let private_uid = step_secret.as_ref().map(|secret| secret.identity.id())
+                    .or_else(|| ordinary_workload.as_ref().map(|ordinary| ordinary.identity.id()));
+                let workload = private_uid.map_or(workload, |uid| WorkloadIdentity { uid, gid: uid });
 
                 // 0.47 The mission's workspace, made here where root can make one and the workload
                 // cannot: owned by the workload, mode 0700, removed when the lease ends. Made after the
@@ -1264,6 +1343,9 @@ async fn handle_client(
 
                 if let Some(secret) = &mut step_secret {
                     if workspace_created { secret.register_workspace(Path::new(work_dir))?; }
+                }
+                if let Some(ordinary) = &mut ordinary_workload {
+                    if workspace_created { ordinary.register_workspace(Path::new(work_dir))?; }
                 }
 
                 // 0.5 Resolve the clamps.
@@ -1313,7 +1395,7 @@ async fn handle_client(
                         // A workspace made for a mission that never ran is removed with the refusal,
                         // and the EXIT frame says so: the caller's teardown reads it, not the daemon's
                         // log. Three refused missions left theirs behind on 2026-09-24.
-                        let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
+                        let workspace_removed = workspace_created && workload::remove_workspace(ordinary_workload.as_mut(), Path::new(work_dir));
                         let err_chunk = serde_json::json!({
                             "type": "STDERR",
                             "data": format!("SPLAT refused to execute: no lease could be provisioned ({e}).\n")
@@ -1398,7 +1480,7 @@ async fn handle_client(
                 // "Operation not permitted" as a daemon fault. Say so here instead.
                 if !lease_cfg.allowed_exec_paths.iter().any(|p| p == command) {
                     error!("Refusing to execute for mission {mission_id}: '{command}' is not in this lease's allowedExecPaths");
-                    let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
+                    let workspace_removed = workspace_created && workload::remove_workspace(ordinary_workload.as_mut(), Path::new(work_dir));
                     let err_chunk = serde_json::json!({
                         "type": "STDERR",
                         "data": format!(
@@ -1424,7 +1506,7 @@ async fn handle_client(
                 }.and_then(|()| lease_mgr.register_lease(cg.cgroup_id, cg.path.clone(), &lease_cfg));
                 if let Err(e) = installed {
                     error!("Refusing to execute for mission {mission_id}: {e:#}");
-                    let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
+                    let workspace_removed = workspace_created && workload::remove_workspace(ordinary_workload.as_mut(), Path::new(work_dir));
                     let err_chunk = serde_json::json!({
                         "type": "STDERR",
                         "data": format!("SPLAT refused to execute: the capability lease could not be installed ({e}).\n")
@@ -1438,6 +1520,20 @@ async fn handle_client(
                     line.clear();
                     continue;
                 }
+
+                // Bind the installed policy and read-back clamps, including the execution filter,
+                // into the signed receipt. This is not a signature over an uninstalled request.
+                let effective_policy_sha256 = {
+                    use sha2::{Digest, Sha256};
+                    let installed = installed.as_ref().expect("successful installation checked above");
+                    format!("{:x}", Sha256::digest(serde_json::to_vec(&serde_json::json!({
+                        "lease": lease_cfg, "executionPolicySha256": execution_policy.as_ref().map(|p| &p.sha256),
+                        "overlay": enable_cow, "scratchExec": allow_scratch_exec,
+                        "execInodes": installed.allowed_exec_inodes.iter().map(|i| (i.dev, i.ino)).collect::<Vec<_>>(),
+                        "protectedInodes": installed.protected_inodes.iter().map(|i| (i.dev, i.ino)).collect::<Vec<_>>(),
+                        "endpoints": installed.allowed_endpoints.iter().map(|e| (e.addr, e.port)).collect::<Vec<_>>()
+                    }))?))
+                };
 
                 // 2. Spawn Subprocess
                 let effective_work_dir = if Path::new(work_dir).exists() { work_dir } else { "/tmp" };
@@ -1455,6 +1551,7 @@ async fn handle_client(
                         enable_cow,
                         Path::new("/"),
                     ).and_then(|mut plan| {
+                        if private_uid.is_some() { plan.set_workload_identity(workload.uid, workload.gid)?; }
                         if allow_scratch_exec {
                             plan.authorize_scratch_exec(lease_mgr.scratch_exec_map()?, cg.cgroup_id)?;
                         }
@@ -1464,7 +1561,7 @@ async fn handle_client(
                         Err(e) => {
                             error!("Refusing to execute for mission {mission_id}: the jail root could not be prepared: {e:#}");
                             lease_mgr.revoke_lease(cg.cgroup_id);
-                            let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
+                            let workspace_removed = workspace_created && workload::remove_workspace(ordinary_workload.as_mut(), Path::new(work_dir));
                             let err_chunk = serde_json::json!({
                                 "type": "STDERR",
                                 "data": format!("SPLAT refused to execute: the workload's root could not be prepared ({e}).\n")
@@ -1511,6 +1608,9 @@ async fn handle_client(
                 if let Some(secret) = &mut step_secret {
                     secret.arm_cleanup(&cg, lease_mgr.clone(), jail_plan.clone());
                 }
+                if let Some(ordinary) = &mut ordinary_workload {
+                    ordinary.arm_cleanup(&cg, lease_mgr.clone(), jail_plan.clone());
+                }
                 out.send(&lease_frame).await?;
 
                 let mut cmd = Command::new(command);
@@ -1549,6 +1649,7 @@ async fn handle_client(
                 if cgroup_is_real {
                     let procs = cg.path.join("cgroup.procs");
                     let plan_for_child = jail_plan.clone();
+                    let policy_for_child = execution_policy.clone();
                     match std::ffi::CString::new(procs.as_os_str().as_bytes()) {
                         Ok(procs_c) => unsafe {
                             cmd.pre_exec(move || {
@@ -1571,13 +1672,18 @@ async fn handle_client(
 
                                 if secret_step { execution::isolate_secret_ipc()?; }
 
-                                drop_privileges(wl_uid, wl_gid)
+                                // SIGCONT may cross UID boundaries within one session. A private
+                                // session closes that exception while descendants keep job control.
+                                if libc::setsid() < 0 { return Err(std::io::Error::last_os_error()); }
+                                drop_privileges(wl_uid, wl_gid)?;
+                                if let Some(policy) = &policy_for_child { policy.apply()?; }
+                                Ok(())
                             });
                         },
                         Err(e) => {
                             error!("Refusing to execute for mission {mission_id}: cgroup path is not a valid C string: {e}");
                             lease_mgr.revoke_lease(cg.cgroup_id);
-                            let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
+                            let workspace_removed = workspace_created && workload::remove_workspace(ordinary_workload.as_mut(), Path::new(work_dir));
                             let err_chunk = serde_json::json!({
                                 "type": "STDERR",
                                 "data": "SPLAT refused to execute: the lease cgroup path could not be used.\n"
@@ -1640,7 +1746,7 @@ async fn handle_client(
                         });
                         out.send(&err_chunk).await?;
 
-                        let workspace_removed = workspace_created && workspace::remove(Path::new(work_dir));
+                        let workspace_removed = workspace_created && workload::remove_workspace(ordinary_workload.as_mut(), Path::new(work_dir));
                         let exit_chunk = serde_json::json!({
                             "type": "EXIT",
                             "exitCode": -1,
@@ -1652,10 +1758,19 @@ async fn handle_client(
                     }
                 };
 
+                let mut pump_error: Option<std::io::Error> = None;
+                if let Some(policy) = &execution_policy {
+                    // spawn succeeds only after the pre-exec restriction calls and exec succeed.
+                    // Prepared policy in a LEASE frame would otherwise overstate installation.
+                    pump_error = out.send(&serde_json::json!({"type":"POLICY_APPLIED", "sha256":policy.sha256,
+                        "landlockAbi":policy.landlock_abi, "syscallFilter":"seccomp-cbpf-v1"})).await.err();
+                }
+
                 // The child joined its cgroup in pre_exec, before exec, so there is nothing to attach
                 // here. Verify rather than assume: a tool running outside its lease must be visible,
                 // not silently tolerated the way the discarded attach_pid error used to be.
                 if let Some(secret) = &mut step_secret { secret.identity.mark_spawned(); }
+                if let Some(ordinary) = &mut ordinary_workload { ordinary.identity.mark_spawned(); }
                 if cgroup_is_real {
                     if let Some(pid) = child.id() {
                         match cg.contains_pid(pid) {
@@ -1700,7 +1815,7 @@ async fn handle_client(
                 let forwarded = Arc::new(AtomicU64::new(0));
                 let forwarded_in_task = forwarded.clone();
                 let lease_mgr_for_drain = lease_mgr.clone();
-                tokio::spawn(async move {
+                let violation_forwarder = tokio::spawn(async move {
                     loop {
                         tokio::select! {
                             _ = &mut done_rx => {
@@ -1791,16 +1906,42 @@ async fn handle_client(
                 // the expiry reaper came round - and that reaper then unpoliced it rather than
                 // killing it. A lost client ends the lease, in the same order expiry uses: kill
                 // inside the installed policy, then withdraw the policy.
-                let mut pump_error: Option<std::io::Error> = None;
-                loop {
+                let mut watch_client = true;
+                let mut cancellation_accepted = false;
+                while pump_error.is_none() {
                     tokio::select! {
-                        // A silent secret step has no stdout to reveal a dead client. Secret
-                        // sessions forbid pipelining, so EOF or another request ends this step.
-                        incoming = buf_reader.fill_buf(), if secret_step => {
-                            let kind = if incoming.is_ok() { std::io::ErrorKind::ConnectionAborted }
-                                else { std::io::ErrorKind::ConnectionReset };
-                            pump_error = Some(std::io::Error::new(kind, "secret step connection ended or pipelined"));
-                            break;
+                        // Silent ordinary steps need EOF detection too. Leave ordinary pipelined
+                        // bytes queued for the next request without repeatedly polling a ready buffer.
+                        // Secret sessions still refuse pipelining to keep grant ownership unambiguous.
+                        incoming = buf_reader.fill_buf(), if watch_client => {
+                            match incoming {
+                                Ok(bytes) if !bytes.is_empty() && execution_context.is_some() => {
+                                    // Only this authenticated session may cancel this mission. Keep
+                                    // its policy installed until cgroup.events confirms every descendant left.
+                                    let mut control = String::new();
+                                    let result = tokio::time::timeout(Duration::from_secs(2), read_frame(&mut buf_reader, &mut control)).await;
+                                    let valid = match result {
+                                        Ok(Ok(n)) if n > 0 => authenticated_request(control.trim(), &session, &peer_auth, sequence)
+                                            .is_ok_and(|v| v["type"] == "CANCEL" && v["missionId"] == mission_id),
+                                        _ => false,
+                                    };
+                                    if !valid {
+                                        pump_error = Some(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid lease cancellation"));
+                                        break;
+                                    }
+                                    sequence += 1;
+                                    cg.kill_all().context("drain canceled workload while its policy remains installed")?;
+                                    cancellation_accepted = true;
+                                    watch_client = false;
+                                }
+                                Ok(bytes) if !bytes.is_empty() && !secret_step => watch_client = false,
+                                Ok(_) => {
+                                    pump_error = Some(std::io::Error::new(std::io::ErrorKind::ConnectionAborted,
+                                        "lease connection ended or secret request pipelined"));
+                                    break;
+                                }
+                                Err(error) => { pump_error = Some(error); break; }
+                            }
                         }
                         message = rx.recv() => match message {
                             Some(msg) => if let Err(e) = out.send(&msg).await {
@@ -1812,18 +1953,18 @@ async fn handle_client(
                     }
                 }
 
-                if let Some(e) = pump_error {
-                    let drained = !cgroup_is_real || cg.kill_all().is_ok();
-                    if drained {
-                        lease_mgr.revoke_lease(cg.cgroup_id);
-                        let _ = waiter.await;
-                    } else {
+                if pump_error.is_some() {
+                    if cgroup_is_real && cg.kill_all().is_err() {
                         error!("Disconnected lease could not be drained; retaining policy for the expiry reaper");
+                        return Err(anyhow::anyhow!("disconnected workload could not be drained"));
                     }
-                    return Err(anyhow::Error::from(e).context("client write failed; lease terminated"));
+                    // Release blocked output producers, then follow the same signed completion
+                    // path as a connected caller. Transport loss must not discard drain evidence.
+                    drop(rx);
                 }
 
                 let status = waiter.await.context("join child reaper")??;
+                violation_forwarder.await.context("join violation forwarder before signing its counters")?;
                 let exit_code = status.code().unwrap_or(-1);
                 if cgroup_is_real {
                     cg.kill_all().context("drain workload before removing overlay scratch")?;
@@ -1833,21 +1974,11 @@ async fn handle_client(
                 drop(cmd);
                 drop(jail_plan);
                 if let Some(secret) = &mut step_secret { secret.finish()?; }
+                if let Some(ordinary) = &mut ordinary_workload { ordinary.finish()?; }
 
-                // The workspace goes before EXIT is written, so the frame can say it went. Anything
-                // the tool left running in its cgroup is killed first, so nothing is still writing
-                // into a directory being removed; revoking the lease below drains the same cgroup
-                // again, which is then a no-op.
-                let workspace_removed = if workspace_created {
-                    if cgroup_is_real {
-                        if let Err(e) = cg.kill_all() {
-                            warn!("Mission {mission_id}: the cgroup could not be drained before its workspace was removed: {e:#}");
-                        }
-                    }
-                    workspace::remove(Path::new(work_dir))
-                } else {
-                    false
-                };
+                // The cgroup is already drained. Guarded cleanup must not revisit a pathname
+                // that a later request may reuse after the original workspace was removed.
+                let workspace_removed = workspace_created && workload::remove_workspace(ordinary_workload.as_mut(), Path::new(work_dir));
 
                 // The lease's own denial count, read from the kernel after the forwarder has
                 // finished, and the number of frames the caller was actually sent. Read in this
@@ -1900,7 +2031,7 @@ async fn handle_client(
                 // bytes, and "rebuild the canonical form" is where that agreement goes wrong. The
                 // public key rides along so a bundle verifies without a second call to this host.
                 if let Some(signer) = outcome_signer.as_ref() {
-                    let canonical = outcome::canonical_outcome(
+                    let mut canonical = outcome::canonical_outcome(
                         &mission_id,
                         cg.cgroup_id,
                         lease_mgr.is_enforcing(),
@@ -1912,6 +2043,16 @@ async fn handle_client(
                         if workspace_created { Some(work_dir) } else { None },
                         if workspace_created { Some(workspace_removed) } else { None },
                     );
+                    if let Some(context) = execution_context {
+                        let policy_hash = execution_policy.as_ref().map_or("none", |p| p.sha256.as_str());
+                        canonical = outcome::bound_outcome(&canonical, policy_hash, context,
+                            &effective_policy_sha256, cgroup_is_real, cancellation_accepted);
+                        exit_chunk["executionPolicySha256"] = serde_json::json!(policy_hash);
+                        exit_chunk["executionContext"] = serde_json::json!(context);
+                        exit_chunk["effectivePolicySha256"] = serde_json::json!(effective_policy_sha256);
+                        exit_chunk["workloadDrained"] = serde_json::json!(cgroup_is_real);
+                        exit_chunk["cancellationAccepted"] = serde_json::json!(cancellation_accepted);
+                    }
                     exit_chunk["outcomeCanonical"] = serde_json::Value::from(canonical.clone());
                     exit_chunk["outcomeSignature"] = serde_json::Value::from(signer.sign(&canonical));
                     exit_chunk["outcomeKeyId"] = serde_json::Value::from(signer.key_id());
@@ -1923,10 +2064,25 @@ async fn handle_client(
                     }
                 }
 
-                out.send(&exit_chunk).await?;
-
                 // 3. Atomically revoke lease upon exit
                 lease_mgr.revoke_lease(cg.cgroup_id);
+                let mut retained = true;
+                if let Some(context) = execution_context {
+                    // The cache serves a caller who lost the connection. A connected caller is owed
+                    // its signed EXIT whether or not the copy could be written; the reservation
+                    // stays pending, so a lookup reports the mission unresolved and the mission ID
+                    // still cannot be admitted again.
+                    if let Err(error) = receipt_store.as_ref().context("receipt cache unavailable")
+                        .and_then(|store| store.finish(mission_id, context, &lease_frame, &exit_chunk)) {
+                        error!("Bound outcome for mission {mission_id} could not be retained: {error:#}");
+                        retained = false;
+                    }
+                }
+                if let Some(error) = pump_error {
+                    let state = if retained { "terminal outcome retained" } else { "terminal outcome lost" };
+                    return Err(anyhow::Error::from(error).context(format!("client disconnected; {state}")));
+                }
+                out.send(&exit_chunk).await?;
                 info!("Completed tool execution for mission {mission_id} (exit code {exit_code})");
             }
 

@@ -210,6 +210,45 @@ pub fn canonical_outcome(
     out
 }
 
+pub fn bound_outcome(legacy: &str, policy: &str, context: &str, effective: &str, drained: bool, canceled: bool) -> String {
+    let mut text = legacy.replacen("splat-lease-outcome/1", "splat-lease-outcome/2", 1);
+    field(&mut text, "executionPolicySha256", policy);
+    field(&mut text, "executionContext", context);
+    field(&mut text, "effectivePolicySha256", effective);
+    field(&mut text, "workloadDrained", if drained { "true" } else { "false" });
+    field(&mut text, "cancellationAccepted", if canceled { "true" } else { "false" });
+    text
+}
+
+pub fn validate_context(request: &serde_json::Value, enforcing: bool, signing: bool) -> Result<Option<&str>> {
+    if request["type"] != "EXECUTE_BOUND" {
+        if !request["executionContext"].is_null() { bail!("bound context requires EXECUTE_BOUND"); }
+        return Ok(None);
+    }
+    if !enforcing || !signing { bail!("bound execution requires enforcement and outcome signing"); }
+    let text = request["executionContext"].as_str().ok_or_else(|| anyhow::anyhow!("executionContext required"))?;
+    if text.len() > 4096 { bail!("executionContext exceeds limit"); }
+    let context: serde_json::Value = serde_json::from_str(text)?;
+    let fields = context.as_object().ok_or_else(|| anyhow::anyhow!("context must be an object"))?;
+    for (name, value) in fields {
+        if !matches!(name.as_str(), "agentId" | "contractSha256" | "tenantId" | "callerId" | "taskId"
+            | "parentTaskId" | "delegationSha256" | "requestingAgentId" | "requestingContractSha256") { bail!("unknown executionContext field"); }
+        if !value.is_null() && !value.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 128
+            && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))) { bail!("invalid context identifier"); }
+    }
+    for required in ["agentId", "contractSha256", "tenantId", "callerId", "taskId"] {
+        if context[required].as_str().is_none() { bail!("missing context identity"); }
+    }
+    for hash in ["contractSha256", "delegationSha256", "requestingContractSha256"] {
+        if let Some(value) = context[hash].as_str() {
+            if value.len() != 64 || !value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+                bail!("invalid context digest");
+            }
+        }
+    }
+    Ok(Some(text))
+}
+
 fn field(out: &mut String, key: &str, value: &str) {
     out.push('|');
     out.push_str(key);
@@ -247,6 +286,32 @@ fn base64(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bound_outcomes_cover_policy_identity_and_confirmed_drain() {
+        let base = canonical_outcome("task", 7, true, 200000, -1, Some(0), 0, 0, None, None);
+        let receipt = bound_outcome(&base, "filter", "{\"agentId\":\"alice\"}", "effective", true, true);
+        assert!(receipt.starts_with("splat-lease-outcome/2|"));
+        assert!(receipt.contains("executionPolicySha256=filter|executionContext={\"agentId\":\"alice\"}"));
+        assert!(receipt.ends_with("effectivePolicySha256=effective|workloadDrained=true|cancellationAccepted=true"));
+        assert_ne!(receipt, bound_outcome(&base, "other", "{\"agentId\":\"alice\"}", "effective", true, true));
+        assert_ne!(receipt, bound_outcome(&base, "filter", "{\"agentId\":\"bob\"}", "effective", true, true));
+    }
+
+    #[test]
+    fn contexts_require_the_new_enforcing_signed_operation() {
+        let context = serde_json::json!({"agentId":"worker", "contractSha256":"a".repeat(64),
+            "tenantId":"tenant", "callerId":"caller", "taskId":"task"}).to_string();
+        let mut request = serde_json::json!({"type":"EXECUTE_BOUND", "executionContext":context});
+        assert!(validate_context(&request, true, true).unwrap().is_some());
+        assert!(validate_context(&request, false, true).is_err());
+        assert!(validate_context(&request, true, false).is_err());
+        request["type"] = serde_json::json!("EXECUTE_AGENT");
+        assert!(validate_context(&request, true, true).is_err());
+        request["type"] = serde_json::json!("EXECUTE_BOUND");
+        request["executionContext"] = serde_json::json!("{}");
+        assert!(validate_context(&request, true, true).is_err());
+    }
 
     #[test]
     fn base64_matches_the_rfc_vectors() {

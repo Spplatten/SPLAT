@@ -19,7 +19,7 @@ namespace MissionController.Infrastructure.Linux;
 /// Executes a sandboxed command inside the WSL2 / eBPF guest daemon over Hyper-V VSOCK / TCP transport.
 /// Handles structured tool output streaming and surfaces in-kernel BPF-LSM violation events.
 /// </summary>
-public class WslLeasedExecutor : ILeasedExecutor
+public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
 {
     private readonly string _host;
     private readonly int _port;
@@ -40,6 +40,10 @@ public class WslLeasedExecutor : ILeasedExecutor
     /// exit -1). Neither the daemon nor the lease's own connection counts as a session; a wsl.exe does.
     /// </summary>
     private readonly Func<IDisposable> _holdGuestAwake;
+    private static readonly SharedGuestHold GuestHold = new(IdleGuestSession.Open,
+        session => ((IdleGuestSession)session).IsAlive);
+
+    static WslLeasedExecutor() => AppDomain.CurrentDomain.ProcessExit += (_, _) => GuestHold.Dispose();
 
     /// <summary>
     /// For reaching a daemon whose port refused the first connection: long enough to boot a stopped
@@ -95,7 +99,7 @@ public class WslLeasedExecutor : ILeasedExecutor
         _port = port;
         _token = token;
         _startDaemon = startDaemon ?? StartInstalledServiceAsync;
-        _holdGuestAwake = holdGuestAwake ?? IdleGuestSession.Open;
+        _holdGuestAwake = holdGuestAwake ?? GuestHold.Acquire;
     }
 
     public async Task<ProcessExecutionResult> ExecuteLeasedAsync(
@@ -154,10 +158,20 @@ public class WslLeasedExecutor : ILeasedExecutor
             // Whatever answered must prove it holds the token before a byte of the lease is sent to it.
             using var session = await OpenSessionAsync(stream, authToken, ct);
 
+            lease.ExecutionPolicy?.Validate();
+            string? executionContext = lease.ExecutionContext is null ? null
+                : JsonSerializer.Serialize(lease.ExecutionContext, BoundLeaseReceipt.Json);
+            if (executionContext is not null && !session.FramesProven)
+                throw new InvalidOperationException("Bound execution requires authenticated result frames.");
             // 1. Serialize Lease Request Envelope
             var payload = new
             {
-                type = "EXECUTE_TOOL",
+                // Older guests reject an unknown operation; they must never ignore a restriction
+                // attached to the legacy envelope and then launch with broader permissions.
+                type = executionContext is not null ? "EXECUTE_BOUND" : lease.RequireEnforcing ? "EXECUTE_AGENT"
+                    : lease.ExecutionPolicy is null ? "EXECUTE_TOOL" : "EXECUTE_POLICY",
+                executionContext,
+                executionPolicy = lease.ExecutionPolicy,
                 protocolVersion = WslAgentSession.ProtocolVersion,
                 missionId = lease.MissionId.ToString(),
                 command = command,
@@ -199,14 +213,30 @@ public class WslLeasedExecutor : ILeasedExecutor
             string jsonPayload = JsonSerializer.Serialize(payload);
 
             // The lease's clock starts with the request it times.
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, lease.LeaseDurationSeconds)));
+            using var cts = executionContext is null ? CancellationTokenSource.CreateLinkedTokenSource(ct) : new CancellationTokenSource();
+            cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, lease.LeaseDurationSeconds) + (executionContext is null ? 0 : 15)));
             await session.SendAsync(jsonPayload, cts.Token);
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            stop.CancelAfter(TimeSpan.FromSeconds(Math.Max(5, lease.LeaseDurationSeconds)));
+            Task stopped = Task.Delay(Timeout.Infinite, stop.Token);
+            bool cancellationSent = false;
 
             // 2. Stream Inbound Output Chunks
             while (!cts.Token.IsCancellationRequested)
             {
-                string? line = await session.ReadLineAsync(cts.Token);
+                // Do not interrupt a partially read authenticated frame. Send cancellation on the
+                // write half, then continue reading through the daemon's bounded drain receipt.
+                Task<string?> pending = session.ReadLineAsync(cts.Token).AsTask();
+                if (executionContext is not null && !cancellationSent && await Task.WhenAny(pending, stopped) == stopped)
+                {
+                    cancellationSent = true;
+                    timedOut = !ct.IsCancellationRequested;
+                    terminalReason = timedOut ? "LocalDeadlineExpired" : "CallerCancelled";
+                    using var cancelBudget = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    await session.SendAsync(JsonSerializer.Serialize(new { type = "CANCEL", missionId = lease.MissionId.ToString() }), cancelBudget.Token);
+                    cts.CancelAfter(TimeSpan.FromSeconds(12));
+                }
+                string? line = await pending;
                 if (line == null) break;
 
                 if (string.IsNullOrWhiteSpace(line)) continue;
@@ -235,6 +265,18 @@ public class WslLeasedExecutor : ILeasedExecutor
                                 stderrBuilder.Append(text);
                                 stderr?.Report(text);
                             }
+                            break;
+
+                        case "POLICY_APPLIED":
+                            if (lease.ExecutionPolicy is null || outcome is null
+                                || !root.TryGetProperty("sha256", out var policyHash)
+                                || policyHash.ValueKind != JsonValueKind.String
+                                || policyHash.GetString() is not { Length: 64 } hash
+                                || hash.Any(c => !Uri.IsHexDigit(c))
+                                || !root.TryGetProperty("landlockAbi", out var abi) || abi.GetInt32() < 5
+                                || !root.TryGetProperty("syscallFilter", out var filter) || filter.GetString() != "seccomp-cbpf-v1")
+                                throw new InvalidOperationException("The guest did not acknowledge a supported execution policy.");
+                            outcome = outcome with { ExecutionPolicySha256 = hash };
                             break;
 
                         case "VIOLATION":
@@ -382,12 +424,25 @@ public class WslLeasedExecutor : ILeasedExecutor
                                 stderr?.Report(note + "\n");
                             }
 
+                            if (lease.ExecutionPolicy is not null && exitCode == 0 && outcome?.ExecutionPolicySha256 is null)
+                            {
+                                exitCode = -1;
+                                throw new InvalidOperationException("The guest reported success without acknowledging the required execution policy.");
+                            }
+                            if (lease.RequireEnforcing && exitCode == 0
+                                && outcome is not { Installed: true, Enforcing: true, Jailed: true })
+                            {
+                                exitCode = -1;
+                                throw new InvalidOperationException("The guest did not confirm the enforcing jail required by this agent.");
+                            }
+                            if (executionContext is not null && outcome is { Installed: true })
+                                outcome = BoundLeaseReceipt.Verify(lease, outcome, exitCode, root, executionContext);
                             stopwatch.Stop();
                             return new ProcessExecutionResult(
                                 ExitCode: exitCode,
                                 StandardOutput: stdoutBuilder.ToString(),
                                 StandardError: stderrBuilder.ToString(),
-                                TimedOut: false,
+                                TimedOut: timedOut,
                                 // The guest daemon's EXIT frame carries no cgroup accounting, so
                                 // nothing here was measured. This previously returned
                                 // MaxMemoryBytes/4 as peak memory and half the wall clock as each
@@ -396,13 +451,15 @@ public class WslLeasedExecutor : ILeasedExecutor
                                 // ledger as evidence. Report the absence instead; when the daemon
                                 // starts reporting cgroup counters, populate these from the frame.
                                 FinalMetrics: JobResourceMetrics.Unavailable,
-                                TerminalReason: "ExplicitExit",
+                                TerminalReason: terminalReason ?? "ExplicitExit",
                                 LimitsReadBack: limitsReadBack,
                                 Lease: outcome);
                     }
                 }
                 catch (JsonException)
                 {
+                    if (executionContext is not null)
+                        throw new InvalidOperationException("Bound execution returned an invalid authenticated frame.");
                     // Plaintext fallback chunk
                     stdoutBuilder.Append(line + "\n");
                     stdout?.Report(line + "\n");
@@ -432,6 +489,8 @@ public class WslLeasedExecutor : ILeasedExecutor
         }
         catch (Exception ex)
         {
+            // An EXIT code is not success until the bound receipt has verified.
+            exitCode = -1;
             terminalReason = "TransportError";
             stderrBuilder.Note($"[DAEMON_COMMUNICATION_ERROR] {ex.Message}");
         }
@@ -621,6 +680,8 @@ public class WslLeasedExecutor : ILeasedExecutor
         private readonly Process? _process;
 
         private IdleGuestSession(Process? process) => _process = process;
+
+        internal bool IsAlive => _process is not null && !_process.HasExited;
 
         public static IDisposable Open()
         {

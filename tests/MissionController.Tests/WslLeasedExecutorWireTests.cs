@@ -317,6 +317,71 @@ public class WslLeasedExecutorWireTests
         Assert.Contains("ok", result.StandardOutput);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecutionContractUsesANewOperationAndRequiresAnAppliedAcknowledgement(bool acknowledge)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var policy = new MissionController.Core.Models.ExecutionPolicy(1, "x86_64",
+                new[] { "write", "close", "execve", "exit_group" },
+                new[] { new MissionController.Core.Models.FileAccessGrant("/usr/bin/id", new[] { "read", "execute" }) });
+            var frames = new List<string> { "{\"type\":\"LEASE\",\"cgroupId\":42,\"enforcing\":true,\"jailed\":true}" };
+            string hash = new('a', 64);
+            if (acknowledge)
+                frames.Add(JsonSerializer.Serialize(new { type = "POLICY_APPLIED", sha256 = hash, landlockAbi = 7, syscallFilter = "seccomp-cbpf-v1" }));
+            frames.Add("{\"type\":\"EXIT\",\"exitCode\":0}");
+            var daemon = RunStandInDaemonAsync(listener, frames.ToArray());
+            var executor = new WslLeasedExecutor("127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port,
+                authToken: TestToken, holdGuestAwake: NoGuest);
+            var result = await executor.ExecuteLeasedAsync(SampleLease() with { ExecutionPolicy = policy }, "/usr/bin/id", Array.Empty<string>());
+            using var request = JsonDocument.Parse((await daemon).Request!);
+            Assert.Equal("EXECUTE_POLICY", request.RootElement.GetProperty("type").GetString());
+            Assert.Equal(JsonSerializer.Serialize(policy), request.RootElement.GetProperty("executionPolicy").GetRawText());
+            if (acknowledge)
+            {
+                Assert.Equal(0, result.ExitCode);
+                Assert.Equal(hash, result.Lease!.ExecutionPolicySha256);
+                Assert.Contains(LeaseControls.Describe(result.Lease)!, c => c.Contains("outside signed outcome v1"));
+            }
+            else
+            {
+                Assert.NotEqual(0, result.ExitCode);
+                Assert.Contains("without acknowledging", result.StandardError);
+                Assert.Null(result.Lease?.ExecutionPolicySha256);
+            }
+        }
+        finally { listener.Stop(); }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task BoundAgentNeverUsesALegacyOperationOrAcceptsNonEnforcingSuccess(bool enforcing)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var daemon = RunStandInDaemonAsync(listener, new[]
+            {
+                JsonSerializer.Serialize(new { type = "LEASE", cgroupId = 42, enforcing, jailed = enforcing }),
+                "{\"type\":\"EXIT\",\"exitCode\":0}"
+            });
+            var executor = new WslLeasedExecutor("127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port,
+                authToken: TestToken, holdGuestAwake: NoGuest);
+            var result = await executor.ExecuteLeasedAsync(SampleLease() with { RequireEnforcing = true }, "/usr/bin/id", Array.Empty<string>());
+            using var request = JsonDocument.Parse((await daemon).Request!);
+            Assert.Equal("EXECUTE_AGENT", request.RootElement.GetProperty("type").GetString());
+            Assert.Equal(enforcing, result.ExitCode == 0);
+            if (!enforcing) Assert.Contains("did not confirm", result.StandardError);
+        }
+        finally { listener.Stop(); }
+    }
+
     /// <summary>
     /// The lease is the policy, so every field the kernel enforces has to survive the wire. These
     /// were hardcoded on the daemon side until 2026-09-03; a template could name one approved

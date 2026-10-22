@@ -1,0 +1,57 @@
+{
+  "Schema": 1,
+  "MissionId": "1bb2a51b-7a49-4687-8e17-9af39c782572",
+  "RecordedAtUtc": "2026-10-14T23:26:25.7144242Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "TemplateId": "source-price-index-probe",
+  "TemplateName": "Public Price Index Source Probe",
+  "TemplateSha256": "sha256:b9cc5c4c85840e16ba5c3a8ab374218486c36005789d0d119022c5aed721c4af",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "4f657fb149b89660f49d54b7ca76165cdb8488b9c10d6d335fce6486dd063f33",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "Endpoint: https://api.bls.gov/\nRead-only public source probe. No credential is presented. Returned data is untrusted.\nHTTP_STATUS: 200\nAPI_STATUS: REQUEST_SUCCEEDED\nSERIES_ID: CUUR0000SAF1\nOBSERVATIONS_RETURNED: 33\nLATEST_PERIOD: September 2026\nLATEST_VALUE: 350.905\nPRIOR_YEAR_PERIOD: September 2025\nPRIOR_YEAR_VALUE: 342.405\nTWELVE_MONTH_CHANGE_PCT: 2.48\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "lease:enforcing",
+      "cgroup:/sys/fs/cgroup/splat_leases/mission_1bb2a51b-7a49-4687-8e17-9af39c782572",
+      "jail:mount-namespace",
+      "workload:uid=200000",
+      "workspace:/var/lib/splat/missions/1bb2a51b7a4946878e179af39c782572 (created by the daemon)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# Data Source Analysis: BLS Consumer Price Index Feed\n\nThe public BLS API responded successfully with valid data. Series CUUR0000SAF1 reports \"Food at home\" (a Consumer Price Index measuring the relative price level of groceries against a reference baseline) at an index value of \"350.905\" for September 2026, with a twelve-month change of 2.48% from the September 2025 value of \"342.405\". This series measures a *price level*, not a dollar amount or household spending figure—an index of 350.905 means prices for this category are approximately 3.5 times their value in the reference period (typically 1982–1984 = 100).\n\n**What this series actually measures:** The relative cost of food purchased at retail for home consumption, expressed as an index number. It does not represent dollars spent by households or the total food budget—those would require the Consumer Expenditure Survey. A 2.48% annual increase in this index indicates that the relative price of groceries has risen modestly year-over-year.\n\n**Provenance required alongside any published figure:**\n- Series ID: `CUUR0000SAF1`\n- Period: September 2026\n- Value as published: `350.905`\n- Prior-year value (September 2025): `342.405`\n- Retrieval date: [current date of this analysis]\n\nThis feed is suitable for a dashboard slot tracking price-level trends in food-at-home costs, but cannot fill a slot requesting dollar amounts or household expenditures.\n\n```json\n{\n  \"status\": \"Healthy\",\n  \"headline\": \"BLS public API delivered valid CPI data for food-at-home pricing with 2.48% annual increase\",\n  \"findings\": [\n    \"API returned HTTP 200 with API_STATUS: REQUEST_SUCCEEDED; 33 observations received\",\n    \"Series CUUR0000SAF1 (Food at home CPI) latest value 350.905 for September 2026, up from 342.405 in September 2025\",\n    \"Twelve-month change calculated as 2.48%, representing a price-level increase—not a dollar amount or spending quantity\"\n  ]\n}\n```",
+      "LatencyMs": 6106,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 1
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "8a88242ecd16c6dfc407200a43cb825b684d13de1035538aba6575499f606fdc",
+    "Status": "Healthy",
+    "Headline": "BLS public API delivered valid CPI data for food-at-home pricing with 2.48% annual increase",
+    "Findings": [
+      "✓ API returned HTTP 200 with API_STATUS: REQUEST_SUCCEEDED; 33 observations received",
+      "✓ Series CUUR0000SAF1 (Food at home CPI) latest value 350.905 for September 2026, up from 342.405 in September 2025",
+      "✓ Twelve-month change calculated as 2.48%, representing a price-level increase—not a dollar amount or spending quantity"
+    ],
+    "RecommendedActions": [],
+    "Grounded": 3,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 0
+  },
+  "Note": "Reviewed 2026-10-14: fresh execution of the current Linux-lease template with a real Anthropic answer; public-source sensor output and every answer reviewed for host identity and credentials. No identity redaction was needed. This fixture preserves the observed pipeline verdict, not an independent endorsement of the diagnosis."
+}

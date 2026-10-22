@@ -10,6 +10,8 @@ public partial class McpServerHandler
     // It is deliberately absent from ProcessMessageAsync and the public MCP tool list.
     internal async Task<McpJsonRpcMessage> ExecuteManagedLeaseAsync(McpJsonRpcMessage message, string actor, CancellationToken ct)
     {
+        if (IsAgentBound)
+            return CreateErrorResponse(message.Id, -32003, "This endpoint accepts only tools from its approved agent manifest; raw leases are refused.");
         if (_revocationManager is not null)
         {
             try

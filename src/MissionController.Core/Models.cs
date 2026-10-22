@@ -13,7 +13,9 @@ public record EgressRule(
     int AllowedPort = 443,
     bool EnforceHttpsOnly = true,
     string Description = "Approved outbound destination",
-    EgressScope Scope = EgressScope.ModelGateway)
+    EgressScope Scope = EgressScope.ModelGateway,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? AdditionalFqdns = null)
 {
     /// <summary>
     /// True when no sensor tool needs a network stack to satisfy this rule, so the tool process can
@@ -42,7 +44,11 @@ public record SingleToolDefinition(
     // A leased HTTPS sensor receives the compiler's IPv4 pins as its final argv value. It keeps TLS
     // hostname verification while avoiding a DNS socket that the lease correctly does not allow.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    bool PassLeaseEgressAsArguments = false);
+    bool PassLeaseEgressAsArguments = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    ExecutionPolicy? ExecutionPolicy = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    bool PassLeaseHostPinsAsArguments = false);
 
 /// <summary>
 /// The substrate a template's tool runs on. It decides which launcher, jail and job the mission
@@ -293,6 +299,13 @@ public record SingleToolTemplate(
             throw new InvalidOperationException("Native-tool timeout must be between 1 and 3600 seconds.");
         if (Tool.MaxMemoryBytes <= 0 || Tool.MaxCpuPercent is < 1 or > 100)
             throw new InvalidOperationException("Native-tool resource limits are outside the governed range.");
+
+        if (Tool.ExecutionPolicy is not null)
+        {
+            if (Tool.Substrate != ToolSubstrate.LinuxLease)
+                throw new InvalidOperationException("Execution policies require the Linux lease substrate.");
+            Tool.ExecutionPolicy.Validate();
+        }
 
         var fields = ParameterFields ?? Array.Empty<TemplateParameterField>();
         var duplicateKeys = fields

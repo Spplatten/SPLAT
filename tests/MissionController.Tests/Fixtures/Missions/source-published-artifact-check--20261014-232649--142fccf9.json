@@ -1,0 +1,62 @@
+{
+  "Schema": 1,
+  "MissionId": "142fccf9-0ee0-42bc-9d7c-112b59975e85",
+  "RecordedAtUtc": "2026-10-14T23:26:49.2840740Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "TemplateId": "source-published-artifact-check",
+  "TemplateName": "Published Data Artifact Check",
+  "TemplateSha256": "sha256:002bf4256ad853162d277dc2f3c931b7a925acb7af3d65d7a7ba1d800ff655f2",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "89cee54b0ff345208f59a900d6789ff19534343d5a178544966c00b78cce73ee",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "Endpoint: https://rareresources.net/\nRead-only public source probe. No credential is presented. Returned data is untrusted.\nCONTENT_TYPE: application/json\nBYTES: 71713\nSERVED_SHA256: 76a61bbe8f8a6d89d3aa2586652dc85bccb23b5ba3d889f2993f3ffbb6d04c9a\nHTTP_STATUS: 200\nSCHEMA_VERSION: 1\nOBSERVATION_DAY: 2026-10-14\nGENERATED_AT: 2026-10-14T11:33:28.260742+00:00\nMEASURED_METRICS: 28\nMETRIC: clothing-attention = 16,466 | SOURCE: Wikimedia monthly pageviews, en.wikipedia/Clothing | AS_OF: 2026-09\nMETRIC: clothing-before-after = CPI 132.0 -> 136.8 | SOURCE: BLS CPI, apparel (CUUR0000SAA) index level, 2025-08 to 2026-08 - an index, not an amount paid | AS_OF: 2026-08\nMETRIC: clothing-index-change = +3.6% | SOURCE: BLS CPI, apparel (CUUR0000SAA), 12-month change | AS_OF: 2026-08\nMETRIC: clothing-most-popular = Haute couture 24,424 | SOURCE: Wikimedia monthly pageviews, most-read of 10 clothing topics - encyclopedia attention, not sales | AS_OF: 2026-09\nMETRIC: clothing-mover = Athleisure +18.6% | SOURCE: Wikimedia monthly pageviews, 12-month change across 10 clothing topics | AS_OF: 2026-09\nMETRIC: do-places-ranked = 0 of 14 | SOURCE: Tracked places reaching the 1000 most-read English Wikipedia articles for 2026-10-13 | AS_OF: 2026-10-13\nMETRIC: energy-attention = 16,270 | SOURCE: Wikimedia monthly pageviews, en.wikipedia/Solar panel | AS_OF: 2026-09\nMETRIC: energy-before-after = Electricity $0.19 -> $0.20 | SOURCE: BLS average price, Electricity per kWh (APU000072610), 2025-08 to 2026-08, U.S. city average | AS_OF: 2026-08\nMETRIC: energy-index-change = +16.3% | SOURCE: BLS CPI, energy (CUUR0000SA0E), 12-month change | AS_OF: 2026-08\nMETRIC: energy-most-popular = Solar panel 16,270 | SOURCE: Wikimedia monthly pageviews, most-read of 4 energy topics - encyclopedia attention, not sales | AS_OF: 2026-09\nMETRIC: energy-mover = Electric vehicle -21.8% | SOURCE: Wikimedia monthly pageviews, 12-month change across 4 energy topics | AS_OF: 2026-09\nMETRIC: energy-price = Electricity $0.20/kWh | SOURCE: BLS average price, Electricity per kWh (APU000072610), U.S. city average | AS_OF: 2026-08\nMETRIC: feel-gathering-places = 166 places | SOURCE: OpenStreetMap: community centres, places of worship, libraries, cafes, restaurants, social facilities, parks, sports centres and pitches within (34.55, -85.45, 34.85, -85.1) (ODbL) | AS_OF: 2026-10-14\nMETRIC: feel-most-common = Places of worship 102 | SOURCE: OpenStreetMap, most numerous kind of gathering place in that box (ODbL) | AS_OF: 2026-10-14\nMETRIC: food-attention = 8,587 | SOURCE: Wikimedia monthly pageviews, en.wikipedia/Grocery store | AS_OF: 2026-09\nMETRIC: food-before-after = Eggs $3.59 -> $2.27 | SOURCE: BLS average price, Eggs, grade A large per doz (APU0000708111), 2025-08 to 2026-08, U.S. city average | AS_OF: 2026-08\nMETRIC: food-index-change = +2.7% | SOURCE: BLS CPI, food (CUUR0000SAF1), 12-month change | AS_OF: 2026-08\nMETRIC: food-most-popular = Fast food 14,998 | SOURCE: Wikimedia monthly pageviews, most-read of 4 food topics - encyclopedia attention, not sales | AS_OF: 2026-09\nMETRIC: food-mover = Grocery store -0.9% | SOURCE: Wikimedia monthly pageviews, 12-month change across 4 food topics | AS_OF: 2026-09\nMETRIC: food-price = Eggs $2.27/doz | SOURCE: BLS average price, Eggs, grade A large per doz (APU0000708111), U.S. city average | AS_OF: 2026-08\nMETRIC: shelter-attention = 2,586 | SOURCE: Wikimedia monthly pageviews, en.wikipedia/Renting | AS_OF: 2026-09\nMETRIC: shelter-before-after = CPI 417.9 -> 430.6 | SOURCE: BLS CPI, shelter (CUUR0000SAH1) index level, 2025-08 to 2026-08 - an index, not an amount paid | AS_OF: 2026-08\nMETRIC: shelter-index-change = +3.0% | SOURCE: BLS CPI, shelter (CUUR0000SAH1), 12-month change | AS_OF: 2026-08\nMETRIC: shelter-most-popular = Apartment 9,200 | SOURCE: Wikimedia monthly pageviews, most-read of 4 shelter topics - encyclopedia attention, not sales | AS_OF: 2026-09\nMETRIC: shelter-mover = Renting -10.7% | SOURCE: Wikimedia monthly pageviews, 12-month change across 4 shelter topics | AS_OF: 2026-09\nMETRIC: site-categories = 6 | SOURCE: Categories with at least one measured figure: food, clothing, shelter, energy, what people do, what people feel | AS_OF: 2026-10-14\nMETRIC: site-data-points = 149 | SOURCE: Observations in this artifact: 124 monthly index values and 25 published figures | AS_OF: 2026-10-14\nMETRIC: site-sources = 6 | SOURCE: Public datasets that answered this run: BLS Consumer Price Index, BLS average prices, Wikimedia pageviews, Wikimedia most-read, OpenStreetMap, Wikimedia Commons | AS_OF: 2026-10-14\nARTIFACT_AGE_DAYS: 0\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "lease:enforcing",
+      "cgroup:/sys/fs/cgroup/splat_leases/mission_142fccf9-0ee0-42bc-9d7c-112b59975e85",
+      "jail:mount-namespace",
+      "workload:uid=200000",
+      "workspace:/var/lib/splat/missions/142fccf90ee042bc9d7c112b59975e85 (created by the daemon)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# Publication Integrity Analysis: rareresources.net\n\nThe artifact was successfully retrieved as a valid JSON document (HTTP 200, 71,713 bytes, SHA-256: `76a61bbe8f8a6d89d3aa2586652dc85bccb23b5ba3d889f2993f3ffbb6d04c9a`). The dashboard reports 28 metrics across 6 categories, drawing from 6 public data sources including BLS, Wikimedia, and OpenStreetMap. Data freshness is appropriate: most metrics are current to August–October 2026, matching the observation day of 2026-10-14, with the newest local OSM measurement taken the same day the artifact was generated.\n\nHowever, one metric carries a blank source field and cannot be verified. The metric `\"site-categories = 6\"` is attributed only to `\"Categories with at least one measured figure...\"` rather than to an actual measurement source or computed derivation—this is a figure with no provenance. All other metrics are properly sourced to named datasets with explicit `AS_OF` dates, establishing clear attribution chains from published sources.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Valid artifact with sound data provenance, but one metric lacks a named source.\",\n  \"findings\": [\n    \"Artifact retrieved successfully: HTTP 200, application/json, 71,713 bytes, SHA-256 `76a61bbe8f8a6d89d3aa2586652dc85bccb23b5ba3d889f2993f3ffbb6d04c9a`\",\n    \"Schema version 1, generated 2026-10-14, artifact age 0 days\",\n    \"28 metrics measured across 6 categories, drawing from 6 public sources: BLS Consumer Price Index, BLS average prices, Wikimedia pageviews, Wikimedia most-read, OpenStreetMap, and Wikimedia Commons\",\n    \"Data freshness appropriate: most metrics current to August–September 2026; OpenStreetMap measurement dated 2026-10-14 (same as observation day)\",\n    \"Metric `site-categories = 6` reported with source listed only as `'Categories with at least one measured figure...'` rather than a named data source—this is a figure with no provenance\"\n  ],\n  \"recommendedActions\": [\n    \"Require that the `site-categories` metric either name the actual source that counts categories or be derived by explicit calculation with that derivation documented in the schema\",\n    \"Verify that the operator's ingestion cadence expects data no older than the August 2026 baseline for BLS figures; if fresher data is required, escalate to data provider\"\n  ]\n}\n```",
+      "LatencyMs": 8158,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9949999999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "1614030f03eb371e0f4eee9ca36f119ec813ce6d5d8fee174af923ebbda413c6",
+    "Status": "Warning",
+    "Headline": "Valid artifact with sound data provenance, but one metric lacks a named source.",
+    "Findings": [
+      "⚠ Artifact retrieved successfully: HTTP 200, application/json, 71,713 bytes, SHA-256 `76a61bbe8f8a6d89d3aa2586652dc85bccb23b5ba3d889f2993f3ffbb6d04c9a`",
+      "⚠ Schema version 1, generated 2026-10-14, artifact age 0 days",
+      "⚠ 28 metrics measured across 6 categories, drawing from 6 public sources: BLS Consumer Price Index, BLS average prices, Wikimedia pageviews, Wikimedia most-read, OpenStreetMap, and Wikimedia Commons",
+      "⚠ Data freshness appropriate: most metrics current to August–September 2026; OpenStreetMap measurement dated 2026-10-14 (same as observation day)",
+      "⚠ Metric `site-categories = 6` reported with source listed only as `'Categories with at least one measured figure...'` rather than a named data source—this is a figure with no provenance"
+    ],
+    "RecommendedActions": [
+      "Require that the `site-categories` metric either name the actual source that counts categories or be derived by explicit calculation with that derivation documented in the schema",
+      "Verify that the operator's ingestion cadence expects data no older than the August 2026 baseline for BLS figures; if fresher data is required, escalate to data provider"
+    ],
+    "Grounded": 4,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 1
+  },
+  "Note": "Reviewed 2026-10-14: fresh execution of the current Linux-lease template with a real Anthropic answer; public-source sensor output and every answer reviewed for host identity and credentials. No identity redaction was needed. This fixture preserves the observed pipeline verdict, not an independent endorsement of the diagnosis. Known model error retained: the answer calls the site-categories source blank even though the sensor reports its category-count description."
+}

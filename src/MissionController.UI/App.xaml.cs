@@ -303,6 +303,7 @@ public partial class App : Application
         services.AddSingleton<QuickDiagnosticianViewModel>();
         services.AddSingleton<LiveMissionMonitorViewModel>();
         services.AddSingleton<TemplateCatalogViewModel>();
+        services.AddSingleton<AgentManifestImporter>();
         services.AddSingleton<ProjectStudioViewModel>();
         services.AddSingleton<SecurityAuditViewModel>();
         services.AddSingleton<SemanticSearchViewModel>();

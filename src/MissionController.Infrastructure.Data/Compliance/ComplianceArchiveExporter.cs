@@ -72,9 +72,8 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
             proofs.Add(_merkleEngine.GenerateProof(tree, entry.Id));
         }
 
-        // 2. Generate Digital Attestation Signature
-        string signatureData = $"{packageId}:{framework}:{tree.RootHash}:{entries.Count}:{operatorIdentity}";
-        string digitalSignature = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signatureData))).ToLowerInvariant();
+        // A public digest cannot authenticate an exporter. This legacy Merkle-only format is
+        // explicitly unsigned; authenticated evidence uses the signed mission-record format.
 
         var includedFiles = new List<string>
         {
@@ -93,8 +92,8 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
             operatorIdentity,
             tree.RootHash,
             entries.Count,
-            digitalSignature,
-            "SHA256-ENTERPRISE-ATTESTATION",
+            string.Empty,
+            "None (unsigned Merkle evidence)",
             includedFiles);
 
         // 3. Create Zip Archive in memory / file stream
@@ -382,26 +381,29 @@ public sealed class ComplianceArchiveExporter : IComplianceArchiveExporter
         sb.AppendLine($"- **Exported By:** `{manifest.ExportedBy}`");
         sb.AppendLine($"- **Merkle Root Hash:** `{manifest.MerkleRootHash}`");
         sb.AppendLine($"- **Total Audit Log Entries:** `{manifest.TotalAuditEntries}`");
-        sb.AppendLine($"- **Digital Attestation Signature:** `{manifest.DigitalSignature}`");
+        sb.AppendLine("- **Signature:** None. Merkle proofs establish consistency of the included rows, not authenticity or completeness of the source ledger.");
+        sb.AppendLine("- **Scope:** Selected audit rows only. This export does not establish continuous endpoint enforcement, a 90-day observation period, SOC 2 attestation, or ISO/IEC 27001 certification.");
         sb.AppendLine();
         sb.AppendLine("## Regulatory Framework Alignment");
         switch (framework)
         {
             case ComplianceFramework.Soc2Type2:
-                sb.AppendLine("- **Trust Services Criteria:** CC6.1 (Logical Access), CC6.8 (Unauthorized Changes), CC7.2 (System Monitoring).");
-                sb.AppendLine("- **Evidence:** Cryptographically chained SHA-256 audit ledger verifying non-repudiation of all diagnostic commands and AI inferences.");
+                sb.AppendLine("- **Candidate mapping for assessor review:** SOC 2 CC6.1 (logical access) and CC7.2 (monitoring). Applicability and operating effectiveness require separate assessment.");
+                sb.AppendLine("- **Evidence:** Included audit rows and their Merkle membership proofs. No independent attestation or non-repudiation claim.");
+                sb.AppendLine("- **Source:** https://www.aicpa-cima.com/resources/download/2017-trust-services-criteria-with-revised-points-of-focus-2022");
                 break;
             case ComplianceFramework.Hipaa:
                 sb.AppendLine("- **HIPAA Security Rule:** 45 CFR § 164.312(b) (Audit Controls) & 45 CFR § 164.312(e)(1) (Transmission Security).");
-                sb.AppendLine("- **Evidence:** In-process NT ACL jailing with memory-pinned DPAPI credentials ensuring zero ePHI data leakage.");
+                sb.AppendLine("- **Evidence:** Included audit rows only; these rows cannot establish absence of ePHI leakage or transmission-security compliance.");
                 break;
             case ComplianceFramework.CmmcLevel2:
-                sb.AppendLine("- **CMMC 2.0 / NIST SP 800-171:** AU.2.041 (Audit Record Generation), AU.2.042 (Audit Record Non-Repudiation), SC.3.177 (Boundary Protection).");
-                sb.AppendLine("- **Evidence:** In-memory egress domain firewall clamping all AI communications to verified FQDNs with SHA-256 Merkle root verification.");
+                sb.AppendLine("- **Candidate subject for assessor review:** Audit record generation and protection; no CMMC level or control satisfaction is asserted.");
+                sb.AppendLine("- **Evidence:** Included audit rows and Merkle membership proofs; these do not establish boundary protection.");
                 break;
             case ComplianceFramework.Iso27001:
                 sb.AppendLine("- **ISO/IEC 27001:2022:** Control A.8.15 (Logging), Control A.8.24 (Use of Cryptography).");
-                sb.AppendLine("- **Evidence:** Tamper-evident hash chaining and zero-privilege Win32 Job Object execution.");
+                sb.AppendLine("- **Evidence:** Included audit rows and Merkle membership proofs. The mapping is a review aid, not a Statement of Applicability or a finding that either control is satisfied.");
+                sb.AppendLine("- **Source:** https://www.iso.org/standard/27001");
                 break;
         }
         sb.AppendLine();
@@ -690,7 +692,8 @@ function Test-Signature($missionId) {
     }
 
     foreach ($name in $listed.Keys) {
-        $actual = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+        # Hash the exact bytes without depending on optional module autoload in the verifier's host.
+        $actual = Get-Sha256HexOfBytes ([System.IO.File]::ReadAllBytes((Join-Path $PSScriptRoot $name)))
         if ($actual -ne $listed[$name]) { Stop-Verification ""$name is not the file that was signed."" }
     }
     foreach ($required in @('mission_run_record.json', 'audit_chain.json', 'merkle_proofs.json')) {

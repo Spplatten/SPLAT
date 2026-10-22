@@ -21,7 +21,7 @@ public static partial class GovernedTemplateCatalog
     /// Bumped whenever the seeded set changes. The registry stores this so startup can skip a
     /// redundant full-catalog upsert when the on-disk set already matches the shipped build.
     /// </summary>
-    public const string CatalogVersion = "2.6.0";
+    public const string CatalogVersion = "2.7.0";
 
     // Removing a seed does not remove its persisted row. Keep retired identities reserved so
     // an upgraded registry cannot launch them, or import them again under their historical IDs.

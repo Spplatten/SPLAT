@@ -54,6 +54,9 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
         uint leaseDurationSeconds = 30)
     {
         ArgumentNullException.ThrowIfNull(template);
+        template.Tool.ExecutionPolicy?.Validate();
+        if (template.Tool.ExecutionPolicy is not null && template.Tool.Substrate != ToolSubstrate.LinuxLease)
+            throw new PolicyCompilationException("Execution policies require the Linux lease substrate.");
         if (string.IsNullOrWhiteSpace(workingDirectory))
         {
             workingDirectory = "/tmp/splat_sandboxes/" + missionId;
@@ -120,6 +123,7 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
         bool allowNetwork = false;
         var allowedIps = new List<string>();
         var allowedPorts = new List<uint>();
+        var resolvedHosts = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 
         // Only a rule whose destination is opened by the SENSOR earns a network lease. This used to
         // read the FQDN alone, and since every template carries one - defaulting to the AI gateway,
@@ -129,67 +133,89 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
             ? template.EgressRule.AllowedFqdn?.Trim() ?? string.Empty
             : string.Empty;
 
-        if (!string.IsNullOrEmpty(targetFqdn) &&
-            !targetFqdn.Equals("none", StringComparison.OrdinalIgnoreCase) &&
-            !targetFqdn.Equals("localhost", StringComparison.OrdinalIgnoreCase) &&
-            !targetFqdn.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        var destinations = new[] { targetFqdn }.Concat(template.EgressRule.ToolProcessNeedsNetwork
+            ? template.EgressRule.AdditionalFqdns ?? Array.Empty<string>() : Array.Empty<string>()).ToArray();
+        if (destinations.Length > 8 || destinations.Distinct(StringComparer.OrdinalIgnoreCase).Count() != destinations.Length)
+            throw new PolicyCompilationException("Declare at most eight unique egress hosts.");
+        if (destinations.Length > 1 && destinations.Any(h => string.IsNullOrWhiteSpace(h) || h.Equals("none", StringComparison.OrdinalIgnoreCase)))
+            throw new PolicyCompilationException("Every additional destination must name an actual host.");
+
+        foreach (string destination in destinations)
         {
-            if (template.EgressRule.AllowedPort is < 0 or > 65535)
+            targetFqdn = destination;
+            if (!string.IsNullOrEmpty(targetFqdn) &&
+                !targetFqdn.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+                !targetFqdn.Equals("localhost", StringComparison.OrdinalIgnoreCase) &&
+                !targetFqdn.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
             {
-                throw new PolicyCompilationException(
-                    $"Configured egress port {template.EgressRule.AllowedPort} is out of valid range (1-65535).");
-            }
-
-            uint port = template.EgressRule.AllowedPort > 0 ? (uint)template.EgressRule.AllowedPort : 443u;
-            allowedPorts.Add(port);
-
-            // Attempt DNS resolution to pin /32 IPv4 destinations
-            IPAddress[] hostAddresses;
-            try
-            {
-                hostAddresses = _dnsResolver.GetHostAddresses(targetFqdn);
-            }
-            catch (Exception ex)
-            {
-                throw new PolicyCompilationException(
-                    $"Failed to resolve egress destination '{targetFqdn}' for tool process network lease: {ex.Message}", ex);
-            }
-
-            if (hostAddresses == null || hostAddresses.Length == 0)
-            {
-                throw new PolicyCompilationException(
-                    $"Egress destination '{targetFqdn}' resolved to zero IP addresses. Refusing lease.");
-            }
-
-            foreach (var ip in hostAddresses)
-            {
-                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                if (targetFqdn != targetFqdn.Trim() || targetFqdn.EndsWith('.')
+                    || Uri.CheckHostName(targetFqdn) is not (UriHostNameType.Dns or UriHostNameType.IPv4))
+                    throw new PolicyCompilationException("Egress destinations must be exact hostnames or IPv4 addresses, without URLs or wildcards.");
+                if (template.EgressRule.AllowedPort is < 0 or > 65535)
                 {
-                    allowedIps.Add(ip.ToString());
+                    throw new PolicyCompilationException(
+                        $"Configured egress port {template.EgressRule.AllowedPort} is out of valid range (1-65535).");
                 }
-            }
 
-            if (allowedIps.Count == 0)
+                uint port = template.EgressRule.AllowedPort > 0 ? (uint)template.EgressRule.AllowedPort : 443u;
+                allowedPorts.Add(port);
+
+                // Attempt DNS resolution to pin /32 IPv4 destinations
+                IPAddress[] hostAddresses;
+                try
+                {
+                    hostAddresses = _dnsResolver.GetHostAddresses(targetFqdn);
+                }
+                catch (Exception ex)
+                {
+                    throw new PolicyCompilationException(
+                        $"Failed to resolve egress destination '{targetFqdn}' for tool process network lease: {ex.Message}", ex);
+                }
+
+                if (hostAddresses == null || hostAddresses.Length == 0)
+                {
+                    throw new PolicyCompilationException(
+                        $"Egress destination '{targetFqdn}' resolved to zero IP addresses. Refusing lease.");
+                }
+
+                var hostPins = new List<string>();
+                foreach (var ip in hostAddresses)
+                {
+                    if (ip.AddressFamily == AddressFamily.InterNetwork)
+                    {
+                        allowedIps.Add(ip.ToString());
+                        hostPins.Add(ip.ToString());
+                    }
+                }
+
+                if (hostPins.Count == 0)
+                {
+                    throw new PolicyCompilationException(
+                        $"Egress destination '{targetFqdn}' resolved to no usable IPv4 addresses. Refusing lease rather than fabricating permission.");
+                }
+
+                allowNetwork = true;
+                resolvedHosts.Add(targetFqdn.ToLowerInvariant(), hostPins.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray());
+            }
+            else if (targetFqdn.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                     targetFqdn.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
             {
-                throw new PolicyCompilationException(
-                    $"Egress destination '{targetFqdn}' resolved to no usable IPv4 addresses. Refusing lease rather than fabricating permission.");
-            }
+                if (template.EgressRule.AllowedPort is < 0 or > 65535)
+                {
+                    throw new PolicyCompilationException(
+                        $"Configured loopback egress port {template.EgressRule.AllowedPort} is out of valid range (1-65535).");
+                }
 
-            allowNetwork = true;
-        }
-        else if (targetFqdn.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                 targetFqdn.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
-        {
-            if (template.EgressRule.AllowedPort is < 0 or > 65535)
-            {
-                throw new PolicyCompilationException(
-                    $"Configured loopback egress port {template.EgressRule.AllowedPort} is out of valid range (1-65535).");
+                allowNetwork = true;
+                allowedIps.Add("127.0.0.1");
+                resolvedHosts.Add(targetFqdn.ToLowerInvariant(), new[] { "127.0.0.1" });
+                allowedPorts.Add(template.EgressRule.AllowedPort > 0 ? (uint)template.EgressRule.AllowedPort : 80u);
             }
-
-            allowNetwork = true;
-            allowedIps.Add("127.0.0.1");
-            allowedPorts.Add(template.EgressRule.AllowedPort > 0 ? (uint)template.EgressRule.AllowedPort : 80u);
         }
+        // DNS runs at each admission. The frozen result is used both by the kernel and the sensor;
+        // the child cannot resolve again and acquire a different destination after authorization.
+        if (allowedIps.Distinct(StringComparer.Ordinal).Count() > 64)
+            throw new PolicyCompilationException("Resolved egress exceeds the 64-address lease limit.");
 
         // 4. Resource Limits from Tool Definition
         ulong memoryBytes = template.Tool.MaxMemoryBytes > 0
@@ -226,7 +252,9 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
             OverlayFs: overlay,
             // A governed mission's workspace is the daemon's to make and remove; a caller that
             // compiled a Windows template for the guest keeps naming a directory of its own.
-            EphemeralWorkspace: template.Tool.Substrate == ToolSubstrate.LinuxLease);
+            EphemeralWorkspace: template.Tool.Substrate == ToolSubstrate.LinuxLease,
+            ExecutionPolicy: template.Tool.ExecutionPolicy,
+            ResolvedEgressHosts: resolvedHosts);
     }
 
     private static IReadOnlyList<string> GetStandardLinuxBinaryPaths(string toolName)
@@ -252,5 +280,5 @@ public class TemplatePolicyCompiler : ITemplatePolicyCompiler
 public sealed class SystemHostAddressResolver : IHostAddressResolver
 {
     public IPAddress[] GetHostAddresses(string hostNameOrAddress) =>
-        Dns.GetHostAddresses(hostNameOrAddress);
+        Dns.GetHostAddressesAsync(hostNameOrAddress).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
 }

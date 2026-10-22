@@ -113,13 +113,21 @@ public static class DerivedTemplateGuard
     private static bool ToolMatches(SingleToolDefinition derived, SingleToolDefinition source) =>
         derived is not null
         && source is not null
-        && string.Equals(derived.ExecutablePath, source.ExecutablePath, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(derived.ExecutablePath, source.ExecutablePath,
+            source.Substrate == ToolSubstrate.LinuxLease ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase)
         && string.Equals(derived.ArgumentsTemplate, source.ArgumentsTemplate, StringComparison.Ordinal)
         && derived.TimeoutSeconds == source.TimeoutSeconds
         && derived.MaxMemoryBytes == source.MaxMemoryBytes
         && derived.MaxCpuPercent == source.MaxCpuPercent
         && derived.RequiresRestrictedToken == source.RequiresRestrictedToken
         && derived.IntegrityLevel == source.IntegrityLevel
+        && derived.Substrate == source.Substrate
+        && derived.PassLeaseEgressAsArguments == source.PassLeaseEgressAsArguments
+        && derived.PassLeaseHostPinsAsArguments == source.PassLeaseHostPinsAsArguments
+        // Adding an opt-in restriction to an unrestricted base cannot expand its jail/exec/egress.
+        // A base that already requires one must retain it verbatim, including after database reload.
+        && (source.ExecutionPolicy is null || System.Text.Json.JsonSerializer.Serialize(derived.ExecutionPolicy)
+            == System.Text.Json.JsonSerializer.Serialize(source.ExecutionPolicy))
         && (derived.AllowedExitCodes ?? Array.Empty<int>())
             .SequenceEqual(source.AllowedExitCodes ?? Array.Empty<int>());
 
@@ -127,7 +135,11 @@ public static class DerivedTemplateGuard
         derived is not null
         && source is not null
         && string.Equals(derived.AllowedFqdn, source.AllowedFqdn, StringComparison.OrdinalIgnoreCase)
-        && derived.ToolProcessNeedsNetwork == source.ToolProcessNeedsNetwork;
+        && derived.AllowedPort == source.AllowedPort
+        && derived.EnforceHttpsOnly == source.EnforceHttpsOnly
+        && derived.Scope == source.Scope
+        && (derived.AdditionalFqdns ?? Array.Empty<string>())
+            .SequenceEqual(source.AdditionalFqdns ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
 
     private static string Describe(SingleToolDefinition? tool) =>
         tool is null ? "(none)" : $"{tool.ExecutablePath} {tool.ArgumentsTemplate}".Trim();

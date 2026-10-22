@@ -111,7 +111,12 @@ public class MerkleComplianceArchiveTests
             Assert.Equal(ComplianceFramework.CmmcLevel2, manifest.Framework);
             Assert.Equal(3, manifest.TotalAuditEntries);
             Assert.Equal("LeadSecOps", manifest.ExportedBy);
-            Assert.NotEmpty(manifest.DigitalSignature);
+            Assert.Empty(manifest.DigitalSignature);
+            Assert.Equal("None (unsigned Merkle evidence)", manifest.SignatureAlgorithm);
+            using var summaryReader = new StreamReader(archive.GetEntry("compliance_summary.md")!.Open());
+            string summary = await summaryReader.ReadToEndAsync();
+            Assert.Contains("not authenticity or completeness", summary);
+            Assert.DoesNotContain("verifying non-repudiation", summary);
         }
         finally
         {

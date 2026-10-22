@@ -17,6 +17,8 @@
     <PublisherDisplayName>Platten Industries</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <Description>SPLAT: Enterprise-hardened Autonomous AI Agent Fleet &amp; System Protection Appliance.</Description>
+    <!-- Disable MSIX File System Virtualization so runtime logs and DBs write directly -->
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
   </Properties>
 
   <Dependencies>
@@ -40,13 +42,11 @@
         Square44x44Logo="Assets\Square44x44Logo.png">
         <uap:DefaultTile ShortName="MissionController" Wide310x150Logo="Assets\Wide310x150Logo.png" />
       </uap:VisualElements>
-
-      <!-- CRITICAL HARDENING FIX 4: Disable MSIX File System Virtualization -->
-      <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
     </Application>
   </Applications>
 
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
   </Capabilities>
 </Package>

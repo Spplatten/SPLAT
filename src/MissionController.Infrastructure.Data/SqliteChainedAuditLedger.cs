@@ -48,6 +48,9 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         _explicitHmacKey = explicitHmacKey;
     }
 
+    /// <summary>The database this ledger writes, so a caller can confirm it shares one transaction with it.</summary>
+    public string DatabasePath => _context.DatabasePath;
+
     public async Task AppendLogAsync(
         Guid missionId,
         string templateId,
@@ -58,6 +61,28 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
     {
         await using var conn = _context.CreateConnection();
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(cancellationToken);
+        await AppendWithinAsync(conn, tx, missionId, templateId, action, details, operatorIdentity, cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Appends inside a transaction the caller owns on this ledger's database, without committing it, so
+    /// the entry commits or rolls back with the caller's own rows. A2A admission needs exactly that: an
+    /// authorization row written before a task insert that then failed outlived the refusal it described
+    /// (16 orphan rows in the 2026-10-20 A2A stress run). Same key checks and chaining as AppendLogAsync.
+    /// </summary>
+    public async Task AppendWithinAsync(
+        SqliteConnection conn,
+        SqliteTransaction tx,
+        Guid missionId,
+        string templateId,
+        string action,
+        string details,
+        string operatorIdentity,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(conn);
+        ArgumentNullException.ThrowIfNull(tx);
 
         // The newest entry decides everything, and it is read by primary key: an append never scans.
         LedgerRow? newest = await ReadNewestAsync(conn, tx, cancellationToken);
@@ -87,7 +112,6 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         }
 
         await InsertAsync(conn, tx, missionId, templateId, action, details, operatorIdentity, previousHash, cancellationToken);
-        await tx.CommitAsync(cancellationToken);
     }
 
     /// <summary>Writes one entry after <paramref name="previousHash"/> and returns its hash.</summary>

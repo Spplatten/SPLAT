@@ -208,6 +208,21 @@ dimension the caller did not declare.
 | `overlayFs.enableCow` | bool | no | `true` is **refused** |
 | `ephemeralWorkspace` | bool | no (`false`) | The daemon makes `workingDirectory` for this lease and removes it at the lease's end. Accepted only for a directory directly under the daemon's missions root (`--missions-root`, default `/var/lib/splat/missions`) named by one component of letters, digits, `-`, `_` and `.`; anywhere else is **refused**. Daemons before 2026-09-24 ignore the field and fall back to `/tmp` for a directory that is not there |
 
+**`EXECUTE_BOUND`** uses the same lease fields and adds `executionContext`, an exact JSON string
+with `agentId`, `contractSha256`, `tenantId`, `callerId` and `taskId`. Optional delegation fields
+are `parentTaskId`, `delegationSha256`, `requestingAgentId` and `requestingContractSha256`.
+The trusted host supplies these labels after authentication; they are not independent guest-side
+identity verification. This operation requires enforcement, authenticated reply frames and signing.
+An optional `executionPolicy` supplies the explicit Landlock/seccomp contract.
+
+While a bound workload runs, its owning authenticated session may send
+`{"type":"CANCEL","missionId":"<same mission UUID>"}` in its next sequenced request frame.
+The daemon kills and drains the cgroup while its policy is installed, then emits its signed EXIT.
+Outcome v2 appends `executionPolicySha256` (`none` without an explicit policy), `executionContext`,
+`effectivePolicySha256`, `workloadDrained` and `cancellationAccepted` to the v1 canonical fields.
+The same values appear on EXIT; the host verifies their signature and invocation binding before
+claiming confirmed termination. A disconnect without that receipt remains unconfirmed to the host.
+
 The answer is a stream, in this order: one `LEASE` (daemons since 2026-09-24; earlier ones send
 none), then zero or more `STDOUT`, `STDERR` and `VIOLATION` frames, then exactly one `EXIT`. Every
 `VIOLATION` belonging to the lease precedes `EXIT`, and since 2026-09-25 that is checked rather

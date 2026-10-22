@@ -100,6 +100,8 @@ public partial class McpServerHandler
 
     /// <summary>The endpoints a run_command lease may name. See <see cref="McpEgressPolicy"/>.</summary>
     private readonly McpEgressPolicy _egressPolicy;
+    private readonly AgentManifestApproval? _agent;
+    internal bool IsAgentBound => _agent is not null;
 
     /// <summary>
     /// Where <see cref="RecordInternalError"/> keeps failures; null keeps none. The entry point names it,
@@ -128,6 +130,7 @@ public partial class McpServerHandler
         RunRecordLedgerVerifier? recordVerifier = null,
         ICredentialSanitizer? credentialSanitizer = null,
         IDataLossPreventionSanitizer? dlpSanitizer = null,
+        AgentManifestApproval? agent = null,
         string? internalErrorLog = null)
     {
         _internalErrorLog = internalErrorLog;
@@ -154,6 +157,16 @@ public partial class McpServerHandler
         // No policy means no network for run_command, not the caller's choice of network.
         _egressPolicy = egressPolicy ?? McpEgressPolicy.None;
         _revocationManager = revocationManager;
+        if (agent is not null)
+        {
+            AgentManifestApproval.ValidateSelection(agent.AgentId, agent.Sha256);
+            if (AgentManifestApproval.AgentIdOf(agent.Manifest) != agent.AgentId
+                || AgentManifestApproval.Hash(agent.Manifest) != agent.Sha256)
+                throw new InvalidOperationException("Agent contract does not match its approved version.");
+            // Copy at the authority boundary; caller-owned collections cannot mutate a live session.
+            _agent = agent with { Manifest = JsonSerializer.Deserialize<CompiledAgentManifest>(
+                JsonSerializer.Serialize(agent.Manifest))! };
+        }
     }
 
     /// <summary>
@@ -286,6 +299,9 @@ public partial class McpServerHandler
     private McpJsonRpcMessage HandleInitialize(McpJsonRpcMessage request)
     {
         var result = new McpInitializeResult();
+        if (_agent is not null)
+            result.Instructions = $"This endpoint is bound to agent {_agent.AgentId}, contract {_agent.Sha256}. "
+                + "Use tools/list for the only available tools. Execution authority comes from the saved contract.";
         return new McpJsonRpcMessage
         {
             JsonRpc = "2.0",
@@ -296,6 +312,8 @@ public partial class McpServerHandler
 
     private Task<McpJsonRpcMessage> HandleToolsListAsync(McpJsonRpcMessage request, CancellationToken ct)
     {
+        if (_agent is not null)
+            return Task.FromResult(ListAgentTools(request));
         var tools = new List<McpToolDefinition>
         {
             new()
@@ -593,6 +611,16 @@ public partial class McpServerHandler
 
         McpToolCallResult toolResult;
 
+        // This gate precedes every generic tool, including nested orchestration and host file I/O.
+        // The caller cannot supply or switch an agent ID; the operator pinned it at host startup.
+        if (_agent is not null)
+        {
+            toolResult = await ExecuteAgentToolAsync(toolName, args, actor, ct);
+            toolResult = await AttachAuditAnchorAsync(toolName, args, toolResult, ct);
+            return new McpJsonRpcMessage { JsonRpc = "2.0", Id = request.Id,
+                Result = JsonSerializer.SerializeToElement(toolResult) };
+        }
+
         switch (toolName)
         {
             case "run_command":
@@ -697,7 +725,8 @@ public partial class McpServerHandler
     /// The tool the caller named. run_code wraps its script and delegates here, and its rows used to
     /// land under run_command's name - a record that described a call nobody made.
     /// </param>
-    private async Task<McpToolCallResult> ExecuteRunCommandAsync(JsonElement args, CancellationToken ct, string toolName = "run_command")
+    private async Task<McpToolCallResult> ExecuteRunCommandAsync(JsonElement args, CancellationToken ct,
+        string toolName = "run_command", LeaseSpec? approvedLease = null)
     {
         string ledgerTool = $"mcp-tool-{toolName}";
         var startedAtUtc = DateTimeOffset.UtcNow;
@@ -768,7 +797,7 @@ public partial class McpServerHandler
                 }
             }
         }
-        var missionId = Guid.NewGuid();
+        var missionId = approvedLease?.MissionId ?? Guid.NewGuid();
 
         // The network half of the lease is the operator's. allowNetwork and allowedEgressIps used to
         // go into it as sent, loopback filled in and 80 and 443 added for every address, so an agent
@@ -778,7 +807,12 @@ public partial class McpServerHandler
         IReadOnlyList<string> leaseAddresses = Array.Empty<string>();
         IReadOnlyList<uint> leasePorts = Array.Empty<uint>();
         string? egressRefusal = null;
-        if (allowNetwork)
+        if (approvedLease is not null)
+        {
+            leaseAddresses = approvedLease.AllowedEgressIps;
+            leasePorts = approvedLease.AllowedEgressPorts;
+        }
+        else if (allowNetwork)
         {
             var egress = _egressPolicy.Authorize(egressIps);
             egressRefusal = egress.Refusal;
@@ -833,7 +867,7 @@ public partial class McpServerHandler
             };
         }
 
-        var lease = new LeaseSpec(
+        var lease = approvedLease ?? new LeaseSpec(
             MissionId: missionId,
             WorkingDirectory: workDir,
             AllowNetwork: allowNetwork,
@@ -869,6 +903,9 @@ public partial class McpServerHandler
             violations: violationProgress,
             ct: ct);
 
+        _agentResult?.Invoke(execResult);
+        // Cancellation stops the workload, not the durable account of its final receipt.
+        ct = CancellationToken.None;
         string actor = await ResolveActorAsync(ct);
         var facts = NewLeaseFacts(missionId, ledgerTool, actor, startedAtUtc, command, argumentsForLog, workDir, timeoutSec);
 
@@ -905,6 +942,8 @@ public partial class McpServerHandler
         }
 
         outputSb.AppendLine($"[Process Exited with code {execResult.ExitCode}]");
+        if (approvedLease is not null)
+            outputSb.AppendLine(JsonSerializer.Serialize(new { agentLease = execResult.Lease }));
 
         // Record flight recorder log in audit ledger
         await AppendScrubbedLogAsync(

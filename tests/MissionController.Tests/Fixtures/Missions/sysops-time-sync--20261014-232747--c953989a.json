@@ -1,0 +1,66 @@
+{
+  "Schema": 1,
+  "MissionId": "c953989a-99ce-4c78-b364-944acd81f835",
+  "RecordedAtUtc": "2026-10-14T23:27:47.5002688Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "TemplateId": "sysops-time-sync",
+  "TemplateName": "W32Time Sync & Kerberos Skew Diagnostic",
+  "TemplateSha256": "sha256:05d18aa58535650249fab5e257220c53bd57257eb8b431e94d7886e46e585a6e",
+  "Parameters": {},
+  "Model": "Anthropic/claude-sonnet-5",
+  "SystemPromptSha256": "63b1e60dea1367f67873a8db0bee758a504e0163e22bfbec74029b9a3f924645",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "The following error occurred: The service has not been started. (0x80070426)\n--- CONFIGURATION --- \r\n\r\nHKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\W32Time\\Parameters\r\n    NtpServer    REG_SZ    time.windows.com,0x9\r\n    ServiceDll    REG_EXPAND_SZ    %systemroot%\\system32\\w32time.dll\r\n    ServiceDllUnloadOnStop    REG_DWORD    0x1\r\n    ServiceMain    REG_SZ    SvchostEntry_W32Time\r\n    Type    REG_SZ    NTP\r\n\r\n\r\nHKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\W32Time\\TimeProviders\\NtpClient\r\n    AllowNonstandardModeCombinations    REG_DWORD    0x1\r\n    CompatibilityFlags    REG_DWORD    0x80000000\r\n    CrossSiteSyncFlags    REG_DWORD    0x2\r\n    DllName    REG_EXPAND_SZ    %systemroot%\\system32\\w32time.dll\r\n    Enabled    REG_DWORD    0x1\r\n    EventLogFlags    REG_DWORD    0x1\r\n    InputProvider    REG_DWORD    0x1\r\n    LargeSampleSkew    REG_DWORD    0x3\r\n    ResolvePeerBackoffMaxTimes    REG_DWORD    0x7\r\n    ResolvePeerBackoffMinutes    REG_DWORD    0xf\r\n    SignatureAuthAllowed    REG_DWORD    0x1\r\n    SpecialPollInterval    REG_DWORD    0x4000\r\n    SpecialPollTimeRemaining    REG_MULTI_SZ    time.windows.com,8023ca9\r\n\r\n--- PEERS --- \r\nThe following error occurred: The service has not been started. (0x80070426)\n--- LIVE OFFSET SAMPLES --- \r\nTracking time.windows.com [168.61.215.74:123].\nCollecting 5 samples.\nThe current time is 10/14/2026 7:26:49 PM.\n19:26:49, +00.8917092s\n19:26:51, +00.8940337s\n19:26:53, +00.8871817s\n19:26:55, +00.8894726s\n19:26:57, +00.8689458s\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "acl-jail:inheritance-stripped,allow-rules=3,deny-rules=0",
+      "job:MissionJob_c953989a99ce4c78b364944acd81f835",
+      "token:integrity=Medium",
+      "token:administrators=deny-only",
+      "token:privileges=1",
+      "token:appcontainer=none"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-sonnet-5",
+      "Response": "**Operator Analysis**\n\n**STORY:** This host's Windows Time service (W32Time) is not running — both the configuration query and the peer query failed with \"The service has not been started. (0x80070426)\" — meaning no time correction is currently happening at all. The registry shows the machine is configured in plain `NTP` mode against the public server `time.windows.com,0x9`, not against the domain hierarchy (`NT5DS`), which is the wrong source type for a domain member. `SpecialPollInterval` is set to `0x4000` (16384s, ~4.5 hours), a backed-off interval that only appears after repeated sync failures. The live stripchart samples (gathered independently of the stopped service) show a small, stable ~0.89s offset against `time.windows.com` — not itself alarming, but irrelevant to domain auth health since the service applying corrections is down and the source queried isn't the domain's own consensus clock anyway.\n\n**KNOWN-GOOD:** W32Time and `w32time.dll` in `system32` are core Windows components, expected on every machine — waved through. The `NtpClient` provider registry structure (Enabled, InputProvider, etc.) matches stock Windows defaults — waved through. The lookalike that would NOT be waved through: a `ServiceDll` pointing outside `system32`, or an `NtpServer` value resolving to an unfamiliar external IP rather than `time.windows.com`/a DC name — neither is present here, but the *mode* (`NTP` instead of `NT5DS`) on what appears to be an AD-relevant host is itself the anomaly, not the binary.\n\n**HYPOTHESES:**\n1. *Service stopped* — benign: disabled by policy, hypervisor-managed clock (e.g., Hyper-V), or pending reboot. Hostile: deliberately stopped to block detection/consensus with DCs or as part of broader defense-tampering. Settles with: service Start type + System event log Service Control Manager entries (7036/7034) showing who/what stopped it.\n2. *Source set to internet NTP instead of domain hierarchy* — benign: workgroup machine or stale GPO. Hostile: source changed to let clock drift independently for ticket manipulation. Settles with: `w32tm /query /source`, domain-join status, and GPO time-source policy.\n3. *Backed-off poll interval (16384s)* — benign: temporary network blip previously. Hostile: sustained unreachability from firewall/isolation changes made by an attacker. Settles with: `w32tm /query /status` stratum/last-sync-time once service is restarted, and firewall rule history for UDP/123.\n\n**PLAN:** (1) Cheap refutation first — confirm domain-join status and current GPO time policy (`w32tm /query /source`, `dsregcmd /status`) to rule out \"this is just a standalone box.\" (2) Restart W32Time, run `w32tm /resync /rediscover` and `w32tm /query /status` to get real stratum and last-successful-sync timestamp against a DC. (3) Pull System event log for service stop/start events to see who/what disabled it — decides benign vs. hostile. (4) If domain-joined, reconfigure to `NT5DS` (`w32tm /config /syncfromflags:domhier /update`). (5) If stop/disable looks attacker-driven, contain (isolate host, check for other disabled security services) before cleanup. No prompt-injection attempt was found in this telemetry — it is plain `w32tm`/registry output with no text addressing the analyst or claiming operator authority.\n\n```json\n{\n  \"status\": \"Critical\",\n  \"headline\": \"Windows Time service is stopped and misconfigured to an external NTP source instead of the domain hierarchy, leaving the clock uncorrected\",\n  \"findings\": [\n    \"Both the configuration and peers queries returned: 'The service has not been started. (0x80070426)' — W32Time is not running, so no time correction is occurring.\",\n    \"Registry key NtpServer is set to 'time.windows.com,0x9' with Type 'NTP' — the machine is configured to sync from a public internet server rather than the domain hierarchy (which would use Type NT5DS).\",\n    \"SpecialPollInterval is set to 0x4000 (16384 seconds, ~4.5 hours) — a backed-off polling interval consistent with a history of repeated sync failures.\",\n    \"Live stripchart samples against time.windows.com show a stable offset of roughly +0.887s to +0.894s (e.g. '19:26:49, +00.8917092s') — small in isolation, but this measurement is independent of the stopped W32Time service and does not reflect domain-hierarchy consensus.\",\n    \"No stratum or last-successful-sync timestamp could be obtained because the service query failed outright.\"\n  ],\n  \"recommendedActions\": [\n    \"Check service start type and recent Service Control Manager events (Event IDs 7036/7034) to determine who or what stopped W32Time (knowledge: ties to ATT&CK T1489 Service Stop / T1070 indicator removal if unauthorized).\",\n    \"Confirm domain-join status and current GPO-assigned time source with 'w32tm /query /source' and 'dsregcmd /status' before assuming misconfiguration is benign.\",\n    \"Restart W32Time and run 'w32tm /resync /rediscover' then 'w32tm /query /status' to obtain real stratum, source, and last-successful-sync timestamp (knowledge: CIS Benchmark time-sync baseline expects sync against domain hierarchy with stratum/offset within Kerberos' 5-minute skew tolerance).\",\n    \"If domain-joined, reconfigure the time source to the domain hierarchy with 'w32tm /config /syncfromflags:domhier /update' rather than time.windows.com.\",\n    \"Investigate firewall/network changes around UDP port 123 that may explain the backed-off poll interval, and review for other disabled security or monitoring services on this host before closing out as a simple misconfiguration.\"\n  ]\n}\n```",
+      "LatencyMs": 49381,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.845
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "a7ac00618819865d1f11de0b224e8ea2ce6fa96e78608ed9229f404aa27387e6",
+    "Status": "Critical",
+    "Headline": "Windows Time service is stopped and misconfigured to an external NTP source instead of the domain hierarchy, leaving the clock uncorrected",
+    "Findings": [
+      "🔴 Both the configuration and peers queries returned: 'The service has not been started. (0x80070426)' — W32Time is not running, so no time correction is occurring.",
+      "🔴 Registry key NtpServer is set to 'time.windows.com,0x9' with Type 'NTP' — the machine is configured to sync from a public internet server rather than the domain hierarchy (which would use Type NT5DS).",
+      "🔴 SpecialPollInterval is set to 0x4000 (16384 seconds, ~4.5 hours) — a backed-off polling interval consistent with a history of repeated sync failures.  [UNSUPPORTED - not found in collected telemetry]",
+      "🔴 Live stripchart samples against time.windows.com show a stable offset of roughly +0.887s to +0.894s (e.g. '19:26:49, +00.8917092s') — small in isolation, but this measurement is independent of the stopped W32Time service and does not reflect domain-hierarchy consensus.",
+      "🔴 No stratum or last-successful-sync timestamp could be obtained because the service query failed outright."
+    ],
+    "RecommendedActions": [
+      "Check service start type and recent Service Control Manager events (Event IDs 7036/7034) to determine who or what stopped W32Time (knowledge: ties to ATT&CK T1489 Service Stop / T1070 indicator removal if unauthorized).",
+      "Confirm domain-join status and current GPO-assigned time source with 'w32tm /query /source' and 'dsregcmd /status' before assuming misconfiguration is benign.",
+      "Restart W32Time and run 'w32tm /resync /rediscover' then 'w32tm /query /status' to obtain real stratum, source, and last-successful-sync timestamp (knowledge: CIS Benchmark time-sync baseline expects sync against domain hierarchy with stratum/offset within Kerberos' 5-minute skew tolerance).",
+      "If domain-joined, reconfigure the time source to the domain hierarchy with 'w32tm /config /syncfromflags:domhier /update' rather than time.windows.com.",
+      "Investigate firewall/network changes around UDP port 123 that may explain the backed-off poll interval, and review for other disabled security or monitoring services on this host before closing out as a simple misconfiguration."
+    ],
+    "Grounded": 1,
+    "PartiallyGrounded": 0,
+    "Unsupported": 1,
+    "Unattributed": 3
+  },
+  "Note": "Reviewed 2026-10-14: current template executed under the real Windows sandbox and answered by Anthropic. Both telemetry and answer reviewed; no host/account identity or credential redaction was needed. Public NTP endpoint, sample times and time-service configuration are retained. Preserves the observed verdict, not diagnostic correctness: domain membership is not measured, and SpecialPollInterval alone does not establish repeated sync failures. The model also calls the successful registry configuration read a failed configuration query."
+}

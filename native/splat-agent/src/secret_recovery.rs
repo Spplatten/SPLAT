@@ -1,4 +1,4 @@
-//! A root-only, payload-free journal identifies secret workspaces left by a daemon crash.
+//! A root-only, payload-free journal identifies private lease workspaces left by a daemon crash.
 //! Recovery runs only after startup has verified that all old lease cgroups are drained.
 
 use anyhow::{bail, Context, Result};

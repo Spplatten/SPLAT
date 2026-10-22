@@ -135,15 +135,7 @@ public sealed class LinuxLeaseSubstrate : IMissionSubstrateSelector
                 EphemeralWorkspace = true,
             };
 
-            if (_template.Tool.PassLeaseEgressAsArguments)
-            {
-                if (!lease.AllowNetwork || lease.AllowedEgressIps.Count == 0
-                    || !lease.AllowedEgressPorts.SequenceEqual(new uint[] { 443 }))
-                    throw new PolicyCompilationException("This HTTPS sensor requires compiled IPv4 destinations on port 443.");
-                // The host appends these after binding operator input. A sensor cannot substitute a
-                // resolver or ask the kernel for addresses that were absent from the compiled lease.
-                argv = argv.Append(string.Join(",", lease.AllowedEgressIps)).ToArray();
-            }
+            argv = LeaseEgressArguments.Append(_template.Tool, lease, argv);
 
             var violations = new BoundedViolationLog();
             var collect = new SynchronousProgress<LeaseViolationEvent>(violations.Add);

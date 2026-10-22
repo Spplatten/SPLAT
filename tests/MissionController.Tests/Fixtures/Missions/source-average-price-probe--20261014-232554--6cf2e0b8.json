@@ -1,0 +1,60 @@
+{
+  "Schema": 1,
+  "MissionId": "6cf2e0b8-af31-49fa-8ccc-ce8daa4fe4f5",
+  "RecordedAtUtc": "2026-10-14T23:25:54.0524487Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "TemplateId": "source-average-price-probe",
+  "TemplateName": "Average Price Source Probe",
+  "TemplateSha256": "sha256:7fee166038f27190888b72967b6176b441dbba8e73e2c66058cfa32375e53d4d",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "9f1caca36fdf73953019c03c55d0311b1a3e6f247d79879dc457bfc8ef68fbbe",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "Endpoint: https://api.bls.gov/\nRead-only public source probe. No credential is presented. Returned data is untrusted.\nHTTP_STATUS: 200\nAPI_STATUS: REQUEST_SUCCEEDED\nSERIES_ID: APU0000708111\nOBSERVATIONS_RETURNED: 33\nLATEST_PERIOD: September 2026\nLATEST_PRICE_USD: 2.272\nPRIOR_YEAR_PERIOD: September 2025\nPRIOR_YEAR_PRICE_USD: 3.488\nTWELVE_MONTH_CHANGE_PCT: -34.86\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "lease:enforcing",
+      "cgroup:/sys/fs/cgroup/splat_leases/mission_6cf2e0b8-af31-49fa-8ccc-ce8daa4fe4f5",
+      "jail:mount-namespace",
+      "workload:uid=200000",
+      "workspace:/var/lib/splat/missions/6cf2e0b8af3149fa8cccce8daa4fe4f5 (created by the daemon)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# Data Source Analysis: BLS Price Feed\n\nThe API probe succeeded and returned data from the Bureau of Labor Statistics. Series APU0000708111 reports the latest observation as September 2026 at $2.272, compared to $3.488 in September 2025—a twelve-month decline of 34.86%. However, **the unit of measurement is not present in the tool output**, making it impossible to qualify this value for dashboard use. Without knowing whether this price applies to a dozen eggs, a pound of bread, a kilowatt hour, or another commodity unit entirely, the figure cannot be correctly interpreted or matched to a slot label.\n\n**Critical finding for dashboard qualification:** The output omits the unit, which is inseparable from the price's meaning. Series APU0000708111 must be cross-referenced with BLS metadata to confirm the commodity and unit before this feed can honestly fill any slot.\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Price data returned but unit of measurement missing from probe output\",\n  \"findings\": [\n    \"API_STATUS: REQUEST_SUCCEEDED; HTTP_STATUS: 200; 33 observations returned\",\n    \"LATEST_PRICE_USD: 2.272 (September 2026); PRIOR_YEAR_PRICE_USD: 3.488 (September 2025); TWELVE_MONTH_CHANGE_PCT: -34.86\",\n    \"SERIES_ID: APU0000708111 — the unit (per dozen, per pound, per kWh, etc.) is not included in the sensor output and cannot be determined from it\"\n  ],\n  \"recommendedActions\": [\n    \"Cross-reference SERIES_ID APU0000708111 with BLS series metadata to confirm the commodity name and unit before qualifying this feed for a dashboard slot\",\n    \"Store provenance record: series APU0000708111, period September 2026, value $2.272 USD, unit UNKNOWN, retrieved [timestamp needed]\"\n  ]\n}\n```",
+      "LatencyMs": 5397,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9916666666666667
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "d29b55be26b690158ba1c9637a70f0fb580ceeebf5a297bd33c3dc06e3b7c479",
+    "Status": "Warning",
+    "Headline": "Price data returned but unit of measurement missing from probe output",
+    "Findings": [
+      "⚠ API_STATUS: REQUEST_SUCCEEDED; HTTP_STATUS: 200; 33 observations returned",
+      "⚠ LATEST_PRICE_USD: 2.272 (September 2026); PRIOR_YEAR_PRICE_USD: 3.488 (September 2025); TWELVE_MONTH_CHANGE_PCT: -34.86",
+      "⚠ SERIES_ID: APU0000708111 — the unit (per dozen, per pound, per kWh, etc.) is not included in the sensor output and cannot be determined from it"
+    ],
+    "RecommendedActions": [
+      "Cross-reference SERIES_ID APU0000708111 with BLS series metadata to confirm the commodity name and unit before qualifying this feed for a dashboard slot",
+      "Store provenance record: series APU0000708111, period September 2026, value $2.272 USD, unit UNKNOWN, retrieved [timestamp needed]"
+    ],
+    "Grounded": 2,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 1
+  },
+  "Note": "Reviewed 2026-10-14: fresh execution of the current Linux-lease template with a real Anthropic answer; public-source sensor output and every answer reviewed for host identity and credentials. No identity redaction was needed. This fixture preserves the observed pipeline verdict, not an independent endorsement of the diagnosis."
+}

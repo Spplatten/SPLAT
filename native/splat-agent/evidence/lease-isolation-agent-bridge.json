@@ -1,0 +1,126 @@
+{
+  "timestampUtc": "2026-10-14T02:03:44Z",
+  "kernel": "6.18.33.2-microsoft-standard-WSL2",
+  "daemonSha256": "870ad87ee3f5d9ba0077fb710583c9c6649798e22d08a89c2ac4d4c60e4adbeb",
+  "sourceSha256": {
+    "Cargo.toml": "0d634c91c21e6f277f3fe949b336ee9bcafb75a51e124eb99518e18cfb852764",
+    "Cargo.lock": "e7d70cab59f70abc5eea65b062b4eb99158ce03445639d8ed039938cdd388815",
+    "build.rs": "d6d5280d4eaa8c1a238a08b79b5e4c060494e96a5a5e35aeff9d1891e96c512f",
+    "src/auth.rs": "36b9b7ceb2b737f5ebd2172b2d7acb960b9009c68e0525a60c239a119531cf6c",
+    "src/ceiling.rs": "ae84a9abca24b8413485355dd7fee2f87e62ca24cf792b2375d5ad79d714882b",
+    "src/cgroup.rs": "b2e4b4b206d818573e62e06e630909c7cc9085e0b22eb5cd4dcae2d5b4caaa3c",
+    "src/cow.rs": "610ef03d3d9318edbe12d6c782da1b3750a1d45534d66e49f512c46daffe41dc",
+    "src/execution.rs": "3fba500d2874506a585dd3e6e3549efefd9cdfe2256dfc98e0820457615d670b",
+    "src/execution_policy.rs": "dc96a7c4fb0661335d0121591bd2acef091ee286c9ec55e2dc37542bcafaa431",
+    "src/identities.rs": "a9d79c48382482e6857ec944357a9a5d0cd32609fa21024b1b773e6f3dbb566a",
+    "src/jail.rs": "30e04f9622e9b2efbcb330851c6d876726ca21632213ab73b0b544ed5b607425",
+    "src/lease.rs": "a32548558eebbc46a725b0fe18983c5a9fd11a35dc8ef1e3cb16fe803185cb3c",
+    "src/main.rs": "dccd0a605b27dc7ee9ceaa4bda70b3a57cedcc33a2e65b91b21b603f0778fa76",
+    "src/outcome.rs": "cc136ae28e9ebf33178bcf076f537103d86f60e6241e7418084257dac5efec55",
+    "src/pinning.rs": "73ceaa31d8ea959b4d80029da090dfa2ca49ccdf4c2f5c4e18abb8879d4a10ce",
+    "src/secret_memory.rs": "9b7de51460540f364a8e11e317b1777c636ac42f007a43ec6c8f4aee7b786dfd",
+    "src/secret_recovery.rs": "a171a8410856c33731c691736b903db74f4be0e90449b975f51d91081e4df7e0",
+    "src/secrets.rs": "95977ae9995830d3b91a3e687945bba0f6e14d120b5ae7e7e289aa49a48249ca",
+    "src/violation.rs": "3f56c5476e55cc99b90d56569cd3dad6ef11893212a9fa07585eabb6ce3fc2c9",
+    "src/workload.rs": "e9aed3b57bcd1239e5223b973e05b4d4de5879892a95ac5a4ea56f04cf513c94",
+    "src/workspace.rs": "187444d8b7c36e4dfa2371652fd89fa1dd2a744f9abf606c0c687a4e6e571959",
+    "src/bpf/lease_lsm.bpf.c": "6fc637d8e30f375e7b64a51a2438202515cf12cf008fff78b2f8b719a9a8b4f1",
+    "src/bpf/vmlinux.h": "f6a0c69a8949fbe7aca3b9ea09ca0cd93b0f13ff7873d753741640d112f83526"
+  },
+  "probeSha256": "84f079f6e6f17e6d96d92815f94398ebe400ffb9f65017666b5c3e0842bb8968",
+  "runnerSha256": "454bf00a468f80e5872468a768b6c0436d00435bf726b4548b6e103310497a63",
+  "syntheticOnly": true,
+  "externalNetworkUsed": false,
+  "checks": {
+    "running_artifact_matches_recorded_binary": true,
+    "daemon_enforcing": true,
+    "target_has_enforcing_jail": true,
+    "target_reads_own_workspace": true,
+    "private_identity_resolves_in_jail": true,
+    "target_pid_in_its_cgroup": true,
+    "attacker_completed": true,
+    "distinct_enforcing_cgroups": true,
+    "distinct_private_uids": true,
+    "target_alive_during_attempts": true,
+    "attacker_reads_own_workspace": true,
+    "attacker_signals_own_child": true,
+    "target_completed": true,
+    "target_received_stop_control": true,
+    "both_workspaces_removed": true,
+    "sibling_signal_denied": true,
+    "sibling_continue_denied": true,
+    "sibling_cwd_denied": true,
+    "sibling_workspace_denied": true,
+    "sibling_root_workspace_denied": true,
+    "sibling_descriptor_denied": true,
+    "target_received_no_sibling_signal": true,
+    "capacity_0_has_enforcing_jail": true,
+    "capacity_1_has_enforcing_jail": true,
+    "capacity_2_has_enforcing_jail": true,
+    "capacity_3_has_enforcing_jail": true,
+    "capacity_holders_have_distinct_uids": true,
+    "identity_exhaustion_refuses_without_fallback": true,
+    "identity_exhaustion_has_no_workspace_effect": true,
+    "identity-capacity-0_drained": true,
+    "identity-capacity-1_drained": true,
+    "identity-capacity-2_drained": true,
+    "identity-capacity-3_drained": true,
+    "drained_identity_reused": true,
+    "expiry_drains_and_removes_workspace": true,
+    "identity_available_after_expiry": true,
+    "spawn_failure_cleans_workspace": true,
+    "identity_available_after_spawn_failure": true,
+    "disconnect_has_enforcing_jail": true,
+    "disconnect_descendant_is_in_lease": true,
+    "disconnect_drains_descendants_and_workspace": true,
+    "identity_available_after_disconnect": true,
+    "ordinary_pipelining_preserves_both_requests": true,
+    "pipelined_workspaces_removed": true,
+    "crash_has_enforcing_jail": true,
+    "restart_drains_orphan_and_removes_workspace": true,
+    "restart_enforces": true,
+    "identity_available_after_restart": true,
+    "sources_unchanged_during_proof": true,
+    "test_pins_retired_after_drain": true,
+    "installed_service_restored": true
+  },
+  "verdict": "PASS",
+  "installedServiceWasActive": true,
+  "retiredIdlePinHash": "496cc634e06ee05f0c9382598f382beb19df1d9749989ebbb5feba4ba4dffea6",
+  "observations": {
+    "targetUid": 200000,
+    "attackerUid": 200001,
+    "operations": {
+      "own_workspace": true,
+      "own_child_signal": true,
+      "sibling_signal": {
+        "allowed": false,
+        "errno": 1
+      },
+      "sibling_continue": {
+        "allowed": false,
+        "errno": 1
+      },
+      "sibling_cwd": {
+        "allowed": false,
+        "errno": 13
+      },
+      "sibling_workspace": {
+        "allowed": false,
+        "errno": 13
+      },
+      "sibling_root_workspace": {
+        "allowed": false,
+        "errno": 13
+      },
+      "sibling_descriptor": {
+        "allowed": false,
+        "errno": 13
+      }
+    },
+    "target": {
+      "signals_received": 0,
+      "stopped": true
+    }
+  }
+}

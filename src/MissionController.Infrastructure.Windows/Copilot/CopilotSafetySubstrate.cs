@@ -126,7 +126,8 @@ public sealed class CopilotSafetySubstrate : ICopilotSafetySubstrate
                 jobSandbox: jobSandbox,
                 dropAdminPrivileges: policy.EnforceRestrictedToken,
                 timeoutSeconds: policy.TimeoutSeconds,
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken,
+                denyNetworkAccess: !policy.AllowNetworkEgress);
 
             bool isSuccess = procResult.ExitCode == 0 && !procResult.TimedOut;
 

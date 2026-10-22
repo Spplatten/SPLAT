@@ -1,4 +1,4 @@
-//! A secret step cannot share a UID with a sibling that can inspect its process memory.
+//! Leases and pending secret grants cannot share a UID with a sibling that can inspect them.
 
 use anyhow::{bail, Result};
 use std::sync::{Arc, Mutex};
@@ -12,11 +12,11 @@ pub struct IdentityPool {
 impl IdentityPool {
     pub fn reserved(start: u32, count: u32, legacy_uid: u32, legacy_gid: u32) -> Result<Self> {
         if start < 65536 || count == 0 || count > 256 || start.checked_add(count).is_none_or(|end| end == u32::MAX) {
-            bail!("secret identity range must contain 1..256 IDs above 65535, without overflow");
+            bail!("lease identity range must contain 1..256 IDs above 65535, without overflow");
         }
         for id in start..start + count {
             if id == legacy_uid || id == legacy_gid || account_exists(id)? {
-                bail!("secret identity range overlaps an existing account or the legacy workload identity");
+                bail!("lease identity range overlaps an existing account or the legacy workload identity");
             }
         }
         // An account-free range can still have a surviving process. Startup drains old lease
@@ -29,12 +29,12 @@ impl IdentityPool {
                     for line in status.lines().filter(|line| line.starts_with("Uid:") || line.starts_with("Gid:")) {
                         if line.split_whitespace().skip(1).filter_map(|id| id.parse::<u32>().ok())
                             .any(|id| (start..start + count).contains(&id)) {
-                            bail!("secret identity range is in use by an existing process");
+                            bail!("lease identity range is in use by an existing process");
                         }
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH) => {}
-                Err(_) => bail!("could not verify that the secret identity range is unused"),
+                Err(_) => bail!("could not verify that the lease identity range is unused"),
             }
         }
         Ok(Self::empty(start, count as usize))
@@ -46,7 +46,7 @@ impl IdentityPool {
 
     pub fn acquire(&self) -> Result<LeaseIdentity> {
         let mut used = self.used.lock().map_err(|_| anyhow::anyhow!("identity pool unavailable"))?;
-        let index = used.iter().position(|busy| !busy).ok_or_else(|| anyhow::anyhow!("secret step capacity exhausted"))?;
+        let index = used.iter().position(|busy| !busy).ok_or_else(|| anyhow::anyhow!("private lease identity capacity exhausted"))?;
         used[index] = true;
         Ok(LeaseIdentity { pool: self.clone(), index, spawned: false })
     }
@@ -91,7 +91,7 @@ impl Drop for LeaseIdentity {
         if !self.spawned {
             if let Ok(mut used) = self.pool.used.lock() { used[self.index] = false; }
         } else {
-            tracing::warn!("A secret workload identity remains quarantined after incomplete teardown");
+            tracing::warn!("A workload identity remains quarantined after incomplete teardown");
         }
     }
 }

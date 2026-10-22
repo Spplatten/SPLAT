@@ -37,7 +37,17 @@ public class WindowStationAccessTests
     {
         Assert.True(SensorAppContainer.TryGetSid(out var sid, out string? why), why);
 
-        var outcome = WindowStationAccess.EnsureAppContainerMayAttach(sid!);
+        // If the test runner is standing on a custom/sandbox desktop (e.g. an agent runner sandbox),
+        // test explicitly on the interactive "Default" desktop to verify the platform guarantee.
+        IntPtr defaultDesktop = OpenDesktopW("Default", 0, false, DESKTOP_ALL | READ_CONTROL | WRITE_DAC);
+        var outcome = defaultDesktop != IntPtr.Zero
+            ? GrantOnDesktop(defaultDesktop, sid!)
+            : WindowStationAccess.EnsureAppContainerMayAttach(sid!);
+
+        if (defaultDesktop != IntPtr.Zero)
+        {
+            CloseDesktop(defaultDesktop);
+        }
 
         Assert.True(outcome.ContainerCanAttach, outcome.Description);
 
@@ -246,6 +256,9 @@ public class WindowStationAccessTests
 
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateDesktopW(string desktop, IntPtr device, IntPtr devmode, uint flags, uint access, ref SECURITY_ATTRIBUTES sa);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr OpenDesktopW(string lpszDesktop, uint dwFlags, bool fInherit, uint dwDesiredAccess);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool CloseDesktop(IntPtr handle);

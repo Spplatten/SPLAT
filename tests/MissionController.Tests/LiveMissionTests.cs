@@ -36,18 +36,13 @@ namespace MissionController.Tests;
 /// The one thing the rest of the suite cannot do: run a mission against the real model, over the
 /// real network, and hold the resulting bundle to the same standard a stranger would.
 ///
-/// It needs a key, so it is inert without one, and it looks for that key exactly where the app does:
-/// the DPAPI vault the Settings screen writes to, then <c>ANTHROPIC_API_KEY</c>. Reading the vault
-/// is the point - it means a live run needs no secret on a command line, in a script, or in a
-/// terminal history, and it exercises the same path a user's own key takes.
-///
-///     # either: paste the key into SPLAT's Settings screen once, then
-///     dotnet test --filter FullyQualifiedName~LiveMissionTests
-///     # or, without the app:
-///     $env:ANTHROPIC_API_KEY = "..."
-///
-/// Every assertion below is on the live path; a run that only proved the skip would be worse than
-/// no test, so the skip is reported out loud rather than passing quietly.
+/// Every test is skipped unless <c>SPLAT_ALLOW_ANTHROPIC_TEST_REQUESTS=1</c>. Tests that send
+/// filtered host telemetry also require <c>SPLAT_ALLOW_HOST_TELEMETRY_TO_ANTHROPIC=1</c>;
+/// corpus recording additionally requires <c>SPLAT_RECORD_CORPUS=1</c>. A stored key is not consent.
+/// Opt-ins apply to requests to api.anthropic.com, including model credit usage. See the fixture
+/// recording guide before granting permission for the payload. Disabled tests are reported as
+/// skipped, never passed. An opted-in test without a key fails before collecting any telemetry.
+/// Keys are read from the Settings DPAPI vault, then <c>ANTHROPIC_API_KEY</c>, only after consent.
 /// </summary>
 [Collection(SerialProcessSpawning.Name)]
 public sealed class LiveMissionTests
@@ -56,25 +51,28 @@ public sealed class LiveMissionTests
 
     public LiveMissionTests(ITestOutputHelper output) => _out = output;
 
-    private static readonly DpapiCredentialVault Vault = new();
-
-    /// <summary>Whether a key is reachable at all - never the key itself, which is not read here.</summary>
-    private static async Task<bool> HaveKeyAsync()
-        => !string.IsNullOrWhiteSpace(await Vault.RetrieveSecretStringAsync(ClaudeStreamClient.ApiKeyVaultKey))
-           || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"));
-
-    private static ClaudeStreamClient NewClient()
+    private static async Task RequireKeyAsync(LiveAnthropicScope scope)
     {
-        var (http, firewall) = HardenedHttpClientFactory.CreateHardenedClient();
-        return new ClaudeStreamClient(http, firewall, Vault);
+        LiveAnthropicFactAttribute.RequireConsent(scope);
+        var vault = new DpapiCredentialVault();
+        Assert.True(!string.IsNullOrWhiteSpace(await vault.RetrieveSecretStringAsync(ClaudeStreamClient.ApiKeyVaultKey))
+            || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")),
+            "No Anthropic key is reachable; an opted-in live test cannot pass without a live request.");
     }
 
-    [Fact]
+    private static ClaudeStreamClient NewClient(LiveAnthropicScope scope)
+    {
+        LiveAnthropicFactAttribute.RequireConsent(scope);
+        var (http, firewall) = HardenedHttpClientFactory.CreateHardenedClient();
+        return new ClaudeStreamClient(http, firewall, new DpapiCredentialVault());
+    }
+
+    [LiveAnthropicFact(LiveAnthropicScope.Synthetic)]
     public async Task TheKeyReachesTheModel_AndTheFirstBytesArriveInsideTheStallWindow()
     {
-        if (!await HaveKeyAsync()) { _out.WriteLine("SKIPPED: no Anthropic key in the vault or the environment."); return; }
+        await RequireKeyAsync(LiveAnthropicScope.Synthetic);
 
-        var client = NewClient();
+        var client = NewClient(LiveAnthropicScope.Synthetic);
         var availability = await client.CheckAvailabilityAsync("claude-sonnet-5");
         Assert.True(availability.IsLive, availability.UnavailableReason);
 
@@ -104,10 +102,10 @@ public sealed class LiveMissionTests
         Assert.NotEqual(0, answer.Trim().Length);
     }
 
-    [Fact]
+    [LiveAnthropicFact(LiveAnthropicScope.HostTelemetry)]
     public async Task AWholeMission_RunsLive_AndItsSignedBundleVerifiesFromTheBundleAlone()
     {
-        if (!await HaveKeyAsync()) { _out.WriteLine("SKIPPED: no Anthropic key in the vault or the environment."); return; }
+        await RequireKeyAsync(LiveAnthropicScope.HostTelemetry);
 
         string dir = Path.Combine(Path.GetTempPath(), "splat-live-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -126,7 +124,7 @@ public sealed class LiveMissionTests
             var engine = new MissionExecutionEngine(
                 new NtAclJailManager(),
                 new SuspendedProcessLauncher(new RestrictedTokenProvider()),
-                NewClient(),
+                NewClient(LiveAnthropicScope.HostTelemetry),
                 ledger,
                 name => new Win32JobSandbox(name),
                 semanticMemoryIndex: null,
@@ -228,10 +226,10 @@ public sealed class LiveMissionTests
     /// The fixture is left in <c>SPLAT_RECORD_MISSIONS_DIR</c> when that is set, ready to be reviewed and
     /// promoted; otherwise in a temporary directory that is removed with the run.
     /// </summary>
-    [Fact]
+    [LiveAnthropicFact(LiveAnthropicScope.HostTelemetry)]
     public async Task TheCanary_ALargeTemplateRunsLive_AndItsRecordingReplaysToTheSameVerdict()
     {
-        if (!await HaveKeyAsync()) { _out.WriteLine("SKIPPED: no Anthropic key in the vault or the environment."); return; }
+        await RequireKeyAsync(LiveAnthropicScope.HostTelemetry);
 
         string templateId = Environment.GetEnvironmentVariable("SPLAT_CANARY_TEMPLATE") is { Length: > 0 } chosen
             ? chosen.Trim()
@@ -239,29 +237,26 @@ public sealed class LiveMissionTests
         await RecordAndReplayAsync(templateId);
     }
 
-    [Fact]
+    [LiveAnthropicFact(LiveAnthropicScope.Corpus)]
     public async Task TheCorpus_RecordsCurrentTemplatesSequentially_AndReplaysEveryLiveAnswer()
     {
         // Opt-in because this spends model credit and runs real sensors. Resume only from actual
         // current, accepted recordings; the coverage gate still requires reviewed promotion.
-        if (Environment.GetEnvironmentVariable("SPLAT_RECORD_CORPUS") != "1")
-        {
-            _out.WriteLine("SKIPPED: set SPLAT_RECORD_CORPUS=1 and SPLAT_RECORD_MISSIONS_DIR for a live sitting.");
-            return;
-        }
-        Assert.True(await HaveKeyAsync(), "No live model key is reachable.");
+        var templates = SelectCorpusTemplates(Environment.GetEnvironmentVariable(CorpusTemplatesVariable));
+        var parameters = SelectCorpusParameters(Environment.GetEnvironmentVariable(CorpusParametersVariable), templates);
+        await RequireKeyAsync(LiveAnthropicScope.Corpus);
         string directory = Environment.GetEnvironmentVariable(MissionFixtureDirectoryRecorder.EnvironmentVariable) ?? "";
         Assert.True(Path.IsPathFullyQualified(directory), "Recording requires an absolute private output directory.");
         Directory.CreateDirectory(directory);
         var failures = new List<string>();
-        foreach (var template in GovernedTemplateCatalog.All.OrderBy(t => t.TemplateId, StringComparer.Ordinal))
+        foreach (var template in templates)
         {
             var recorded = Directory.EnumerateFiles(directory, "*.json").Select(MissionFixture.Load).ToList();
             if (MissionCorpusTests.CoverageProblems(new[] { template }, recorded).Count == 0)
                 continue;
             try
             {
-                await RecordAndReplayAsync(template.TemplateId);
+                await RecordAndReplayAsync(template.TemplateId, parameters.GetValueOrDefault(template.TemplateId));
                 recorded = Directory.EnumerateFiles(directory, "*.json").Select(MissionFixture.Load).ToList();
                 failures.AddRange(MissionCorpusTests.CoverageProblems(new[] { template }, recorded));
             }
@@ -273,7 +268,52 @@ public sealed class LiveMissionTests
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
     }
 
-    private async Task RecordAndReplayAsync(string templateId)
+    internal const string CorpusTemplatesVariable = "SPLAT_RECORD_CORPUS_TEMPLATES";
+    internal const string CorpusParametersVariable = "SPLAT_RECORD_CORPUS_PARAMETERS";
+
+    internal static Dictionary<string, Dictionary<string, string>> SelectCorpusParameters(
+        string? json, IReadOnlyList<SingleToolTemplate> templates)
+    {
+        var result = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        if (json is null) return result;
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("Corpus parameters must map selected template IDs to string parameters.");
+        foreach (var entry in document.RootElement.EnumerateObject())
+        {
+            var template = templates.SingleOrDefault(t => t.TemplateId == entry.Name)
+                ?? throw new InvalidOperationException("Corpus parameters name a template outside the selected scope.");
+            var arguments = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (entry.Value.ValueKind != JsonValueKind.Object || !result.TryAdd(entry.Name, arguments))
+                throw new InvalidOperationException("Duplicate or invalid corpus parameter map.");
+            foreach (var parameter in entry.Value.EnumerateObject())
+                if (parameter.Value.ValueKind != JsonValueKind.String || !arguments.TryAdd(parameter.Name, parameter.Value.GetString()!))
+                    throw new InvalidOperationException("Corpus parameters require unique string fields.");
+            // Validate before collecting a sensor or checking a provider key; parameters confer no consent.
+            GovernedArgumentBinder.Bind(template, arguments);
+        }
+        return result;
+    }
+
+    internal static IReadOnlyList<SingleToolTemplate> SelectCorpusTemplates(string? selection)
+    {
+        var catalog = GovernedTemplateCatalog.All;
+        if (selection is null)
+            return catalog.OrderBy(t => t.TemplateId, StringComparer.Ordinal).ToArray();
+
+        // A malformed restriction must never fall back to collecting the entire machine's corpus.
+        string[] ids = selection.Split(',', StringSplitOptions.TrimEntries);
+        if (ids.Any(string.IsNullOrEmpty) || ids.Distinct(StringComparer.Ordinal).Count() != ids.Length)
+            throw new InvalidOperationException($"{CorpusTemplatesVariable} must contain distinct, nonempty template IDs.");
+        var unknown = ids.Except(catalog.Select(t => t.TemplateId), StringComparer.Ordinal).ToArray();
+        if (unknown.Length > 0)
+            throw new InvalidOperationException($"{CorpusTemplatesVariable} contains unknown template IDs: {string.Join(", ", unknown)}.");
+
+        return catalog.Where(t => ids.Contains(t.TemplateId, StringComparer.Ordinal))
+            .OrderBy(t => t.TemplateId, StringComparer.Ordinal).ToArray();
+    }
+
+    private async Task RecordAndReplayAsync(string templateId, Dictionary<string, string>? parameters = null)
     {
         var template = GovernedTemplateCatalog.All.Single(t => t.TemplateId == templateId);
 
@@ -291,7 +331,7 @@ public sealed class LiveMissionTests
             var engine = new MissionExecutionEngine(
                 new NtAclJailManager(),
                 new SuspendedProcessLauncher(new RestrictedTokenProvider()),
-                NewClient(),
+                NewClient(LiveAnthropicScope.HostTelemetry),
                 ledger,
                 name => new Win32JobSandbox(name),
                 semanticMemoryIndex: null,
@@ -304,7 +344,7 @@ public sealed class LiveMissionTests
 
             var clock = Stopwatch.StartNew();
             var chunks = new List<MissionChunk>();
-            await foreach (var chunk in engine.ExecuteMissionAsync(template, new Dictionary<string, string>(), "live-test-operator"))
+            await foreach (var chunk in engine.ExecuteMissionAsync(template, parameters ?? new Dictionary<string, string>(), "live-test-operator"))
             {
                 chunks.Add(chunk);
             }

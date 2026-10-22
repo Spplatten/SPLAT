@@ -5,6 +5,7 @@ using System.Linq;
 using MissionController.Infrastructure.Data.Audit;
 using MissionController.Infrastructure.Data.Compliance;
 using MissionController.Host;
+using MissionController.Infrastructure.Data.Catalog;
 
 namespace SplatMcp;
 
@@ -24,6 +25,9 @@ public abstract record McpServerCommand
 
     public static string Usage => $"""
         Usage: splat-mcp [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>] [--run-record-key <file>]
+               splat-mcp import-agent <reviewed-manifest.json>
+               splat-mcp --agent <id> --agent-version <approved-contract-sha256>
+               splat-mcp a2a --configuration <approved-a2a.json>
                splat-mcp doctor [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>] [--run-record-key <file>]
                splat-mcp provision [--apply] [--egress <a.b.c.d:port,...>]
                splat-mcp unmount [--apply] [--manifest <file>]
@@ -85,6 +89,15 @@ public abstract record McpServerCommand
                               is used; with neither, bundles are exported unsigned and say so.
           -h, --help          Show this and exit.
 
+          import-agent        Save a reviewed manifest and its compiled templates atomically;
+                              print the agent ID and immutable contract version. Does not execute.
+          a2a                 Serve one approved agent over loopback HTTPS using A2A 1.0 JSON-RPC.
+                              Configuration pins the contract and each caller's allowed skills.
+          --agent             Serve only this saved agent's tools. Generic execution, filesystem
+                              tools and nested orchestration are refused on this endpoint.
+          --agent-version     Required with --agent; pins the exact contract returned on import.
+                              Both Community and commercially licensed Corporate use this gate.
+
         """;
 
     public static McpServerCommand Parse(IReadOnlyList<string> args)
@@ -128,6 +141,13 @@ public abstract record McpServerCommand
 
         IReadOnlyList<string> options = doctor || provision || unmount || retain ? args.Skip(1).ToArray() : args;
 
+        if (args.Count > 0 && args[0] == "import-agent")
+        {
+            if (args.Count != 2 || args[1].StartsWith('-') || !File.Exists(args[1]))
+                return new UsageError("import-agent requires one existing reviewed manifest file.");
+            return new ImportAgent(Path.GetFullPath(args[1]));
+        }
+
         var given = new Dictionary<string, string>(StringComparer.Ordinal);
         for (int i = 0; i < options.Count; i++)
         {
@@ -165,7 +185,9 @@ public abstract record McpServerCommand
                 return new UsageError("--manifest is only for `splat-mcp unmount`.");
             }
 
-            if (option is not ("--workspace" or "--egress" or "--ledger-key" or "--run-record-key" or "--manifest"))
+            if (option is "--agent" or "--agent-version" && (doctor || provision || unmount || retain))
+                return new UsageError("Agent binding options apply only to the MCP server.");
+            if (option is not ("--workspace" or "--egress" or "--ledger-key" or "--run-record-key" or "--manifest" or "--agent" or "--agent-version"))
             {
                 return arg.StartsWith('-')
                     ? new UsageError($"unknown option '{arg}'.")
@@ -189,6 +211,7 @@ public abstract record McpServerCommand
                     "--workspace" => "--workspace needs a directory.",
                     "--ledger-key" => "--ledger-key needs the key file's path.",
                     "--run-record-key" => "--run-record-key needs the key file's path.",
+                    "--agent" or "--agent-version" => $"{option} needs a value.",
                     _ => "--egress needs a list of a.b.c.d:port endpoints.",
                 });
             }
@@ -279,9 +302,20 @@ public abstract record McpServerCommand
             return signingError;
         }
 
-        return given.TryGetValue("--workspace", out string? workspace)
+        var result = given.TryGetValue("--workspace", out string? workspace)
             ? ValidateWorkspace(workspace, egress, doctor, ledgerKey, runRecordKey)
             : Built(doctor, null, egress, ledgerKey, runRecordKey);
+        if (given.ContainsKey("--agent") || given.ContainsKey("--agent-version"))
+        {
+            try
+            {
+                AgentManifestApproval.ValidateSelection(given.GetValueOrDefault("--agent")!, given.GetValueOrDefault("--agent-version")!);
+            }
+            catch (InvalidOperationException ex) { return new UsageError(ex.Message); }
+            if (result is Serve serve)
+                result = serve with { AgentId = given["--agent"], AgentVersion = given["--agent-version"] };
+        }
+        return result;
     }
 
     /// <summary>
@@ -389,7 +423,10 @@ public abstract record McpServerCommand
     /// <see cref="Egress"/> is <see cref="McpEgressPolicy.None"/> when no --egress was, and
     /// <see cref="LedgerKeyPath"/> is null when the ledger is to chain unkeyed.
     /// </summary>
-    public sealed record Serve(string? WorkspaceRoot, McpEgressPolicy Egress, string? LedgerKeyPath = null, string? RunRecordKeyPath = null) : McpServerCommand;
+    public sealed record Serve(string? WorkspaceRoot, McpEgressPolicy Egress, string? LedgerKeyPath = null,
+        string? RunRecordKeyPath = null, string? AgentId = null, string? AgentVersion = null) : McpServerCommand;
+
+    public sealed record ImportAgent(string Path) : McpServerCommand;
 
     private static McpServerCommand Built(bool doctor, string? workspaceRoot, McpEgressPolicy egress, string? ledgerKey, string? runRecordKey) =>
         doctor

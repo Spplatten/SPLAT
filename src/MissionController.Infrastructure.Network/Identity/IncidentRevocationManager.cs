@@ -13,7 +13,6 @@ public sealed class IncidentRevocationManager : IIncidentRevocationManager
     private readonly IRevocationStore? _revocationStore;
     private readonly ConcurrentDictionary<string, RevocationEntry> _revocationIndex = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _loadGate = new(1, 1);
-    private volatile bool _loaded;
 
     public IncidentRevocationManager(IAuditLedger auditLedger, IRevocationStore? revocationStore = null)
     {
@@ -22,16 +21,13 @@ public sealed class IncidentRevocationManager : IIncidentRevocationManager
     }
 
     /// <summary>
-    /// Loads the persisted list once, and makes every caller wait for that load rather than only the
-    /// first one. A flag set before the read finishes would let a check that arrives during cold
-    /// start walk past an empty index and report a revoked principal as clear - the window is short,
-    /// and it is exactly the window an attacker whose credential was just revoked is in.
-    /// A load that fails leaves the flag down, so the next call retries rather than serving an index
-    /// it knows is incomplete.
+    /// Reload before each authorization so another host's revocation takes effect without restart.
+    /// Merge monotonically: a failed local persistence operation must not undo an emergency refusal.
+    /// A failed read refuses authorization instead of clearing a principal from a stale snapshot.
     /// </summary>
     private async ValueTask EnsureLoadedAsync(CancellationToken cancellationToken)
     {
-        if (_revocationStore is null || _loaded)
+        if (_revocationStore is null)
         {
             return;
         }
@@ -39,18 +35,12 @@ public sealed class IncidentRevocationManager : IIncidentRevocationManager
         await _loadGate.WaitAsync(cancellationToken);
         try
         {
-            if (_loaded)
-            {
-                return;
-            }
-
             var persisted = await _revocationStore.LoadRevocationsAsync(cancellationToken);
             foreach (var entry in persisted)
             {
                 _revocationIndex[entry.Identifier] = entry;
             }
 
-            _loaded = true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

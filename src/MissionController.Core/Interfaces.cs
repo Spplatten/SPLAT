@@ -579,7 +579,11 @@ public record LeaseSpec(
     // The daemon creates the working directory for this lease under its missions root, owned by
     // the workload, and removes it when the lease ends: a governed mission's jail, on the substrate
     // where only root in the guest can make one. False for a caller that names a directory it owns.
-    bool EphemeralWorkspace = false);
+    bool EphemeralWorkspace = false,
+    ExecutionPolicy? ExecutionPolicy = null,
+    bool RequireEnforcing = false,
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? ResolvedEgressHosts = null,
+    LeaseExecutionContext? ExecutionContext = null);
 
 /// <summary>
 /// What the daemon reported about the lease it installed, from its <c>LEASE</c> and <c>EXIT</c> frames:
@@ -627,7 +631,12 @@ public record LeaseOutcome(
     string? SignedOutcome = null,
     string? OutcomeSignature = null,
     string? OutcomeKeyId = null,
-    string? OutcomePublicKey = null);
+    string? OutcomePublicKey = null,
+    // A post-spawn daemon acknowledgement, not a field in the existing RSA-signed outcome v1.
+    string? ExecutionPolicySha256 = null,
+    string? ExecutionContextSha256 = null,
+    string? EffectivePolicySha256 = null,
+    bool? WorkloadDrained = null);
 
 /// <summary>
 /// What the daemon reported about a lease, in the vocabulary the run record reads. Every line is read
@@ -673,6 +682,13 @@ public static class LeaseControls
             controls.Add($"workload:uid={uid}");
         }
 
+        if (lease.ExecutionPolicySha256 is { } hash)
+            controls.Add($"execution-policy:landlock+seccomp-cbpf sha256={hash} " + (lease.ExecutionContextSha256 is null
+                ? "(guest acknowledgement; outside signed outcome v1)" : "(verified signed outcome v2)"));
+        if (lease.ExecutionContextSha256 is { } context)
+            controls.Add($"agent-context:sha256={context} effective-policy:sha256={lease.EffectivePolicySha256} (verified signed outcome v2)");
+        if (lease.WorkloadDrained == true) controls.Add("workload:drained (verified signed outcome v2)");
+
         if (lease.Workspace is { } workspace)
         {
             controls.Add(lease.WorkspaceCreated ? $"workspace:{workspace} (created by the daemon)" : $"workspace:{workspace}");
@@ -686,6 +702,12 @@ public static class LeaseControls
 /// Executes a tool command inside a hardware-isolated WSL2 guest VM under an in-kernel BPF-LSM capability lease.
 /// Do NOT overload IProcessLauncher (which is intrinsically Win32 job-object shaped).
 /// </summary>
+/// <summary>Retrieves terminal evidence only; a missing receipt never permits replaying a workload.</summary>
+public interface ILeaseReceiptLookup
+{
+    Task<LeaseOutcome?> RecoverReceiptAsync(LeaseSpec lease, CancellationToken ct = default);
+}
+
 public interface ILeasedExecutor
 {
     /// <param name="argv">

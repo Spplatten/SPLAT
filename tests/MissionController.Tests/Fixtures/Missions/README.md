@@ -11,25 +11,69 @@ those pieces fit is a regression test the moment the run that showed it is recor
 Three recording routes; promotion must check that a live model answered. The engine can also
 record a local simulation, which does not satisfy the corpus gate:
 
+`LiveMissionTests` skips every external request by default, even with a funded key in the vault.
+An operator must explicitly authorize the destination and payload before enabling a run:
+`SPLAT_ALLOW_ANTHROPIC_TEST_REQUESTS=1` permits the fixed synthetic check to contact
+`api.anthropic.com`. Real template tests additionally require
+`SPLAT_ALLOW_HOST_TELEMETRY_TO_ANTHROPIC=1`. Their filtered telemetry can still include network
+addresses, process paths/command lines, account names, scheduled tasks, services and DNS names.
+A funded key, output directory or corpus switch alone does not authorize either transfer.
+Set consent flags only for the approved test process; disabled tests are skipped, not passed.
+`LiveAnthropicConsentTests` exercises these gates using synthetic environment values without
+making requests. The guards recheck consent before vault access and live client construction.
+
 | Source | How |
 | --- | --- |
 | The console or `splat-mcp` | Set `SPLAT_RECORD_MISSIONS_DIR` to a directory before starting either. Every mission that reaches its analysis writes one file there. |
 | Runs the console has already done | `SPLAT_EXPORT_MISSION_FIXTURES=1 dotnet test --filter FullyQualifiedName~MissionReplayTests` reads the console's database (or `SPLAT_DB_PATH`) and writes one fixture per accepted live-model mission indexed today; `SPLAT_EXPORT_MISSION_FIXTURES_SINCE=yyyy-MM-dd` reaches further back. The sealed facts must name a live provider/model and an accepted analysis. Exported fixtures carry the accepted answer as the first attempt and no parameters or prompt hash, because the index did not retain those inputs or a rejected first attempt. |
-| The live canary | `LiveMissionTests` records its mission to `SPLAT_RECORD_MISSIONS_DIR` when set, and replays what it recorded before it passes. |
-| A full live sitting | Set `SPLAT_RECORD_CORPUS=1` and an absolute private `SPLAT_RECORD_MISSIONS_DIR`, then run only `LiveMissionTests.TheCorpus_RecordsCurrentTemplatesSequentially_AndReplaysEveryLiveAnswer`. It runs one sensor at a time, uses the real Linux substrate for guest templates, replays every answer, and resumes past current accepted recordings. It spends model credit; it never promotes recordings automatically. For an older installed app, point `SPLAT_DATA_DIR` at the data directory holding its vault. |
+| The live canary | With both Anthropic consent flags above explicitly enabled, `LiveMissionTests` records its mission to `SPLAT_RECORD_MISSIONS_DIR` when set, and replays what it recorded before it passes. |
+| A full live sitting | With both Anthropic consent flags above explicitly enabled, also set `SPLAT_RECORD_CORPUS=1` and an absolute private `SPLAT_RECORD_MISSIONS_DIR`, then run only `LiveMissionTests.TheCorpus_RecordsCurrentTemplatesSequentially_AndReplaysEveryLiveAnswer`. It runs one sensor at a time, uses the real Linux substrate for guest templates, replays every answer, and resumes past current accepted recordings. It spends model credit; it never promotes recordings automatically. For an older installed app, point `SPLAT_DATA_DIR` at the data directory holding its vault. |
 
 A recorded file is promoted by copying it here. Read it first: the telemetry is the machine's own,
 after the scrub, and it is what a stranger to that machine will read in this tree. The `Note`
 field is yours to say what the fixture guards.
 
+For approval limited to particular templates, set `SPLAT_RECORD_CORPUS_TEMPLATES` to their
+comma-separated IDs in the recording process. The corpus runner validates the complete selection
+before vault access or sensor collection; empty, duplicate and unknown IDs fail instead of falling
+back to the full catalog. Omitting this variable selects the full catalog and requires approval for
+that full payload scope. This restriction does not enable the other live tests: filter to the corpus
+test alone.
+
+For parameterized sensors, `SPLAT_RECORD_CORPUS_PARAMETERS` accepts a JSON object mapping only
+selected template IDs to their declared string parameters, for example
+`{"source-consumer-reviews":{"AppId":"570060128"}}`. Validation happens before sensor collection;
+it neither expands the selected templates nor grants consent to send their output.
+
 `MissionCorpusTests.EveryShippedTemplate_HasALiveRecordingOfItsCurrentDefinition` evaluates the
 shipped catalog and fails for every missing or stale recording. Simulations, rejected diagnoses,
 timed-out or empty sensors, and files without a recorded answer do not cover a template. Rejected
 runs can still guard regressions in the replay suite. A template change requires a fresh run, even if the old
-answer still replays. All 58 current templates were recorded against live models on 2026-10-05,
-including the four real guest leases, then replayed and redacted before promotion. The coverage
-and privacy gates pass. This holds the observed pipeline verdicts; it does not independently
-establish the accuracy of every diagnosis or cover other host conditions.
+answer still replays. The 2026-10-05 sitting recorded all 58 definitions then current, including
+the four real guest leases. On 2026-10-14, nine changed definitions were renewed: the eight public
+web probes now using real Linux leases, plus `sysops-time-sync` under the Windows sandbox. Their
+new files retain the genuine mission IDs, template/prompt hashes, sensor output, model attempts
+and verdicts. Both sensor and answer were reviewed; these nine required no identity redaction.
+The coverage, privacy and offline replay gates pass. Review notes explicitly retain observed model
+errors, including an invented partial-month flag and a response-format conflict. Passing these
+gates holds the observed pipeline verdicts; it does not establish diagnostic accuracy, guarantee
+compliance with every template-specific format, or cover other host conditions.
+
+On 2026-10-18, separate explicit permission covered only the three RARE Linux templates:
+`source-consumer-catalog`, `source-consumer-reviews` and `source-consumer-offers`. The scoped live
+run recorded one real Anthropic `claude-haiku-4-5` answer for each, then replayed every live verdict.
+The three reviewed files retain their genuine mission IDs and template/prompt hashes. One review
+title's personal first name and school name were replaced with same-width synthetic text; neither
+occurred in the answer. All model answers and verdicts remain unchanged, and no expectations were
+blessed. Coverage, privacy, replay and corpus adversarial checks passed 9/9 in
+`rare-corpus-validation-20261018.trx`.
+
+Their notes retain observed model errors: the catalog answer miscounts 17 cohorts/157 apps as
+16 topics/144 apps; the reviews answer miscounts rating groups and misattributes review IDs; the
+offers answer infers billing variants and omits required exact offer citations. These are genuine
+accepted pipeline outputs, not validated RARE publication drafts or evidence of resistance to a
+new prompt injection. The original recordings remain private; the promoted review IDs are public
+and retained for grounding, so title redaction is not a claim of anonymity.
 
 The catalog requires an explicit `Reasoned(...)` or `Plain(rationale, ...)` choice for every
 prompt. The plain rationale is stored beside the template in source. Changing that choice does

@@ -12,6 +12,25 @@ nothing on the far end consumed either one.
 
 Protocol version 3. Anything else is refused; see `main.rs`, and `docs/SCHEMA.md` for the frames.
 
+Optional execution policies on `EXECUTE_POLICY`, `EXECUTE_AGENT` and `EXECUTE_BOUND` have a separate
+[agent execution contract](EXECUTION_POLICY.md). The source/artifact-bound
+[agent proof](evidence/agent-manifest-probe.json) records 50/50 live checks; the matching
+[lifecycle proof](evidence/lease-isolation-agent-bridge.json) records 51/51. These measured-guest
+results do not establish clean-machine deployment or upgrade the baseline claims below.
+In particular, an explicit execution policy's generated seccomp filter refuses new AF_UNIX and
+AF_NETLINK sockets (`generated_filter_refuses_alternate_abis_unknown_calls_and_local_sockets`).
+The baseline local-IPC row still applies to leases without that policy; inherited descriptors
+and other IPC mechanisms are not thereby eliminated.
+
+The [A2A authority probe](evidence/a2a-authority-probe.json) records 114/114 checks for its named
+published host and daemon; [receipt details](evidence/a2a-authority-details.json) retain the signed
+outcomes. `EXECUTE_BOUND` requires enforcement and a signing key. Outcome v2 covers the exact
+execution-policy hash, effective native-policy hash, host-authenticated invocation identity and
+confirmed cgroup drain. Authenticated cancellation kills and drains before removing policy.
+Identity labels are supplied by the trusted host; this does not establish remote attestation or
+remove the guest-root/shared-daemon-credential trust boundary. The installed service was restored
+to its original binary after the proof; this is not evidence that the new package is deployed.
+
 ---
 
 ## Enforced in the kernel (BPF-LSM)
@@ -77,8 +96,8 @@ Linux results below do not establish those Windows boundaries.
 | **AF_UNIX / AF_NETLINK** | Local IPC is untouched. A per-socket allow-list keyed on the socket's inode is the real answer and does not exist. A leased tool can talk to any local daemon socket its uid can reach — including a resolver that answers over one, which is how a name lookup can still succeed on a host where `systemd-resolved` is reached that way rather than over UDP. |
 | **Raw and packet sockets** | Creating one needs `CAP_NET_RAW`, which a workload dropped to `nobody` does not have, so nothing policies it and nothing needs to. Not a claim about a workload that keeps capabilities: this daemon does not run one. |
 | **Inherited file descriptors** | The hooks fire on `open` and `connect`. A descriptor the tool inherits was opened by the daemon, before any of them ran. |
+| **Ordinary sibling leases sharing a UID** | The 2026-10-12 root run in `evidence/lease-isolation-before.json` confirmed a delivered `SIGUSR1` and reads of a synthetic sibling workspace through `/proc/<pid>/cwd`, `/proc/<pid>/root` and `/proc/<pid>/fd`. Separate BPF policy maps did not isolate those operations. A replacement identity boundary requires its own fresh probe. |
 | **Filesystem writes and reads outside the jail's contents** | Closed by the jail since 2026-09-20 (**root probe PASS** against `6fc637d8` on the 2026-10-12 run — `jail_*` and `read_only_fs_makes_workdir_read_only`): the workload's root holds the system directories read-only, its working directory, a fresh `/tmp`, `/proc` and six device nodes, and nothing else. `/etc` travels whole and read-only; what `nobody` may not read there is still denied by mode, and the inode deny-list still applies inside the jail because bind mounts keep inode identity. Before that run the deny-list was the boundary: on 2026-09-18, `nobody` read a public key in the Windows user's `.ssh` folder through `/mnt/c`. Two things close that today: `/mnt` is absent from the jail, and `splat-mcp provision --apply` now writes the `[automount]` umask of 077 into the guest's `/etc/wsl.conf` when it is missing, which shuts `nobody` out of the Windows drives for anything not jailed once WSL restarts. |
-| **Signals and `/proc` reach between two ordinary leases** | Every ordinary workload runs as the single `--workload-uid` (default 65534, `src/main.rs`), the jail unshares the mount namespace only (`CLONE_NEWNS`, `src/jail.rs`), and the `/proc` it mounts carries no `hidepid`. Two concurrent ordinary leases therefore share one pid namespace and see each other in `/proc`: at the shared uid, one can `kill(2)` the other's workload and passes `ptrace_may_access(PTRACE_MODE_READ_FSCREDS)` for it, so it can `readlink` and walk the other's `/proc/<pid>/cwd`, `/root` and `/fd` — into that lease's working directory and its `0700` mission workspace, to read and to write. A root run recorded this in `evidence/daemon-probe.json` (2026-10-12): `cross_lease_signal_reaches_a_peer_lease`, `cross_lease_peer_proc_cwd_readlinked`, `cross_lease_peer_proc_root_readlinked`, `cross_lease_peer_workspace_read_via_proc` and `cross_lease_peer_workspace_written_via_proc` are all true, with `cross_lease_control_ops_possible` the control that the operations are otherwise possible. A secret step is outside this: it is given a distinct uid from the reserved pool and a private IPC namespace (`src/identities.rs`, `src/execution.rs`), so the uid-keyed signal and `/proc` credential checks fail across its boundary. |
 
 ## What has been proven, and where
 

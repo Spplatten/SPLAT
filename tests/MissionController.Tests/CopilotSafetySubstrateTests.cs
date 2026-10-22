@@ -157,6 +157,7 @@ public class CopilotSafetySubstrateTests
         Assert.NotEmpty(mockLedger.Entries);
         Assert.Equal("COPILOT_TOOL_SUCCESS", mockLedger.Entries[^1].Action);
         Assert.NotNull(result.MerkleEntryHash);
+        Assert.True(mockLauncher.DenyNetworkAccess);
     }
 
     [Fact]
@@ -224,21 +225,21 @@ public class CopilotSafetySubstrateTests
             jailManager: mockJailManager,
             auditLedger: mockLedger);
 
-        var filter = new SplatCopilotInvocationFilter(substrate, _defaultPolicy);
+        var filter = new SplatCopilotInvocationFilter(substrate, _defaultPolicy, bindings:
+            [CommandBinding("WindowsDiagnosticsPlugin", "CheckServiceHealth")]);
 
         var skContext = new SplatFunctionInvocationContext(
             PluginName: "WindowsDiagnosticsPlugin",
             FunctionName: "CheckServiceHealth",
             Arguments: new Dictionary<string, object?>
             {
-                ["command"] = "powershell.exe",
                 ["arguments"] = "Get-Service -Name W32Time"
             },
             SessionId: Guid.NewGuid(),
             AgentId: "copilot-agent",
             OperatorIdentity: "corp\\alice");
 
-        var result = await filter.InterceptAndExecuteAsync(skContext, () => Task.FromResult("fallback"));
+        var result = await filter.InterceptAndExecuteAsync(skContext);
 
         Assert.True(result.IsSuccess);
         Assert.Contains("Service Status: Running", result.StandardOutput);
@@ -258,14 +259,14 @@ public class CopilotSafetySubstrateTests
             jailManager: mockJailManager,
             auditLedger: mockLedger);
 
-        var filter = new SplatCopilotInvocationFilter(substrate, _defaultPolicy);
+        var filter = new SplatCopilotInvocationFilter(substrate, _defaultPolicy, bindings:
+            [CommandBinding("FilePlugin", "ReadSecret")]);
 
         var skContext = new SplatFunctionInvocationContext(
             PluginName: "FilePlugin",
             FunctionName: "ReadSecret",
             Arguments: new Dictionary<string, object?>
             {
-                ["command"] = "powershell.exe",
                 ["arguments"] = @"Get-Content C:\Windows\System32\config\SAM"
             },
             SessionId: Guid.NewGuid(),
@@ -273,7 +274,7 @@ public class CopilotSafetySubstrateTests
             OperatorIdentity: "corp\\alice");
 
         await Assert.ThrowsAsync<SecurityException>(() =>
-            filter.InterceptAndExecuteAsync(skContext, () => Task.FromResult("fallback")));
+            filter.InterceptAndExecuteAsync(skContext));
     }
 
     [Fact]
@@ -426,6 +427,9 @@ public class CopilotSafetySubstrateTests
         }
     }
 
+    private static SplatFunctionBinding CommandBinding(string plugin, string function) =>
+        new(plugin, function, "powershell.exe", ["arguments"], args => (string)args["arguments"]!);
+
     // ─────────────────────────────────────────────────────────────────────────────
     // Test Mocks & Doubles
     // ─────────────────────────────────────────────────────────────────────────────
@@ -436,6 +440,7 @@ public class CopilotSafetySubstrateTests
         private readonly string _stdout;
         private readonly string _stderr;
         public int LaunchCount { get; private set; }
+        public bool DenyNetworkAccess { get; private set; }
 
         public MockProcessLauncher(int exitCode, string stdout, string stderr)
         {
@@ -456,6 +461,7 @@ public class CopilotSafetySubstrateTests
             CancellationToken cancellationToken = default, bool denyNetworkAccess = false)
         {
             LaunchCount++;
+            DenyNetworkAccess = denyNetworkAccess;
             var metrics = new JobResourceMetrics(1024 * 1024, 512 * 1024, 10, 20, 1);
             return Task.FromResult(new ProcessExecutionResult(_exitCode, _stdout, _stderr, false, metrics));
         }

@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-10-13T20:33:28Z",
+  "verdict": "COMPONENT_PASS_DEPLOYMENT_UNPROVEN",
+  "requestType": "EXECUTE_POLICY",
+  "protocolVersion": 3,
+  "kernel": "6.18.33.2-microsoft-standard-WSL2",
+  "architecture": "x86_64",
+  "landlockAbi": 7,
+  "minimumLandlockAbi": 5,
+  "generatedPolicyBackend": "seccomp-classic-bpf",
+  "nativeRegression": { "passed": 95, "failed": 0, "ignored": 10 },
+  "executionPolicyChecks": {
+    "contract_cannot_be_smuggled_through_legacy_or_non_enforcing_requests": true,
+    "broad_or_ambiguous_contracts_are_refused_before_kernel_setup": true,
+    "generated_filter_refuses_alternate_abis_unknown_calls_and_local_sockets": true,
+    "kernel_file_and_syscall_contract_is_enforced_and_inherited": true,
+    "kernel_missing_symlink_and_wrong_kind_grants_prevent_execution": true,
+    "kernel_catalog_manifest_reads_only_the_declared_inputs": true,
+    "root_jail_privilege_drop_and_generated_policy_compose": true
+  },
+  "kernelChecksRunSeparatelyFromIgnoredInventory": 4,
+  "managedBridgeChecks": {
+    "passed": 91,
+    "failed": 0,
+    "resultFile": "tests/MissionController.Tests/TestResults/agent-execution-contracts.trx",
+    "scope": "Manifest import, database reload, template-to-lease compilation, authenticated stand-in wire protocol, policy acknowledgement and existing lease regressions"
+  },
+  "discoveryChecks": {
+    "passed": 3,
+    "failed": 0,
+    "realCatalogTraceReproducedExampleSyscalls": true,
+    "linuxUapiSyscallMappingsChecked": 124,
+    "candidateStatus": "candidate-needs-review",
+    "executable": "/usr/lib/cargo/bin/coreutils/cat",
+    "executableSha256AtReview": "f84e76ea4da1e0c4e92254bd0d7dccdabe2c8b3098e734f27997dae3ee5d8e02",
+    "traceSha256": "d92c44a9c749061c1f5155f75acf426ae2d388acc2e717d69ae1e2cd1a2c8157",
+    "traceRetained": false,
+    "addedLaunchSyscalls": ["write"]
+  },
+  "builds": {
+    "managedTests": "PASS, zero warnings and errors",
+    "winUi": "PASS, zero warnings and errors",
+    "nativeTestHarness": "PASS",
+    "nativeTestHarnessSha256": "1bbddba2b9bfa7a2f8bd8e75182cd3c94e6a6d38f8957993f0f48026e664bf51",
+    "managedTestAssemblySha256": "6673a676cecff738db9549485e5b376e04dd20c9e470e281b73141762ec4e215",
+    "winUiAssemblySha256": "bc244a3de8b630857e10a3b2943a51491e991c5b1ad515cb941c9bdb99ca019d"
+  },
+  "sha256Utf8LfSelectedSources": {
+    "native/splat-agent/src/execution_policy.rs": "98276065a043578d92dea1717c53c9e1bb74836d1b36c7c0b91ad7ea8bf084ec",
+    "native/splat-agent/src/main.rs": "efecf3fdb0521abd4a1977ba6c042e416d932078782ac1d2aad185ab9620ed9f",
+    "native/splat-agent/src/jail.rs": "30e04f9622e9b2efbcb330851c6d876726ca21632213ab73b0b544ed5b607425",
+    "native/splat-agent/src/execution.rs": "3fba500d2874506a585dd3e6e3549efefd9cdfe2256dfc98e0820457615d670b",
+    "native/splat-agent/Cargo.toml": "bf8c83fead307a3df6352bf688dab35c10ca9d668a68ffe0a7255cf85cdada6f",
+    "native/splat-agent/Cargo.lock": "2bcaf2a5865890eef403eb2f4d925dd6368cc525ad28972bdd8d46ce9a9f31d9",
+    "src/MissionController.Core/ExecutionPolicy.cs": "2f6921587402ddf703a2e34227535fb0a6506f33f1543739f11137dbe37f92c3",
+    "src/MissionController.Core/Models.cs": "adf51967bd278d09a7a667bbd5f20720fcc74ddcd24027cb1b6b83838467779f",
+    "src/MissionController.Core/Interfaces.cs": "f085b05c4f1472b5bd03f3a5be35673b795ef52763ebf5fa6fda5fa4f53ced0c",
+    "src/MissionController.Infrastructure.Data/Catalog/AgentManifestCompiler.cs": "277750e0061283cfd9f8e64bf53ae6ae6cb60899cedce173d7baf617a4028a13",
+    "src/MissionController.Infrastructure.Data/Catalog/DerivedTemplateGuard.cs": "25d914a144799aebcc10b69979157bd7741507389158c803a3ffa956c20a015b",
+    "src/MissionController.Infrastructure.Linux/TemplatePolicyCompiler.cs": "3e543c03bdb664e1dec446146c128fa22c1c2a711972df046f8abcb9ec444fb8",
+    "src/MissionController.Infrastructure.Linux/WslLeasedExecutor.cs": "44ac5d6f59972163df984faaabf243d6e9b4da04e9ed2be1b9318262baf93aaf",
+    "examples/agent-manifests/guest-identity.contract.json": "5e4ee8c3ae0f4ce58617d94afa6b767b66de05269c1c48def0f7a4cd5c41248d",
+    "packaging/infer-execution-policy.py": "b593c75042f03ae9b343dc7948f59583a1db462996182778a68c24fe11cd29d2"
+  },
+  "commands": [
+    "cargo test --locked --offline --quiet",
+    "cargo test --locked --offline execution_policy::tests -- --include-ignored --skip root_jail_privilege_drop_and_generated_policy_compose --nocapture",
+    "as root: target/debug/deps/splat_agent-49ca0816ba59bf1d execution_policy::tests::root_jail_privilege_drop_and_generated_policy_compose --ignored --nocapture",
+    "python3 packaging/test_infer_execution_policy.py"
+  ],
+  "limitations": [
+    "No new installed-daemon, packaged-executable, clean-machine, or authenticated MCP-to-enforcing-daemon proof was performed.",
+    "The installed service and BPF pins were not changed by these component checks.",
+    "The separate ordinary-lease disconnect-cleanup proof remains a release requirement.",
+    "Discovery extracts observed calls, not a complete specification from arbitrary code or MCP schemas.",
+    "The generated filter is classic seccomp BPF, not generated Rust or a new eBPF-LSM program.",
+    "File grants cover existing regular files visible in the jail, with explicit read/execute directory grants for runtime dependencies; they do not bind new host paths into the jail.",
+    "Metadata, inherited descriptors and permitted output channels remain outside the file-open claim.",
+    "Landlock and seccomp denials are not counted in the existing BPF ring-buffer telemetry.",
+    "POLICY_APPLIED acknowledges successful pre-exec installation but is outside the existing RSA-signed outcome format.",
+    "The guest-specific example must be reviewed for runtime path or library-version changes."
+  ]
+}

@@ -163,7 +163,7 @@ internal static class ManagedBridgeHost
             string? tool = executeLease ? "execute_lease" : checkSubstrate ? "check_substrate" :
                 request.Params is { } parameters && parameters.TryGetProperty("name", out var name)
                 && name.ValueKind == JsonValueKind.String ? name.GetString() : null;
-            if (tool is null || (!executeLease && !checkSubstrate && !AllowedTools.Contains(tool)))
+            if (tool is null || (!handler.IsAgentBound && !executeLease && !checkSubstrate && !AllowedTools.Contains(tool)))
                 return new McpJsonRpcMessage { JsonRpc = "2.0", Id = request.Id,
                     Error = new McpError { Code = -32601, Message = "This managed service exposes Linux lease tools and substrate health only." } };
             var actor = await identity.ResolveAsync(ct);
@@ -193,7 +193,7 @@ internal static class ManagedBridgeHost
                         Result = JsonSerializer.SerializeToElement(await checkManaged(ct)) };
         }
         var response = await handler.ProcessMessageAsync(request, ct);
-        if (request.Method == "tools/list" && response.Result is { } result)
+        if (!handler.IsAgentBound && request.Method == "tools/list" && response.Result is { } result)
         {
             var tools = result.GetProperty("tools").EnumerateArray()
                 .Where(tool => AllowedTools.Contains(tool.GetProperty("name").GetString() ?? "")).Select(tool => tool.Clone()).ToArray();

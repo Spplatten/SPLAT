@@ -1,0 +1,63 @@
+{
+  "Schema": 1,
+  "MissionId": "59fd7089-06f2-4965-8592-4b5bbeaab79c",
+  "RecordedAtUtc": "2026-10-14T23:25:47.7398949Z",
+  "RecordedBy": "LiveMissionTests canary",
+  "TemplateId": "grants-opportunity-ingestion",
+  "TemplateName": "Grant Opportunity Ingestion",
+  "TemplateSha256": "sha256:1a8f9ae09f0e657b0ee98eaba4e7d9e14f920987710fa4d2d37970e28e426fae",
+  "Parameters": {},
+  "Model": "Anthropic/claude-haiku-4-5",
+  "SystemPromptSha256": "d5be07473828a80cd3316fac2b76cd39d5deca756b22f860d13dc0a20e74b5df",
+  "Sensor": {
+    "ExitCode": 0,
+    "TimedOut": false,
+    "Stdout": "Endpoint: https://api.grants.gov/\nRead-only public source probe. No credential is presented. Returned data is untrusted.\nHTTP_STATUS: 200\nAPI_STATUS: errorcode=0 msg=Webservice Succeeds\nTOTAL_MATCHING_PROGRAMS: 270\nRETURNED_THIS_PAGE: 25\nIDX: 1\nOPP_NUMBER: 26-503\nTITLE: Artificial Intelligence and Cybersecurity Education Innovation and Scholarship for Service (CyberAI SFS)\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 02/04/2026\nCLOSE: 04/05/2027\nIDX: 2\nOPP_NUMBER: 25-531\nTITLE: Cybersecurity Innovation for Cyberinfrastructure (CICI)\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 01/04/2025\nCLOSE: 01/20/2027\nIDX: 3\nOPP_NUMBER: 26-506\nTITLE: Pathways to Enable Secure Open-Source Ecosystems (PESOSE)\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 02/19/2026\nCLOSE: 03/02/2027\nIDX: 4\nOPP_NUMBER: 21-595\nTITLE: Tribal Colleges and Universities Program (TCUP)\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 06/24/2021\nCLOSE: 10/14/2026\nIDX: 5\nOPP_NUMBER: PD-19-127Y\nTITLE: Science of Learning and Augmented Intelligence (SL)\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 09/19/2019\nCLOSE: 02/10/2027\nIDX: 6\nOPP_NUMBER: 24-554\nTITLE: Artificial Intelligence, Formal Methods, and Mathematical Reasoning (AIMing)\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 10/13/2026\nCLOSE: \nIDX: 7\nOPP_NUMBER: G27AS00079\nTITLE: Cooperative Agreement for Affiliated Partner with the Great Lakes-Northern Forest Cooperative Ecosystem Studies Unit (CESU)\nAGENCY: Geological Survey\nSTATUS: posted\nOPEN: 10/14/2026\nCLOSE: 11/14/2026\nIDX: 8\nOPP_NUMBER: 26-504\nTITLE: Postdoctoral Research Fellowships in Biology (PRFB)\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 02/05/2026\nCLOSE: 09/28/2027\nIDX: 9\nOPP_NUMBER: 26-512\nTITLE: Unlocking Dataset Value for AI-Enabled Scientific Discovery (AI Datasets)\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 07/21/2026\nCLOSE: 11/04/2026\nIDX: 10\nOPP_NUMBER: 26-507\nTITLE: National Science Foundation Fostering Interdisciplinary Networks to Develop Emergent and Responsive Solutions Foundry (NSF FINDERS FOUNDRY)\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 03/23/2026\nCLOSE: 11/18/2026\nIDX: 11\nOPP_NUMBER: RFA-DE-27-001\nTITLE: Community Engagement Evaluation and Data Coordination (CEED) Hub to Advance Data and Practice Transformation for Optimizing Oral Health for All (U01, Clinical Trial Not Allowed)\nAGENCY: National Institutes of Health\nSTATUS: posted\nOPEN: 04/27/2026\nCLOSE: 10/19/2026\nIDX: 12\nOPP_NUMBER: PAR-27-015\nTITLE: Community-Based Participatory Research to Advance Data and Practice Transformation (ADAPT) for Optimizing Oral Health for All (UG3/UH3 Clinical Trial Optional)\nAGENCY: National Institutes of Health\nSTATUS: posted\nOPEN: 04/27/2026\nCLOSE: 11/16/2028\nIDX: 13\nOPP_NUMBER: RFA-RM-27-013\nTITLE: Model-to-Clinic (M2C) for Precision Medicine with AI: Integrating Imaging with Multimodal Data (PRIMED-AI) (UG3/UH3, Clinical Trial Optional)\nAGENCY: National Institutes of Health\nSTATUS: posted\nOPEN: 06/30/2026\nCLOSE: 10/19/2026\nIDX: 14\nOPP_NUMBER: RFA-RM-27-012\nTITLE: PRIMED-AI: Data-to-Model Academic-Industrial Partnerships (D2M-AIP) for Precision Medicine with AI: Integrating Imaging with Multimodal Data (UG3/UH3 Clinical Trial Optional)\nAGENCY: National Institutes of Health\nSTATUS: posted\nOPEN: 06/30/2026\nCLOSE: 10/19/2026\nIDX: 15\nOPP_NUMBER: RFA-AR-28-001\nTITLE: NIAMS P30 Centers Program (P30 - Clinical Trial Not Allowed)\nAGENCY: National Institutes of Health\nSTATUS: posted\nOPEN: 10/09/2026\nCLOSE: 03/01/2029\nIDX: 16\nOPP_NUMBER: PAR-26-040\nTITLE: Advancing Bioinformatics, Translational Bioinformatics and Computational Biology Research (R01 Clinical Trial Optional)\nAGENCY: National Institutes of Health\nSTATUS: posted\nOPEN: 02/11/2026\nCLOSE: 03/05/2029\nIDX: 17\nOPP_NUMBER: W911NF-20-S-0008\nTITLE: UNITED STATES MILITARY ACADEMY Broad Agency Announcement\nAGENCY: Dept of the Army -- Materiel Command\nSTATUS: posted\nOPEN: 04/01/2020\nCLOSE: 03/31/2027\nIDX: 18\nOPP_NUMBER: DE-FOA-0003612\nTITLE: The Genesis Mission:  Transforming Science and Energy with AI\nAGENCY: Office of Science\nSTATUS: posted\nOPEN: 03/17/2026\nCLOSE: 12/17/2026\nIDX: 19\nOPP_NUMBER: HM047623BAA0001\nTITLE: Boosting Innovative GEOINT - Science &amp; Technology  Broad Agency Announcement (BIG-ST BAA)\nAGENCY: National Geospatial-Intelligence Agency \nSTATUS: posted\nOPEN: 12/15/2023\nCLOSE: 12/14/2026\nIDX: 20\nOPP_NUMBER: USDA-NIFA-TCRGP-011697\nTITLE: Tribal Colleges Research Grants Program\nAGENCY: National Institute of Food and Agriculture\nSTATUS: posted\nOPEN: 04/22/2026\nCLOSE: 12/31/2026\nIDX: 21\nOPP_NUMBER: PD-24-1340\nTITLE: Research in the Formation of Engineers\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 09/17/2023\nCLOSE: \nIDX: 22\nOPP_NUMBER: 20-544\nTITLE: Expeditions in Computing\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 02/14/2020\nCLOSE: 03/31/2027\nIDX: 23\nOPP_NUMBER: PD-26-367Y\nTITLE: Chemical Process Systems (CPS)\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 04/24/2026\nCLOSE: \nIDX: 24\nOPP_NUMBER: PD-26-366Y\nTITLE: Transport Phenomena (TP)\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 04/24/2026\nCLOSE: 08/20/2076\nIDX: 25\nOPP_NUMBER: 26-514\nTITLE: Engineering (ENG): Electrical, Communications, and Computing Systems (ECCS)\nAGENCY: U.S. National Science Foundation\nSTATUS: posted\nOPEN: 08/17/2026\nCLOSE: 10/05/2076\n",
+    "Stderr": "",
+    "RedactionCount": 0,
+    "RedactedCategories": [],
+    "AppliedControls": [
+      "lease:enforcing",
+      "cgroup:/sys/fs/cgroup/splat_leases/mission_59fd7089-06f2-4965-8592-4b5bbeaab79c",
+      "jail:mount-namespace",
+      "workload:uid=200000",
+      "workspace:/var/lib/splat/missions/59fd708906f2496585924b5bbeaab79c (created by the daemon)"
+    ]
+  },
+  "Attempts": [
+    {
+      "Index": 0,
+      "Model": "claude-haiku-4-5",
+      "Response": "# ANALYSIS FOR OPERATOR\n\nThe retrieval succeeded (HTTP 200, API errorcode=0) and returned 25 opportunities from a total matching set of 270 programs—this is a 9% sample, and the shortlist is **substantially truncated**. The operator directive names no applicant sector, so ranking cannot be performed: without sector context (e.g., higher education, tribal institution, AI research, defense contracting), fit assessment is impossible. Critical data quality issues are present: multiple records lack close dates (IDX 6, 21, 23), one record shows a closing date of 2076 (IDX 24, 25)—almost certainly data errors—and several records carry open dates from 2019–2021, suggesting stale entries. All close dates and eligibility statements must be verified against the live solicitation before any application decision.\n\n---\n\n```json\n{\n  \"status\": \"Warning\",\n  \"headline\": \"Truncated opportunity sample retrieved; missing applicant sector prevents ranking; multiple records contain implausible or missing close dates requiring verification\",\n  \"findings\": [\n    \"Retrieved 25 opportunities from TOTAL_MATCHING_PROGRAMS=270 (8.3% sample); operator directive names no applicant sector, making fit-based ranking impossible\",\n    \"Four records lack close dates entirely (OPP 24-554, PD-24-1340, PD-26-367Y); two records show close dates of 08/20/2076 and 10/05/2076 (IDX 24, 25)—implausible end-dates indicating data error\",\n    \"Six records carry open dates from 2019–2021 (PD-19-127Y, W911NF-20-S-0008, 20-544, HM047623BAA0001 opened 12/15/2023) suggesting stale or perpetually-rolling solicitations; verification required\",\n    \"Feed-level close dates and eligibility text are frequently abridged; all records flagged for full solicitation review before reliance\"\n  ],\n  \"recommendedActions\": [\n    \"Provide applicant sector (e.g., 'higher education,' 'small business,' 'tribal institution,' 'national laboratory') to enable ranking by fit\",\n    \"Verify close dates against live Grants.gov solicitations for records with missing or implausible dates (IDX 6, 21, 23, 24, 25)\",\n    \"Confirm status of records with open dates >4 years old (PD-19-127Y from 2019, W911NF-20-S-0008 from 2020, 20-544 from 2020) to determine if they are rolling or expired\",\n    \"Request a second page of results to expand the candidate pool beyond this 9% sample\"\n  ]\n}\n```",
+      "LatencyMs": 8799,
+      "Quadrant": "QuadrantI_Pass",
+      "X": 1,
+      "Y": 0.9937499999999999
+    }
+  ],
+  "Expected": {
+    "Accepted": true,
+    "ExecutionState": "Completed",
+    "EscalationTriggered": false,
+    "OutputSha256": "a7ee955e54bc96e4e6f7664eeedfb6eaf96b10ab90c6f0a45f4074231a8a744b",
+    "Status": "Warning",
+    "Headline": "Truncated opportunity sample retrieved; missing applicant sector prevents ranking; multiple records contain implausible or missing close dates requiring verification",
+    "Findings": [
+      "⚠ Retrieved 25 opportunities from TOTAL_MATCHING_PROGRAMS=270 (8.3% sample); operator directive names no applicant sector, making fit-based ranking impossible",
+      "⚠ Four records lack close dates entirely (OPP 24-554, PD-24-1340, PD-26-367Y); two records show close dates of 08/20/2076 and 10/05/2076 (IDX 24, 25)—implausible end-dates indicating data error",
+      "⚠ Six records carry open dates from 2019–2021 (PD-19-127Y, W911NF-20-S-0008, 20-544, HM047623BAA0001 opened 12/15/2023) suggesting stale or perpetually-rolling solicitations; verification required",
+      "⚠ Feed-level close dates and eligibility text are frequently abridged; all records flagged for full solicitation review before reliance"
+    ],
+    "RecommendedActions": [
+      "Provide applicant sector (e.g., 'higher education,' 'small business,' 'tribal institution,' 'national laboratory') to enable ranking by fit",
+      "Verify close dates against live Grants.gov solicitations for records with missing or implausible dates (IDX 6, 21, 23, 24, 25)",
+      "Confirm status of records with open dates >4 years old (PD-19-127Y from 2019, W911NF-20-S-0008 from 2020, 20-544 from 2020) to determine if they are rolling or expired",
+      "Request a second page of results to expand the candidate pool beyond this 9% sample"
+    ],
+    "Grounded": 3,
+    "PartiallyGrounded": 0,
+    "Unsupported": 0,
+    "Unattributed": 1
+  },
+  "Note": "Reviewed 2026-10-14: fresh execution of the current Linux-lease template with a real Anthropic answer; public-source sensor output and every answer reviewed for host identity and credentials. No identity redaction was needed. This fixture preserves the observed pipeline verdict, not an independent endorsement of the diagnosis. Known model errors retained: inconsistent sample percentages and counts of missing dates; these are not validated by the acceptance verdict."
+}
