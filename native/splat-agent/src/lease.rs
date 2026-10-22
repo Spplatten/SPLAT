@@ -127,9 +127,23 @@ pub struct ActiveLease {
     /// the policy - a reaper holding only a cgroup id can unpolice a process but cannot stop it.
     pub cgroup_path: PathBuf,
     pub expires_at: Instant,
+    /// The same deadline on CLOCK_BOOTTIME, as the kernel program compares it. `expires_at` drives
+    /// the reaper's kill; this ends the lease's authority even when no reaper is running.
+    pub deadline_boot_ns: u64,
     pub protected_inodes: Vec<InodeKey>,
     pub allowed_exec_inodes: Vec<InodeKey>,
     pub allowed_endpoints: Vec<Ipv4Endpoint>,
+}
+
+/// CLOCK_BOOTTIME in nanoseconds: the clock `bpf_ktime_get_boot_ns()` reads, which keeps counting
+/// through suspend. A deadline written on any other clock would not mean the same instant in the kernel.
+pub fn boot_clock_ns() -> Result<u64> {
+    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    // SAFETY: clock_gettime writes one timespec through a valid pointer and reads nothing else.
+    if unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut ts) } != 0 {
+        bail!("clock_gettime(CLOCK_BOOTTIME): {}", std::io::Error::last_os_error());
+    }
+    Ok(ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64)
 }
 
 pub fn bytes_of<T: Copy>(v: &T) -> &[u8] {
@@ -281,6 +295,7 @@ impl LeaseManager {
             cgroup_id,
             cgroup_path,
             expires_at: now + duration,
+            deadline_boot_ns: boot_clock_ns()?.saturating_add(duration.as_nanos() as u64),
             protected_inodes,
             allowed_exec_inodes,
             allowed_endpoints,
@@ -654,6 +669,7 @@ mod isolation_tests {
             cgroup_id,
             cgroup_path: PathBuf::from(format!("/sys/fs/cgroup/splat_leases/mission_m-{cgroup_id}")),
             expires_at: now + Duration::from_secs(30),
+            deadline_boot_ns: boot_clock_ns().unwrap() + 30_000_000_000,
             protected_inodes: protected,
             allowed_exec_inodes: exec,
             allowed_endpoints: endpoints,

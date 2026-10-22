@@ -19,6 +19,9 @@ pub struct RawViolationEvent {
 // 56 by the u64s' alignment. The drain casts the ring buffer record straight to this type, so a
 // layout that drifted would read the pid out of the hook and never say so. The lease keys already
 // fail the build this way; this was the one struct crossing that boundary that did not.
+/// Mirrors HOOK_EXPIRED_FLAG in the program: the denial came from an expired lease, not its rules.
+pub const HOOK_EXPIRED_FLAG: u32 = 0x100;
+
 const _: () = assert!(std::mem::size_of::<RawViolationEvent>() == 56);
 const _: () = assert!(std::mem::align_of::<RawViolationEvent>() == 8);
 
@@ -44,7 +47,17 @@ impl ViolationEvent {
         let comm_len = raw.comm.iter().position(|&b| b == 0).unwrap_or(16);
         let comm = String::from_utf8_lossy(&raw.comm[0..comm_len]).to_string();
 
+        // HOOK_EXPIRED_FLAG in the program: refused because the lease's deadline had passed, whatever
+        // its rules allowed. The kernel enforces that even while no daemon is alive to reap it.
+        let expired_hook = match raw.hook & !HOOK_EXPIRED_FLAG {
+            1 => "bprm_check_security",
+            2 => "file_open",
+            3 => "socket_connect",
+            4 => "socket_sendmsg",
+            _ => "unknown hook",
+        };
         let detail_text = match raw.hook {
+            h if h & HOOK_EXPIRED_FLAG != 0 => format!("{expired_hook}: denied because the lease had expired"),
             1 => format!("bprm_check_security: denied execution of unleased binary (inode {})", raw.detail),
             2 => format!("file_open: denied access to protected sensitive file (inode {})", raw.detail),
             // The hook reports 0 for an IPv6 destination, which it denies without an address to name;
@@ -136,6 +149,25 @@ mod tests {
             let raw = ipv4_to_be_u32(addr).unwrap();
             assert_eq!(be_u32_to_ipv4(raw), addr, "{addr} must survive parse then render");
         }
+    }
+
+    /// A denial an expired lease caused says so, rather than reading as a rule the lease broke: past
+    /// its deadline the kernel refuses everything, including what the lease had allowed.
+    #[test]
+    fn a_denial_from_an_expired_lease_says_the_lease_expired() {
+        let raw = RawViolationEvent {
+            cgroup_id: 7,
+            ktime_ns: 1,
+            seq: 2,
+            pid: 3,
+            hook: 3 | HOOK_EXPIRED_FLAG,
+            detail: 0,
+            comm: *b"curl\0\0\0\0\0\0\0\0\0\0\0\0",
+        };
+        let event = ViolationEvent::from_raw(&raw);
+        assert!(event.detail_text.contains("socket_connect"), "{}", event.detail_text);
+        assert!(event.detail_text.contains("expired"), "{}", event.detail_text);
+        assert!(!event.detail_text.contains("0.0.0.0"), "{}", event.detail_text);
     }
 
     /// A datagram denial is not a connect denial, and reads as itself: the two hooks catch different
