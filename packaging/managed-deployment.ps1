@@ -167,6 +167,12 @@ function Assert-Manifest {
 
 if ($Mode -eq 'Remove') {
     Assert-Manifest
+    # The removal ends by moving this root aside, and Windows will not move a folder while a program
+    # inside it is running. Started from the installed copy, a removal took everything else away, then
+    # could not move the root, and the reinstall refused the root it left (2026-10-21).
+    if ($Executable -and [IO.Path]::GetFullPath($Executable).StartsWith("$root\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Run the unmount from a published splat-mcp.exe, not the installed copy under $root."
+    }
     $account = Get-LocalUser -Name $Instance -ErrorAction SilentlyContinue
     if ($account -and $account.SID.Value -ne $manifest.AccountSid) { throw 'Account was substituted; refusing removal.' }
     $service = Get-CimInstance Win32_Service -Filter "Name='$Instance'"
@@ -186,7 +192,16 @@ if ($Mode -eq 'Remove') {
     }
     if ($account) { Remove-LocalUser -SID $account.SID }
     $profile = Get-CimInstance Win32_UserProfile | Where-Object SID -EQ $manifest.AccountSid
-    if ($profile) { $profile | Remove-CimInstance }
+    # WSL and the profile service let go of a removed account's profile only after the processes that
+    # held it have exited, so the first attempt can find it in use (0x80070020, 2026-10-21). Every step
+    # above skips what is already gone, so a removal that still cannot finish here says so and is re-run.
+    for ($attempt = 1; $profile; $attempt++) {
+        try { $profile | Remove-CimInstance; $profile = $null }
+        catch {
+            if ($attempt -ge 24) { throw "The removed account's profile is still in use after two minutes. The service, account and distro are already gone; restart Windows and run this unmount again to finish. ($($_.Exception.Message))" }
+            Start-Sleep -Seconds 5
+        }
+    }
     # Preserve the keyed audit ledger and receipts. Dropping an endpoint must not erase evidence.
     Set-ProtectedDirectory $state @()
     $manifest.Status = 'Removed; audit state retained'

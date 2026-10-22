@@ -131,7 +131,7 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Completion target:** `Passed! - Failed: 0, Passed: 1110`, on a line ending `(net10.0)`. The live
+**Completion target:** `Passed! - Failed: 0, Passed: 1113`, on a line ending `(net10.0)`. The live
 packaged A2A proof is skipped by default; explicitly select its artifact as described in
 [the A2A guide](A2A-TEMPLATE-BRIDGE.md) before treating this as an all-cases target. All four
 Anthropic tests also skip by default, including when a funded key is stored. Separate explicit
