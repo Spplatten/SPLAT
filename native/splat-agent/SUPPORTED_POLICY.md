@@ -57,16 +57,16 @@ incompatible set. Pins preserve policy during an outage.
 Lease expiry is held in the kernel, not only by the daemon's timer: each `leased_cgroups` entry
 carries its deadline on `CLOCK_BOOTTIME`, and every hook refuses a lease past it with `-EPERM`,
 whatever its rules allowed, reporting the hook with `HOOK_EXPIRED_FLAG` (0x100). **Root probe PASS**
-against `4d16bf66` on 2026-10-22 (`expiry_*`): with the daemon SIGKILLed and none running, an 8-second
-lease's allowed exec and open were refused 9.96 ms past the deadline the kernel held (17.74 ms on the
-earlier run of the same source). The kernel stops the lease's authority; it does not kill or drain the
+against `4d16bf66` on 2026-10-23 (`expiry_*`), inside the shipped SPLAT Guest (Debian 13, archive `f238c13a`): with the daemon SIGKILLed and none running, an 8-second
+lease's allowed exec and open were refused 4.95 ms past the deadline the kernel held (9.96 and 17.74 ms on the
+2026-10-22 runs of the same source on a development Ubuntu). The kernel stops the lease's authority; it does not kill or drain the
 cgroup, which waits for a daemon to reap it.
 
 ## Enforced by the daemon, not the kernel
 
 | Dimension | Where | What is checked |
 | --- | --- | --- |
-| The workload's root | mount namespace and `pivot_root`, in `pre_exec` | A root holding `/usr`, `/bin`, `/sbin`, `/lib*` and `/etc` read-only, the working directory, a fresh `/tmp`, `/proc` and six device nodes. `/home`, `/root`, `/mnt`, `/var`, `/opt` and `/sys` are absent, not hidden. **Built 2026-09-20. Root probe PASS** against `4d16bf66` on the 2026-10-22 run, which built the shipping `jail.rs` (`4b3f41c`, 2026-10-15): `/home` and `/mnt` absent with the host holding both as the control (`jail_hides_home_and_mnt`), system directories read-only (`jail_system_dirs_read_only`), the working directory and `/tmp` writable with `/etc` visible (`jail_workdir_and_tmp_writable`), and `readOnlyFs` making the working directory read-only (`read_only_fs_makes_workdir_read_only`). |
+| The workload's root | mount namespace and `pivot_root`, in `pre_exec` | A root holding `/usr`, `/bin`, `/sbin`, `/lib*` and `/etc` read-only, the working directory, a fresh `/tmp`, `/proc` and six device nodes. `/home`, `/root`, `/mnt`, `/var`, `/opt` and `/sys` are absent, not hidden. **Built 2026-09-20. Root probe PASS** against `4d16bf66` on the 2026-10-23 run, which built the shipping `jail.rs` (`4b3f41c`, 2026-10-15): `/home` and `/mnt` absent with the host holding both as the control (`jail_hides_home_and_mnt`), system directories read-only (`jail_system_dirs_read_only`), the working directory and `/tmp` writable with `/etc` visible (`jail_workdir_and_tmp_writable`), and `readOnlyFs` making the working directory read-only (`read_only_fs_makes_workdir_read_only`). |
 | `readOnlyFs` | the same | The working directory bound read-only as well. Refused only by a daemon that is not enforcing, which jails nothing. |
 | `overlayFs.enableCow` | child mount namespace, before the workdir bind | **Root probe PASS** against `4d16bf66`. The parent prepares private `upper/` and `work/`; the child mounts an overlay on its working-directory target. Writes are discarded after the cgroup drains. `readOnlyFs` still makes the merged view read-only. A mock daemon, missing lowerdir, mount-option separators and inode policy paths overlapping the lowerdir are refused. Executing newly created scratch inodes is not authorized by this feature. |
 | Memory, CPU, PID ceilings | cgroup v2 | Written to `memory.max`, `cpu.max`, `pids.max`, then **read back**; a controller that did not take the clamp fails the request. |
@@ -104,7 +104,7 @@ Linux results below do not establish those Windows boundaries.
 | **Raw and packet sockets** | Creating one needs `CAP_NET_RAW`, which a workload dropped to `nobody` does not have, so nothing policies it and nothing needs to. Not a claim about a workload that keeps capabilities: this daemon does not run one. |
 | **Inherited file descriptors** | The hooks fire on `open` and `connect`. A descriptor the tool inherits was opened by the daemon, before any of them ran. |
 | **Ordinary sibling leases sharing a UID** | The 2026-10-12 root run in `evidence/lease-isolation-before.json` confirmed a delivered `SIGUSR1` and reads of a synthetic sibling workspace through `/proc/<pid>/cwd`, `/proc/<pid>/root` and `/proc/<pid>/fd`. Separate BPF policy maps did not isolate those operations. A replacement identity boundary requires its own fresh probe. |
-| **Filesystem writes and reads outside the jail's contents** | Closed by the jail since 2026-09-20 (**root probe PASS** against `4d16bf66` on the 2026-10-22 run — `jail_*` and `read_only_fs_makes_workdir_read_only`): the workload's root holds the system directories read-only, its working directory, a fresh `/tmp`, `/proc` and six device nodes, and nothing else. `/etc` travels whole and read-only; what `nobody` may not read there is still denied by mode, and the inode deny-list still applies inside the jail because bind mounts keep inode identity. Before that run the deny-list was the boundary: on 2026-09-18, `nobody` read a public key in the Windows user's `.ssh` folder through `/mnt/c`. Two things close that today: `/mnt` is absent from the jail, and `splat-mcp provision --apply` now writes the `[automount]` umask of 077 into the guest's `/etc/wsl.conf` when it is missing, which shuts `nobody` out of the Windows drives for anything not jailed once WSL restarts. |
+| **Filesystem writes and reads outside the jail's contents** | Closed by the jail since 2026-09-20 (**root probe PASS** against `4d16bf66` on the 2026-10-23 run — `jail_*` and `read_only_fs_makes_workdir_read_only`): the workload's root holds the system directories read-only, its working directory, a fresh `/tmp`, `/proc` and six device nodes, and nothing else. `/etc` travels whole and read-only; what `nobody` may not read there is still denied by mode, and the inode deny-list still applies inside the jail because bind mounts keep inode identity. Before that run the deny-list was the boundary: on 2026-09-18, `nobody` read a public key in the Windows user's `.ssh` folder through `/mnt/c`. Two things close that today: `/mnt` is absent from the jail, and `splat-mcp provision --apply` now writes the `[automount]` umask of 077 into the guest's `/etc/wsl.conf` when it is missing, which shuts `nobody` out of the Windows drives for anything not jailed once WSL restarts. |
 
 ## What has been proven, and where
 
@@ -134,8 +134,9 @@ refusal of a wrong hash, an incomplete set and a substituted map. It restores th
 stops its daemon on exit. Ordinary client runs leave persistence checks unproven; replay records
 always say REPLAY.
 
-> **Re-run under root on 2026-10-22.** `probe-daemon.sh` records PASS against `4d16bf66`, the BPF
-> source that ships, at `2026-10-22T17:20:02Z`, and `probe-last-hop.ps1` at `2026-10-22T17:20:34Z`,
+> **Re-run under root on 2026-10-23, inside the shipped SPLAT Guest (Debian 13, archive `f238c13a`).** `probe-daemon.sh` records PASS
+> against `4d16bf66`, the BPF source that ships, at `2026-10-23T16:23:27Z`, and `probe-last-hop.ps1` at
+> `2026-10-23T16:23:43Z`,
 > its control now running as the lease's own UID; the daemon and last-hop evidence below is from those
 > runs. Earlier history, from the 2026-10-12 run against `6fc637d8`: The daemon run
 > also checked the mission workspace, the `LEASE` frame and the signed outcome, and their rows above

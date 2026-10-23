@@ -1534,6 +1534,11 @@ evidence = {
     # anyway. Guarded rather than branched on `replay`, so the recorded field never depends on which
     # mode wrote it.
     "kernel_release": os.uname().release if hasattr(os, "uname") else "unavailable-no-uname",
+    # The userland the run proved, for the same reason: the 2026-10-23 run on the shipped SPLAT Guest
+    # and the 2026-10-22 run on a development Ubuntu wrote records nothing could tell apart.
+    "guest_os": next((line.split("=", 1)[1].strip().strip('"')
+                      for line in (open("/etc/os-release").read().splitlines() if os.path.exists("/etc/os-release") else [])
+                      if line.startswith("PRETTY_NAME=")), "unknown"),
     "protocol_version": 3,
     "recorded_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
