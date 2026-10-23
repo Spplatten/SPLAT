@@ -1295,16 +1295,34 @@ def open_ok():
 emit(phase='ready', exec_ok=exec_ok(), open_ok=open_ok())
 while not os.path.exists('continue'):
     time.sleep(0.02)
+deadline = int(Path('continue').read_text().strip() or 0)
 first_exec = first_open = None
 allowed_after_kill = exec_ok() and open_ok()
 until = now() + __WINDOW__
+# Bracket the deadline with opens alone, which cost microseconds where an exec costs milliseconds.
+# A permitted open that STARTED at t puts the kernel's deadline after t; a refused open that ENDED
+# at t puts it at or before t. The 20 ms exec loop below could only bound the overrun by its own
+# sleep, which is what the 2026-10-22/23 pilot measured.
+while now() < deadline - 50_000_000:
+    time.sleep(0.005)
+last_open_allowed_start = first_open_denied_end = None
+while now() < until:
+    t0 = now()
+    r = open_ok()
+    t1 = now()
+    if r is True:
+        last_open_allowed_start = t0
+    elif r is False:
+        first_open_denied_end = t1
+        break
 while now() < until and (first_exec is None or first_open is None):
     if first_exec is None and exec_ok() is False:
         first_exec = now()
     if first_open is None and open_ok() is False:
         first_open = now()
     time.sleep(0.02)
-emit(phase='done', allowed_after_kill=allowed_after_kill, first_exec_denied_ns=first_exec, first_open_denied_ns=first_open)
+emit(phase='done', allowed_after_kill=allowed_after_kill, first_exec_denied_ns=first_exec, first_open_denied_ns=first_open,
+     last_open_allowed_start_ns=last_open_allowed_start, first_open_denied_end_ns=first_open_denied_end)
 time.sleep(60)
 """.replace("__WINDOW__", str((duration + 20) * 1_000_000_000))
     worker = threading.Thread(target=lambda: call({
@@ -1330,6 +1348,8 @@ time.sleep(60)
                 key = int.from_bytes(bytes(int(b, 16) for b in key), "little")
             if key == cgid:
                 deadline = value["deadline_ns"] if isinstance(value, dict) else int.from_bytes(bytes(int(b, 16) for b in value), "little")
+        # How much of the lease the outage covered: the probe and the workload share one boot clock.
+        kill_ns = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
         managed_process.kill()  # Our own Popen, never a PID discovered on the host.
         killed = managed_process.wait(timeout=5) == -9
         worker.join(timeout=5)
@@ -1339,15 +1359,50 @@ time.sleep(60)
                 pass
         except OSError:
             no_listener = True
-        (ws / "continue").touch()
+        # Written whole, then renamed: the workload reads the deadline the moment the name appears.
+        (ws / "continue.tmp").write_text(str(deadline or 0))
+        (ws / "continue.tmp").rename(ws / "continue")
         if not wait_for(lambda: any(p["phase"] == "done" for p in phases()), seconds=duration + 30):
             raise RuntimeError("expiry workload did not finish its measurement")
         done = next(p for p in phases() if p["phase"] == "done")
         outage = killed and no_listener and deadline is not None and ready.get("exec_ok") is True and ready.get("open_ok") is True
         first = done.get("first_exec_denied_ns")
         overrun_ms = (first - deadline) / 1e6 if outage and first else None
-        feature_observations["expiry_outage"] = {"deadline_ns": deadline, "ready": ready, "done": done,
-                                                 "overrun_ms": overrun_ms, "lease_seconds": duration}
+        allowed_start, denied_end = done.get("last_open_allowed_start_ns"), done.get("first_open_denied_end_ns")
+        bracketed = outage and allowed_start is not None and denied_end is not None and allowed_start < deadline <= denied_end
+
+        # The kernel stamped each refusal itself (bpf_ktime_get_ns, CLOCK_MONOTONIC) into the pinned
+        # ring buffer, where it waits for a daemon. Restart one, read the stamps from its drain, and
+        # carry them onto the boot clock with an offset sampled here; no suspend can fall inside one
+        # run, so the offset holds for all of it.
+        import re
+        b1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+        mono = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
+        boot_minus_mono = (b1 + time.clock_gettime_ns(time.CLOCK_BOOTTIME)) // 2 - mono
+        start_owned()
+        stamp = re.compile(r"Kernel -EPERM violation \(cgroup (\d+), hook (0x[0-9a-f]+), ktime (\d+) ns, seq (\d+)\)")
+        def kernel_stamps(hook):
+            managed_log.seek(0)
+            found = [int(m.group(3)) + boot_minus_mono for m in stamp.finditer(managed_log.read().decode(errors="replace"))
+                     if int(m.group(1)) == cgid and int(m.group(2), 16) == hook]
+            return min(found) if found else None
+        wait_for(lambda: kernel_stamps(0x102) is not None and kernel_stamps(0x101) is not None, seconds=10)
+        kernel_open, kernel_exec = kernel_stamps(0x102), kernel_stamps(0x101)
+        # The kernel decided inside the refused call, so its stamp sits between the deadline and the
+        # call's end. 20 us covers the offset's sampling error; anything wider is a finding.
+        tolerance = 20_000
+        stamped = bracketed and kernel_open is not None and deadline - tolerance <= kernel_open <= denied_end + tolerance
+
+        feature_observations["expiry_outage"] = {
+            "deadline_ns": deadline, "ready": ready, "done": done, "overrun_ms": overrun_ms, "lease_seconds": duration,
+            "kill_boot_ns": kill_ns, "outage_before_deadline_ms": (deadline - kill_ns) / 1e6 if deadline else None,
+            "bracket_us": (denied_end - allowed_start) / 1e3 if bracketed else None,
+            "boot_minus_mono_ns": boot_minus_mono,
+            "kernel_first_open_refusal_boot_ns": kernel_open, "kernel_first_exec_refusal_boot_ns": kernel_exec,
+            "kernel_open_refusal_after_deadline_us": (kernel_open - deadline) / 1e3 if kernel_open and deadline else None,
+        }
+        feature_checks["expiry_deadline_within_open_bracket"] = bracketed
+        feature_checks["expiry_kernel_stamp_within_bracket"] = stamped
         feature_checks["expiry_no_daemon_during_measurement"] = outage
         feature_checks["expiry_allowed_until_deadline"] = outage and done.get("allowed_after_kill") is True
         feature_checks["expiry_exec_denied_without_daemon"] = outage and first is not None and first >= deadline
@@ -1539,6 +1594,9 @@ evidence = {
     "guest_os": next((line.split("=", 1)[1].strip().strip('"')
                       for line in (open("/etc/os-release").read().splitlines() if os.path.exists("/etc/os-release") else [])
                       if line.startswith("PRETTY_NAME=")), "unknown"),
+    # The binary that enforced, not only the source it came from: the pilot runs could name the BPF
+    # source and the daemon commit but not prove which build answered.
+    "daemon_binary_sha256": hashlib.sha256(Path(managed_binary).read_bytes()).hexdigest() if managed_binary else None,
     "protocol_version": 3,
     "recorded_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "subject": "splat-agent daemon (end-to-end over the JSON protocol)",

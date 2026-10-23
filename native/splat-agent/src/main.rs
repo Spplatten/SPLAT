@@ -402,7 +402,11 @@ async fn main() -> Result<()> {
                     if data.len() >= std::mem::size_of::<RawViolationEvent>() {
                         let raw = unsafe { &*(data.as_ptr() as *const RawViolationEvent) };
                         let event = ViolationEvent::from_raw(raw);
-                        info!("Kernel -EPERM violation: {}", event.detail_text);
+                        // The kernel's own stamp and number, not only the text: a denial made while no
+                        // daemon ran waits in the pinned ring buffer and is drained here after restart,
+                        // and this line is then the only record of when the kernel decided.
+                        info!("Kernel -EPERM violation (cgroup {}, hook {:#x}, ktime {} ns, seq {}): {}",
+                              event.cgroup_id, event.hook, event.ktime_ns, event.seq, event.detail_text);
                         let _ = ringbuf_viol_tx.send(event);
                     }
                     0
