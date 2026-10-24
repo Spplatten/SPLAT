@@ -59,10 +59,11 @@ carries its deadline on `CLOCK_BOOTTIME`, and every hook refuses a lease past it
 whatever its rules allowed, reporting the hook with `HOOK_EXPIRED_FLAG` (0x100). **Root probe PASS**
 against `4d16bf66` on 2026-10-24 (`expiry_*`), inside the shipped SPLAT Guest (Debian 13, archive
 `f238c13a`): with the daemon SIGKILLed 7.9 s before an 8-second lease's deadline and none running, the
-lease's last permitted open began 1.7 µs before the deadline the kernel held, and the kernel's own
-stamp on its first refusal, read back from the pinned ring buffer, is 36.7 µs after it. An expired
-lease's exec was refused, and the drained ring buffer held no `bprm_check_security` expiry
-record for it - consistent with exec opening the binary, and `file_open` refusing it, first. The
+lease's last permitted open began 2.2 µs before the deadline the kernel held, and the kernel's own
+stamp on its first refusal, read back from the pinned ring buffer, is 6.8 µs after it. The kernel
+counted three denials for the lease and all three were drained, none dropped, every one on
+`file_open`: an expired lease's exec is refused when it opens the binary, before
+`bprm_check_security` runs, and is reported as a `file_open` denial. The
 kernel stops the lease's authority; it does not kill or drain the
 cgroup, which waits for a daemon to reap it.
 
@@ -139,8 +140,8 @@ stops its daemon on exit. Ordinary client runs leave persistence checks unproven
 always say REPLAY.
 
 > **Re-run under root on 2026-10-24, inside the shipped SPLAT Guest (Debian 13, archive `f238c13a`).** `probe-daemon.sh` records PASS
-> against `4d16bf66`, the BPF source that ships, at `2026-10-24T14:48:30Z`, and `probe-last-hop.ps1` at
-> `2026-10-24T14:48:55Z`,
+> against `4d16bf66`, the BPF source that ships, at `2026-10-24T15:06:54Z`, and `probe-last-hop.ps1` at
+> `2026-10-24T15:07:28Z`,
 > its control now running as the lease's own UID; the daemon and last-hop evidence below is from those
 > runs. Earlier history, from the 2026-10-12 run against `6fc637d8`: The daemon run
 > also checked the mission workspace, the `LEASE` frame and the signed outcome, and their rows above
