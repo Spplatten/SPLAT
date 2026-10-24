@@ -2,16 +2,18 @@
   "schema": 4,
   "bpf_source_sha256": "4d16bf66b11fd04700d2fc40f31037a3926cb00f94e3eb20b05663bef823ab40",
   "kernel_release": "6.18.33.2-microsoft-standard-WSL2",
+  "guest_os": "Debian GNU/Linux 13 (trixie)",
+  "daemon_binary_sha256": "714a52d676fd47fc1524dbb5c5a1e9afe85eb86d54bfd150b9a23e0bc18f0ce0",
   "protocol_version": 3,
-  "recorded_utc": "2026-10-23T16:23:27Z",
+  "recorded_utc": "2026-10-24T14:48:30Z",
   "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
   "root_feature_observations": {
     "errors": [],
     "lifecycle_requested": true,
     "scratch_exec_frames": [
       {
-        "cgroupId": 19965,
-        "cgroupPath": "/sys/fs/cgroup/splat_leases/mission_probe-exec-splat-probe-exec-1hh5dkfw",
+        "cgroupId": 28865,
+        "cgroupPath": "/sys/fs/cgroup/splat_leases/mission_probe-exec-splat-probe-exec-q6r17ah3",
         "enforcing": true,
         "environmentMode": "explicit",
         "jailed": true,
@@ -21,13 +23,13 @@
           "maxPids": 100
         },
         "limitsReadBack": true,
-        "missionId": "probe-exec-splat-probe-exec-1hh5dkfw",
+        "missionId": "probe-exec-splat-probe-exec-q6r17ah3",
         "processOutput": "streamed",
         "readOnlyFs": false,
         "secretStdin": false,
         "type": "LEASE",
         "workloadUid": 200000,
-        "workspace": "/tmp/splat-probe-exec-1hh5dkfw",
+        "workspace": "/tmp/splat-probe-exec-q6r17ah3",
         "workspaceCreated": false
       },
       {
@@ -35,27 +37,27 @@
         "type": "STDOUT"
       },
       {
-        "cgroupId": 19965,
+        "cgroupId": 28865,
         "comm": "python3",
         "detail": 3,
         "detailText": "bprm_check_security: denied execution of unleased binary (inode 3)",
         "hook": 1,
-        "ktimeNs": 11889591702929,
-        "pid": 12438,
+        "ktimeNs": 42651087677748,
+        "pid": 15814,
         "seq": 11,
-        "timestampMs": 1792772580441,
+        "timestampMs": 1792853273277,
         "type": "VIOLATION"
       },
       {
-        "cgroupId": 19965,
+        "cgroupId": 28865,
         "comm": "python3",
         "detail": 3,
         "detailText": "bprm_check_security: denied execution of unleased binary (inode 3)",
         "hook": 1,
-        "ktimeNs": 11889592192787,
-        "pid": 12439,
+        "ktimeNs": 42651088244557,
+        "pid": 15815,
         "seq": 12,
-        "timestampMs": 1792772580442,
+        "timestampMs": 1792853273278,
         "type": "VIOLATION"
       },
       {
@@ -63,15 +65,15 @@
         "type": "STDOUT"
       },
       {
-        "cgroupId": 19965,
+        "cgroupId": 28865,
         "comm": "python3",
         "detail": 3,
         "detailText": "bprm_check_security: denied execution of unleased binary (inode 3)",
         "hook": 1,
-        "ktimeNs": 11889594395038,
-        "pid": 12441,
+        "ktimeNs": 42651089109334,
+        "pid": 15817,
         "seq": 13,
-        "timestampMs": 1792772580444,
+        "timestampMs": 1792853273279,
         "type": "VIOLATION"
       },
       {
@@ -80,10 +82,10 @@
       },
       {
         "exitCode": 0,
-        "outcomeCanonical": "splat-lease-outcome/1|mission=probe-exec-splat-probe-exec-1hh5dkfw|cgroup=19965|enforcing=true|uid=200000|exit=0|counted=3|reported=3|dropped=0|workspace=|workspaceRemoved=n/a",
+        "outcomeCanonical": "splat-lease-outcome/1|mission=probe-exec-splat-probe-exec-q6r17ah3|cgroup=28865|enforcing=true|uid=200000|exit=0|counted=3|reported=3|dropped=0|workspace=|workspaceRemoved=n/a",
         "outcomeKeyId": "3c9cda2642bcead1a6ad78d5390ee7d9cf05012ad9e463e13257bccac78128d2",
         "outcomePublicKey": "MIIBCgKCAQEA2PdkfjaJdWwPZrLdWAdvXB905hZBdl+mTOjCleFGDLAdYfO2BloxQ4TjycDYB7g9+jR1GF7MyYYlXFg8u1yHUQTQvO94wHdFZIyKOcm8krjcSe4y6NP1pysp7IOza3I0VsEwpLLEuUYYUnpV4mKdll5fHh62IXkwg5IWz/czTSjvRogNbeIYmFVrXwOP4WkzuqHr9bn9ZcYOauMfs6CjkcsOmRKAvl9MS4L66tqc61JVrQy/4tckvtFuuxHeu9U8opc/VE4hBCRPh0wz+Pd840m2qzEoJSbzMw/HZ1vphWI/iHrFEnVc3AO7OnVWrXBNb3Qhc60ZdqlCLrQFz/5o/QIDAQAB",
-        "outcomeSignature": "K3Pjk/baOR7RBoTROrOweXMlBCiZY6oBikEWN+3/xv8GxNDTUxFGOGNGRYHaS64yItFjEgjAozoubU8KZvkA9ELI7lrTkdOEdJMTG80OOF6ByqMSNyP1hhbgQUmXU3AxBQP/4gNdKav+KytKQIx/hthLu7pqzkhP/SbxyxWHsArtgFH8hDgb4XxhFZgDu0Kjs5VFKUmnlSQAd1sTH9lWPO3l7zjVlRmH9uIJjc7D1ecqDxVnqqLbqvMu6YWoC1UPSnd1hE+2jp2Y7MqVt33odT0Yya9SOioUAe8S+ACm7X9rcQqVEh+wAw9Ul4k48SM3kBf4D5fcrbg+gIHIOwHLQw==",
+        "outcomeSignature": "IYHwHuHNmx/ZlhxP65edtO2dMyHcCBrdzfldW5lOicAzM4UKKtRhjnUdrV704JB/SQYbv2Si8OcExemtuYPvJ1NQfM1jsYR3CfPLnStWjw4K2HmTwfMIu4xfXi+AUkl+Ij3/ZZpDn6KZXLuis4B3JdRCgFreBSDqzw1wxt6NS/WpAIzVmhY/xAKE06KuG3irGZfH4MdTAQft9hqFd4BiYO2pjY9e5MRHHsanoX1V/2AF9aLpgD2Rn0HueAj5Ntq0+8ilra+Utho8XZ1LX7ipbE+Fo7qziIwbgv48esLpx9B8uv4aF5WRaPb118zGbOrVIbpbaNU6zzMFd3InMm2R2w==",
         "type": "EXIT",
         "violationsComplete": true,
         "violationsCounted": 3,
@@ -92,7 +94,7 @@
       }
     ],
     "cross_lease": {
-      "peer_pid": 323,
+      "peer_pid": 328,
       "attacker_stdout": "CONTROL_OK\n SELF_UID=200001\n PEER_UID=200000\n KILL0_FAIL=1\n LINK_cwd_FAIL=13\n LINK_root_FAIL=13\n PEER_READ_FAIL=13\n PEER_WRITE_FAIL=13\n",
       "injected_file_present_on_host": false,
       "self_uid": "200001",
@@ -101,47 +103,47 @@
     "pin_directory": "/sys/fs/bpf/splat/4d16bf66b11fd04700d2fc40f31037a3926cb00f94e3eb20b05663bef823ab40",
     "pin_ids_before": {
       "link_splat_bprm_check": {
-        "id": 11,
-        "prog_id": 287
+        "id": 15,
+        "prog_id": 455
       },
       "link_splat_file_open": {
-        "id": 12,
-        "prog_id": 288
+        "id": 16,
+        "prog_id": 456
       },
       "link_splat_socket_connect": {
-        "id": 13,
-        "prog_id": 289
+        "id": 17,
+        "prog_id": 457
       },
       "link_splat_socket_sendmsg": {
-        "id": 14,
-        "prog_id": 290
+        "id": 18,
+        "prog_id": 458
       },
       "map_allowed_connect_ipv4": {
-        "id": 101
+        "id": 131
       },
       "map_allowed_exec_inodes": {
-        "id": 99
+        "id": 129
       },
       "map_counters": {
-        "id": 96
+        "id": 126
       },
       "map_leased_cgroups": {
-        "id": 97
+        "id": 127
       },
       "map_protected_inodes": {
-        "id": 98
+        "id": 128
       },
       "map_scratch_exec_devs": {
-        "id": 100
+        "id": 130
       },
       "map_violation_counts": {
-        "id": 103
+        "id": 133
       },
       "map_violations": {
-        "id": 102
+        "id": 132
       }
     },
-    "daemon_binary_sha256": "d0ca38b58f817f093855d33c656b0c0a5484029f5940eadc0f8ea5eb800cb610",
+    "daemon_binary_sha256": "714a52d676fd47fc1524dbb5c5a1e9afe85eb86d54bfd150b9a23e0bc18f0ce0",
     "pin_control_distinct_inode": true,
     "pin_workload_before": {
       "allowed": true,
@@ -155,104 +157,104 @@
     },
     "pin_ids_after_sigkill": {
       "link_splat_bprm_check": {
-        "id": 11,
-        "prog_id": 287
+        "id": 15,
+        "prog_id": 455
       },
       "link_splat_file_open": {
-        "id": 12,
-        "prog_id": 288
+        "id": 16,
+        "prog_id": 456
       },
       "link_splat_socket_connect": {
-        "id": 13,
-        "prog_id": 289
+        "id": 17,
+        "prog_id": 457
       },
       "link_splat_socket_sendmsg": {
-        "id": 14,
-        "prog_id": 290
+        "id": 18,
+        "prog_id": 458
       },
       "map_allowed_connect_ipv4": {
-        "id": 101
+        "id": 131
       },
       "map_allowed_exec_inodes": {
-        "id": 99
+        "id": 129
       },
       "map_counters": {
-        "id": 96
+        "id": 126
       },
       "map_leased_cgroups": {
-        "id": 97
+        "id": 127
       },
       "map_protected_inodes": {
-        "id": 98
+        "id": 128
       },
       "map_scratch_exec_devs": {
-        "id": 100
+        "id": 130
       },
       "map_violation_counts": {
-        "id": 103
+        "id": 133
       },
       "map_violations": {
-        "id": 102
+        "id": 132
       }
     },
     "pin_ids_after_restart": {
       "link_splat_bprm_check": {
-        "id": 11,
-        "prog_id": 287
+        "id": 15,
+        "prog_id": 455
       },
       "link_splat_file_open": {
-        "id": 12,
-        "prog_id": 288
+        "id": 16,
+        "prog_id": 456
       },
       "link_splat_socket_connect": {
-        "id": 13,
-        "prog_id": 289
+        "id": 17,
+        "prog_id": 457
       },
       "link_splat_socket_sendmsg": {
-        "id": 14,
-        "prog_id": 290
+        "id": 18,
+        "prog_id": 458
       },
       "map_allowed_connect_ipv4": {
-        "id": 101
+        "id": 131
       },
       "map_allowed_exec_inodes": {
-        "id": 99
+        "id": 129
       },
       "map_counters": {
-        "id": 96
+        "id": 126
       },
       "map_leased_cgroups": {
-        "id": 97
+        "id": 127
       },
       "map_protected_inodes": {
-        "id": 98
+        "id": 128
       },
       "map_scratch_exec_devs": {
-        "id": 100
+        "id": 130
       },
       "map_violation_counts": {
-        "id": 103
+        "id": 133
       },
       "map_violations": {
-        "id": 102
+        "id": 132
       }
     },
     "pin_startup_refusals": {
       "foreign or incomplete BPF pin set": {
         "exit_code": 1,
-        "log": "\u001b[2m2026-10-23T16:23:19.250976Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Starting SPLAT Resident eBPF Containment Daemon on 127.0.0.1:50051\n\u001b[2m2026-10-23T16:23:19.251045Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Initializing in-kernel BPF-LSM capability lease skeleton...\n\u001b[2m2026-10-23T16:23:19.251111Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Failed to establish pinned BPF-LSM enforcement: foreign or incomplete BPF pin set: /sys/fs/bpf/splat/0000000000000000000000000000000000000000000000000000000000000000 (expected 4d16bf66b11fd04700d2fc40f31037a3926cb00f94e3eb20b05663bef823ab40)\n\u001b[2m2026-10-23T16:23:19.251118Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Refusing to start: BPF-LSM enforcement could not be verified. Check the kernel and pin-set error above; --mock-bpf explicitly runs without containment.\n"
+        "log": "\u001b[2m2026-10-24T14:48:11.948856Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Starting SPLAT Resident eBPF Containment Daemon on 127.0.0.1:50051\n\u001b[2m2026-10-24T14:48:11.948901Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Initializing in-kernel BPF-LSM capability lease skeleton...\n\u001b[2m2026-10-24T14:48:11.948950Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Failed to establish pinned BPF-LSM enforcement: foreign or incomplete BPF pin set: /sys/fs/bpf/splat/0000000000000000000000000000000000000000000000000000000000000000 (expected 4d16bf66b11fd04700d2fc40f31037a3926cb00f94e3eb20b05663bef823ab40)\n\u001b[2m2026-10-24T14:48:11.948956Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Refusing to start: BPF-LSM enforcement could not be verified. Check the kernel and pin-set error above; --mock-bpf explicitly runs without containment.\n"
       },
       "incomplete BPF pin set": {
         "exit_code": 1,
-        "log": "\u001b[2m2026-10-23T16:23:19.259157Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Starting SPLAT Resident eBPF Containment Daemon on 127.0.0.1:50051\n\u001b[2m2026-10-23T16:23:19.259230Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Initializing in-kernel BPF-LSM capability lease skeleton...\n\u001b[2m2026-10-23T16:23:19.259545Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Failed to establish pinned BPF-LSM enforcement: incomplete BPF pin set at /sys/fs/bpf/splat/4d16bf66b11fd04700d2fc40f31037a3926cb00f94e3eb20b05663bef823ab40\n\u001b[2m2026-10-23T16:23:19.259553Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Refusing to start: BPF-LSM enforcement could not be verified. Check the kernel and pin-set error above; --mock-bpf explicitly runs without containment.\n"
+        "log": "\u001b[2m2026-10-24T14:48:11.954682Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Starting SPLAT Resident eBPF Containment Daemon on 127.0.0.1:50051\n\u001b[2m2026-10-24T14:48:11.954806Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Initializing in-kernel BPF-LSM capability lease skeleton...\n\u001b[2m2026-10-24T14:48:11.955254Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Failed to establish pinned BPF-LSM enforcement: incomplete BPF pin set at /sys/fs/bpf/splat/4d16bf66b11fd04700d2fc40f31037a3926cb00f94e3eb20b05663bef823ab40\n\u001b[2m2026-10-24T14:48:11.955264Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Refusing to start: BPF-LSM enforcement could not be verified. Check the kernel and pin-set error above; --mock-bpf explicitly runs without containment.\n"
       },
       "pinned hook does not match": {
         "exit_code": 1,
-        "log": "\u001b[2m2026-10-23T16:23:19.271277Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Starting SPLAT Resident eBPF Containment Daemon on 127.0.0.1:50051\n\u001b[2m2026-10-23T16:23:19.271345Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Initializing in-kernel BPF-LSM capability lease skeleton...\n\u001b[2m2026-10-23T16:23:19.290571Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Failed to establish pinned BPF-LSM enforcement: pinned hook does not match this program and its maps: /sys/fs/bpf/splat/4d16bf66b11fd04700d2fc40f31037a3926cb00f94e3eb20b05663bef823ab40/link_splat_bprm_check\n\u001b[2m2026-10-23T16:23:19.290588Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Refusing to start: BPF-LSM enforcement could not be verified. Check the kernel and pin-set error above; --mock-bpf explicitly runs without containment.\n"
+        "log": "\u001b[2m2026-10-24T14:48:11.965531Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Starting SPLAT Resident eBPF Containment Daemon on 127.0.0.1:50051\n\u001b[2m2026-10-24T14:48:11.965624Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Initializing in-kernel BPF-LSM capability lease skeleton...\n\u001b[2m2026-10-24T14:48:12.000889Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Failed to establish pinned BPF-LSM enforcement: pinned hook does not match this program and its maps: /sys/fs/bpf/splat/4d16bf66b11fd04700d2fc40f31037a3926cb00f94e3eb20b05663bef823ab40/link_splat_bprm_check\n\u001b[2m2026-10-24T14:48:12.000904Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Refusing to start: BPF-LSM enforcement could not be verified. Check the kernel and pin-set error above; --mock-bpf explicitly runs without containment.\n"
       }
     },
     "expiry_outage": {
-      "deadline_ns": 11916503208461,
+      "deadline_ns": 42677893438514,
       "ready": {
         "phase": "ready",
         "exec_ok": true,
@@ -261,11 +263,20 @@
       "done": {
         "phase": "done",
         "allowed_after_kill": true,
-        "first_exec_denied_ns": 11916508158481,
-        "first_open_denied_ns": 11916508182172
+        "first_exec_denied_ns": 42677893933049,
+        "first_open_denied_ns": 42677893947032,
+        "last_open_allowed_start_ns": 42677893436777,
+        "first_open_denied_end_ns": 42677893514428
       },
-      "overrun_ms": 4.95002,
-      "lease_seconds": 8
+      "overrun_ms": 0.494535,
+      "lease_seconds": 8,
+      "kill_boot_ns": 42670000139607,
+      "outage_before_deadline_ms": 7893.298907,
+      "bracket_us": 77.651,
+      "boot_minus_mono_ns": -631,
+      "kernel_first_open_refusal_boot_ns": 42677893475167,
+      "kernel_first_exec_refusal_boot_ns": null,
+      "kernel_open_refusal_after_deadline_us": 36.653
     }
   },
   "results": {
@@ -302,6 +313,8 @@
     "expiry_exec_denied_without_daemon": true,
     "expiry_open_denied_without_daemon": true,
     "expiry_overrun_within_1s": true,
+    "expiry_deadline_within_open_bracket": true,
+    "expiry_kernel_stamp_within_bracket": true,
     "permitted_tool_ran": true,
     "protected_inode_control_could_read_it": true,
     "protected_inode_leaked": false,
@@ -358,70 +371,70 @@
   "violations": [
     {
       "hook": 2,
-      "pid": 12392,
+      "pid": 15768,
       "detail": 91,
       "detailText": "file_open: denied access to protected sensitive file (inode 91)",
       "comm": "cat"
     },
     {
       "hook": 1,
-      "pid": 12394,
+      "pid": 15770,
       "detail": 603,
       "detailText": "bprm_check_security: denied execution of unleased binary (inode 603)",
       "comm": "sh"
     },
     {
       "hook": 1,
-      "pid": 12394,
+      "pid": 15770,
       "detail": 603,
       "detailText": "bprm_check_security: denied execution of unleased binary (inode 603)",
       "comm": "sh"
     },
     {
       "hook": 3,
-      "pid": 12396,
+      "pid": 15772,
       "detail": 16843009,
       "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 1.1.1.1",
       "comm": "curl"
     },
     {
       "hook": 3,
-      "pid": 12397,
+      "pid": 15774,
       "detail": 16777343,
       "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 127.0.0.1",
       "comm": "curl"
     },
     {
       "hook": 1,
-      "pid": 12403,
+      "pid": 15782,
       "detail": 562,
       "detailText": "bprm_check_security: denied execution of unleased binary (inode 562)",
       "comm": "sh"
     },
     {
       "hook": 1,
-      "pid": 12403,
+      "pid": 15782,
       "detail": 562,
       "detailText": "bprm_check_security: denied execution of unleased binary (inode 562)",
       "comm": "sh"
     },
     {
       "hook": 3,
-      "pid": 12413,
+      "pid": 15791,
       "detail": 16777343,
       "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 127.0.0.1",
       "comm": "curl"
     },
     {
       "hook": 3,
-      "pid": 12414,
+      "pid": 15792,
       "detail": 0,
       "detailText": "socket_connect: denied outbound network connection (IPv6 destination, or IPv4 0.0.0.0)",
       "comm": "curl"
     },
     {
       "hook": 4,
-      "pid": 12420,
+      "pid": 15796,
       "detail": 16843009,
       "detailText": "socket_sendmsg: denied outbound datagram to unapproved IPv4 1.1.1.1",
       "comm": "python3"

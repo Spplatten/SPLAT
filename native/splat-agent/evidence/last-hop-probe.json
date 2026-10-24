@@ -3,12 +3,12 @@
     "bpf_source_sha256":  "4d16bf66b11fd04700d2fc40f31037a3926cb00f94e3eb20b05663bef823ab40",
     "kernel_release":  "6.18.33.2-microsoft-standard-WSL2",
     "protocol_version":  3,
-    "recorded_utc":  "2026-10-23T16:23:43Z",
+    "recorded_utc":  "2026-10-24T14:48:55Z",
     "subject":  "the last hop: a run_command from an MCP client, through splat-mcp and the C# bridge, refused in the kernel",
     "transport":  "stdio JSON-RPC to splat-mcp.exe; loopback TCP 127.0.0.1:50051 to splat-agent",
     "operator_egress_policy":  "127.0.0.1:80",
-    "trace_id":  "last-hop-e930b0784a55466fb158c9394b239d06",
-    "audit_anchor_sha256":  "d201551a153b46d0b3daf0853209534787e560c1919d32b0e216bd5d25480312",
+    "trace_id":  "last-hop-6b68e1e02d32482188ad15369ba11c20",
+    "audit_anchor_sha256":  "825a9af274c1b6fa1a2c6114dd4b60ded200bcaba489bed4b332e88d2914d8dc",
     "results":  {
                     "permitted_command_ran_unprivileged":  true,
                     "unleased_second_exec_blocked_by_kernel":  true,
@@ -18,9 +18,9 @@
                     "outside_operator_policy_refused_before_any_lease":  true
                 },
     "violations":  [
-                       "-EPERM: Hook=Exec Comm=sh Detail=bprm_check_security: denied execution of unleased binary (inode 603) (PID=13029)",
-                       "-EPERM: Hook=Exec Comm=sh Detail=bprm_check_security: denied execution of unleased binary (inode 603) (PID=13029)",
-                       "-EPERM: Hook=Connect Comm=curl Detail=socket_connect: denied outbound network connection to unapproved IPv4 1.1.1.1 (PID=13033)"
+                       "-EPERM: Hook=Exec Comm=sh Detail=bprm_check_security: denied execution of unleased binary (inode 603) (PID=16067)",
+                       "-EPERM: Hook=Exec Comm=sh Detail=bprm_check_security: denied execution of unleased binary (inode 603) (PID=16067)",
+                       "-EPERM: Hook=Connect Comm=curl Detail=socket_connect: denied outbound network connection to unapproved IPv4 1.1.1.1 (PID=16071)"
                    ],
     "verdict":  "PASS"
 }
