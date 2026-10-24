@@ -298,13 +298,14 @@ public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
                             var vEvent = new LeaseViolationEvent(
                                 CgroupId: cgid,
                                 ProcessId: pid,
-                                Hook: (KernelViolationHook)hookVal,
+                                Hook: (KernelViolationHook)(hookVal & ~0x100),
                                 Detail: detail,
                                 DetailText: detailText,
                                 ProcessComm: comm,
                                 TimestampUtc: stamped,
                                 Sequence: root.TryGetProperty("seq", out var seqProp) ? seqProp.GetUInt64() : 0,
-                                KernelTimeNs: root.TryGetProperty("ktimeNs", out var ktProp) ? ktProp.GetUInt64() : 0);
+                                KernelTimeNs: root.TryGetProperty("ktimeNs", out var ktProp) ? ktProp.GetUInt64() : 0,
+                                LeaseExpired: (hookVal & 0x100) != 0);
 
                             violations?.Report(vEvent);
                             stderr?.Report($"[KERNEL -EPERM BLOCK] [{comm} pid {pid}] {detailText}\n");

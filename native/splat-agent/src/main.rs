@@ -272,8 +272,10 @@ impl BpfMapSync for LiveBpfSync {
             bail!("stale scratch execution grant for cgroup {}", lease.cgroup_id);
         }
         let one: u8 = 1;
+        // The value is the lease's deadline on CLOCK_BOOTTIME, struct lease_state in the program. The
+        // kernel refuses everything the lease does past it, so expiry holds with no daemon alive.
         self.leased_cgroups
-            .update(&lease.cgroup_id.to_ne_bytes(), &[one], MapFlags::ANY)
+            .update(&lease.cgroup_id.to_ne_bytes(), &lease.deadline_boot_ns.to_ne_bytes(), MapFlags::ANY)
             .context("update leased_cgroups")?;
 
         // Every policy entry is scoped to this lease's cgroup. Writing the bare resource key here
@@ -400,7 +402,11 @@ async fn main() -> Result<()> {
                     if data.len() >= std::mem::size_of::<RawViolationEvent>() {
                         let raw = unsafe { &*(data.as_ptr() as *const RawViolationEvent) };
                         let event = ViolationEvent::from_raw(raw);
-                        info!("Kernel -EPERM violation: {}", event.detail_text);
+                        // The kernel's own stamp and number, not only the text: a denial made while no
+                        // daemon ran waits in the pinned ring buffer and is drained here after restart,
+                        // and this line is then the only record of when the kernel decided.
+                        info!("Kernel -EPERM violation (cgroup {}, hook {:#x}, ktime {} ns, seq {}): {}",
+                              event.cgroup_id, event.hook, event.ktime_ns, event.seq, event.detail_text);
                         let _ = ringbuf_viol_tx.send(event);
                     }
                     0

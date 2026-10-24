@@ -559,7 +559,10 @@ public record LeaseViolationEvent(
     // that never arrives was dropped. The kernel's monotonic clock at the denial, in nanoseconds
     // since the guest booted. Both 0 from a daemon that predates them.
     ulong Sequence = 0,
-    ulong KernelTimeNs = 0);
+    ulong KernelTimeNs = 0,
+    // HOOK_EXPIRED_FLAG (0x100) in the kernel program: refused because the lease's in-kernel deadline
+    // had passed, whatever its rules allowed. Split off Hook so a denial still names a defined hook.
+    bool LeaseExpired = false);
 
 public record LeaseSpec(
     Guid MissionId,

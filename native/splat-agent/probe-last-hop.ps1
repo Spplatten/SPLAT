@@ -15,7 +15,7 @@
   daemon's 0600 token - happens inside the bridge, which is itself part of what is being proven.
 
   Four checks have to hold together, because refusals alone would also be produced by a chain that
-  is simply broken: a permitted command must run (as nobody, not as the daemon's root), a permitted
+  is simply broken: a permitted command must run (as its lease identity, not as the daemon's root), a permitted
   endpoint must stay reachable, an unleased second exec must be refused by the kernel, and an
   address outside the lease must be refused by the kernel. A fifth records that a request outside
   the OPERATOR's egress policy is turned away in the MCP host, before any lease exists, and says so
@@ -157,7 +157,10 @@ function Test-KernelRefusal([string] $text, [string] $hook) {
     return ($text -match "\[KERNEL VIOLATION CONTAINMENT REPORT\]") -and ($text -match "-EPERM") -and ($text -match [regex]::Escape("Detail=$hook"))
 }
 
-$ranAsNobody      = $control -match "\b65534\b"
+# Since per-lease UIDs (PR #18) the control runs as splat200000+; nobody remains the identity when the
+# pool is unset. Same rule as SubstrateProbe: the property is "not the daemon's root", not one number.
+$controlUid       = [regex]::Match($control, "(?m)^\s*(\d+)\s*$")
+$ranUnprivileged  = $controlUid.Success -and ([long]$controlUid.Groups[1].Value -eq 65534 -or [long]$controlUid.Groups[1].Value -ge 200000)
 $execBlocked      = Test-KernelRefusal $exec "bprm_check_security"
 $dpkgLeaked       = ($exec -match "(?i)dpkg") -and ($exec -match "(?i)package management program version")
 $permittedAllowed = ($egressOk -match "\[Process Exited with code") -and ($egressOk -notmatch "\[KERNEL VIOLATION CONTAINMENT REPORT\]")
@@ -185,7 +188,7 @@ $evidence = [ordered]@{
     trace_id = $traceId
     audit_anchor_sha256 = (Get-AnchorHash 2)
     results = [ordered]@{
-        permitted_command_ran_as_nobody = [bool] $ranAsNobody
+        permitted_command_ran_unprivileged = [bool] $ranUnprivileged
         unleased_second_exec_blocked_by_kernel = [bool] $execBlocked
         unleased_exec_output_leaked = [bool] $dpkgLeaked
         permitted_endpoint_reached_the_syscall = [bool] $permittedAllowed
@@ -195,7 +198,7 @@ $evidence = [ordered]@{
     violations = $violationLines
 }
 $evidence.verdict = if (
-    $evidence.results.permitted_command_ran_as_nobody -and
+    $evidence.results.permitted_command_ran_unprivileged -and
     $evidence.results.unleased_second_exec_blocked_by_kernel -and
     -not $evidence.results.unleased_exec_output_leaked -and
     $evidence.results.permitted_endpoint_reached_the_syscall -and
