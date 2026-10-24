@@ -1348,6 +1348,16 @@ time.sleep(60)
                 key = int.from_bytes(bytes(int(b, 16) for b in key), "little")
             if key == cgid:
                 deadline = value["deadline_ns"] if isinstance(value, dict) else int.from_bytes(bytes(int(b, 16) for b in value), "little")
+        def map_value(name, wanted):
+            # bpftool prints an integer where BTF lets it and raw little-endian hex bytes where not.
+            def as_int(v):
+                return v if isinstance(v, int) else int.from_bytes(bytes(int(b, 16) for b in v), "little")
+            for entry in bpftool("map", "dump", "pinned", directory / name) or []:
+                if as_int(entry.get("key")) == wanted:
+                    return as_int(entry.get("value"))
+            return None
+        # The kernel's own tally of denials it could not record (COUNTER_DROPPED), before the outage.
+        dropped_before = map_value("map_counters", 1)
         # How much of the lease the outage covered: the probe and the workload share one boot clock.
         kill_ns = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
         managed_process.kill()  # Our own Popen, never a PID discovered on the host.
@@ -1379,15 +1389,27 @@ time.sleep(60)
         b1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
         mono = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
         boot_minus_mono = (b1 + time.clock_gettime_ns(time.CLOCK_BOOTTIME)) // 2 - mono
+        # Read before the restart, which drains the orphan and withdraws its entries: how many denials
+        # the kernel itself counted for this lease, and whether the ring buffer lost any meanwhile. A
+        # record that never arrives otherwise looks exactly like a hook that never fired.
+        counted = map_value("map_violation_counts", cgid)
+        dropped_after = map_value("map_counters", 1)
         start_owned()
         stamp = re.compile(r"Kernel -EPERM violation \(cgroup (\d+), hook (0x[0-9a-f]+), ktime (\d+) ns, seq (\d+)\)")
-        def kernel_stamps(hook):
+        def drained():
             managed_log.seek(0)
-            found = [int(m.group(3)) + boot_minus_mono for m in stamp.finditer(managed_log.read().decode(errors="replace"))
-                     if int(m.group(1)) == cgid and int(m.group(2), 16) == hook]
+            return [(int(m.group(4)), int(m.group(2), 16), int(m.group(3)) + boot_minus_mono)
+                    for m in stamp.finditer(managed_log.read().decode(errors="replace")) if int(m.group(1)) == cgid]
+        def kernel_stamps(hook):
+            found = [t for _, h, t in drained() if h == hook]
             return min(found) if found else None
-        wait_for(lambda: kernel_stamps(0x102) is not None and kernel_stamps(0x101) is not None, seconds=10)
+        wait_for(lambda: counted is not None and len(drained()) >= counted, seconds=10)
+        records = drained()
         kernel_open, kernel_exec = kernel_stamps(0x102), kernel_stamps(0x101)
+        # Every denial the kernel counted arrived, and none was dropped: only then does an absent
+        # bprm_check_security record mean the hook did not refuse, rather than that its record was lost.
+        complete = counted is not None and len(records) == counted and dropped_before is not None \
+            and dropped_before == dropped_after
         # The kernel decided inside the refused call, so its stamp sits between the deadline and the
         # call's end. 20 us covers the offset's sampling error; anything wider is a finding.
         tolerance = 20_000
@@ -1400,7 +1422,11 @@ time.sleep(60)
             "boot_minus_mono_ns": boot_minus_mono,
             "kernel_first_open_refusal_boot_ns": kernel_open, "kernel_first_exec_refusal_boot_ns": kernel_exec,
             "kernel_open_refusal_after_deadline_us": (kernel_open - deadline) / 1e3 if kernel_open and deadline else None,
+            "kernel_counted_denials": counted, "drained_denials": len(records),
+            "ring_drops_during_outage": dropped_after - dropped_before if None not in (dropped_before, dropped_after) else None,
+            "drained_by_hook": {hex(h): sum(1 for _, x, _ in records if x == h) for h in sorted({x for _, x, _ in records})},
         }
+        feature_checks["expiry_every_kernel_denial_drained"] = complete
         feature_checks["expiry_deadline_within_open_bracket"] = bracketed
         feature_checks["expiry_kernel_stamp_within_bracket"] = stamped
         feature_checks["expiry_no_daemon_during_measurement"] = outage
