@@ -54,35 +54,64 @@ def kernel_dev(st_dev):
     return ((os.major(st_dev) << 20) | os.minor(st_dev)) & 0xFFFFFFFF
 
 
-def attach_func_name(btf_obj_id, btf_type_id):
-    # The link names its target as a BTF type id; the name is what says which hook it is.
+def btf_func_names(btf_obj_id, type_ids):
+    # A link names its target as a BTF type id; the name is what says which hook it is.
     out = subprocess.run([BPFTOOL, "btf", "dump", "id", str(btf_obj_id)], capture_output=True, text=True, timeout=60)
     if out.returncode != 0:
         raise Indeterminate(f"cannot read BTF object {btf_obj_id}: {out.stderr.strip()}")
-    prefix = f"[{btf_type_id}] "
-    for line in out.stdout.splitlines():
-        if line.startswith(prefix):
-            m = re.match(r"\[\d+\] (\w+) '([^']*)'", line)
-            return m.group(2) if m else None
-    return None
+    names = {}
+    for m in re.finditer(r"^\[(\d+)\] FUNC '([^']*)'", out.stdout, re.MULTILINE):
+        if int(m.group(1)) in type_ids:
+            names[int(m.group(1))] = m.group(2)
+    return names
 
 
-def observe_deployment(profile):
-    """The attached program that decides exec, and the maps IT references - not maps found at a pin path."""
-    want = profile["execProgram"]
-    links = bpftool("link", "show") or []
-    candidates = []
-    for link in links:
-        prog = bpftool("prog", "show", "id", str(link["prog_id"]))
-        if prog.get("name") != want["name"] or prog.get("type") != want["progType"]:
+def programs_held_by(pid):
+    # The kernel's own account of which BPF programs a process holds open: fdinfo of each bpf-prog fd.
+    held = set()
+    fd_dir = f"/proc/{pid}/fdinfo"
+    for fd in os.listdir(fd_dir):
+        try:
+            with open(os.path.join(fd_dir, fd)) as f:
+                m = re.search(r"^prog_id:\s+(\d+)", f.read(), re.MULTILINE)
+        except OSError:
             continue
-        func = attach_func_name(link.get("target_obj_id"), link.get("target_btf_id"))
-        candidates.append({"link": link, "prog": prog, "attachFunc": func})
-    if len(candidates) != 1:
-        raise Indeterminate(f"expected exactly one attached {want['name']}, found {len(candidates)}")
-    found = candidates[0]
-    if found["attachFunc"] != want["attachFunc"]:
-        raise Indeterminate(f"{want['name']} is attached to {found['attachFunc']}, not {want['attachFunc']}")
+        if m:
+            held.add(int(m.group(1)))
+    return held
+
+
+def observe_deployment(profile, daemon_pid):
+    """The program that decides exec for this daemon's workloads, and the maps IT references.
+
+    Not a map found at a pin path, and not a program found by name: the shared WSL kernel can carry
+    another SPLAT deployment's programs on the same hook. The admitting daemon's program is the one it
+    holds open; any other program on the hook takes part in the decision under semantics this
+    profile does not describe, so its presence makes the check indeterminate rather than guessed.
+    """
+    want = profile["execProgram"]
+    lsm_links = [l for l in (bpftool("link", "show") or []) if l.get("attach_type") == "lsm_mac"]
+    by_obj = {}
+    for l in lsm_links:
+        by_obj.setdefault(l["target_obj_id"], set()).add(l["target_btf_id"])
+    names = {}
+    for obj, ids in by_obj.items():
+        names.update({(obj, i): n for i, n in btf_func_names(obj, ids).items()})
+    at_hook = [l for l in lsm_links if names.get((l["target_obj_id"], l["target_btf_id"])) == want["attachFunc"]]
+    held = programs_held_by(daemon_pid)
+    ours = [l for l in at_hook if l["prog_id"] in held]
+    others = [l for l in at_hook if l["prog_id"] not in held]
+    if len(ours) != 1:
+        raise Indeterminate(f"the admitting daemon holds {len(ours)} of the {len(at_hook)} programs on {want['attachFunc']}")
+    if others:
+        described = [{"link": l["id"], "prog": l["prog_id"], "name": bpftool("prog", "show", "id", str(l["prog_id"])).get("name")}
+                     for l in others]
+        raise Indeterminate(f"other programs also decide {want['attachFunc']}: {described}")
+    prog = bpftool("prog", "show", "id", str(ours[0]["prog_id"]))
+    if prog.get("name") != want["name"] or prog.get("type") != want["progType"]:
+        raise Indeterminate(f"the daemon's program on the hook is {prog.get('type')}/{prog.get('name')}, not the profiled one")
+    found = {"link": ours[0], "prog": prog, "attachFunc": want["attachFunc"], "daemonPid": daemon_pid,
+             "programsHeldByDaemon": sorted(held)}
 
     maps = {}
     for map_id in found["prog"].get("map_ids", []):
@@ -98,7 +127,7 @@ def observe_deployment(profile):
     missing = sorted(set(profile["maps"]) - set(maps))
     if missing:
         raise Indeterminate(f"the attached program does not reference {missing}")
-    return {"link": found["link"], "prog": found["prog"], "attachFunc": found["attachFunc"], "maps": maps}
+    return dict(found, maps=maps)
 
 
 def dump(map_id):
@@ -241,7 +270,7 @@ def main():
         if record["cgroupProcsBeforeAdmission"]:
             raise Indeterminate("the lease cgroup already holds a process before admission")
 
-        deployment = observe_deployment(profile)
+        deployment = observe_deployment(profile, os.getppid())
         record["deployment"] = deployment
         if config.get("corrupt"):
             record["injection"] = inject(deployment, dict(config["corrupt"], cgroupId=args.cgroup_id))

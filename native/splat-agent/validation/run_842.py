@@ -41,12 +41,27 @@ CONDITIONS = [("correct", "OFF"), ("correct", "B2"), ("correct", "B3"),
 
 
 def expected(policy, variant):
-    """Thesis 8.4.2's table, made executable before any run is seen."""
+    """Thesis 8.4.2's table, made executable before any run is seen.
+
+    `launched` is every image a daemon-forked process ran, from the trace: the gate always runs; A only
+    when admitted; X only when A's exec of it is permitted (X replaces A, so it is the same process).
+    """
+    gate = f"{OPT}/gate.py"
     if policy == "correct":
-        return {"admitted": True, "aExec": True, "xExec": False, "exitCode": 10}
+        return {"admitted": True, "aExec": True, "xExec": False, "launched": [gate, A], "exitCode": 10}
     if policy == "mutated" and variant in ("OFF", "B2"):
-        return {"admitted": True, "aExec": True, "xExec": True, "exitCode": 0}
-    return {"admitted": False, "aExec": False, "xExec": False, "exitCode": -1}
+        return {"admitted": True, "aExec": True, "xExec": True, "launched": [gate, A, X], "exitCode": 0}
+    return {"admitted": False, "aExec": False, "xExec": False, "launched": [gate], "exitCode": -1}
+
+
+def classify(complete, observed, want, gate):
+    """Thesis 8.4.3: unavailable evidence is indeterminate, never a detection or a false rejection."""
+    if not complete:
+        return "indeterminate-observation"
+    if gate and gate.get("decision") == "indeterminate":
+        # Refused for want of a required observation. Safe only if nothing but the gate ran.
+        return "indeterminate-refused" if observed["launched"] == [f"{OPT}/gate.py"] else "indeterminate-unsafe"
+    return "as-expected" if observed == want else "unexpected"
 
 
 def sha256_file(path):
@@ -118,9 +133,13 @@ def call(token, req, timeout=60):
 # ---- independent launch observation -----------------------------------------------------------------
 
 def trace_setup():
-    os.makedirs(TRACE, exist_ok=True)
-    with open(f"{TRACE}/trace_clock", "w") as f:
-        f.write("boot")  # the clock the gate and the program's deadline use
+    # One continuous trace from before the daemon's exec to the end: clearing it between runs would
+    # also discard the creation of any daemon thread in the gap, and a spawn by that thread would then
+    # go unattributed - which in a refused run reads as "nothing started".
+    os.makedirs(TRACE)
+    for name, value in (("buffer_size_kb", "16384"), ("trace_clock", "boot")):  # boot: the clock the gate and deadline use
+        with open(f"{TRACE}/{name}", "w") as f:
+            f.write(value)
     for event in ("sched_process_fork", "sched_process_exec"):
         with open(f"{TRACE}/events/sched/{event}/enable", "w") as f:
             f.write("1")
@@ -128,9 +147,7 @@ def trace_setup():
         f.write("1")
 
 
-def trace_reset(marker):
-    with open(f"{TRACE}/trace", "w"):
-        pass
+def trace_mark(marker):
     with open(f"{TRACE}/trace_marker", "w") as f:
         f.write(marker)
 
@@ -140,16 +157,57 @@ def trace_read():
         return f.read()
 
 
+def trace_overruns():
+    total = 0
+    for cpu in os.listdir(f"{TRACE}/per_cpu"):
+        with open(f"{TRACE}/per_cpu/{cpu}/stats") as f:
+            total += int(re.search(r"^overrun: (\d+)", f.read(), re.MULTILINE).group(1))
+    return total
+
+
+def trace_slice(trace, mission):
+    begin, end = f"tracing_mark_write: begin {mission}\n", f"tracing_mark_write: end {mission}\n"
+    start = trace.index(begin)
+    return trace[trace.rindex("\n", 0, start) + 1:trace.index(end, start) + len(end)]
+
+
 FORK = re.compile(r"sched_process_fork: comm=(.*?) pid=(\d+) child_comm=(.*?) child_pid=(\d+)")
 EXEC = re.compile(r"sched_process_exec: filename=(\S+) pid=(\d+) old_pid=(\d+)")
 
 
-def observe(trace, daemon_tids):
-    forks = [(int(m.group(2)), int(m.group(4))) for m in FORK.finditer(trace)]
-    execs = [(m.group(1), int(m.group(2))) for m in EXEC.finditer(trace)]
-    daemon_children = {child for parent, child in forks if parent in daemon_tids}
+class DaemonTasks:
+    """The daemon's threads in the kernel's own (root-namespace) pid space, which is what ftrace reports.
+
+    Each WSL distro has its own pid namespace, so /proc here cannot name them. The trace is running when
+    the daemon execs, so its global pid comes from that exec event, and every later fork by one of its
+    tasks is either a thread (it never execs: added to the set) or a spawned process (it execs).
+    """
+    def __init__(self, trace):
+        starts = [int(m.group(2)) for m in EXEC.finditer(trace) if m.group(1) == f"{OPT}/splat-agent"]
+        if len(starts) != 1:
+            raise RuntimeError(f"expected one exec of the daemon in the startup trace, found {len(starts)}")
+        self.global_pid = starts[0]
+        self.tids = {self.global_pid}
+        self.absorb(trace)
+
+    def absorb(self, trace):
+        forks = [(int(m.group(2)), int(m.group(4))) for m in FORK.finditer(trace)]
+        exec_pids = {int(m.group(2)) for m in EXEC.finditer(trace)}
+        self.spawned = set()
+        for parent, child in forks:  # in trace order, so a thread's own forks resolve
+            if parent in self.tids:
+                if child in exec_pids:
+                    self.spawned.add(child)
+                else:
+                    self.tids.add(child)
+
+
+def observe(run_trace, tasks):
+    spawned = tasks.spawned
+    execs = [(m.group(1), int(m.group(2))) for m in EXEC.finditer(run_trace)]
     return {"aExec": any(f == A for f, _ in execs), "xExec": any(f == X for f, _ in execs),
-            "daemonChildExecs": [f for f, pid in execs if pid in daemon_children],
+            # Every image a process the daemon forked went on to run, in order: the gate, then the workload.
+            "launched": [f for f, pid in execs if pid in spawned],
             "execsOfAOrX": [{"filename": f, "pid": p} for f, p in execs if f in (A, X)]}
 
 
@@ -163,6 +221,11 @@ def preflight():
     for p in (OPT, LIBEXEC, ETC, STATE, TRACE):
         if os.path.exists(p):
             sys.exit(f"{p} exists from an earlier run; remove it first")
+    # A guest whose systemd did not mount bpffs still has the kernel's; the daemon refuses without it.
+    if sh("stat", "-f", "-c", "%T", "/sys/fs/bpf") != "bpf_fs":
+        subprocess.run(["mount", "-t", "bpf", "bpf", "/sys/fs/bpf"], check=True)
+        return True
+    return False
 
 
 def install(stage):
@@ -217,7 +280,7 @@ def deployment_snapshot(bundle, when):
     return {"programs": ours, "links": links, "xlatedSha256": xlated}
 
 
-def run_one(token, bundle, block, index, policy, variant, daemon_pid):
+def run_one(token, bundle, block, index, policy, variant):
     mission = f"e842-b{block}-{index:02d}-{policy}-{variant}".lower()
     rundir = f"{bundle}/runs/{mission}"
     os.makedirs(rundir)
@@ -231,13 +294,16 @@ def run_one(token, bundle, block, index, policy, variant, daemon_pid):
     writer_intent = [A, X] if policy == "mutated" else [A]
     request = {"type": "EXECUTE_TOOL", "missionId": mission, "command": A, "argv": [],
                "allowedExecPaths": writer_intent, "leaseDurationSeconds": LEASE_SECONDS}
-    daemon_tids = {int(t) for t in os.listdir(f"/proc/{daemon_pid}/task")}
-    trace_reset(f"begin {mission}")
+    trace_mark(f"begin {mission}")
     started = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
     frames = call(token, request)
     finished = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
     time.sleep(0.3)
-    trace = trace_read()
+    trace_mark(f"end {mission}")
+    full = trace_read()
+    tasks = DaemonTasks(full)
+    trace = trace_slice(full, mission)
+    overruns = trace_overruns()
 
     gate = json.load(open(f"{rundir}/{mission}.gate.json")) if os.path.exists(f"{rundir}/{mission}.gate.json") else None
     cleanup = None
@@ -248,14 +314,18 @@ def run_one(token, bundle, block, index, policy, variant, daemon_pid):
         cleanup = sh("/usr/sbin/bpftool", "map", "delete", "id", str(exec_map), "key", "hex", *[f"{b:02x}" for b in key]) or "deleted"
     admission = next((f for f in frames if f.get("type") == "ADMISSION"), None)
     exit_frame = next((f for f in frames if f.get("type") == "EXIT"), {})
-    obs = observe(trace, daemon_tids)
+    obs = observe(trace, tasks)
     observed = {"admitted": bool(admission and admission.get("admitted")), "aExec": obs["aExec"], "xExec": obs["xExec"],
-                "exitCode": exit_frame.get("exitCode")}
+                "launched": obs["launched"], "exitCode": exit_frame.get("exitCode")}
     want = expected(policy, variant)
+    # A lost trace event could hide a launch, so an overrun makes the run indeterminate, never a match.
+    complete = overruns == 0
     record = {"missionId": mission, "block": block, "policy": policy, "variant": variant, "writerIntent": writer_intent,
-              "expected": want, "observed": observed, "asExpected": observed == want,
+              "expected": want, "observed": observed, "observationComplete": complete,
+              "asExpected": complete and observed == want,
+              "classification": classify(complete, observed, want, gate),
               "gateDecision": gate and gate.get("decision"), "gateReasons": gate and gate.get("reasons"),
-              "daemonChildExecs": obs["daemonChildExecs"], "execsOfAOrX": obs["execsOfAOrX"],
+              "daemonGlobalPid": tasks.global_pid, "traceOverruns": overruns, "execsOfAOrX": obs["execsOfAOrX"],
               "violations": [f for f in frames if f.get("type") == "VIOLATION"],
               "requestBootNs": [started, finished], "injectionCleanup": cleanup}
     write_json(f"{rundir}/request.json", request, 0o644)
@@ -284,20 +354,21 @@ def main():
     ap.add_argument("--blocks", type=int, default=3)
     ap.add_argument("--seed", type=int, default=int.from_bytes(os.urandom(4), "big"))
     args = ap.parse_args()
-    preflight()
+    mounted_bpffs = preflight()
     os.makedirs(f"{args.bundle}/runs")
-    sums = install(args.stage)
     manifest = {"experiment": "thesis 8.4.2 - first native comparison: a consistently wrong executable grant",
-                "build": json.load(open(f"{args.stage}/build.json")), "stagedSha256": sums,
-                "environment": environment(), "seed": args.seed, "blocks": args.blocks,
+                "build": json.load(open(f"{args.stage}/build.json")), "environment": environment(),
+                "bpffsMountedByHarness": mounted_bpffs, "seed": args.seed, "blocks": args.blocks,
                 "startedUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-    profile = json.load(open(f"{ETC}/profile.json"))
-    daemon = start_daemon(args.bundle)
+    daemon = None
     runs = []
     try:
+        manifest["stagedSha256"] = install(args.stage)
+        profile = json.load(open(f"{ETC}/profile.json"))
+        trace_setup()
+        daemon = start_daemon(args.bundle)
         token = open(f"{ETC}/agent.token").read().strip()
         manifest["deployment"] = deployment_snapshot(args.bundle, "before")
-        trace_setup()
         rng = random.Random(args.seed)
         manifest["order"] = []
         for block in range(1, args.blocks + 1):
@@ -305,19 +376,23 @@ def main():
             rng.shuffle(order)
             manifest["order"].append([f"{p}/{v}" for p, v in order])
             for index, (policy, variant) in enumerate(order, 1):
-                r = run_one(token, args.bundle, block, index, policy, variant, daemon.pid)
-                print(f"{r['missionId']:40} gate={r['gateDecision']!s:13} {r['observed']} {'ok' if r['asExpected'] else 'UNEXPECTED'}")
+                r = run_one(token, args.bundle, block, index, policy, variant)
+                print(f"{r['missionId']:36} gate={r['gateDecision']!s:13} {r['classification']:22} {r['observed']}")
                 runs.append(r)
         manifest["deploymentAfter"] = deployment_snapshot(args.bundle, "after")
         manifest["residualMaps"] = residual(profile)
     finally:
-        daemon.send_signal(signal.SIGTERM)
-        try:
-            daemon.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            daemon.kill()
-        manifest["daemonExit"] = daemon.returncode
+        if daemon is not None:
+            daemon.send_signal(signal.SIGTERM)
+            try:
+                daemon.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                daemon.kill()
+                daemon.wait()
+            manifest["daemonExit"] = daemon.returncode
         if os.path.exists(TRACE):
+            with open(f"{args.bundle}/trace-full.txt", "w") as f:
+                f.write(trace_read())
             with open(f"{TRACE}/tracing_on", "w") as f:
                 f.write("0")
             for event in ("sched_process_fork", "sched_process_exec"):
@@ -327,20 +402,28 @@ def main():
         # Pins outlive the daemon by design; this run made them, so it retires them.
         shutil.rmtree(PIN_BASE, ignore_errors=True)
         manifest["pinsRemoved"] = not os.path.exists(PIN_BASE)
-        shutil.copytree(STATE, f"{args.bundle}/daemon-state", dirs_exist_ok=True)
+        if os.path.exists(STATE):
+            shutil.copytree(STATE, f"{args.bundle}/daemon-state", dirs_exist_ok=True)
         for d in (OPT, LIBEXEC, ETC, STATE):
             shutil.rmtree(d, ignore_errors=True)
+        if mounted_bpffs:
+            subprocess.run(["umount", "/sys/fs/bpf"])
 
     residual_entries = sum(len(v or []) for maps in manifest.get("residualMaps", {}).values() for v in maps.values())
     manifest["finishedUtc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     manifest["summary"] = {
         "runs": len(runs), "asExpected": sum(r["asExpected"] for r in runs),
         "residualPolicyEntries": residual_entries,
-        "byCondition": {f"{p}/{v}": [r["asExpected"] for r in runs if (r["policy"], r["variant"]) == (p, v)]
+        "byCondition": {f"{p}/{v}": [r["classification"] for r in runs if (r["policy"], r["variant"]) == (p, v)]
                         for p, v in CONDITIONS}}
-    manifest["verdict"] = ("PASS" if runs and all(r["asExpected"] for r in runs) and residual_entries == 0
-                           and len(runs) == args.blocks * len(CONDITIONS) else "FAIL")
-    manifest["runs"] = [{k: r[k] for k in ("missionId", "policy", "variant", "expected", "observed", "asExpected",
+    complete = len(runs) == args.blocks * len(CONDITIONS) and residual_entries == 0
+    if complete and all(r["classification"] == "as-expected" for r in runs):
+        manifest["verdict"] = "PASS"
+    elif complete and all(r["classification"] == "indeterminate-refused" for r in runs):
+        manifest["verdict"] = "INDETERMINATE"  # every run refused for want of an observation, and nothing launched
+    else:
+        manifest["verdict"] = "FAIL"
+    manifest["runs"] = [{k: r[k] for k in ("missionId", "policy", "variant", "expected", "observed", "classification",
                                            "gateDecision", "gateReasons")} for r in runs]
     write_json(f"{args.bundle}/manifest.json", manifest, 0o644)
     print(json.dumps(manifest["summary"], indent=2), manifest["verdict"])
