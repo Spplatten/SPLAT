@@ -15,7 +15,7 @@ mkdir -p "$STAGE"
 cp "$CARGO_TARGET_DIR/release/splat-agent" "$STAGE/splat-agent"
 gcc -static -O2 -o "$STAGE/a" validation/workload_a.c
 gcc -static -O2 -o "$STAGE/x" validation/workload_x.c
-cp validation/gate.py validation/run_842.py validation/profile.json "$STAGE/"
+cp validation/gate.py validation/run_842.py validation/profile.json validation/run_unified.sh "$STAGE/"
 {
   echo "{"
   echo "  \"commit\": \"$(git rev-parse HEAD)\","
@@ -26,5 +26,5 @@ cp validation/gate.py validation/run_842.py validation/profile.json "$STAGE/"
   echo "  \"gcc\": \"$(gcc --version | head -1)\""
   echo "}"
 } > "$STAGE/build.json"
-(cd "$STAGE" && sha256sum splat-agent a x gate.py run_842.py profile.json > SHA256SUMS)
+(cd "$STAGE" && sha256sum splat-agent a x gate.py run_842.py profile.json run_unified.sh > SHA256SUMS)
 cat "$STAGE/build.json" "$STAGE/SHA256SUMS"
