@@ -20,8 +20,9 @@ which the kernel emits outside the BPF-LSM program and only for an exec that suc
 What B3 shares with the writer, and therefore cannot be independent of: the kernel's `MKDEV`
 encoding (`major << 20 | minor`), the assumption that the jail's bind mounts preserve inode identity,
 the approval file's integrity (root-owned, not signed), and the profile's reading of the BPF source.
-The profile is written from the source, not derived from the loaded bytecode; the bundle records the
-translated program's hash so a later reader can bind them.
+The profile is written from the source, not derived from the loaded bytecode. The bundle records the
+kernel's program tag, which was the same across separate loads of this build (`debffec9428e2ccf`);
+the translated-dump hashes it also keeps change per load, because the dump embeds map ids.
 
 A gate run is indeterminate, and refuses, when any program other than the daemon's own decides
 `bprm_check_security`. WSL distros share one kernel, so another distro's orphaned SPLAT pins are such
