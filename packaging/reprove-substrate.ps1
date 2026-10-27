@@ -235,7 +235,12 @@ try {
     Write-Host "[4/8] probe-daemon.sh owns the fresh daemon, including SIGKILL and restart" -ForegroundColor Cyan
     # The lifecycle probe must own the only daemon. Starting the driver's instance first
     # holds agent.lock and prevents section 19 from ever exercising pinned enforcement.
+    # bpffs is mounted by the installed unit's ExecStartPre, not by the guest. A guest the unit was
+    # never installed in - the shipped SPLAT Guest, imported fresh on 2026-10-23 - has none, and the
+    # daemon refuses to pin. The same idempotent line as the unit, so the run proves the daemon, not
+    # whether some earlier service happened to leave a mount behind.
     $probe = Invoke-Guest -AsRoot (@'
+mountpoint -q /sys/fs/bpf || mount -t bpf bpffs /sys/fs/bpf
 cd '__CRATE__'
 SPLAT_PROBE_DAEMON='__BIN__' SPLAT_EVIDENCE_DIR='__EVIDENCE__' bash probe-daemon.sh '__LISTEN__'
 '@).Replace('__CRATE__', $guestCrate).Replace('__BIN__', $bin).Replace('__EVIDENCE__', $guestEvidence).Replace('__LISTEN__', $Listen)

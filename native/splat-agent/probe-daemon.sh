@@ -893,6 +893,8 @@ feature_checks = dict.fromkeys([
     "pins_allowed_exec_during_outage", "pins_no_daemon_during_measurement", "pins_same_ids_after_restart",
     "pins_restart_enforces", "pins_orphans_drained", "pins_wrong_hash_refused",
     "pins_partial_set_refused", "pins_foreign_map_refused",
+    "expiry_no_daemon_during_measurement", "expiry_allowed_until_deadline",
+    "expiry_exec_denied_without_daemon", "expiry_open_denied_without_daemon", "expiry_overrun_within_1s",
 ], False)
 feature_observations = {"errors": [], "lifecycle_requested": bool(managed_binary)}
 
@@ -1246,7 +1248,7 @@ time.sleep(60)
         info = info[0] if isinstance(info, list) else info
         pin.rename(backup)
         try:
-            bpftool("map", "create", pin, "type", "hash", "key", "8", "value", "1",
+            bpftool("map", "create", pin, "type", "hash", "key", "8", "value", "8",
                     "entries", info["max_entries"], "name", info["name"], "flags", info.get("flags", 0))
             feature_checks["pins_foreign_map_refused"] = refuses_owned_start("pinned hook does not match")
         finally:
@@ -1261,6 +1263,185 @@ time.sleep(60)
         worker.join(timeout=10)
         if not cg.exists():
             shutil.rmtree(ws)
+
+def probe_expiry_outage():
+    # The deadline used to live only in the daemon's reaper, so a daemon that died left a lease its
+    # full authority with no end. The kernel now holds the deadline itself. This kills the daemon
+    # mid-lease and measures when the kernel cuts the workload off, against the deadline it holds.
+    # The workload opens its result file BEFORE the deadline: past it, every new open is refused.
+    ws = Path(tempfile.mkdtemp(prefix="splat-probe-expiry-"))
+    ws.chmod(0o777)
+    mission = "probe-expiry-" + ws.name
+    cg = Path("/sys/fs/cgroup/splat_leases") / ("mission_" + mission)
+    duration = 8
+    code = """import errno, json, os, subprocess, time
+from pathlib import Path
+out = os.open('result.jsonl', os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o666)
+def now():
+    return time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+def emit(**kw):
+    os.write(out, (json.dumps(kw) + '\\n').encode())
+def exec_ok():
+    try:
+        return subprocess.run(['/usr/bin/id', '-u'], capture_output=True).returncode == 0
+    except OSError as e:
+        return False if e.errno == errno.EPERM else None
+def open_ok():
+    try:
+        os.close(os.open('/etc/os-release', os.O_RDONLY))
+        return True
+    except OSError as e:
+        return False if e.errno == errno.EPERM else None
+emit(phase='ready', exec_ok=exec_ok(), open_ok=open_ok())
+while not os.path.exists('continue'):
+    time.sleep(0.02)
+deadline = int(Path('continue').read_text().strip() or 0)
+first_exec = first_open = None
+allowed_after_kill = exec_ok() and open_ok()
+until = now() + __WINDOW__
+# Bracket the deadline with opens alone, which cost microseconds where an exec costs milliseconds.
+# A permitted open that STARTED at t puts the kernel's deadline after t; a refused open that ENDED
+# at t puts it at or before t. The 20 ms exec loop below could only bound the overrun by its own
+# sleep, which is what the 2026-10-22/23 pilot measured.
+while now() < deadline - 50_000_000:
+    time.sleep(0.005)
+last_open_allowed_start = first_open_denied_end = None
+while now() < until:
+    t0 = now()
+    r = open_ok()
+    t1 = now()
+    if r is True:
+        last_open_allowed_start = t0
+    elif r is False:
+        first_open_denied_end = t1
+        break
+while now() < until and (first_exec is None or first_open is None):
+    if first_exec is None and exec_ok() is False:
+        first_exec = now()
+    if first_open is None and open_ok() is False:
+        first_open = now()
+    time.sleep(0.02)
+emit(phase='done', allowed_after_kill=allowed_after_kill, first_exec_denied_ns=first_exec, first_open_denied_ns=first_open,
+     last_open_allowed_start_ns=last_open_allowed_start, first_open_denied_end_ns=first_open_denied_end)
+time.sleep(60)
+""".replace("__WINDOW__", str((duration + 20) * 1_000_000_000))
+    worker = threading.Thread(target=lambda: call({
+        "type": "EXECUTE_TOOL", "missionId": mission, "command": "/usr/bin/python3", "argv": ["-c", code],
+        "allowedExecPaths": ["/usr/bin/python3", "/usr/bin/id"], "workingDirectory": str(ws),
+        "leaseDurationSeconds": duration,
+    }, mission, settle=duration + 40))
+    result = ws / "result.jsonl"
+    def phases():
+        return [json.loads(l) for l in result.read_text().splitlines() if l.strip()] if result.exists() else []
+    worker.start()
+    try:
+        if not wait_for(lambda: any(p["phase"] == "ready" for p in phases())):
+            raise RuntimeError("expiry workload did not reach its pre-kill control")
+        ready = next(p for p in phases() if p["phase"] == "ready")
+        # The deadline exactly as the kernel holds it, read from the pinned map before the kill.
+        directory = Path("/sys/fs/bpf/splat") / hashlib.sha256(Path("src/bpf/lease_lsm.bpf.c").read_bytes()).hexdigest()
+        cgid = cg.stat().st_ino
+        deadline = None
+        for entry in bpftool("map", "dump", "pinned", directory / "map_leased_cgroups") or []:
+            key, value = entry.get("key"), entry.get("value")
+            if isinstance(key, list):
+                key = int.from_bytes(bytes(int(b, 16) for b in key), "little")
+            if key == cgid:
+                deadline = value["deadline_ns"] if isinstance(value, dict) else int.from_bytes(bytes(int(b, 16) for b in value), "little")
+        def map_value(name, wanted):
+            # bpftool prints an integer where BTF lets it and raw little-endian hex bytes where not.
+            def as_int(v):
+                return v if isinstance(v, int) else int.from_bytes(bytes(int(b, 16) for b in v), "little")
+            for entry in bpftool("map", "dump", "pinned", directory / name) or []:
+                if as_int(entry.get("key")) == wanted:
+                    return as_int(entry.get("value"))
+            return None
+        # The kernel's own tally of denials it could not record (COUNTER_DROPPED), before the outage.
+        dropped_before = map_value("map_counters", 1)
+        # How much of the lease the outage covered: the probe and the workload share one boot clock.
+        kill_ns = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+        managed_process.kill()  # Our own Popen, never a PID discovered on the host.
+        killed = managed_process.wait(timeout=5) == -9
+        worker.join(timeout=5)
+        no_listener = False
+        try:
+            with socket.create_connection((host, port), timeout=0.2):
+                pass
+        except OSError:
+            no_listener = True
+        # Written whole, then renamed: the workload reads the deadline the moment the name appears.
+        (ws / "continue.tmp").write_text(str(deadline or 0))
+        (ws / "continue.tmp").rename(ws / "continue")
+        if not wait_for(lambda: any(p["phase"] == "done" for p in phases()), seconds=duration + 30):
+            raise RuntimeError("expiry workload did not finish its measurement")
+        done = next(p for p in phases() if p["phase"] == "done")
+        outage = killed and no_listener and deadline is not None and ready.get("exec_ok") is True and ready.get("open_ok") is True
+        first = done.get("first_exec_denied_ns")
+        overrun_ms = (first - deadline) / 1e6 if outage and first else None
+        allowed_start, denied_end = done.get("last_open_allowed_start_ns"), done.get("first_open_denied_end_ns")
+        bracketed = outage and allowed_start is not None and denied_end is not None and allowed_start < deadline <= denied_end
+
+        # The kernel stamped each refusal itself (bpf_ktime_get_ns, CLOCK_MONOTONIC) into the pinned
+        # ring buffer, where it waits for a daemon. Restart one, read the stamps from its drain, and
+        # carry them onto the boot clock with an offset sampled here; no suspend can fall inside one
+        # run, so the offset holds for all of it.
+        import re
+        b1 = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+        mono = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
+        boot_minus_mono = (b1 + time.clock_gettime_ns(time.CLOCK_BOOTTIME)) // 2 - mono
+        # Read before the restart, which drains the orphan and withdraws its entries: how many denials
+        # the kernel itself counted for this lease, and whether the ring buffer lost any meanwhile. A
+        # record that never arrives otherwise looks exactly like a hook that never fired.
+        counted = map_value("map_violation_counts", cgid)
+        dropped_after = map_value("map_counters", 1)
+        start_owned()
+        stamp = re.compile(r"Kernel -EPERM violation \(cgroup (\d+), hook (0x[0-9a-f]+), ktime (\d+) ns, seq (\d+)\)")
+        def drained():
+            managed_log.seek(0)
+            return [(int(m.group(4)), int(m.group(2), 16), int(m.group(3)) + boot_minus_mono)
+                    for m in stamp.finditer(managed_log.read().decode(errors="replace")) if int(m.group(1)) == cgid]
+        def kernel_stamps(hook):
+            found = [t for _, h, t in drained() if h == hook]
+            return min(found) if found else None
+        wait_for(lambda: counted is not None and len(drained()) >= counted, seconds=10)
+        records = drained()
+        kernel_open, kernel_exec = kernel_stamps(0x102), kernel_stamps(0x101)
+        # Every denial the kernel counted arrived, and none was dropped: only then does an absent
+        # bprm_check_security record mean the hook did not refuse, rather than that its record was lost.
+        complete = counted is not None and len(records) == counted and dropped_before is not None \
+            and dropped_before == dropped_after
+        # The kernel decided inside the refused call, so its stamp sits between the deadline and the
+        # call's end. 20 us covers the offset's sampling error; anything wider is a finding.
+        tolerance = 20_000
+        stamped = bracketed and kernel_open is not None and deadline - tolerance <= kernel_open <= denied_end + tolerance
+
+        feature_observations["expiry_outage"] = {
+            "deadline_ns": deadline, "ready": ready, "done": done, "overrun_ms": overrun_ms, "lease_seconds": duration,
+            "kill_boot_ns": kill_ns, "outage_before_deadline_ms": (deadline - kill_ns) / 1e6 if deadline else None,
+            "bracket_us": (denied_end - allowed_start) / 1e3 if bracketed else None,
+            "boot_minus_mono_ns": boot_minus_mono,
+            "kernel_first_open_refusal_boot_ns": kernel_open, "kernel_first_exec_refusal_boot_ns": kernel_exec,
+            "kernel_open_refusal_after_deadline_us": (kernel_open - deadline) / 1e3 if kernel_open and deadline else None,
+            "kernel_counted_denials": counted, "drained_denials": len(records),
+            "ring_drops_during_outage": dropped_after - dropped_before if None not in (dropped_before, dropped_after) else None,
+            "drained_by_hook": {hex(h): sum(1 for _, x, _ in records if x == h) for h in sorted({x for _, x, _ in records})},
+        }
+        feature_checks["expiry_every_kernel_denial_drained"] = complete
+        feature_checks["expiry_deadline_within_open_bracket"] = bracketed
+        feature_checks["expiry_kernel_stamp_within_bracket"] = stamped
+        feature_checks["expiry_no_daemon_during_measurement"] = outage
+        feature_checks["expiry_allowed_until_deadline"] = outage and done.get("allowed_after_kill") is True
+        feature_checks["expiry_exec_denied_without_daemon"] = outage and first is not None and first >= deadline
+        feature_checks["expiry_open_denied_without_daemon"] = outage and done.get("first_open_denied_ns") is not None \
+            and done["first_open_denied_ns"] >= deadline
+        feature_checks["expiry_overrun_within_1s"] = overrun_ms is not None and 0 <= overrun_ms <= 1000
+        print(f"  lease cut off without a daemon : overrun {overrun_ms} ms past the kernel's deadline")
+    finally:
+        if managed_process.poll() is not None:
+            start_owned()  # Startup drains the surviving workload before serving.
+        worker.join(timeout=10)
+        if not cg.exists():
+            shutil.rmtree(ws, ignore_errors=True)
 
 def probe_cross_lease():
     # Two ORDINARY leases, concurrent. B sleeps in its own ephemeral workspace; A, a second
@@ -1391,6 +1572,11 @@ if replay is None and hasattr(os, "geteuid") and os.geteuid() == 0:
             probe_pins()
         except Exception as e:
             feature_observations["errors"].append("pins: " + str(e))
+        print("\n== 21. Expiry without a daemon: the kernel ends a lease at its deadline ==")
+        try:
+            probe_expiry_outage()
+        except Exception as e:
+            feature_observations["errors"].append("expiry outage: " + str(e))
 for name, passed in feature_checks.items():
     print(f"  {name}: {passed}")
 for error in feature_observations["errors"]:
@@ -1429,6 +1615,14 @@ evidence = {
     # anyway. Guarded rather than branched on `replay`, so the recorded field never depends on which
     # mode wrote it.
     "kernel_release": os.uname().release if hasattr(os, "uname") else "unavailable-no-uname",
+    # The userland the run proved, for the same reason: the 2026-10-23 run on the shipped SPLAT Guest
+    # and the 2026-10-22 run on a development Ubuntu wrote records nothing could tell apart.
+    "guest_os": next((line.split("=", 1)[1].strip().strip('"')
+                      for line in (open("/etc/os-release").read().splitlines() if os.path.exists("/etc/os-release") else [])
+                      if line.startswith("PRETTY_NAME=")), "unknown"),
+    # The binary that enforced, not only the source it came from: the pilot runs could name the BPF
+    # source and the daemon commit but not prove which build answered.
+    "daemon_binary_sha256": hashlib.sha256(Path(managed_binary).read_bytes()).hexdigest() if managed_binary else None,
     "protocol_version": 3,
     "recorded_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "subject": "splat-agent daemon (end-to-end over the JSON protocol)",

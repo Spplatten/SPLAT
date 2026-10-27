@@ -27,7 +27,8 @@
 //   socket_sendmsg      -> the same, for a datagram that names its own destination (-EPERM)
 //
 // A process is "leased" iff its current cgroup id is present in leased_cgroups. Anything
-// outside the lease is untouched, so the host and every other workload are unaffected.
+// outside the lease is untouched, so the host and every other workload are unaffected. Past its
+// deadline a lease has no authority: every hooked operation is refused, whatever its rules allowed.
 
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
@@ -105,12 +106,25 @@ struct {
     __type(value, __u64);
 } counters SEC(".maps");
 
-// cgroup id -> 1. Presence means "this cgroup holds a lease and is subject to policy".
+// cgroup id -> the lease's deadline. Presence means "this cgroup holds a lease and is subject to
+// policy"; the deadline says until when that lease carries any authority.
+//
+// The deadline used to live only in the daemon's reaper. The maps are pinned so policy outlives a
+// daemon crash, which meant a dead daemon left every lease policed with its FULL grant and no end:
+// nothing compared the clock until a daemon started again. The kernel now compares it on every
+// hooked operation, so a lease expires on time whether or not anything in userspace is alive.
+//
+// The clock is bpf_ktime_get_boot_ns(), CLOCK_BOOTTIME: it keeps counting through suspend, so
+// sleeping the machine cannot stretch a lease. The daemon writes the deadline on the same clock.
+struct lease_state {
+    __u64 deadline_ns;
+};
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 256);
     __type(key, __u64);
-    __type(value, __u8);
+    __type(value, struct lease_state);
 } leased_cgroups SEC(".maps");
 
 // Inodes a given lease's processes may NOT open (e.g. /etc/shadow captured at lease time).
@@ -174,9 +188,21 @@ struct {
     __type(value, __u64);
 } violation_counts SEC(".maps");
 
-static __always_inline __u8 is_leased(__u64 cgid)
+enum lease_status {
+    LEASE_NONE = 0,    // not a leased cgroup: untouched
+    LEASE_LIVE = 1,    // policed by its lease
+    LEASE_EXPIRED = 2, // past its deadline: no authority at all
+};
+
+// Set on a denial's hook when it was refused because the lease had expired, not by the lease's rules.
+#define HOOK_EXPIRED_FLAG 0x100
+
+static __always_inline enum lease_status lease_status_of(__u64 cgid)
 {
-    return bpf_map_lookup_elem(&leased_cgroups, &cgid) != NULL;
+    struct lease_state *s = bpf_map_lookup_elem(&leased_cgroups, &cgid);
+    if (!s)
+        return LEASE_NONE;
+    return bpf_ktime_get_boot_ns() >= s->deadline_ns ? LEASE_EXPIRED : LEASE_LIVE;
 }
 
 static __always_inline void report(__u64 cgid, __u32 hook, __u32 detail)
@@ -252,8 +278,13 @@ int BPF_PROG(splat_bprm_check, struct linux_binprm *bprm, int ret)
         return ret;
 
     __u64 cgid = bpf_get_current_cgroup_id();
-    if (!is_leased(cgid))
+    enum lease_status status = lease_status_of(cgid);
+    if (status == LEASE_NONE)
         return 0;
+    if (status == LEASE_EXPIRED) {
+        report(cgid, HOOK_EXEC | HOOK_EXPIRED_FLAG, 0);
+        return -EPERM;
+    }
 
     struct file *f = BPF_CORE_READ(bprm, file);
     struct inode *inode = f ? BPF_CORE_READ(f, f_inode) : NULL;
@@ -290,8 +321,13 @@ int BPF_PROG(splat_file_open, struct file *file, int ret)
         return ret;
 
     __u64 cgid = bpf_get_current_cgroup_id();
-    if (!is_leased(cgid))
+    enum lease_status status = lease_status_of(cgid);
+    if (status == LEASE_NONE)
         return 0;
+    if (status == LEASE_EXPIRED) {
+        report(cgid, HOOK_OPEN | HOOK_EXPIRED_FLAG, 0);
+        return -EPERM;
+    }
 
     struct inode *inode = BPF_CORE_READ(file, f_inode);
     if (!inode)
@@ -312,8 +348,13 @@ int BPF_PROG(splat_socket_connect, struct socket *sock, struct sockaddr *address
         return ret;
 
     __u64 cgid = bpf_get_current_cgroup_id();
-    if (!is_leased(cgid))
+    enum lease_status status = lease_status_of(cgid);
+    if (status == LEASE_NONE)
         return 0;
+    if (status == LEASE_EXPIRED) {
+        report(cgid, HOOK_CONNECT | HOOK_EXPIRED_FLAG, 0);
+        return -EPERM;
+    }
 
     sa_family_t family = BPF_CORE_READ(address, sa_family);
 
@@ -375,8 +416,13 @@ int BPF_PROG(splat_socket_sendmsg, struct socket *sock, struct msghdr *msg, int 
         return ret;
 
     __u64 cgid = bpf_get_current_cgroup_id();
-    if (!is_leased(cgid))
+    enum lease_status status = lease_status_of(cgid);
+    if (status == LEASE_NONE)
         return 0;
+    if (status == LEASE_EXPIRED) {
+        report(cgid, HOOK_SENDMSG | HOOK_EXPIRED_FLAG, 0);
+        return -EPERM;
+    }
 
     void *name = BPF_CORE_READ(msg, msg_name);
     if (!name)
