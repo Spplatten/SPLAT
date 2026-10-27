@@ -214,6 +214,13 @@ struct Args {
     /// refusal. Absent, admission is unchanged. See private thesis section 8.4.2.
     #[arg(long)]
     admission_gate: Option<std::path::PathBuf>,
+
+    /// Thesis 8.4.3 only: make this daemon a consistently wrong writer, so the gate's variants can be
+    /// compared against it. `dev-encoding` keys inodes with the userspace st_dev (the 2026-09-03
+    /// defect); `decoy-exec-map` writes exec grants to a map the enforcing program never reads.
+    /// Both can only refuse what a lease meant to allow, and the gate must be present.
+    #[arg(long, requires = "admission_gate", value_parser = ["dev-encoding", "decoy-exec-map"])]
+    research_fault: Option<String>,
 }
 
 /// Held from the first policy-map write of a lease until its workload's exec has returned, and by
@@ -369,6 +376,16 @@ impl BpfMapSync for LiveBpfSync {
         self.scratch_exec_devs.as_fd().try_clone_to_owned().context("duplicate scratch execution map")
     }
 
+    fn writer_map_ids(&self) -> serde_json::Value {
+        let id = |m: &MapHandle| libbpf_rs::MapInfo::new(m.as_fd()).map(|i| i.info.id).ok();
+        serde_json::json!({
+            "leasedCgroups": id(&self.leased_cgroups),
+            "protected": id(&self.protected_inodes),
+            "allowedExec": id(&self.allowed_exec_inodes),
+            "scratchExec": id(&self.scratch_exec_devs),
+        })
+    }
+
     fn dropped_events(&self) -> u64 {
         // A counter that cannot be read is reported as nothing dropped, and said so: the alternative,
         // failing the lease over a diagnostic, would refuse work the kernel is containing fine.
@@ -423,6 +440,12 @@ async fn main() -> Result<()> {
     if let Some(gate) = &args.admission_gate {
         warn!("Experimental admission gate {} must approve every lease before its workload starts", gate.display());
         let _ = ADMISSION_GATE.set(gate.clone());
+    }
+    if let Some(fault) = &args.research_fault {
+        warn!("RESEARCH FAULT {fault}: this daemon writes policy it was not asked for; for thesis 8.4.3 only");
+        if fault == "dev-encoding" {
+            lease::RESEARCH_DEV_ENCODING_FAULT.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     let (viol_tx, _viol_rx) = broadcast::channel::<ViolationEvent>(128);
@@ -497,6 +520,21 @@ async fn main() -> Result<()> {
                         Ok(counters),
                         Ok(violation_counts),
                     ) => {
+                        // A map with the real one's layout that no program references: exec grants
+                        // written here bind nothing, which is the program/map binding defect 8.4.3
+                        // puts in front of the gate.
+                        let allowed_exec_inodes = if args.research_fault.as_deref() == Some("decoy-exec-map") {
+                            let real = libbpf_rs::MapInfo::new(allowed_exec_inodes.as_fd())?.info;
+                            let opts = libbpf_rs::libbpf_sys::bpf_map_create_opts {
+                                sz: std::mem::size_of::<libbpf_rs::libbpf_sys::bpf_map_create_opts>() as _,
+                                ..Default::default()
+                            };
+                            MapHandle::create(libbpf_rs::MapType::Hash, Some("splat_decoy_exe"), real.key_size,
+                                              real.value_size, real.max_entries, &opts)
+                                .context("create the research decoy exec map")?
+                        } else {
+                            allowed_exec_inodes
+                        };
                         bpf_sync = Some(Arc::new(LiveBpfSync {
                             leased_cgroups,
                             protected_inodes,
@@ -1778,6 +1816,7 @@ async fn handle_client(
                         "allowedIpv4": keys.allowed_ipv4.iter().map(|k| auth::hex(bytes_of(k))).collect::<Vec<_>>(),
                         "scratchExec": allow_scratch_exec,
                         "allowedExecPaths": &lease_cfg.allowed_exec_paths,
+                        "writerMapIds": lease_mgr.writer_map_ids(),
                     });
                     match run_admission_gate(gate, cg.cgroup_id, &cg.path, mission_id, &written).await {
                         Ok(decision) => {

@@ -11,6 +11,8 @@ kernel's installed exec policy catch an unauthorized grant that byte readback ac
 | `workload_a.c`, `workload_x.c` | A is approved and tries to exec X; X is harmless and never approved. Static. |
 | `build_842.sh` | Builds daemon and workloads from a clean tree into a staging directory, with hashes. |
 | `run_842.py` | Runs every condition in randomized blocks in the run guest and writes the evidence bundle. |
+| `run_843.py`, `workload_p.c` | 8.4.3: a missing protection (P opens a file the approval protects), a wrong identity and a decoy map binding (daemon `--research-fault`, gate-only), a write that ignores the daemon's lock, and a no-gate cost baseline. Variant `B2W` reads back through the writer's own map ids. |
+| `run_unified.sh` | The probe (optionally `N` expiry repeats), 8.4.2 and 8.4.3 on one staged binary. |
 
 Conditions: the approval always names A only. The writer's intent is `[A]` (correct), `[A, X]`
 (mutated before serialization) or `[A]` with X's key inserted after the writer recorded its bytes

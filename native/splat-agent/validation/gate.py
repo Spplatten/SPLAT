@@ -7,6 +7,8 @@ only in what they compare the captured state against:
 
     OFF  capture only, admit                  (calibration: semantic validation absent)
     B2   kernel entries == the writer's bytes (ordinary readback)
+    B2W  the same comparison, read through the writer's own map handles (8.4.3: readback as a writer
+         does it, blind to which maps the enforcing program actually references)
     B3   kernel entries, decoded and interpreted as the identified program does, == the approval
 
 Nothing here imports, calls or copies the daemon's encoder. The kernel state comes from bpftool, the
@@ -82,14 +84,15 @@ def programs_held_by(pid):
 
 
 def observe_deployment(profile, daemon_pid):
-    """The program that decides exec for this daemon's workloads, and the maps IT references.
+    """The programs that decide this daemon's workloads, and the maps EACH of them references.
 
     Not a map found at a pin path, and not a program found by name: the shared WSL kernel can carry
     another SPLAT deployment's programs on the same hook. The admitting daemon's program is the one it
     holds open; any other program on the hook takes part in the decision under semantics this
     profile does not describe, so its presence makes the check indeterminate rather than guessed.
+    A map counts for a role only when the program that role belongs to references it: a writer
+    whose map no program reads has bound nothing, whatever its bytes say.
     """
-    want = profile["execProgram"]
     lsm_links = [l for l in (bpftool("link", "show") or []) if l.get("attach_type") == "lsm_mac"]
     by_obj = {}
     for l in lsm_links:
@@ -97,50 +100,74 @@ def observe_deployment(profile, daemon_pid):
     names = {}
     for obj, ids in by_obj.items():
         names.update({(obj, i): n for i, n in btf_func_names(obj, ids).items()})
-    at_hook = [l for l in lsm_links if names.get((l["target_obj_id"], l["target_btf_id"])) == want["attachFunc"]]
     held = programs_held_by(daemon_pid)
-    ours = [l for l in at_hook if l["prog_id"] in held]
-    others = [l for l in at_hook if l["prog_id"] not in held]
-    if len(ours) != 1:
-        raise Indeterminate(f"the admitting daemon holds {len(ours)} of the {len(at_hook)} programs on {want['attachFunc']}")
-    if others:
-        described = [{"link": l["id"], "prog": l["prog_id"], "name": bpftool("prog", "show", "id", str(l["prog_id"])).get("name")}
-                     for l in others]
-        raise Indeterminate(f"other programs also decide {want['attachFunc']}: {described}")
-    prog = bpftool("prog", "show", "id", str(ours[0]["prog_id"]))
-    if prog.get("name") != want["name"] or prog.get("type") != want["progType"]:
-        raise Indeterminate(f"the daemon's program on the hook is {prog.get('type')}/{prog.get('name')}, not the profiled one")
-    found = {"link": ours[0], "prog": prog, "attachFunc": want["attachFunc"], "daemonPid": daemon_pid,
-             "programsHeldByDaemon": sorted(held)}
+
+    programs = {}
+    for role, want in profile["programs"].items():
+        at_hook = [l for l in lsm_links if names.get((l["target_obj_id"], l["target_btf_id"])) == want["attachFunc"]]
+        ours = [l for l in at_hook if l["prog_id"] in held]
+        others = [l for l in at_hook if l["prog_id"] not in held]
+        if len(ours) != 1:
+            raise Indeterminate(f"the admitting daemon holds {len(ours)} of the {len(at_hook)} programs on {want['attachFunc']}")
+        if others:
+            described = [{"link": l["id"], "prog": l["prog_id"], "name": bpftool("prog", "show", "id", str(l["prog_id"])).get("name")}
+                         for l in others]
+            raise Indeterminate(f"other programs also decide {want['attachFunc']}: {described}")
+        prog = bpftool("prog", "show", "id", str(ours[0]["prog_id"]))
+        if prog.get("name") != want["name"] or prog.get("type") != want["progType"]:
+            raise Indeterminate(f"the daemon's program on {want['attachFunc']} is {prog.get('type')}/{prog.get('name')}, not the profiled one")
+        programs[role] = {"link": ours[0], "prog": prog, "attachFunc": want["attachFunc"]}
 
     maps = {}
-    for map_id in found["prog"].get("map_ids", []):
-        info = bpftool("map", "show", "id", str(map_id))
-        for role, spec in profile["maps"].items():
+    for role, spec in profile["maps"].items():
+        found = []
+        for map_id in programs[spec["program"]]["prog"].get("map_ids", []):
+            info = bpftool("map", "show", "id", str(map_id))
             if info.get("name") == spec["name"]:
-                if role in maps:
-                    raise Indeterminate(f"the program references two maps named {spec['name']}")
-                if (info.get("type"), info.get("bytes_key"), info.get("bytes_value")) != (spec["type"], spec["key"], spec["value"]):
-                    raise Indeterminate(f"map {spec['name']} has layout {info.get('type')}/{info.get('bytes_key')}/"
-                                        f"{info.get('bytes_value')}, profile says {spec['type']}/{spec['key']}/{spec['value']}")
-                maps[role] = info
-    missing = sorted(set(profile["maps"]) - set(maps))
-    if missing:
-        raise Indeterminate(f"the attached program does not reference {missing}")
-    return dict(found, maps=maps)
+                found.append(info)
+        if len(found) != 1:
+            raise Indeterminate(f"the {spec['program']} program references {len(found)} maps named {spec['name']}")
+        info = found[0]
+        if (info.get("type"), info.get("bytes_key"), info.get("bytes_value")) != (spec["type"], spec["key"], spec["value"]):
+            raise Indeterminate(f"map {spec['name']} has layout {info.get('type')}/{info.get('bytes_key')}/"
+                                f"{info.get('bytes_value')}, profile says {spec['type']}/{spec['key']}/{spec['value']}")
+        maps[role] = info
+    # The exec program's link and program stay at the top level, where the 8.4.2 bundles keep them.
+    return {"link": programs["exec"]["link"], "prog": programs["exec"]["prog"], "programs": programs,
+            "daemonPid": daemon_pid, "programsHeldByDaemon": sorted(held), "maps": maps}
 
 
 def dump(map_id):
     return sorted((hexbytes(e["key"]), hexbytes(e["value"])) for e in (bpftool("map", "dump", "id", str(map_id)) or []))
 
 
-def capture(deployment):
+def capture(maps, between=None):
     # Two passes over every map; a hash map iterated while it changes can repeat or skip keys, so a
-    # snapshot is only accepted when both passes agree. The daemon's lock makes that the expected case.
-    passes = [{role: dump(info["id"]) for role, info in deployment["maps"].items()} for _ in range(2)]
-    if passes[0] != passes[1]:
+    # snapshot is only accepted when both passes agree. The daemon's lock makes that the expected case;
+    # `between` is 8.4.3's write that does not take the lock.
+    first = {role: dump(info["id"]) for role, info in maps.items()}
+    if between:
+        between()
+    second = {role: dump(info["id"]) for role, info in maps.items()}
+    if first != second:
         raise Indeterminate("map contents changed between two capture passes")
-    return passes[0]
+    return first
+
+
+# The writer's own handles, by the roles the profile names. B2W reads these; every other variant reads
+# the maps the enforcing programs reference. The two are the same maps unless the binding is wrong.
+WRITER_ROLES = {"leased_cgroups": "leasedCgroups", "allowed_exec": "allowedExec",
+                "scratch_exec_devs": "scratchExec", "protected": "protected"}
+
+
+def writer_maps(written):
+    ids = written.get("writerMapIds") or {}
+    maps = {}
+    for role, field in WRITER_ROLES.items():
+        if not isinstance(ids.get(field), int):
+            raise Indeterminate(f"the writer did not report the id of its {field} map")
+        maps[role] = bpftool("map", "show", "id", str(ids[field]))
+    return maps
 
 
 def entries_for(entries, cgroup_id):
@@ -161,7 +188,22 @@ def check_b2(state, written, cgroup_id):
         reasons.append("leased_cgroups value differs from the written deadline")
     if bool(entries_for(state["scratch_exec_devs"], cgroup_id)) != bool(written["scratchExec"]):
         reasons.append("scratch_exec_devs presence differs from the writer's scratchExec")
+    if sorted(k for k, _ in entries_for(state["protected"], cgroup_id)) != sorted(written.get("protected", [])):
+        reasons.append("protected_inodes keys for this cgroup differ from the written keys")
     return reasons
+
+
+def decode_inode_keys(entries):
+    # struct lease_inode_key: cgroup u64, ino u64, dev u32, pad u32 - the layout exec and open share.
+    out = {}
+    for key, _value in entries:
+        raw = bytes.fromhex(key)
+        ino = int.from_bytes(raw[8:16], "little")
+        dev = int.from_bytes(raw[16:20], "little")
+        if int.from_bytes(raw[20:24], "little") != 0:
+            raise Indeterminate(f"inode key {key} has nonzero padding; the program never builds such a key")
+        out[(dev, ino)] = key
+    return out
 
 
 def resolve_approved(approval):
@@ -204,15 +246,7 @@ def check_b3(state, approval, cgroup_id, mission_id, now_boot_ns):
     if remaining > approval["leaseDurationSeconds"] * 1_000_000_000:
         reasons.append("the installed deadline is later than the approval allows")
 
-    granted = {}
-    for key, _value in entries_for(state["allowed_exec"], cgroup_id):
-        raw = bytes.fromhex(key)
-        ino = int.from_bytes(raw[8:16], "little")
-        dev = int.from_bytes(raw[16:20], "little")
-        pad = int.from_bytes(raw[20:24], "little")
-        if pad != 0:
-            raise Indeterminate(f"exec key {key} has nonzero padding; the program never builds such a key")
-        granted[(dev, ino)] = key
+    granted = decode_inode_keys(entries_for(state["allowed_exec"], cgroup_id))
     if entries_for(state["scratch_exec_devs"], cgroup_id):
         reasons.append("the cgroup holds a scratch execution grant the approval does not contain")
 
@@ -226,6 +260,21 @@ def check_b3(state, approval, cgroup_id, mission_id, now_boot_ns):
     semantics = {"deadlineBootNs": deadline, "remainingNs": remaining,
                  "granted": [{"dev": d, "ino": i, "approvedPath": approved.get((d, i))} for d, i in sorted(granted)],
                  "approved": [{"dev": d, "ino": i, "path": p} for (d, i), p in sorted(approved.items())]}
+
+    # splat_file_open, when the approval states protections: an open is refused iff its (cgroup, ino,
+    # dev, pad=0) key is present in protected_inodes. Each approved protection must be installed, and
+    # nothing else: a protection the approval does not name is a policy nobody approved.
+    if "protected" in approval:
+        installed = decode_inode_keys(entries_for(state["protected"], cgroup_id))
+        required = {}
+        for path in approval["protected"]:
+            st = os.stat(path)
+            required[(kernel_dev(st.st_dev), st.st_ino)] = path
+        for ident in sorted(set(required) - set(installed)):
+            reasons.append(f"approved protection absent: {required[ident]}")
+        for dev, ino in sorted(set(installed) - set(required)):
+            reasons.append(f"protection the approval does not name: dev {dev:#x} ino {ino}")
+        semantics["protected"] = [{"dev": d, "ino": i, "approvedPath": required.get((d, i))} for d, i in sorted(installed)]
     return reasons, semantics
 
 
@@ -274,14 +323,23 @@ def main():
         record["deployment"] = deployment
         if config.get("corrupt"):
             record["injection"] = inject(deployment, dict(config["corrupt"], cgroupId=args.cgroup_id))
-        state = capture(deployment)
+        # 8.4.3's write that ignores the daemon's lock, as a root writer outside SPLAT could: between
+        # the two capture passes, or after the decision and before the daemon forks.
+        mid = config.get("midWrite") or {}
+
+        def write_mid():
+            record["injection"] = dict(inject(deployment, dict(mid, cgroupId=args.cgroup_id)), when=mid["when"],
+                                       atBootNs=time.clock_gettime_ns(time.CLOCK_BOOTTIME))
+
+        maps = writer_maps(written) if config["variant"] == "B2W" else deployment["maps"]
+        state = capture(maps, between=write_mid if mid.get("when") == "between-passes" else None)
         record["capture"] = state
         now = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
         record["capturedBootNs"] = now
 
         if config["variant"] == "OFF":
             reasons = []
-        elif config["variant"] == "B2":
+        elif config["variant"] in ("B2", "B2W"):
             reasons = check_b2(state, written, args.cgroup_id)
         elif config["variant"] == "B3":
             with open(os.path.join(APPROVALS, args.mission_id + ".json")) as f:
@@ -293,10 +351,15 @@ def main():
         record["reasons"] = reasons
         record["decision"] = "reject" if reasons else "admit"
         code = REJECT if reasons else ADMIT
+        if mid.get("when") == "after-capture" and not reasons:
+            write_mid()
     except Indeterminate as e:
+        # Reset: a failure after the decision (8.4.3's post-capture write) must not leave it admitting.
+        code = INDETERMINATE
         record["reasons"] = [str(e)]
         record["decision"] = "indeterminate"
     except Exception as e:  # A gate that crashes is a refusal with its cause kept, not a silent admit.
+        code = INDETERMINATE
         record["reasons"] = [f"{type(e).__name__}: {e}"]
         record["decision"] = "indeterminate"
     record["gateFinishedBootNs"] = time.clock_gettime_ns(time.CLOCK_BOOTTIME)

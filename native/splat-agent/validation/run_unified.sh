@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# One apparatus, two experiments: the root lifecycle probe and experiment 8.4.2, on the SAME staged
-# daemon binary, in one guest, into one bundle. Run as root in the run guest:
-#   bash run_unified.sh <staging-dir> <bundle-dir> [blocks]
+# One apparatus, three experiments: the root lifecycle probe (with its expiry series) and experiments
+# 8.4.2 and 8.4.3, on the SAME staged daemon binary, in one guest, into one bundle. Run as root:
+#   bash run_unified.sh <staging-dir> <bundle-dir> [blocks] [expiry-repeats]
 # The probe starts the daemon without --admission-gate, so it measures the unchanged admission path of
-# the very binary the gate experiment then runs with the flag.
+# the very binary the gate experiments then run with the flag.
 set -uo pipefail
 CRATE="$(cd "$(dirname "$0")/.." && pwd)"
-STAGE="$1"; BUNDLE="$2"; BLOCKS="${3:-3}"
+STAGE="$1"; BUNDLE="$2"; BLOCKS="${3:-3}"; EXPIRY_REPEAT="${4:-1}"
 PROBE_BIN=/opt/splat-probe/splat-agent
 [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 2; }
 [ ! -e "$BUNDLE" ] || { echo "$BUNDLE exists" >&2; exit 2; }
@@ -23,7 +23,8 @@ pins_before=$( [ -e /sys/fs/bpf/splat ] && echo yes || echo no )
 
 # 1. Root lifecycle probe. It owns the daemon (SIGKILL, restart, expiry with no daemon) and keeps pins.
 install -d -m 0755 /opt/splat-probe && install -m 0755 "$STAGE/splat-agent" "$PROBE_BIN"
-(cd "$CRATE" && SPLAT_PROBE_DAEMON="$PROBE_BIN" SPLAT_EVIDENCE_DIR="$BUNDLE/probe" bash probe-daemon.sh 127.0.0.1:50051) \
+(cd "$CRATE" && SPLAT_PROBE_DAEMON="$PROBE_BIN" SPLAT_EVIDENCE_DIR="$BUNDLE/probe" SPLAT_PROBE_EXPIRY_REPEAT="$EXPIRY_REPEAT" \
+    bash probe-daemon.sh 127.0.0.1:50051) \
     > "$BUNDLE/probe/console.txt" 2>&1
 echo "probe exit=$?" | tee -a "$BUNDLE/probe/console.txt"
 pgrep -af "$PROBE_BIN" && { echo "probe left its daemon running" >&2; exit 4; }
@@ -37,22 +38,30 @@ python3 -I "$STAGE/run_842.py" "$STAGE" "$BUNDLE/842" --blocks "$BLOCKS" > "$BUN
 echo "842 exit=$?" | tee -a "$BUNDLE/842-console.txt"
 mv "$BUNDLE/842-console.txt" "$BUNDLE/842/console.txt"
 
-# 3. One identity across both: the binary each experiment says it ran, and the program each loaded.
+# 3. Experiment 8.4.3, same binary again, including its two research-fault daemon phases.
+python3 -I "$STAGE/run_843.py" "$STAGE" "$BUNDLE/843" --blocks "$BLOCKS" > "$BUNDLE/843-console.txt" 2>&1
+echo "843 exit=$?" | tee -a "$BUNDLE/843-console.txt"
+mv "$BUNDLE/843-console.txt" "$BUNDLE/843/console.txt"
+
+# 4. One identity across all three: the binary each experiment says it ran, and the program each loaded.
 python3 -I - "$BUNDLE" <<'PY'
 import glob, json, os, sys
 b = sys.argv[1]
 staged = dict(reversed(l.split()) for l in open(f"{b}/SHA256SUMS").read().splitlines())["splat-agent"]
 probe = json.load(open(sorted(glob.glob(f"{b}/probe/daemon-probe*.json"))[0]))  # PASS file sorts before INCOMPLETE
 m = json.load(open(f"{b}/842/manifest.json"))
+m3 = json.load(open(f"{b}/843/manifest.json")) if os.path.exists(f"{b}/843/manifest.json") else {}
 probe_bin = probe.get("daemon_binary_sha256") or probe.get("root_feature_observations", {}).get("daemon_binary_sha256")
 tags = sorted({p["tag"] for p in m["deployment"]["programs"] if p["name"] == "splat_bprm_check"})
 out = {"stagedDaemonSha256": staged, "probeDaemonSha256": probe_bin, "harnessDaemonSha256": m["stagedSha256"]["splat-agent"],
-       "sameBinary": staged == probe_bin == m["stagedSha256"]["splat-agent"],
+       "harness843DaemonSha256": m3.get("stagedSha256", {}).get("splat-agent"),
+       "sameBinary": staged == probe_bin == m["stagedSha256"]["splat-agent"] == m3.get("stagedSha256", {}).get("splat-agent"),
        "bpfSourceSha256": {"build": json.load(open(f"{b}/build.json"))["bpfSourceSha256"], "probe": probe["bpf_source_sha256"]},
        "harnessExecProgramTags": tags, "commit": json.load(open(f"{b}/build.json"))["commit"],
-       "probeVerdict": probe.get("verdict"), "harnessVerdict": m["verdict"]}
+       "probeVerdict": probe.get("verdict"), "harnessVerdict": m["verdict"], "harness843Verdict": m3.get("verdict")}
 out["sameSource"] = out["bpfSourceSha256"]["build"] == out["bpfSourceSha256"]["probe"]
-out["verdict"] = "PASS" if out["sameBinary"] and out["sameSource"] and out["probeVerdict"] == "PASS" and out["harnessVerdict"] == "PASS" else "FAIL"
+out["verdict"] = "PASS" if out["sameBinary"] and out["sameSource"] and out["probeVerdict"] == "PASS" \
+    and out["harnessVerdict"] == "PASS" and out["harness843Verdict"] == "PASS" else "FAIL"
 json.dump(out, open(f"{b}/unified.json", "w"), indent=2)
 print(json.dumps(out, indent=2))
 PY
