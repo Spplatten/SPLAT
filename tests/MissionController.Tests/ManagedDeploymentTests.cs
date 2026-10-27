@@ -71,6 +71,31 @@ public sealed class ManagedDeploymentTests
     }
 
     /// <summary>
+    /// The archive itself carries what the daemon needs, so an import runs a lease without the managed
+    /// installer: a fresh SPLAT Guest on 2026-10-23 had no systemd, no bpffs and no /etc/sudoers, and
+    /// refused every lease until each was added by hand. The hook has to run too, not only exist.
+    /// </summary>
+    [Fact]
+    public void TheGuestArchiveRunsALeaseWithoutAnInstaller()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "MissionController.sln")))
+        {
+            dir = dir.Parent;
+        }
+        Assert.NotNull(dir);
+        string script = File.ReadAllText(Path.Combine(dir!.FullName, "packaging", "build-splat-guest.sh"));
+
+        Assert.Contains(@"printf '[boot]\nsystemd=true\n' > ""$1""/etc/wsl.conf", script);
+        Assert.Contains(@"install -m 0440 -o root -g root /dev/null ""$1""/etc/sudoers", script);
+        Assert.Contains("mount -t bpf -o mode=0700 bpffs /sys/fs/bpf", script);
+        Assert.Contains("sysinit.target.wants/splat-bpffs.service", script);
+        // systemd refuses a .mount unit for its own API filesystem: one was tried, and it never ran.
+        Assert.DoesNotContain("sys-fs-bpf.mount", script);
+        Assert.Contains(@"--customize-hook='sh ""$WORK/hooks/splat.sh"" ""$1""'", script);
+    }
+
+    /// <summary>
     /// A removal ends by moving the deployment root aside, which Windows refuses while a program inside it
     /// runs. Run from the installed copy, the gate's unmount removed everything else and left the root,
     /// which the reinstall then refused (2026-10-21). It is refused before anything is removed.
