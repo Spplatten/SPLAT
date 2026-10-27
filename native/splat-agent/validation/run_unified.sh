@@ -3,9 +3,9 @@
 # 8.4.2 and 8.4.3, on the SAME staged daemon binary, in one guest, into one bundle. Run as root:
 #   bash run_unified.sh <staging-dir> <bundle-dir> [blocks] [expiry-repeats]
 # The probe starts the daemon without --admission-gate, so it measures the unchanged admission path of
-# the very binary the gate experiments then run with the flag.
+# the very binary the gate experiments then run with the flag. The probe script and the BPF source it
+# hashes run from the stage too, so every file the run executes is in SHA256SUMS (see PROTOCOL.md).
 set -uo pipefail
-CRATE="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE="$1"; BUNDLE="$2"; BLOCKS="${3:-3}"; EXPIRY_REPEAT="${4:-1}"
 PROBE_BIN=/opt/splat-probe/splat-agent
 [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 2; }
@@ -16,14 +16,14 @@ PROBE_BIN=/opt/splat-probe/splat-agent
 lsm_links=$(bpftool -j link show | python3 -c 'import json,sys;print(sum(1 for l in json.load(sys.stdin) if l.get("attach_type")=="lsm_mac"))')
 [ "$lsm_links" = 0 ] || { echo "refusing: $lsm_links LSM link(s) already attached in the shared kernel" >&2; bpftool link show >&2; exit 3; }
 mkdir -p "$BUNDLE/probe"
-cp "$STAGE/build.json" "$STAGE/SHA256SUMS" "$BUNDLE/"
+cp "$STAGE/build.json" "$STAGE/SHA256SUMS" "$STAGE/PROTOCOL.md" "$BUNDLE/"
 mountpoint -q /sys/fs/bpf || { mount -t bpf bpffs /sys/fs/bpf; echo mounted > "$BUNDLE/probe/bpffs-mounted-by-driver"; }
 pins_before=$( [ -e /sys/fs/bpf/splat ] && echo yes || echo no )
 [ "$pins_before" = no ] || { echo "refusing: /sys/fs/bpf/splat already exists" >&2; exit 3; }
 
 # 1. Root lifecycle probe. It owns the daemon (SIGKILL, restart, expiry with no daemon) and keeps pins.
 install -d -m 0755 /opt/splat-probe && install -m 0755 "$STAGE/splat-agent" "$PROBE_BIN"
-(cd "$CRATE" && SPLAT_PROBE_DAEMON="$PROBE_BIN" SPLAT_EVIDENCE_DIR="$BUNDLE/probe" SPLAT_PROBE_EXPIRY_REPEAT="$EXPIRY_REPEAT" \
+(cd "$STAGE" && SPLAT_PROBE_DAEMON="$PROBE_BIN" SPLAT_EVIDENCE_DIR="$BUNDLE/probe" SPLAT_PROBE_EXPIRY_REPEAT="$EXPIRY_REPEAT" \
     bash probe-daemon.sh 127.0.0.1:50051) \
     > "$BUNDLE/probe/console.txt" 2>&1
 echo "probe exit=$?" | tee -a "$BUNDLE/probe/console.txt"
