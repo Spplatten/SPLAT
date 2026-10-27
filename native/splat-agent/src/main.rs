@@ -207,6 +207,48 @@ struct Args {
     /// Issue a grant using public binding metadata from this file and secret bytes from stdin.
     #[arg(long, requires = "secret_socket")]
     issue_secret: Option<std::path::PathBuf>,
+
+    /// Experimental: a root-owned program that must approve each installed lease before its workload
+    /// is spawned. It is told the cgroup and the exact key bytes this daemon wrote, reads the kernel's
+    /// maps for itself, and admits with exit 0. Anything else - a refusal, a crash, a timeout - is a
+    /// refusal. Absent, admission is unchanged. See private thesis section 8.4.2.
+    #[arg(long)]
+    admission_gate: Option<std::path::PathBuf>,
+}
+
+/// Held from the first policy-map write of a lease until its workload's exec has returned, and by
+/// the reaper and the ordinary post-exit withdrawal. An admission check that reads the maps while
+/// another lease's writes land would certify a state that was never the one the spawn ran under.
+/// Error-path withdrawals in Drop handlers cannot take it (they are synchronous); they only remove
+/// their own lease's keys, which a check scoped to another cgroup does not read as policy.
+static MAP_WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+static ADMISSION_GATE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// How long the gate may take. A gate that hangs holds MAP_WRITES, so it cannot be unbounded.
+const ADMISSION_GATE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Runs the admission gate over one installed lease. Ok(decision) only on exit 0; the decision is the
+/// gate's stdout, kept verbatim for the caller's record.
+async fn run_admission_gate(gate: &Path, cgroup_id: u64, cgroup_path: &Path, mission_id: &str,
+                            written: &serde_json::Value) -> Result<String> {
+    let mut child = Command::new(gate)
+        .arg("--cgroup-id").arg(cgroup_id.to_string())
+        .arg("--cgroup-path").arg(cgroup_path)
+        .arg("--mission-id").arg(mission_id)
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn().with_context(|| format!("start admission gate {}", gate.display()))?;
+    let mut stdin = child.stdin.take().context("admission gate stdin")?;
+    stdin.write_all(&serde_json::to_vec(written)?).await?;
+    drop(stdin);
+    let output = tokio::time::timeout(ADMISSION_GATE_TIMEOUT, child.wait_with_output()).await
+        .context("admission gate timed out")??;
+    let decision = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() {
+        bail!("admission gate refused ({}): {}", output.status, decision);
+    }
+    Ok(decision)
 }
 
 /// See `Args::missions_root`. The bridge's `LinuxLeaseSubstrate` names the same default.
@@ -378,6 +420,10 @@ async fn main() -> Result<()> {
     }
 
     info!("Starting SPLAT Resident eBPF Containment Daemon on {}", args.listen);
+    if let Some(gate) = &args.admission_gate {
+        warn!("Experimental admission gate {} must approve every lease before its workload starts", gate.display());
+        let _ = ADMISSION_GATE.set(gate.clone());
+    }
 
     let (viol_tx, _viol_rx) = broadcast::channel::<ViolationEvent>(128);
     let mut bpf_sync: Option<Arc<dyn BpfMapSync>> = None;
@@ -615,6 +661,7 @@ async fn main() -> Result<()> {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             interval.tick().await;
+            let _map_writes = MAP_WRITES.lock().await;
             for l in reaper_mgr.take_expired() {
                 // Order is the whole point. Deleting the map entries first would leave a live
                 // process in a cgroup the hooks no longer recognise, and every hook returns allow
@@ -1505,6 +1552,8 @@ async fn handle_client(
                 // A lease that could not be installed is a refusal, not a warning. register_lease
                 // rolls back its own partial map writes and returns Err, so there is no state in
                 // which the cgroup is policed while some of its protections are missing.
+                // Dropped at the end of this request's spawn, or at any `continue` before it.
+                let map_writes = MAP_WRITES.lock().await;
                 let installed = if enable_cow {
                     cow::validate_policy(Path::new(work_dir), &lease_cfg.protected_paths, &lease_cfg.allowed_exec_paths)
                 } else {
@@ -1714,6 +1763,43 @@ async fn handle_client(
                     }
                 }
 
+                // The gate runs after the last map write this request makes (the jail's scratch grant
+                // above) and before the fork, under MAP_WRITES, so the state it reads is the state the
+                // exec meets. It is handed the writer's own key bytes so that a byte-readback gate and
+                // a semantic gate see identical input; what each does with them is the experiment.
+                if let Some(gate) = ADMISSION_GATE.get() {
+                    let lease = installed.as_ref().expect("successful installation checked above");
+                    let keys = lease_map_keys(lease);
+                    let written = serde_json::json!({
+                        "leasedCgroup": {"key": auth::hex(&lease.cgroup_id.to_ne_bytes()),
+                                         "value": auth::hex(&lease.deadline_boot_ns.to_ne_bytes())},
+                        "allowedExec": keys.allowed_exec.iter().map(|k| auth::hex(bytes_of(k))).collect::<Vec<_>>(),
+                        "protected": keys.protected.iter().map(|k| auth::hex(bytes_of(k))).collect::<Vec<_>>(),
+                        "allowedIpv4": keys.allowed_ipv4.iter().map(|k| auth::hex(bytes_of(k))).collect::<Vec<_>>(),
+                        "scratchExec": allow_scratch_exec,
+                        "allowedExecPaths": &lease_cfg.allowed_exec_paths,
+                    });
+                    match run_admission_gate(gate, cg.cgroup_id, &cg.path, mission_id, &written).await {
+                        Ok(decision) => {
+                            out.send(&serde_json::json!({"type":"ADMISSION", "admitted": true, "decision": decision})).await?;
+                        }
+                        Err(e) => {
+                            error!("Refusing to execute for mission {mission_id}: {e:#}");
+                            lease_mgr.revoke_lease(cg.cgroup_id);
+                            let workspace_removed = workspace_created && workload::remove_workspace(ordinary_workload.as_mut(), Path::new(work_dir));
+                            out.send(&serde_json::json!({"type":"ADMISSION", "admitted": false, "decision": format!("{e:#}")})).await?;
+                            out.send(&serde_json::json!({"type":"STDERR", "data":"SPLAT refused admission: the installed lease did not pass the admission gate.\n"})).await?;
+                            let mut exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                            if workspace_created {
+                                exit_chunk["workspaceRemoved"] = serde_json::json!(workspace_removed);
+                            }
+                            out.send(&exit_chunk).await?;
+                            line.clear();
+                            continue;
+                        }
+                    }
+                }
+
                 // Subscribe BEFORE spawning. An exec refused by the LSM fails inside the child, so
                 // spawn() returns EPERM and the request ends here - if the subscription only began
                 // after a successful spawn, the kernel's own violation for that refusal would never
@@ -1763,6 +1849,8 @@ async fn handle_client(
                         continue;
                     }
                 };
+                // The exec has returned; later writes no longer change what this workload was admitted under.
+                drop(map_writes);
 
                 let mut pump_error: Option<std::io::Error> = None;
                 if let Some(policy) = &execution_policy {
@@ -2071,7 +2159,9 @@ async fn handle_client(
                 }
 
                 // 3. Atomically revoke lease upon exit
+                let map_writes = MAP_WRITES.lock().await;
                 lease_mgr.revoke_lease(cg.cgroup_id);
+                drop(map_writes);
                 let mut retained = true;
                 if let Some(context) = execution_context {
                     // The cache serves a caller who lost the connection. A connected caller is owed

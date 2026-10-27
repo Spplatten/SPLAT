@@ -1,0 +1,10 @@
+{
+  "bpfSourceSha256": "4d16bf66b11fd04700d2fc40f31037a3926cb00f94e3eb20b05663bef823ab40",
+  "fragment": "exec authority of splat_bprm_check only; file_open, connect and sendmsg are captured by nothing here",
+  "execProgram": {"name": "splat_bprm_check", "progType": "lsm", "attachFunc": "bpf_lsm_bprm_check_security"},
+  "maps": {
+    "leased_cgroups": {"name": "leased_cgroups", "type": "hash", "key": 8, "value": 8},
+    "allowed_exec": {"name": "allowed_exec_in", "type": "hash", "key": 24, "value": 1},
+    "scratch_exec_devs": {"name": "scratch_exec_de", "type": "hash", "key": 8, "value": 4}
+  }
+}
