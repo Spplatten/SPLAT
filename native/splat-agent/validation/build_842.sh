@@ -15,7 +15,11 @@ mkdir -p "$STAGE"
 cp "$CARGO_TARGET_DIR/release/splat-agent" "$STAGE/splat-agent"
 gcc -static -O2 -o "$STAGE/a" validation/workload_a.c
 gcc -static -O2 -o "$STAGE/x" validation/workload_x.c
-cp validation/gate.py validation/run_842.py validation/profile.json validation/run_unified.sh "$STAGE/"
+gcc -static -O2 -o "$STAGE/p" validation/workload_p.c
+cp validation/gate.py validation/run_842.py validation/run_843.py validation/profile.json validation/run_unified.sh \
+   validation/PROTOCOL.md probe-daemon.sh "$STAGE/"
+# The probe hashes the BPF source relative to its cwd; staging it makes the stage the whole apparatus.
+mkdir -p "$STAGE/src/bpf" && cp src/bpf/lease_lsm.bpf.c "$STAGE/src/bpf/"
 {
   echo "{"
   echo "  \"commit\": \"$(git rev-parse HEAD)\","
@@ -26,5 +30,6 @@ cp validation/gate.py validation/run_842.py validation/profile.json validation/r
   echo "  \"gcc\": \"$(gcc --version | head -1)\""
   echo "}"
 } > "$STAGE/build.json"
-(cd "$STAGE" && sha256sum splat-agent a x gate.py run_842.py profile.json run_unified.sh > SHA256SUMS)
+(cd "$STAGE" && sha256sum splat-agent a x p gate.py run_842.py run_843.py profile.json run_unified.sh \
+    PROTOCOL.md probe-daemon.sh src/bpf/lease_lsm.bpf.c > SHA256SUMS)
 cat "$STAGE/build.json" "$STAGE/SHA256SUMS"

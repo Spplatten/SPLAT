@@ -87,11 +87,21 @@ pub(crate) fn kernel_dev_from_st_dev(st_dev: u64) -> u32 {
     (((major << 20) | (minor & 0xf_ffff)) & 0xffff_ffff) as u32
 }
 
+/// Thesis 8.4.3 only, behind `--research-fault dev-encoding`, which requires the admission gate: key
+/// every inode with the userspace `st_dev` instead of the kernel's dev_t - the defect this file fixed
+/// on 2026-09-03 - so a writer that is consistently wrong can be put in front of the validator.
+pub static RESEARCH_DEV_ENCODING_FAULT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub fn inode_key_for_path(path: &Path) -> Result<InodeKey> {
     let md = fs::metadata(path).with_context(|| format!("stat path {}", path.display()))?;
+    let dev = if RESEARCH_DEV_ENCODING_FAULT.load(std::sync::atomic::Ordering::Relaxed) {
+        md.dev() as u32
+    } else {
+        kernel_dev_from_st_dev(md.dev())
+    };
     Ok(InodeKey {
         ino: md.ino(),
-        dev: kernel_dev_from_st_dev(md.dev()),
+        dev,
         _pad: 0,
     })
 }
@@ -193,6 +203,12 @@ pub trait BpfMapSync: Send + Sync {
     /// only report the difference across its own lifetime.
     fn dropped_events(&self) -> u64 {
         0
+    }
+
+    /// The kernel ids of the maps this writer actually writes, for a readback that goes through the
+    /// writer's own handles rather than through the maps the enforcing program references.
+    fn writer_map_ids(&self) -> serde_json::Value {
+        serde_json::Value::Null
     }
 
     /// How many denials the kernel counted for this cgroup, read from its own map rather than from
@@ -346,6 +362,10 @@ impl LeaseManager {
     /// See [`BpfMapSync::dropped_events`]. Zero when nothing reaches the kernel.
     pub fn dropped_events(&self) -> u64 {
         self.bpf_sync.as_ref().map_or(0, |sync| sync.dropped_events())
+    }
+
+    pub fn writer_map_ids(&self) -> serde_json::Value {
+        self.bpf_sync.as_ref().map_or(serde_json::Value::Null, |sync| sync.writer_map_ids())
     }
 
     /// See [`BpfMapSync::violations_for`]. `None` without a live program, which is the honest
