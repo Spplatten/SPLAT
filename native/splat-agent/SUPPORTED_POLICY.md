@@ -105,6 +105,7 @@ Linux results below do not establish those Windows boundaries.
 
 | Gap | Consequence |
 | --- | --- |
+| **Host sleep and the lease deadline** | The deadline counts the guest's running time, not wall time. Sleeping the host pauses the WSL VM, and `CLOCK_BOOTTIME` stops with it: across one 212 s Modern Standby on 2026-10-28, it advanced 5.1 s of 215.7 s. A lease grants no extra running time and nothing runs while paused, but its wall-clock end moves by the length of the sleep. The comment in `lease_lsm.bpf.c` saying sleep cannot stretch a lease is wrong for this case; it is corrected with the next program change, since the source is hash-bound to its proof. |
 | **AF_UNIX / AF_NETLINK** | Local IPC is untouched. A per-socket allow-list keyed on the socket's inode is the real answer and does not exist. A leased tool can talk to any local daemon socket its uid can reach — including a resolver that answers over one, which is how a name lookup can still succeed on a host where `systemd-resolved` is reached that way rather than over UDP. |
 | **Raw and packet sockets** | Creating one needs `CAP_NET_RAW`, which a workload dropped to `nobody` does not have, so nothing policies it and nothing needs to. Not a claim about a workload that keeps capabilities: this daemon does not run one. |
 | **Inherited file descriptors** | The hooks fire on `open` and `connect`. A descriptor the tool inherits was opened by the daemon, before any of them ran. |
