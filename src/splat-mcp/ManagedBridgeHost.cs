@@ -139,6 +139,8 @@ internal static class ManagedBridgeHost
 
     private static async Task<SubstrateReport> CheckManagedAsync(ManagedBridgeConfiguration config, CancellationToken ct)
     {
+        if (!config.HasLinuxLease)
+            return new SubstrateReport(1, $"Managed service: {config.ServiceName}. {AbsentLinuxLease.Reason}");
         var guest = new ManagedGuest(config.Distribution);
         var token = new WslAgentToken(guest.ReadTokenAsync);
         using var output = new StringWriter();

@@ -234,14 +234,18 @@ public static class Program
         // 3.5 Linux / WSL2 Substrate, built before the engine because the engine runs missions on it:
         // a catalog template whose tool names the Linux lease is handed to the daemon whole, with its
         // lease compiled from the template by the compiler that used to be constructed and never called.
-        var guest = managed is null ? null : new ManagedGuest(managed.Distribution);
+        // A Windows-only managed install created no guest. Its leases are refused with that reason rather
+        // than sent to whatever distro the service account can reach, and nothing probes for a daemon.
+        bool leaseAbsent = managed is { HasLinuxLease: false };
+        var guest = managed is null || leaseAbsent ? null : new ManagedGuest(managed.Distribution);
         var guestToken = guest is null ? null : new WslAgentToken(guest.ReadTokenAsync);
-        var leasedExecutor = guest is null ? new WslLeasedExecutor()
+        WslLeasedExecutor? wslExecutor = leaseAbsent ? null : guest is null ? new WslLeasedExecutor()
             : new WslLeasedExecutor("127.0.0.1", managed!.Port, guestToken!, guest.StartDaemonAsync, guest.HoldAwake);
+        ILeasedExecutor leasedExecutor = (ILeasedExecutor?)wslExecutor ?? new AbsentLinuxLease();
         var policyCompiler = new TemplatePolicyCompiler();
         // The managed service owns its guest, so its health check reaches the daemon the way a lease does.
-        var healthChecker = managed is null ? new WslSubstrateHealthChecker()
-            : new WslSubstrateHealthChecker("127.0.0.1", managed.Port, guestToken, connect: leasedExecutor.ConnectToDaemonAsync);
+        var healthChecker = guest is null ? new WslSubstrateHealthChecker()
+            : new WslSubstrateHealthChecker("127.0.0.1", managed!.Port, guestToken, connect: wslExecutor!.ConnectToDaemonAsync);
         var leaseSubstrate = new LinuxLeaseSubstrate(leasedExecutor, policyCompiler);
 
         // 4. Core Cognitive Engine
@@ -318,7 +322,10 @@ public static class Program
             dlpSanitizer: dlpSanitizer,
             agent: agent,
             // The managed service's data root is its private state directory, readable by administrators.
-            internalErrorLog: Path.Combine(SplatDataRoot.Current.Root, "internal-errors.log"));
+            internalErrorLog: Path.Combine(SplatDataRoot.Current.Root, "internal-errors.log"))
+        {
+            LinuxLeaseAbsent = leaseAbsent ? AbsentLinuxLease.Reason : null
+        };
 
         using (runRecordSigner)
         {

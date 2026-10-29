@@ -38,6 +38,14 @@ public partial class McpServerHandler
                 Error = new McpError { Code = -32602, Message = "The managed lease request is invalid or exceeds the service policy." } };
         }
 
+        // The admission row is already committed; this one, under the mission the desktop seals, says why
+        // nothing followed it.
+        if (LinuxLeaseAbsent is { } absent)
+        {
+            await _auditLedger.AppendLogAsync(request.Lease.MissionId, "managed-linux-lease", "MANAGED_LEASE_REFUSED", absent, actor, CancellationToken.None);
+            return CreateErrorResponse(message.Id, -32003, absent);
+        }
+
         var violations = new MissionController.Core.BoundedViolationLog();
         ProcessExecutionResult process = await _leasedExecutor.ExecuteLeasedAsync(request.Lease, request.Command,
             request.Arguments, violations: violations, ct: ct);
