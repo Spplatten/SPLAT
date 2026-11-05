@@ -468,7 +468,10 @@ internal sealed partial class A2aBridge : IAsyncDisposable
             workloadTerminationConfirmed = record.CancellationRequested || record.ReceiptRecovered
                 ? (bool?)record.WorkloadTerminationConfirmed : null,
             record.Dispatched, record.CancellationEvidence, record.ReceiptRecovered,
-            executionContext = record.AdmittedLease?.ExecutionContext, failure = record.Failure
+            executionContext = record.AdmittedLease?.ExecutionContext, failure = record.Failure,
+            // Lets an out-of-band sensor's alert be attributed to this task by the cgroup it fired in,
+            // which SPLAT states, rather than by a PID the caller would have to guess at.
+            leaseCgroup = record.AdmittedLease is { } admitted ? LinuxLeaseSubstrate.LeaseCgroupPath(admitted.MissionId) : null
         } }
     };
     private static bool Terminal(string state) => state is "TASK_STATE_COMPLETED" or "TASK_STATE_FAILED" or "TASK_STATE_CANCELED" or "TASK_STATE_REJECTED";

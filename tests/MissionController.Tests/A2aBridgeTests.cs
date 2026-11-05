@@ -81,6 +81,15 @@ public sealed partial class A2aBridgeTests : IAsyncLifetime
         Assert.True(lease.RequireEnforcing);
         Assert.True(lease.EphemeralWorkspace);
         Assert.False(lease.AllowNetwork);
+        // The cgroup a sensor binds to is the one the daemon creates for this lease's mission id.
+        Assert.Equal("/splat_leases/mission_" + lease.MissionId.ToString("D"),
+            Metadata(task).GetProperty("leaseCgroup").GetString());
+        var daemon = new DirectoryInfo(AppContext.BaseDirectory);
+        while (daemon is not null && !File.Exists(Path.Combine(daemon.FullName, "native", "splat-agent", "src", "cgroup.rs")))
+            daemon = daemon.Parent;
+        string cgroups = File.ReadAllText(Path.Combine(daemon!.FullName, "native", "splat-agent", "src", "cgroup.rs"));
+        Assert.Contains("BASE_PATH: &str = \"/sys/fs/cgroup/splat_leases\"", cgroups);
+        Assert.Contains("format!(\"mission_{mission_id}\")", cgroups);
         var audit = await _ledger.GetAuditLogsAsync(null, 30);
         Assert.Contains(audit, row => row.Action == "A2A_TASK_AUTHORIZED" && row.Details.Contains(_approval.Sha256)
             && row.OperatorIdentity.Contains("a2a:tenant-one:alice"));

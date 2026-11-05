@@ -46,6 +46,15 @@ internal sealed class Control(HttpClient client, Binding binding, string token)
         // This is the authenticated host's report, not independent verification of its signed
         // native receipt. Persist/export that distinction. A task state alone is never a kill.
     }
+    // A Falco binding watches the cgroup SPLAT says the task runs in. A finished task has nothing left
+    // to revoke, and a cgroup SPLAT does not name cannot be bound by guesswork.
+    internal static string LeaseCgroup(JsonElement task)
+    {
+        if (Outcome(task) != null) throw new InvalidDataException("The task is already terminal.");
+        return task.GetProperty("metadata").GetProperty(Extension).TryGetProperty("leaseCgroup", out var path)
+            && path.ValueKind == JsonValueKind.String ? path.GetString()! : throw new InvalidDataException("SPLAT reports no lease cgroup.");
+    }
+    internal async Task<string> LeaseCgroupAsync(CancellationToken ct) => LeaseCgroup(await Call("GetTask", ct));
     internal async Task RunAsync(Latch latch, CancellationToken ct)
     {
         int failures = 0;

@@ -65,7 +65,8 @@ internal static class SelfTest
             Check(!b.Matches(a with { Node="other-node" },now));
             Check(!b.Matches(a with { AlertId="event\ninjected" },now));
             FalconChecks.RunAsync(directory,Check).GetAwaiter().GetResult();
-            Console.WriteLine($"PASS {assertions} checks: binding compatibility, Falcon schema/identity, HTTP admission, freshness, durable recovery and evidence semantics.");
+            FalcoChecks.RunAsync(directory,Check).GetAwaiter().GetResult();
+            Console.WriteLine($"PASS {assertions} checks: binding compatibility, Falcon schema/identity, Falco lease attribution, HTTP admission, freshness, durable recovery and evidence semantics.");
             return 0;
         }
         finally { Directory.Delete(directory, recursive:true); }
