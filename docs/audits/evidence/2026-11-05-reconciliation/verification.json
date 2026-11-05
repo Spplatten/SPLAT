@@ -1,0 +1,106 @@
+{
+  "schema": 1,
+  "recorded_utc": "2026-11-05T17:31:53.650025+00:00",
+  "base_commit": "35258c586c431a50d0eaf2a9195458aa307ddaea",
+  "scope": "Reconciliation follow-up; no production qualification or SOC 2 assessment.",
+  "sidecar": {
+    "status": "PASS",
+    "checks_passed": 74,
+    "configuration": "Release",
+    "sdk": "10.0.401",
+    "warnings": 0,
+    "errors": 0,
+    "audit_warning_suppression": false,
+    "command": "packaging/test-alert-sidecar.ps1 -DotNetPath C:/Users/s_pla/AppData/Local/Microsoft/dotnet/dotnet.exe",
+    "assembly_sha256": "5394dac236d7b215262151fc26be329727cd3d3d2c9f80dd096abdf142984a96",
+    "limits": "In-process synthetic events and real SQLite/HTTP handler; no live vendor, TLS socket or native cancellation proof."
+  },
+  "test_project_build": {
+    "status": "PASS",
+    "warnings": 0,
+    "errors": 0,
+    "command": "dotnet build tests/MissionController.Tests/MissionController.Tests.csproj -c Debug -m:1 -p:UseSharedCompilation=false"
+  },
+  "focused_vstest": {
+    "status": "ABORTED",
+    "executed": 0,
+    "reason": "VSTest could not connect to testhost within 90 seconds.",
+    "classes": [
+      "DocumentationDriftTests",
+      "SiemTransportInvariantTests",
+      "WslLeasedExecutorWireTests",
+      "SensorNetworkContainmentTests"
+    ]
+  },
+  "native_offline_regressions": {
+    "status": "PASS",
+    "tests_passed": 33,
+    "command": "python -I native/splat-agent/validation/test_audit_gaps.py",
+    "scope": "Observed command output: Ran 33 tests, OK. Simulated kernel observations, not native reproof."
+  },
+  "committed_proofs": {
+    "daemon-probe.json": {
+      "recorded_utc": "2026-11-05T05:47:26Z",
+      "file_sha256": "8c77b389c3dd4bbe66bb8c6c8fc66b5383bed7b5d432d77d61dd1ddbc0fa4697",
+      "verdict": "PASS",
+      "bpf_source_sha256": "d5bb4cad4c3397f1e12c0ca7952b10c1b2a2694b777ec84d30266d21b2b0af80",
+      "boolean_observations": 90,
+      "false_observations": [
+        "protected_inode_leaked",
+        "cross_lease_signal_reaches_a_peer_lease",
+        "cross_lease_peer_proc_cwd_readlinked",
+        "cross_lease_peer_proc_root_readlinked",
+        "cross_lease_peer_workspace_read_via_proc",
+        "cross_lease_peer_workspace_written_via_proc"
+      ],
+      "scope": "Existing committed record inspected; kernel probe not rerun in this follow-up."
+    },
+    "last-hop-probe.json": {
+      "recorded_utc": "2026-11-05T05:47:31Z",
+      "file_sha256": "bcb9cc3efc9412c4d500706ea72018cafd7b89df0fd66d9163d5195b7895ae9e",
+      "verdict": "PASS",
+      "bpf_source_sha256": "d5bb4cad4c3397f1e12c0ca7952b10c1b2a2694b777ec84d30266d21b2b0af80",
+      "boolean_observations": 6,
+      "false_observations": [
+        "unleased_exec_output_leaked"
+      ],
+      "scope": "Existing committed record inspected; kernel probe not rerun in this follow-up."
+    }
+  },
+  "rare": {
+    "status": "NOT_INDEPENDENTLY_VERIFIED",
+    "reported_commit": "cabb978",
+    "reason": "Sandbox denied access to OneDrive/Desktop/RARE.",
+    "prior_ledger_reports": {
+      "python_passed": 130,
+      "browser_contract_passed": 46
+    }
+  },
+  "prior_full_splat_suite": {
+    "source": "Reconciliation task.md; not rerun successfully here.",
+    "reported_passed": 1175,
+    "reported_skipped": 6,
+    "reported_total": 1181
+  },
+  "source_sha256_raw_worktree": {
+    "src/splat-alert-sidecar/AlertIngress.cs": "6de9aae82da38e6b61c8462f770cc34c297223a65c324e1ed5e5f26b3476567c",
+    "src/splat-alert-sidecar/ConfigurationFiles.cs": "c8145655a4940beac338dab70b883b01a4a44c8e43f9b5430fc8fde90c6f21b6",
+    "src/splat-alert-sidecar/Contract.cs": "48976dfa63488331498510be4f5429b6b328e64e9b40b0e4ac382cc11f88f931",
+    "src/splat-alert-sidecar/Control.cs": "49aa94e93565baa5ef92c83dacbdf4c5a2c2c216d46e4a85f09c83f5f3a5efc0",
+    "src/splat-alert-sidecar/FalconAdapter.cs": "f748d340c9d430a6906edef2dc001493f91976c84034cc6a3c26242462cbe853",
+    "src/splat-alert-sidecar/FalconChecks.cs": "f69aacb8923b7860c129451904c3c4214098a499f25f83282001f9e1fb3c7c4a",
+    "src/splat-alert-sidecar/FalconCommands.cs": "844312ef0c3bd8e439f184728f00ed747a2cd73fab9fc4fe990b7f448788e5b5",
+    "src/splat-alert-sidecar/Latch.cs": "69fa79ef2b9e6e378d2458906625e36bfcb55be674d2e69539d9f3072337793c",
+    "src/splat-alert-sidecar/Program.cs": "651766b4aa26c6f0802db784e3477a2aa28c36cf58c1e07603d3b7adcf8acecc",
+    "src/splat-alert-sidecar/SelfTest.cs": "fb7155db68675f24d63b504034a4b07f4b402d149cb29e672a5b37b8bddb2eb0",
+    "src/splat-alert-sidecar/splat-alert-sidecar.csproj": "a3714366821ce274c72fb51bc933614a1c1293f0b033913edca82b498d6b21df",
+    "src/Directory.Build.props": "6fa39408e68c3a87259c4fee363956231db5466420ef3c0d8dfb93de2034c5bd",
+    "packaging/test-alert-sidecar.ps1": "5b3aa7e7c3747e99b4376115b9735d43aa4fffc373662e1741d3be13596903d5"
+  },
+  "log_sha256": {
+    "sidecar-gate.txt": "538c61186c6c4363f286f8e7ac5cb291690f2b90d086ace30dd21f55efc5e970",
+    "tests-build.txt": "3549dfcca273688d30f62fc8dbf79f97c6060be0d34dcfdc072f1f086084cab8",
+    "focused-tests.txt": "68f67ecacc849f62e9d440ca634ce33e2d6db1c7655a9ff1bb4c7c79fe6b421a",
+    "focused-tests.trx": "4b0173ef8c6c7de72dddad3822cc98fb690b84e6976e0f64482045dc54334825"
+  }
+}

@@ -1,0 +1,12 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  splat-alert-sidecar -> C:\C_AGENT_BUILDER\src\splat-alert-sidecar\bin\Release\net10.0\splat-alert-sidecar.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:08.19
+PASS Falcon parser, actual HTTP handler/SQLite admission, pressure recovery and legacy compatibility checks.
+PASS 74 checks: binding compatibility, Falcon schema/identity, HTTP admission, freshness, durable recovery and evidence semantics.
+PASS sidecar build and contract checks. Live provider/TLS/native validation is separate.

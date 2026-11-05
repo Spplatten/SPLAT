@@ -55,6 +55,18 @@ internal sealed class FalconAdapter
         if (!_binding.Matches(alert,now)) throw new InvalidDataException("Stale, future, expired or invalid Falcon event.");
         return alert;
     }
+    // Registrar mode parses identity without enrolling it or substituting the configured root.
+    // A child may resolve only if the trusted native writer has already recorded its lineage
+    // and the trusted sensor join has bound its exact vendor process key.
+    internal SensorObservation Observe(JsonElement root)
+    {
+        if (Text(root, _profile.EventTypePointer) != _profile.EventType)
+            throw new InvalidDataException("Unreviewed Falcon event type.");
+        return new SensorObservation(new SensorProcess(Text(root, _profile.TenantPointer),
+            Text(root, _profile.AgentPointer), Text(root, _profile.ProcessInstancePointer), ProfileHash),
+            Text(root, _profile.RulePointer), Text(root, _profile.EventIdPointer),
+            Timestamp(JsonPointer.Read(root, _profile.EventTimePointer), _profile.TimeEncoding));
+    }
     private static string Text(JsonElement root,string pointer)
     {
         var field = JsonPointer.Read(root,pointer);

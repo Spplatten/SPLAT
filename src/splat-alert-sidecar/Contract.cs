@@ -38,7 +38,13 @@ internal sealed record Binding(string TaskId, string Node, Guid Boot, ulong Cgro
                 throw new InvalidDataException("Invalid Falcon admission identity.");
         }
     }
-    internal static bool ValidIdentifier(string? value) => value is { Length: > 0 and <= 128 } && !value.Any(char.IsControl);
+    internal static bool ValidIdentifier(string? value)
+    {
+        if (value is not { Length: > 0 and <= 128 }) return false;
+        // String indexing avoids IEnumerable<char>'s enumerator allocation in registrar lookup.
+        for (int i = 0; i < value.Length; i++) if (char.IsControl(value[i])) return false;
+        return true;
+    }
     internal string Fingerprint
     {
         get

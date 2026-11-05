@@ -10,6 +10,7 @@ internal sealed class Latch
 {
     private readonly string _connection;
     private readonly string _fingerprint;
+    internal string BindingFingerprint => _fingerprint;
     internal Latch(string path, string fingerprint)
     {
         _fingerprint = fingerprint;

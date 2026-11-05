@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "recorded_utc": "2026-11-05T18:02:44.9256043Z",
+  "base_commit": "35258c586c431a50d0eaf2a9195458aa307ddaea",
+  "scope": "Registrar candidate; synthetic native/sensor producers, real HTTP handler and SQLite. No live admission or kernel/vendor qualification.",
+  "sidecar": {
+    "assembly_sha256": "fad2ea6fe9b80f06984d28e0d16bc5ed5c56d17e6c9a4809a9c9aeaa769e3ea3",
+    "errors": 0,
+    "status": "PASS",
+    "warnings": 0,
+    "checks": 138,
+    "command": "packaging/test-alert-sidecar.ps1 -DotNetPath C:/Users/s_pla/AppData/Local/Microsoft/dotnet/dotnet.exe",
+    "registrar_checks": 64
+  },
+  "offline_audit": {
+    "status": "PASS",
+    "command": "python -I native/splat-agent/validation/test_audit_gaps.py",
+    "tests": 33
+  },
+  "focused_vstest": {
+    "resolved": false,
+    "reason": "testhost loopback connect failed with SocketException 10013; independently reproduced by preflight",
+    "status": "Failed",
+    "executed": 0
+  },
+  "native_activation": {
+    "falcon_identity_join": "No live tenant evidence",
+    "status": "NOT_IMPLEMENTED",
+    "cli_registrar_wiring": "Not enabled; existing operator binding remains",
+    "wsl": "Wsl/E_ACCESSDENIED",
+    "kernel_lineage_producer": "Not implemented"
+  },
+  "git": {
+    "commit": "BLOCKED: .git ref lock creation denied",
+    "branch": "main",
+    "pushed": false
+  },
+  "source_sha256_exact_worktree": {
+    "src/splat-alert-sidecar/AdmissionIdentity.cs": "77c8445af5fe7af55b1ce06497b2203501fdcd871ae51a12bb1105f001729ea7",
+    "src/splat-alert-sidecar/AlertIngress.cs": "be9d9d0dfec74be4080ac9143d07e5a075a5594a52f8223b2e0375c8161a412f",
+    "src/splat-alert-sidecar/ConfigurationFiles.cs": "c8145655a4940beac338dab70b883b01a4a44c8e43f9b5430fc8fde90c6f21b6",
+    "src/splat-alert-sidecar/Contract.cs": "222bb0d2e7915499906a23c929e335115d9d765f8fc830f7810c4cdb04c3ecee",
+    "src/splat-alert-sidecar/Control.cs": "49aa94e93565baa5ef92c83dacbdf4c5a2c2c216d46e4a85f09c83f5f3a5efc0",
+    "src/splat-alert-sidecar/FalconAdapter.cs": "2ff68b4d561539a25cb3cfb1bc6a80e7ef294ed1c9d9c9097c7b591eb09967e8",
+    "src/splat-alert-sidecar/FalconChecks.cs": "f69aacb8923b7860c129451904c3c4214098a499f25f83282001f9e1fb3c7c4a",
+    "src/splat-alert-sidecar/FalconCommands.cs": "844312ef0c3bd8e439f184728f00ed747a2cd73fab9fc4fe990b7f448788e5b5",
+    "src/splat-alert-sidecar/Latch.cs": "483219b224ee2b06f247178b3a222faf65f1a725dc27b84844fdd3c03ccab4e1",
+    "src/splat-alert-sidecar/Program.cs": "651766b4aa26c6f0802db784e3477a2aa28c36cf58c1e07603d3b7adcf8acecc",
+    "src/splat-alert-sidecar/RegistrarChecks.cs": "f73c47fcdfda8d34da8819d3b2b297a26e8343f9c32e4d5cb561c748d6dad1aa",
+    "src/splat-alert-sidecar/SelfTest.cs": "00098438777e05f5adcd74f374f1ab36c0e338510b055b3ea946ab026b8d0054",
+    "src/splat-alert-sidecar/splat-alert-sidecar.csproj": "a3714366821ce274c72fb51bc933614a1c1293f0b033913edca82b498d6b21df",
+    "src/splat-alert-sidecar/TrustedAdmissionRegistrar.cs": "fc770a41ab29a8bfaba113ce1d059c9f855c540222042f14ed58e62fdb44559c",
+    "src/Directory.Build.props": "6fa39408e68c3a87259c4fee363956231db5466420ef3c0d8dfb93de2034c5bd",
+    "packaging/test-alert-sidecar.ps1": "5b3aa7e7c3747e99b4376115b9735d43aa4fffc373662e1741d3be13596903d5",
+    "packaging/test-focused-regressions.ps1": "ea76aac6cf2bc0e6bfc627eab6b8aa2cb66a4b6939e0896bfe254687c2fea2c1",
+    "docs/TRUSTED-ADMISSION-REGISTRAR.md": "1b556c9665905ee470a6d302f3177ac8bbb51d6bb9557de7ceac2321fe729ff7"
+  },
+  "log_sha256": {
+    "focused.trx": "af10a553309b7e46b543b3ac0182b907b654ce03e99e9011c186b17201f6c02b",
+    "offline-audit.txt": "52375da8c7a202fec79f87cf80309545c4cd235e11cc649cff8c9092af1890b8",
+    "preflight.txt": "b37e28de2c7321ae13f36c588bd54d8bb5afe6c12f8f85d84d4c8fe73f530600",
+    "sidecar-gate.txt": "bd6187de9a3a7d42c716cf8575b424b1d1f510685ebbebe150e7159ef89539fe",
+    "vstest-host.txt": "7942ffa6f9820b4e187b9b120810bd39bf9dc1316ff4cd2e687627d0cc337c26"
+  }
+}
