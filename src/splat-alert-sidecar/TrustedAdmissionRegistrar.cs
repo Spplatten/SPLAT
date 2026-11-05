@@ -1,4 +1,3 @@
-using System.Collections.Frozen;
 using System.Collections.Immutable;
 
 namespace Splat.AlertSidecar;
@@ -9,15 +8,19 @@ namespace Splat.AlertSidecar;
 // Kernel enforcement never waits on this table, HTTP, JSON, SQLite or sensor availability.
 internal sealed class TrustedAdmissionRegistrar
 {
-    private sealed record Candidate(RegisteredTask Task, RegisteredProcess Process);
+    // A claim names a bound process by identity, never by a copy of its record: Resolve reads the
+    // current record from the same snapshot's Tasks. So only binding a sensor changes the index, as
+    // one persistent O(log n) update. Rebuilding every claim on every fork, exit and state change was
+    // quadratic in a fork-heavy task, and ran under the writer lock the mailbox commit also takes.
+    private readonly record struct Claim(Guid Task, NativeProcess Native);
     private sealed record Snapshot(ImmutableDictionary<Guid, RegisteredTask> Tasks,
-        FrozenDictionary<SensorProcess, Candidate[]> Index, long Revision);
+        ImmutableDictionary<SensorProcess, ImmutableArray<Claim>> Index, int ProcessCount, long Revision);
     private readonly object _writer = new();
     private readonly TimeProvider _clock;
     private readonly int _maxTasks, _maxProcesses;
     private long _wallHighWater;
     private Snapshot _snapshot = new(ImmutableDictionary<Guid, RegisteredTask>.Empty,
-        new Dictionary<SensorProcess, Candidate[]>().ToFrozenDictionary(), 0);
+        ImmutableDictionary<SensorProcess, ImmutableArray<Claim>>.Empty, 0, 0);
 
     internal TrustedAdmissionRegistrar(TimeProvider? clock = null, int maxTasks = 1024, int maxProcesses = 16384)
     {
@@ -60,15 +63,22 @@ internal sealed class TrustedAdmissionRegistrar
             || Expired(t, now)) throw new InvalidDataException("Admission is absent, closed or expired.");
         return t;
     }
-    private void Publish(RegisteredTask task)
+    // Writers hold _writer, so reading _snapshot here and publishing its successor cannot interleave.
+    private void Publish(RegisteredTask task, (SensorProcess Sensor, NativeProcess Native)? bound = null)
     {
-        var tasks = _snapshot.Tasks.SetItem(task.Task, task);
-        // Keep retired keys as tombstones. A stale sensor key must never become a different task.
+        var current = _snapshot;
+        int processes = current.ProcessCount + task.Processes.Count
+            - (current.Tasks.TryGetValue(task.Task, out var previous) ? previous.Processes.Count : 0);
+        var index = current.Index;
+        // Keep retired claims as tombstones. A stale sensor key must never become a different task.
         // Capacity exhaustion fails closed; Evict does not reclaim identity history for reuse.
-        var index = tasks.Values.SelectMany(t => t.Processes.Values.Where(p => p.Sensor.HasValue)
-            .Select(p => new Candidate(t, p))).GroupBy(c => c.Process.Sensor!.Value)
-            .ToFrozenDictionary(g => g.Key, g => g.ToArray());
-        Volatile.Write(ref _snapshot, new Snapshot(tasks, index, checked(_snapshot.Revision + 1)));
+        if (bound is { } b)
+        {
+            var claim = new Claim(task.Task, b.Native);
+            index = index.SetItem(b.Sensor, index.TryGetValue(b.Sensor, out var claims) ? claims.Add(claim) : [claim]);
+        }
+        Volatile.Write(ref _snapshot, new Snapshot(current.Tasks.SetItem(task.Task, task), index, processes,
+            checked(current.Revision + 1)));
     }
     internal void Begin(Guid task, NativeProcess root, string tenant, string agent, string profileHash,
         string rule, long expiresUnixMs)
@@ -79,13 +89,13 @@ internal sealed class TrustedAdmissionRegistrar
             if (task == Guid.Empty || !root.Valid || !new SensorProcess(tenant, agent, "pending", profileHash).Valid
                 || !Binding.ValidIdentifier(rule) || expiresUnixMs <= now || expiresUnixMs - now > 86_400_000
                 || _snapshot.Tasks.ContainsKey(task) || _snapshot.Tasks.Count >= _maxTasks
-                || _snapshot.Tasks.Values.Sum(t => t.Processes.Count) >= _maxProcesses
+                || _snapshot.ProcessCount >= _maxProcesses
                 || _snapshot.Tasks.Values.Any(t => t.Root.SameBoundary(root)))
                 throw new InvalidDataException("Invalid, reused or over-capacity admission.");
             var process = new RegisteredProcess(root, null, now, true, null);
             Publish(new RegisteredTask(task, root, tenant, agent, profileHash, rule, AdmissionState.Admitting,
                 now, expiresUnixMs, _clock.GetTimestamp(), TimeSpan.FromMilliseconds(expiresUnixMs - now), 0,
-                ImmutableDictionary<NativeProcess, RegisteredProcess>.Empty.Add(root, process)));
+                ImmutableDictionary<NativeProcess, RegisteredProcess>.Empty.Add(root, process), [root.Pid]));
         }
     }
     internal void BindSensor(Guid task, NativeProcess native, SensorProcess sensor)
@@ -103,11 +113,11 @@ internal sealed class TrustedAdmissionRegistrar
             }
             // Preserve conflicting evidence and reject ALL resolutions of it, including the first
             // claimant. Silently rejecting only the second claimant would leave ambiguity usable.
-            Publish(t with { Processes = t.Processes.SetItem(native, p with { Sensor = sensor }) });
+            Publish(t with { Processes = t.Processes.SetItem(native, p with { Sensor = sensor }) }, (sensor, native));
             var conflicts = _snapshot.Index[sensor];
             if (conflicts.Length > 1)
             {
-                foreach (var id in conflicts.Select(c => c.Task.Task).Distinct())
+                foreach (var id in conflicts.Select(c => c.Task).Distinct())
                 {
                     var conflict = _snapshot.Tasks[id];
                     if (conflict.State != AdmissionState.Evicted)
@@ -139,15 +149,15 @@ internal sealed class TrustedAdmissionRegistrar
                 || !t.Processes.TryGetValue(parent, out var p) || !p.Live
                 || child.StartTicks < parent.StartTicks || observedUnixMs < p.NotBeforeUnixMs || observedUnixMs > now
                 || now - observedUnixMs > 30_000
-                || t.Processes.Values.Any(x => x.Live && x.Native.Pid == child.Pid)
-                || _snapshot.Tasks.Values.Sum(x => x.Processes.Count) >= _maxProcesses)
+                || t.LivePids.Contains(child.Pid)
+                || _snapshot.ProcessCount >= _maxProcesses)
             {
                 Publish(t with { State = AdmissionState.Draining });
                 throw new InvalidDataException("Lineage incomplete, escaped or over capacity; drain required.");
             }
             // Kernel cgroup inheritance enforces the lease independently of telemetry. This table
             // records ONLY sequenced native fork evidence, never Falcon parent names or PPIDs.
-            Publish(t with { LineageSequence = sequence,
+            Publish(t with { LineageSequence = sequence, LivePids = t.LivePids.Add(child.Pid),
                 Processes = t.Processes.Add(child, new RegisteredProcess(child, null, observedUnixMs, true, parent)) });
         }
     }
@@ -163,7 +173,8 @@ internal sealed class TrustedAdmissionRegistrar
                 throw new InvalidDataException("Unsequenced process exit; drain required.");
             }
             // Root exit does not mean workload drain: live children may remain. Keep their keys.
-            Publish(t with { LineageSequence = sequence, Processes = t.Processes.SetItem(native, p with { Live = false }) });
+            Publish(t with { LineageSequence = sequence, LivePids = t.LivePids.Remove(native.Pid),
+                Processes = t.Processes.SetItem(native, p with { Live = false }) });
         }
     }
     internal void Drain(Guid task)
@@ -188,6 +199,7 @@ internal sealed class TrustedAdmissionRegistrar
         }
     }
     internal AdmissionState State(Guid task) => Volatile.Read(ref _snapshot).Tasks[task].State;
+    internal object SensorIndex => Volatile.Read(ref _snapshot).Index;
     internal AdmissionResolution Resolve(SensorObservation observation)
     {
         if (!ReadClock(out long now)) return new(ResolutionStatus.ClockRollback, default, default, 0);
@@ -196,9 +208,10 @@ internal sealed class TrustedAdmissionRegistrar
     private AdmissionResolution Resolve(Snapshot snapshot, SensorObservation o, long now)
     {
         AdmissionResolution Refuse(ResolutionStatus status) => new(status, default, default, snapshot.Revision);
-        if (!snapshot.Index.TryGetValue(o.Sensor, out var candidates)) return Refuse(ResolutionStatus.Unknown);
-        if (candidates.Length != 1) return Refuse(ResolutionStatus.Ambiguous);
-        var c = candidates[0]; var t = c.Task; var p = c.Process;
+        if (!snapshot.Index.TryGetValue(o.Sensor, out var claims)) return Refuse(ResolutionStatus.Unknown);
+        if (claims.Length != 1) return Refuse(ResolutionStatus.Ambiguous);
+        // Tasks and processes are kept as tombstones, never removed, so a claim always finds its record.
+        var t = snapshot.Tasks[claims[0].Task]; var p = t.Processes[claims[0].Native];
         if (t.State != AdmissionState.Active || !p.Live || Expired(t, now)) return Refuse(ResolutionStatus.Inactive);
         if (o.Rule != t.Rule || !Binding.ValidIdentifier(o.AlertId) || o.Native is { } native && native != p.Native)
             return Refuse(ResolutionStatus.IdentityMismatch);

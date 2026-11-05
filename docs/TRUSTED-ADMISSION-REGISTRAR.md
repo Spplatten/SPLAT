@@ -174,11 +174,16 @@ before task expiry.
 These clocks govern the host registration; they do not redefine the guest kernel lease clock.
 
 Reader lookup is lock-free, with a measured allocation-free steady path on the test thread.
-Writers allocate immutable dictionaries and rebuild bounded indexes under a monitor. SQLite
-may hold this cold-path writer lock during its configured busy timeout and storage operation;
-there is no bounded disk-latency guarantee. Kernel hooks do not acquire this lock. Fork-heavy
-write throughput and GC pressure have not been benchmarked; do not claim high-throughput or
-sub-millisecond admission from the read-loop result.
+Writers allocate persistent immutable-dictionary updates under a monitor.
+- Only binding a sensor changes the sensor index, by one O(log n) update.
+- A fork, an exit or a state change leaves the index untouched; `RegistrarChecks` asserts that the
+  index instance survives them.
+- Capacity and PID-collision checks are lookups, not scans.
+
+SQLite may hold this cold-path writer lock during its configured busy timeout and storage
+operation; there is no bounded disk-latency guarantee. Kernel hooks do not acquire this lock.
+Sustained fork-heavy throughput and GC pressure have no committed benchmark; do not claim
+high-throughput or sub-millisecond admission from the read-loop result.
 
 The defaults cap history at 1,024 tasks and 16,384 total process records. Eviction preserves
 tombstones; it does not free capacity for reuse. Exhaustion refuses new admission. Restart
@@ -210,8 +215,8 @@ The gap references below name the remaining gates in
 | `RegisteredTask.Task`, `Root`, tenant/agent/profile/rule | Immutable task scope, independent of the inbound alert. Gate 2. |
 | `State`, `CreatedUnixMs`, `ExpiresUnixMs` | Lifecycle state and admission/expiry window; state is not termination evidence. Gates 2–3. |
 | `StartedTimestamp`, `Lifetime` | Monotonic expiry even if wall time stops advancing. Host time only; native clock proof remains separate. |
-| `LineageSequence`, `Processes` | Strict ordered native lifecycle stream and immutable process records. Missing events fence the registration. Producer pending, gates 2–3. |
-| `Snapshot.Tasks`, `Index`, `Revision` | Immutable task table, exact sensor lookup including ambiguity/tombstones, publication version. Revision is diagnostic, not a bearer capability. |
+| `LineageSequence`, `Processes`, `LivePids` | Strict ordered native lifecycle stream, immutable process records, and the live PIDs that a fork's collision check looks up. Missing events fence the registration. Producer pending, gates 2–3. |
+| `Snapshot.Tasks`, `Index`, `ProcessCount`, `Revision` | `Tasks`: the immutable task table. `Index`: exact sensor lookup to (task, process) claims, including ambiguity and tombstones; each claim's record is read from `Tasks`. `ProcessCount`: the process total that capacity checks read. `Revision`: the publication version, diagnostic only, not a bearer capability. |
 | `AdmissionResolution.Status`, `Task`, `Native`, `Revision` | Exactly one task/native result or an explicit rejection. Revalidation is required for mailbox commit. |
 | `Volatile.Read/Write`, `Interlocked.CompareExchange` | Acquire/release snapshot publication and atomic wall-clock high-water mark. They are memory-ordering primitives, not cryptographic authentication. |
 | `_writer` monitor | Serializes lifecycle changes with SQLite commit; only cold-path code acquires it. Gate 3 race/failure boundary. |

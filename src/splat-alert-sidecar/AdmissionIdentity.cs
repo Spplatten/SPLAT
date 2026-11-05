@@ -54,4 +54,6 @@ internal sealed record RegisteredProcess(NativeProcess Native, SensorProcess? Se
 internal sealed record RegisteredTask(Guid Task, NativeProcess Root, string Tenant, string Agent,
     string ProfileHash, string Rule, AdmissionState State, long CreatedUnixMs, long ExpiresUnixMs,
     long StartedTimestamp, TimeSpan Lifetime, ulong LineageSequence,
-    ImmutableDictionary<NativeProcess, RegisteredProcess> Processes);
+    ImmutableDictionary<NativeProcess, RegisteredProcess> Processes,
+    // The PIDs of Processes' live entries, so a fork's PID-collision check is a lookup, not a scan.
+    ImmutableHashSet<int> LivePids);

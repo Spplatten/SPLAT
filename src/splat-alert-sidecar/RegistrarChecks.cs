@@ -111,6 +111,11 @@ internal static class RegistrarChecks
         Refused(() => unknownParent.Fork(task, child, grandchild, 1, clock.Wall), "unenrolled parent refused");
         var full = Seed(maxProcesses: 1);
         Refused(() => full.Fork(task, root, child, 1, clock.Wall), "lineage capacity fails closed");
+        // Only binding a sensor changes the index; lineage and state changes publish around it.
+        var stable = Seed(); stable.BindSensor(task, root, sensor); stable.Activate(task);
+        object sensorIndex = stable.SensorIndex;
+        stable.Fork(task, root, child, 1, clock.Wall); stable.Exit(task, child, 2); stable.Drain(task);
+        Verify(ReferenceEquals(sensorIndex, stable.SensorIndex), "fork, exit and drain leave the sensor index untouched");
 
         var ambiguous = Seed(); ambiguous.BindSensor(task, root, sensor); ambiguous.Activate(task);
         var secondTask = Guid.NewGuid(); var secondRoot = root with { Cgroup = 456, CgroupGeneration = Guid.NewGuid(), Pid = 88 };
