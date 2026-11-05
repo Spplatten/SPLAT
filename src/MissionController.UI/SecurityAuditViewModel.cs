@@ -205,7 +205,13 @@ public partial class SecurityAuditViewModel : ObservableObject
         {
             var posture = await _edrBridge.GetLocalDevicePostureAsync();
             DevicePosture = posture;
-            EdrStatusSummary = $"{posture.Provider} | Real-Time: {(posture.RealTimeProtectionEnabled ? "ACTIVE" : "DISABLED")} | Isolation: {posture.IsolationState}";
+            string protection = posture.RealTimeProtectionEnabled switch
+            {
+                true => "ACTIVE",
+                false => "DISABLED",
+                null => "UNKNOWN"
+            };
+            EdrStatusSummary = $"Provider indicator: {posture.Provider} | Real-Time: {protection} | Isolation: {posture.IsolationState}";
 
             var alerts = await _edrBridge.GetRecentAlertsAsync(10);
             EdrAlerts.Clear();
@@ -326,10 +332,8 @@ public partial class SecurityAuditViewModel : ObservableObject
                 WorkspaceId: wsId,
                 SharedKey: sharedKey);
 
-            bool success = await _siemForwarder.TestConnectionAsync(testConfig);
-            SiemStatusMessage = success
-                ? $"SENTINEL READY: Verified live HMAC-SHA256 authenticated transmission to Workspace {wsId.Substring(0, 8)}..."
-                : "SENTINEL ALERT: Verification request failed or credentials rejected.";
+            var check = await _siemForwarder.ProbeConnectionAsync(testConfig);
+            SiemStatusMessage = check.Detail;
         }
         catch (Exception ex)
         {
@@ -354,10 +358,8 @@ public partial class SecurityAuditViewModel : ObservableObject
             if (!string.IsNullOrWhiteSpace(syslogHost))
             {
                 var cfg = new SiemConfiguration(SiemProtocol.SyslogUdp, syslogHost, 514, false);
-                bool connected = await _siemForwarder.TestConnectionAsync(cfg);
-                SiemStatusMessage = connected
-                    ? $"SYSLOG LIVE: Verified UDP transmission to {syslogHost}:514"
-                    : $"SYSLOG ALERT: Could not reach {syslogHost}:514";
+                var check = await _siemForwarder.ProbeConnectionAsync(cfg);
+                SiemStatusMessage = check.Detail;
             }
             else
             {

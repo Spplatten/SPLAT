@@ -17,6 +17,11 @@ LICENSE. Distributing covered binaries requires the corresponding source under
 the license's terms. Modified versions used for remote network interaction must
 offer their corresponding source to those users as specified in section 13.
 Enterprise use alone does not require purchasing a commercial license.
+Receiving or running the Community edition does not require accepting an
+additional SPLAT EULA. Community notices do not add restrictions to the AGPL
+grant. A separate commercial agreement applies only if separately executed and
+only to the rights its licensor is authorized to grant; third-party obligations
+remain. This notice does not amend any existing signed agreement.
 
 Independent programs and third-party dependencies retain their own licenses;
 packaging them here does not relicense them. The AGPL does not require patches

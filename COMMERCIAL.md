@@ -17,25 +17,35 @@ for the published core. Third-party components keep their own licenses.
 
 ## What it asks in return
 
-If you convey a modified version, or **let anyone interact with a modified version over a network**,
-you must offer those users the corresponding source of your version under the same license. That
-network clause is the difference between the AGPL and the GPL, and it is the reason this license was
-picked: a containment substrate's natural commercial shape is somebody else's platform running it
-for their customers, and the AGPL says that arrangement is fine as long as it stays open.
+The full license in `LICENSE` governs; this page is a summary.
 
-Two things it does **not** ask:
+- **Conveying copies:** retain the required notices and license. Conveying covered binaries,
+  whether modified or unmodified, requires Corresponding Source through a method permitted by
+  AGPL section 6. Corresponding Source includes the applicable build/install scripts and required
+  non-system dependencies; an unrelated source snapshot is insufficient.
+- **Modified network-interactive versions:** section 13 requires a prominent offer of the version's
+  Corresponding Source to all users interacting with it remotely through a computer network.
+  Provide access at no charge as the license specifies. Do not assume a blanket exemption merely
+  because a deployment is called internal.
+- **Ordinary execution:** receiving or running a copy does not require accepting an additional
+  SPLAT EULA. Business use alone does not require buying a commercial license.
 
-- Using SPLAT to run your own workloads imposes nothing. Containing agents on your own machines, in
-  your own CI, for your own company, is plain use. The obligations attach to distributing or serving
-  a modified version, not to running one.
-- Output is yours. Run records, ledgers, evidence bundles and anything a governed mission produces
-  carry no license claim from this project.
+The AGPL does not require you to submit changes to Platten Industries or automatically disclose
+every independent application or workload that communicates with SPLAT. Whether components form a
+covered combined work depends on their relationship. Source must be offered to the recipients/users
+the license identifies; this is not a blanket obligation to publish all company source.
+
+Run records, ledgers, evidence bundles and independent mission outputs carry no license claim from
+SPLAT merely because SPLAT produced them. Embedded third-party material retains its own rights.
 
 ## When to talk to us instead
 
-Buy a commercial license if you want to embed SPLAT in a product you ship closed, or offer it as a
-service, without publishing your own source. That is the whole product: the same code, under terms
-that do not propagate.
+A separately executed commercial agreement can grant alternative permissions for SPLAT code that
+Platten Industries owns or has authority to relicense. Discuss that option when a proposed combined
+or derivative product cannot comply with the AGPL, or your procurement policy excludes AGPL software.
+A commercial agreement does not relicense third-party dependencies or remove their obligations.
+Selling a service or keeping an independent surrounding product proprietary does not, by itself,
+determine that a commercial SPLAT license is required.
 
 Typical fits:
 
@@ -52,10 +62,10 @@ commitment, a security contact with a response time, and a say in the roadmap.
 
 ## Contributions
 
-Contributions are welcome and are accepted under the AGPL. Because the project offers commercial
-licences, a contribution that arrives with no agreement in place would make that offer
-unenforceable for the part you wrote — so anything beyond a trivial fix needs a signed contributor
-agreement first. Open the pull request; that conversation happens before it merges, not after.
+Contributions follow `CONTRIBUTING.md` and the contributor agreement in `CLA.md`. Commercial
+relicensing requires the necessary rights in each included contribution; the presence of a CLA
+template does not prove that a contributor signed it. A contribution policy does not restrict
+anyone's existing right to modify or distribute the Community edition under the AGPL.
 
 ## What this license does not do
 
