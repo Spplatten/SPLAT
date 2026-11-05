@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 [CmdletBinding()]
-param([ValidateSet('Debug','Release')][string]$Configuration='Release')
+param(
+    [ValidateSet('Debug','Release')][string]$Configuration='Release',
+    # Sandboxed runners may redirect LOCALAPPDATA. Accept an explicit installed SDK rather
+    # than falling back to PATH, which points at SDK 9 on the development host.
+    [string]$DotNetPath=(Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe')
+)
 $ErrorActionPreference='Stop'
 $repoRoot=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$sidecarSdk=Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'
-if (-not (Test-Path -LiteralPath $sidecarSdk)) { throw 'The repository requires the installed .NET 10 SDK under LOCALAPPDATA\Microsoft\dotnet.' }
+$sidecarSdk=$DotNetPath
+if (-not (Test-Path -LiteralPath $sidecarSdk -PathType Leaf)) { throw 'The repository requires .NET 10. Supply -DotNetPath when LOCALAPPDATA does not identify the installed SDK.' }
 $sidecarVersion=& $sidecarSdk --version
 if ($LASTEXITCODE -ne 0 -or $sidecarVersion -notmatch '^10\.') { throw 'A .NET 10 SDK is required.' }
 $sidecarProject=Join-Path $repoRoot 'src\splat-alert-sidecar\splat-alert-sidecar.csproj'

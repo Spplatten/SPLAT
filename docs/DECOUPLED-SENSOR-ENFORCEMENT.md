@@ -43,8 +43,10 @@ flowchart TD
 - **X/L:** implemented HTTPS request formatting; no live LogScale account was exercised.
 
 Falco's documented JSON includes rule, time, hostname and output_fields. Those alone are not proof
-of a Windows/WSL task binding. The input is therefore explicitly a versioned normalized contract,
-not an assertion that raw Falco or an arbitrary Falcon webhook can be plugged in unchanged.
+of a Windows/WSL task binding. The default input is a versioned normalized contract. An opt-in
+Falcon adapter also accepts a single JSON event through a reviewed, hash-pinned field mapping;
+it still requires a trusted admission binding and relay. See the
+[Falcon operator procedure](FALCON-SIDECAR.md) for configuration, identity and evidence limits.
 See [Falco output channels](https://falco.org/docs/concepts/outputs/channels/).
 
 The admission owner must retain the task UUID and establish node, guest boot ID, cgroup ID, host-
@@ -71,7 +73,9 @@ Pass 2: `src/splat-alert-sidecar/` is a standalone .NET 10 executable. The repos
 127.0.0.1 over HTTPS, requires an independent 32-byte random alert token, rejects browser Origin,
 limits bodies to 16 KiB, connections to 16 and simultaneous admitted handlers to four.
 
-Startup arguments are admission-binding JSON, SQLite mailbox path and HTTPS PFX path. Environment
+Startup arguments are admission-binding JSON, SQLite mailbox path and HTTPS PFX path, plus an
+approved profile JSON path in Falcon mode. A Falcon binding without its profile refuses startup;
+that mode exposes `/v1/falcon/alerts` rather than the normalized `/v1/alerts` route. Environment
 inputs are SPLAT_ALERT_TOKEN (base64 32 bytes), SPLAT_ALERT_CERT_PASSWORD (when needed),
 SPLAT_A2A_CALLER_TOKEN, and optionally SPLAT_LOGSCALE_INGEST_URL plus SPLAT_LOGSCALE_INGEST_TOKEN.
 Protect those inputs and the mailbox directory with operator ACLs. The A2A credential must be the
@@ -191,17 +195,25 @@ must never mint fresh authority, even when marked high confidence.
 
 ## Evidence and next 30 days
 
-Evidence: `private/sidecar-2026-11-04/`. Native ring: 4 passing tests, including 100,000 allocation-
+Initial evidence: `private/sidecar-2026-11-04/`. Native ring: 4 passing tests, including 100,000 allocation-
 counted push/pop pairs and concurrent transfer. Sidecar: 28 passing in-process checks using real
 SQLite transactions, reopen recovery, identity changes, expiry, duplicate admission and outcome
 semantics. These are not live HTTPS, vendor, A2A, native-kernel or crash/power-loss proofs.
 
-Normal sidecar build is blocked by NU1900 (NuGet vulnerability feed unavailable). A diagnostic
+At that initial run, the normal sidecar build was blocked by NU1900 (NuGet vulnerability feed unavailable). A diagnostic
 compile with only NU1900 demoted locally produced zero compiler errors and two audit warnings;
-the repository warning policy was not edited. This is not a release gate pass. WSL still returns
+the repository warning policy was not edited. That diagnostic was not a release gate pass. WSL returned
 E_ACCESSDENIED; the installed Windows clang advertises no BPF target. The benchmark Python parses
 but has not produced results. Independent loopback diagnostics recorded TCP permission denial
 and a UDP receive timeout, consistent with the earlier seven socket-test failures, not a waiver.
+
+The 2026-11-05 follow-up supersedes the initial sidecar build blocker: the normal Release build
+passed with zero warnings/errors, followed by all 74 checks, including the Falcon parser and real
+HTTP handler with SQLite. These remain in-process tests, not live TLS or vendor delivery evidence.
+The shipping daemon and MCP last hop separately have committed PASS records against `d5bb4cad`;
+those records do not prove the experimental hook or the sensor-to-cancellation chain. Current
+checks, provenance and remaining gates are in the
+[reconciliation follow-up](audits/2026-11-05-reconciliation-follow-up.md).
 
 - Days 1-7: authoritative admission binding/descendant lifecycle registration, scoped collector
   credentials, and independent native receipt verification. Preserve the existing lease ABI.
