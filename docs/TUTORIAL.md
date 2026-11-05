@@ -62,11 +62,11 @@ Behind them sits a catalog of **61 specialists** covering networking, identity, 
 
 ### Wait — is SPLAT an agent builder, or a containment zone?
 
-If you came here looking for an AI bot that opens a browser, logs into TikTok Ads Manager to configure OAuth callbacks, or connects to your personal email to scrape your inbox, you will quickly notice **SPLAT does not do that** — and that is entirely by design.
+Both, and the order matters. SPLAT is built so agents can act on the real world: register a webhook, configure an OAuth app, change a repository. The difference is that the hands and the keys belong to different parties. The model does its reasoning outside. Every action runs as one declared step inside a kernel lease. The lease's network is pinned to the exact hosts that step named, its secret is handed in by a root-only broker and is gone when the lease ends, and its result ends in a signed record of what changed.
 
-Those tasks belong to **Robotic Process Automation (RPA)** — unconstrained bots that navigate arbitrary websites, handle high-privilege credentials, and trigger irreversible cloud actions. In SPLAT's worldview, handing an AI free-roaming browser access and private credentials is an unacceptable security hazard: the moment that bot encounters prompt injection (in an email or a web page), an attacker can hijack it to steal tokens or exfiltrate data.
+> A prompt-injected model can ask for anything; it can only get what the step declared.
 
-> SPLAT is an **execution containment substrate and governance zone**. It does not send bots wandering across the web; it locks down execution on your machine.
+**What is proven and what is not:** the lease, its egress pin and the secret broker are proven under root. Handing that broker a secret from the Windows vault, and actions against outside platforms, are the next phase on the roadmap, not shipped yet. What SPLAT won't do is drive a logged-in browser across arbitrary sites. A web page talks to more hosts than anyone can pin, so SPLAT goes through a platform's API, where the destination is known in advance.
 
 **How SPLAT runs native tasks:** When a specialist runs a task (such as inspecting local event logs, diagnosing network drops, or auditing OAuth configurations), it runs a single pre-vetted tool inside an OS-enforced sandbox. Privileges are stripped, each tool works in its own fenced folder, DLP scrubs secrets, and one in six specialists runs with no network at all — the glossary entry for network denial says why it is not more, and it is not a comfortable answer. It audits, diagnoses, and drafts — it never roams the web unchecked.
 
