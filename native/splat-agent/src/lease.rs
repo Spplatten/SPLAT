@@ -7,7 +7,7 @@ use std::os::unix::fs::MetadataExt;
 use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -70,10 +70,20 @@ pub struct Ipv4Endpoint {
     pub port: u16,
 }
 
+/// Mirrors `struct lease_state` in lease_lsm.bpf.c
+/// Carried in `leased_cgroups` map value: 16 bytes, natural 8-byte alignment.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeaseState {
+    pub deadline_ns: u64,
+    pub epoch: u64,
+}
+
 // A map key whose Rust layout disagrees with the BPF struct silently looks up the wrong bytes, and
 // for protected_inodes a missed lookup falls OPEN. Fail the build instead.
 const _: () = assert!(std::mem::size_of::<LeaseInodeKey>() == 24);
 const _: () = assert!(std::mem::size_of::<LeaseIpv4Key>() == 16);
+const _: () = assert!(std::mem::size_of::<LeaseState>() == 16);
 
 /// Userspace `st_dev` and the kernel's `inode->i_sb->s_dev` encode the same device differently:
 /// glibc packs major/minor into a 64-bit `dev_t`, while the kernel packs `(major << 20) | minor`
@@ -126,6 +136,9 @@ pub struct LeaseConfig {
     pub protected_paths: Vec<String>,
     pub allowed_exec_paths: Vec<String>,
     pub lease_duration_seconds: u32,
+    /// Research gate only: exact deadline from the trusted approval, fixed before installation.
+    #[serde(default)]
+    pub approved_deadline_boot_ns: Option<u64>,
     pub limits: LeaseLimits,
 }
 
@@ -139,14 +152,23 @@ pub struct ActiveLease {
     pub expires_at: Instant,
     /// The same deadline on CLOCK_BOOTTIME, as the kernel program compares it. `expires_at` drives
     /// the reaper's kill; this ends the lease's authority even when no reaper is running.
-    pub deadline_boot_ns: u64,
+    pub deadline_ns: u64,
     pub protected_inodes: Vec<InodeKey>,
     pub allowed_exec_inodes: Vec<InodeKey>,
     pub allowed_endpoints: Vec<Ipv4Endpoint>,
 }
 
+impl ActiveLease {
+    /// One representation for the map writer and its recorded bytes. Epoch is retained for ABI
+    /// compatibility; the current kernel does not use it as a publication or integrity check.
+    pub fn kernel_state(&self) -> LeaseState {
+        LeaseState { deadline_ns: self.deadline_ns, epoch: 1 }
+    }
+}
+
 /// CLOCK_BOOTTIME in nanoseconds: the clock `bpf_ktime_get_boot_ns()` reads, which keeps counting
-/// through suspend. A deadline written on any other clock would not mean the same instant in the kernel.
+/// through guest suspend, but not necessarily host VM pause. This is guest-running-time,
+/// not a wall-clock expiry contract.
 pub fn boot_clock_ns() -> Result<u64> {
     let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     // SAFETY: clock_gettime writes one timespec through a valid pointer and reads nothing else.
@@ -262,8 +284,7 @@ impl LeaseManager {
         cgroup_path: PathBuf,
         config: &LeaseConfig,
     ) -> Result<ActiveLease> {
-        let duration = Duration::from_secs(config.lease_duration_seconds.clamp(5, 300) as u64);
-        let now = Instant::now();
+
 
         let mut protected_inodes = Vec::new();
         for p in &config.protected_paths {
@@ -306,12 +327,18 @@ impl LeaseManager {
             );
         }
 
+        let now_boot = boot_clock_ns()?;
+        let now = Instant::now();
+        let (deadline_ns, remaining) = crate::deadline::resolve(
+            now_boot, config.lease_duration_seconds, config.approved_deadline_boot_ns
+        ).map_err(anyhow::Error::msg)?;
+        let expires_at = now.checked_add(remaining).context("reaper deadline overflow")?;
         let lease = ActiveLease {
             mission_id: config.mission_id.clone(),
             cgroup_id,
             cgroup_path,
-            expires_at: now + duration,
-            deadline_boot_ns: boot_clock_ns()?.saturating_add(duration.as_nanos() as u64),
+            expires_at,
+            deadline_ns,
             protected_inodes,
             allowed_exec_inodes,
             allowed_endpoints,
@@ -465,8 +492,43 @@ mod tests {
             protected_paths: protected.into_iter().map(str::to_string).collect(),
             allowed_exec_paths: vec!["/bin/sh".to_string()],
             lease_duration_seconds: seconds,
+            approved_deadline_boot_ns: None,
             limits: LeaseLimits { max_memory_bytes: 1024, max_cpu_percent: 10, max_pids: 4 },
         }
+    }
+
+    #[test]
+    fn approval_deadline_reaches_the_registered_lease_unchanged() {
+        let sync = RecordingSync::new(false);
+        let mgr = LeaseManager::new(Some(sync.clone()));
+        let mut cfg = config(vec![], 20);
+        let deadline = boot_clock_ns().unwrap() + 10_000_000_000;
+        cfg.approved_deadline_boot_ns = Some(deadline);
+        let installed = mgr.register_lease(91, PathBuf::from("/tmp/audit-test"), &cfg).unwrap();
+        assert_eq!(installed.deadline_ns, deadline);
+        assert_eq!(sync.added.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn expired_approval_is_refused_before_any_map_write() {
+        let sync = RecordingSync::new(false);
+        let mgr = LeaseManager::new(Some(sync.clone()));
+        let mut cfg = config(vec![], 20);
+        cfg.approved_deadline_boot_ns = Some(boot_clock_ns().unwrap());
+        assert!(mgr.register_lease(92, PathBuf::from("/tmp/audit-test"), &cfg).is_err());
+        assert_eq!(sync.added.load(Ordering::SeqCst), 0);
+        assert_eq!(mgr.get_active_count(), 0);
+    }
+
+    #[test]
+    fn approval_cannot_raise_the_configured_duration_ceiling() {
+        let sync = RecordingSync::new(false);
+        let mgr = LeaseManager::new(Some(sync.clone()));
+        let mut cfg = config(vec![], 20);
+        cfg.approved_deadline_boot_ns = Some(boot_clock_ns().unwrap() + 300_000_000_000);
+        assert!(mgr.register_lease(93, PathBuf::from("/tmp/audit-test"), &cfg).is_err());
+        assert_eq!(sync.added.load(Ordering::SeqCst), 0);
+        assert_eq!(mgr.get_active_count(), 0);
     }
 
     #[test]
@@ -689,7 +751,7 @@ mod isolation_tests {
             cgroup_id,
             cgroup_path: PathBuf::from(format!("/sys/fs/cgroup/splat_leases/mission_m-{cgroup_id}")),
             expires_at: now + Duration::from_secs(30),
-            deadline_boot_ns: boot_clock_ns().unwrap() + 30_000_000_000,
+            deadline_ns: boot_clock_ns().unwrap() + 30_000_000_000,
             protected_inodes: protected,
             allowed_exec_inodes: exec,
             allowed_endpoints: endpoints,

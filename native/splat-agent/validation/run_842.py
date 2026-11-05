@@ -24,6 +24,9 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from approval import lifetime
 
 OPT = "/opt/splat-842"
 LIBEXEC = "/usr/local/libexec/splat-842"
@@ -157,11 +160,17 @@ def trace_read():
         return f.read()
 
 
-def trace_overruns():
+def trace_overruns(record_dir=None):
     total = 0
+    raw = {}
     for cpu in os.listdir(f"{TRACE}/per_cpu"):
         with open(f"{TRACE}/per_cpu/{cpu}/stats") as f:
-            total += int(re.search(r"^overrun: (\d+)", f.read(), re.MULTILINE).group(1))
+            raw[cpu] = f.read()
+            total += int(re.search(r"^overrun: (\d+)", raw[cpu], re.MULTILINE).group(1))
+    if not raw:
+        raise RuntimeError("no per-CPU trace statistics available")
+    if record_dir is not None:
+        write_json(f"{record_dir}/trace-stats.json", raw)
     return total
 
 
@@ -236,7 +245,7 @@ def install(stage):
     for d, mode in ((OPT, 0o755), (LIBEXEC, 0o755), (ETC, 0o700), (f"{ETC}/approvals", 0o700), (STATE, 0o700)):
         os.makedirs(d, mode=mode)
         os.chmod(d, mode)
-    for name, dest in (("splat-agent", f"{OPT}/splat-agent"), ("gate.py", f"{OPT}/gate.py"), ("a", A), ("x", X)):
+    for name, dest in (("splat-agent", f"{OPT}/splat-agent"), ("gate.py", f"{OPT}/gate.py"), ("approval.py", f"{OPT}/approval.py"), ("a", A), ("x", X)):
         shutil.copyfile(f"{stage}/{name}", dest)
         os.chmod(dest, 0o755)
     shutil.copyfile(f"{stage}/profile.json", f"{ETC}/profile.json")
@@ -285,7 +294,7 @@ def run_one(token, bundle, block, index, policy, variant):
     rundir = f"{bundle}/runs/{mission}"
     os.makedirs(rundir)
     approval = {"missionId": mission, "bootId": open("/proc/sys/kernel/random/boot_id").read().strip(),
-                "executables": [{"path": A, "sha256": sha256_file(A)}], "leaseDurationSeconds": LEASE_SECONDS,
+                "executables": [{"path": A, "sha256": sha256_file(A)}], **lifetime(LEASE_SECONDS),
                 "approvedAtUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     write_json(f"{ETC}/approvals/{mission}.json", approval)
     gate_config = {"variant": variant, "recordDir": rundir,
@@ -303,7 +312,7 @@ def run_one(token, bundle, block, index, policy, variant):
     full = trace_read()
     tasks = DaemonTasks(full)
     trace = trace_slice(full, mission)
-    overruns = trace_overruns()
+    overruns = trace_overruns(rundir)
 
     gate = json.load(open(f"{rundir}/{mission}.gate.json")) if os.path.exists(f"{rundir}/{mission}.gate.json") else None
     cleanup = None

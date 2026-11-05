@@ -1,14 +1,49 @@
 {
-  "bpfSourceSha256": "4d16bf66b11fd04700d2fc40f31037a3926cb00f94e3eb20b05663bef823ab40",
+  "bpfSourceSha256": "d5bb4cad4c3397f1e12c0ca7952b10c1b2a2694b777ec84d30266d21b2b0af80",
   "fragment": "exec authority of splat_bprm_check and the protected-file denials of splat_file_open; connect and sendmsg are captured by nothing here",
   "programs": {
-    "exec": {"name": "splat_bprm_check", "progType": "lsm", "attachFunc": "bpf_lsm_bprm_check_security"},
-    "open": {"name": "splat_file_open", "progType": "lsm", "attachFunc": "bpf_lsm_file_open"}
+    "exec": {
+      "name": "splat_bprm_check",
+      "progType": "lsm",
+      "attachFunc": "bpf_lsm_bprm_check_security",
+      "expectedTag": null
+    },
+    "open": {
+      "name": "splat_file_open",
+      "progType": "lsm",
+      "attachFunc": "bpf_lsm_file_open",
+      "expectedTag": null
+    }
   },
   "maps": {
-    "leased_cgroups": {"program": "exec", "name": "leased_cgroups", "type": "hash", "key": 8, "value": 8},
-    "allowed_exec": {"program": "exec", "name": "allowed_exec_in", "type": "hash", "key": 24, "value": 1},
-    "scratch_exec_devs": {"program": "exec", "name": "scratch_exec_de", "type": "hash", "key": 8, "value": 4},
-    "protected": {"program": "open", "name": "protected_inode", "type": "hash", "key": 24, "value": 1}
-  }
+    "leased_cgroups": {
+      "program": "exec",
+      "name": "leased_cgroups",
+      "type": "hash",
+      "key": 8,
+      "value": 16
+    },
+    "allowed_exec": {
+      "program": "exec",
+      "name": "allowed_exec_in",
+      "type": "hash",
+      "key": 24,
+      "value": 1
+    },
+    "scratch_exec_devs": {
+      "program": "exec",
+      "name": "scratch_exec_de",
+      "type": "hash",
+      "key": 8,
+      "value": 4
+    },
+    "protected": {
+      "program": "open",
+      "name": "protected_inode",
+      "type": "hash",
+      "key": 24,
+      "value": 1
+    }
+  },
+  "reviewStatus": "native-review-required; historical 8-byte-build tags do not certify this 16-byte build"
 }

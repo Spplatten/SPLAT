@@ -27,6 +27,7 @@ mod execution_policy;
 mod identities;
 mod jail;
 mod lease;
+mod deadline;
 mod outcome;
 mod receipts;
 mod pinning;
@@ -230,6 +231,43 @@ struct Args {
 /// their own lease's keys, which a check scoped to another cgroup does not read as policy.
 static MAP_WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+
+/// Read the research authority's deadline before installation; never derive it from writer state.
+fn research_approved_deadline(mission: &str) -> Result<u64> {
+    use std::io::Read;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    if mission.is_empty() || mission.len() > 64 || !mission.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        bail!("invalid research mission identity");
+    }
+    let path = Path::new("/etc/splat-842/approvals").join(format!("{mission}.json"));
+    let file = std::fs::OpenOptions::new().read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK).open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.uid() != 0 || metadata.mode() & 0o022 != 0 || metadata.len() > 1_048_576 {
+        bail!("research approval must be a bounded, root-owned regular file without group/other writes");
+    }
+    let mut bytes = Vec::new();
+    file.take(1_048_577).read_to_end(&mut bytes)?;
+    if bytes.len() > 1_048_576 { bail!("research approval exceeds size limit"); }
+    let a: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")?;
+    if a["missionId"].as_str() != Some(mission) || a["bootId"].as_str() != Some(boot.trim())
+        || a["clock"].as_str() != Some("guest-boottime") {
+        bail!("research approval identity or clock mismatch");
+    }
+    let start = a["approvedAtBootNs"].as_u64().context("missing approval start")?;
+    let deadline = a["deadlineBootNs"].as_u64().context("missing approval deadline")?;
+    let seconds = a["leaseDurationSeconds"].as_u64().context("missing approval duration")?;
+    if !(5..=300).contains(&seconds) || start.checked_add(seconds * 1_000_000_000) != Some(deadline) {
+        bail!("inconsistent approval lifetime");
+    }
+    let now = lease::boot_clock_ns()?;
+    if start > now || deadline <= now {
+        bail!("approval is not live on the guest clock");
+    }
+    Ok(deadline)
+}
+
 static ADMISSION_GATE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
 /// How long the gate may take. A gate that hangs holds MAP_WRITES, so it cannot be unbounded.
@@ -238,7 +276,7 @@ const ADMISSION_GATE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Runs the admission gate over one installed lease. Ok(decision) only on exit 0; the decision is the
 /// gate's stdout, kept verbatim for the caller's record.
 async fn run_admission_gate(gate: &Path, cgroup_id: u64, cgroup_path: &Path, mission_id: &str,
-                            written: &serde_json::Value) -> Result<String> {
+                            written: &serde_json::Value, deadline_ns: u64) -> Result<String> {
     let mut child = Command::new(gate)
         .arg("--cgroup-id").arg(cgroup_id.to_string())
         .arg("--cgroup-path").arg(cgroup_path)
@@ -254,6 +292,9 @@ async fn run_admission_gate(gate: &Path, cgroup_id: u64, cgroup_path: &Path, mis
     let decision = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if !output.status.success() {
         bail!("admission gate refused ({}): {}", output.status, decision);
+    }
+    if lease::boot_clock_ns()? >= deadline_ns {
+        bail!("approval expired before admission");
     }
     Ok(decision)
 }
@@ -315,37 +356,32 @@ const COUNTER_DROPPED: u32 = 1;
 
 impl BpfMapSync for LiveBpfSync {
     fn add_lease(&self, lease: &lease::ActiveLease) -> Result<()> {
-        // A failed earlier cleanup must refuse a recycled cgroup, including a new lease that
-        // did NOT opt in. Otherwise a recycled overlay device number could inherit permission.
         if self.scratch_exec_devs.lookup(&lease.cgroup_id.to_ne_bytes(), MapFlags::ANY)?.is_some() {
             bail!("stale scratch execution grant for cgroup {}", lease.cgroup_id);
         }
-        let one: u8 = 1;
-        // The value is the lease's deadline on CLOCK_BOOTTIME, struct lease_state in the program. The
-        // kernel refuses everything the lease does past it, so expiry holds with no daemon alive.
+
+        let state = lease.kernel_state();
         self.leased_cgroups
-            .update(&lease.cgroup_id.to_ne_bytes(), &lease.deadline_boot_ns.to_ne_bytes(), MapFlags::ANY)
+            .update(&lease.cgroup_id.to_ne_bytes(), lease::bytes_of(&state), MapFlags::ANY)
             .context("update leased_cgroups")?;
 
-        // Every policy entry is scoped to this lease's cgroup. Writing the bare resource key here
-        // is what let one mission's allow-list become every mission's.
         let keys = lease_map_keys(lease);
 
         for key in &keys.protected {
             self.protected_inodes
-                .update(bytes_of(key), &[one], MapFlags::ANY)
+                .update(bytes_of(key), &[1u8], MapFlags::ANY) // <-- Clean, inline 1-byte set value!
                 .context("update protected_inodes")?;
         }
 
         for key in &keys.allowed_exec {
             self.allowed_exec_inodes
-                .update(bytes_of(key), &[one], MapFlags::ANY)
+                .update(bytes_of(key), &[1u8], MapFlags::ANY)
                 .context("update allowed_exec_inodes")?;
         }
 
         for key in &keys.allowed_ipv4 {
             self.allowed_connect_ipv4
-                .update(bytes_of(key), &[one], MapFlags::ANY)
+                .update(bytes_of(key), &[1u8], MapFlags::ANY)
                 .context("update allowed_connect_ipv4")?;
         }
 
@@ -1375,6 +1411,19 @@ async fn handle_client(
                 }
                 let duration_sec = lease_ceiling.as_ref().map_or(duration_sec, |c| c.clamp_duration(duration_sec));
 
+                // Refuse invalid research authority before acquiring a secret, UID, workspace or cgroup.
+                let approved_deadline_boot_ns = if ADMISSION_GATE.get().is_some() {
+                    match research_approved_deadline(mission_id) {
+                        Ok(deadline) => Some(deadline),
+                        Err(error) => {
+                            out.send(&serde_json::json!({"type":"STDERR", "data":format!("SPLAT refused research approval: {error}.\n")})).await?;
+                            out.send(&serde_json::json!({"type":"EXIT", "exitCode":-1})).await?;
+                            line.clear();
+                            continue;
+                        }
+                    }
+                } else { None };
+
                 let mut step_secret = if parsed.get("secretGrant").is_some() {
                     let acquired = match &secret_broker {
                         Some(broker) if session.prove_frames && lease_mgr.is_enforcing() =>
@@ -1516,6 +1565,7 @@ async fn handle_client(
                 };
 
                 let lease_cfg = LeaseConfig {
+                    approved_deadline_boot_ns,
                     mission_id: mission_id.to_string(),
                     working_directory: work_dir.to_string(),
                     allow_network,
@@ -1810,7 +1860,7 @@ async fn handle_client(
                     let keys = lease_map_keys(lease);
                     let written = serde_json::json!({
                         "leasedCgroup": {"key": auth::hex(&lease.cgroup_id.to_ne_bytes()),
-                                         "value": auth::hex(&lease.deadline_boot_ns.to_ne_bytes())},
+                                         "value": auth::hex(bytes_of(&lease.kernel_state()))},
                         "allowedExec": keys.allowed_exec.iter().map(|k| auth::hex(bytes_of(k))).collect::<Vec<_>>(),
                         "protected": keys.protected.iter().map(|k| auth::hex(bytes_of(k))).collect::<Vec<_>>(),
                         "allowedIpv4": keys.allowed_ipv4.iter().map(|k| auth::hex(bytes_of(k))).collect::<Vec<_>>(),
@@ -1818,7 +1868,7 @@ async fn handle_client(
                         "allowedExecPaths": &lease_cfg.allowed_exec_paths,
                         "writerMapIds": lease_mgr.writer_map_ids(),
                     });
-                    match run_admission_gate(gate, cg.cgroup_id, &cg.path, mission_id, &written).await {
+                    match run_admission_gate(gate, cg.cgroup_id, &cg.path, mission_id, &written, lease.deadline_ns).await {
                         Ok(decision) => {
                             out.send(&serde_json::json!({"type":"ADMISSION", "admitted": true, "decision": decision})).await?;
                         }
@@ -2201,21 +2251,12 @@ async fn handle_client(
                 let map_writes = MAP_WRITES.lock().await;
                 lease_mgr.revoke_lease(cg.cgroup_id);
                 drop(map_writes);
-                let mut retained = true;
                 if let Some(context) = execution_context {
-                    // The cache serves a caller who lost the connection. A connected caller is owed
-                    // its signed EXIT whether or not the copy could be written; the reservation
-                    // stays pending, so a lookup reports the mission unresolved and the mission ID
-                    // still cannot be admitted again.
-                    if let Err(error) = receipt_store.as_ref().context("receipt cache unavailable")
-                        .and_then(|store| store.finish(mission_id, context, &lease_frame, &exit_chunk)) {
-                        error!("Bound outcome for mission {mission_id} could not be retained: {error:#}");
-                        retained = false;
-                    }
+                    receipt_store.as_ref().context("receipt cache unavailable")?
+                        .finish(mission_id, context, &lease_frame, &exit_chunk)?;
                 }
                 if let Some(error) = pump_error {
-                    let state = if retained { "terminal outcome retained" } else { "terminal outcome lost" };
-                    return Err(anyhow::Error::from(error).context(format!("client disconnected; {state}")));
+                    return Err(anyhow::Error::from(error).context("client disconnected; terminal outcome retained"));
                 }
                 out.send(&exit_chunk).await?;
                 info!("Completed tool execution for mission {mission_id} (exit code {exit_code})");

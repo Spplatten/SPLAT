@@ -28,6 +28,9 @@ import statistics
 import subprocess
 import sys
 import time
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from approval import lifetime
 
 _spec = importlib.util.spec_from_file_location("run_842", os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_842.py"))
 r842 = importlib.util.module_from_spec(_spec)
@@ -181,7 +184,7 @@ def approval_for(policy, mission):
     boot = open("/proc/sys/kernel/random/boot_id").read().strip()
     exe = P if policy.startswith("protected") else A
     approval = {"missionId": mission, "bootId": boot, "executables": [{"path": exe, "sha256": r842.sha256_file(exe)}],
-                "leaseDurationSeconds": LEASE_SECONDS, "approvedAtUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+                **lifetime(LEASE_SECONDS), "approvedAtUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if policy.startswith("protected"):
         approval["protected"] = ALWAYS_PROTECTED + [TARGET]
     return approval
@@ -207,7 +210,7 @@ def run_one(token, bundle, phase, block, index, policy, variant):
     full = r842.trace_read()
     tasks = r842.DaemonTasks(full)
     trace = r842.trace_slice(full, mission)
-    overruns = r842.trace_overruns()
+    overruns = r842.trace_overruns(rundir)
 
     gate_path = f"{rundir}/{mission}.gate.json"
     gate = json.load(open(gate_path)) if os.path.exists(gate_path) else None
