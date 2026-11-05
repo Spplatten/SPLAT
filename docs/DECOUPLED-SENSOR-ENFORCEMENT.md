@@ -256,8 +256,10 @@ semantics. These are not live HTTPS, vendor, A2A, native-kernel or crash/power-l
 `--self-test`, which passed 137 checks (`FalcoChecks` adds the lease-attribution, time, drop, restart,
 silence, watchdog and HTTP cases); `dotnet build -warnaserror` reported zero warnings, so NU1900 did
 not recur. Four deliberate mutants (accepting any lease, accepting a non-canonical lease spelling,
-ignoring a moved loss counter, answering foreign traffic with 409) each failed it. Still synthetic:
-no alert from a running Falco has been classified yet.
+ignoring a moved loss counter, answering foreign traffic with 409) each failed it. The suite runs the
+same checks in `AlertSidecarSelfTests`, which fails when any check fails or fewer than 137 run:
+dropping the Falco group (74 ran) and admitting any lease (assertion 102) each failed it. Still
+synthetic: no alert from a running Falco has been classified yet.
 
 Normal sidecar build is blocked by NU1900 (NuGet vulnerability feed unavailable). A diagnostic
 compile with only NU1900 demoted locally produced zero compiler errors and two audit warnings;
