@@ -30,6 +30,15 @@ not become AGPL merely by communicating with SPLAT, and patches do not have to b
 Platten Industries. Contributions and commercial grants require their own applicable agreements.
 The authoritative terms are in LICENSE; COMMERCIAL.md describes the alternative offer.
 
+## Optional Lite guest
+
+Packages built with `-GuestBuildDirectory` carry the guest archive and its build, package, source
+and copyright records. An unmanaged console offers a reviewed import from the Kernel Lease page,
+then a separate mount plan for daemon setup. The managed service retains its own deployment path.
+See [LITE-GUEST.md](LITE-GUEST.md) for the measured packaging and stand-in tests, import recovery,
+retained guest data and the live deployment checks still required. This flow does not establish
+the secondary-principal boundary described below.
+
 ## Loopback protocol tests
 
 Use an isolated test machine. Retain the installer SHA-256, PACKAGE-MANIFEST.json, Windows and WSL

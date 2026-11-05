@@ -17,6 +17,7 @@ public enum SubstrateChange
     None,
     Mount,
     Unmount,
+    ImportGuest,
 }
 
 /// <summary>
@@ -43,6 +44,8 @@ public sealed class SubstrateLifecycle
     private readonly string? _manifestPath;
     private readonly Func<string, string?> _environment;
     private readonly Func<CancellationToken, Task<SubstrateReport>>? _managedCheck;
+    private readonly BundledWslGuest? _bundledGuest;
+    private BundledWslGuest.ImportPlan? _guestImportPlan;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public SubstrateLifecycle(
@@ -52,16 +55,20 @@ public sealed class SubstrateLifecycle
         string? ledgerPath = null,
         string? manifestPath = null,
         Func<string, string?>? environment = null,
-        Func<CancellationToken, Task<SubstrateReport>>? managedCheck = null)
+        Func<CancellationToken, Task<SubstrateReport>>? managedCheck = null,
+        BundledWslGuest? bundledGuest = null)
     {
-        _wsl = wsl ?? SubstrateDoctor.RunWslAsync;
-        _health = health ?? new WslSubstrateHealthChecker();
+        if (managedCheck is not null && bundledGuest is not null)
+            throw new ArgumentException("A managed service and a local bundled guest cannot both own the console's substrate.");
+        _bundledGuest = bundledGuest;
+        _wsl = bundledGuest is not null ? bundledGuest.RunAsync : wsl ?? SubstrateDoctor.RunWslAsync;
+        _health = bundledGuest?.Health ?? health ?? new WslSubstrateHealthChecker();
         _daemonBinary = daemonBinary;
         // The console's own chain, which is not splat-mcp's: the two hosts keep separate ledgers unless
         // SPLAT_DB_PATH points both at one, and a doctor that inspected the other file would vouch for
         // a ledger this host never writes.
         _ledgerPath = ledgerPath ?? SqliteStorageContext.GetDefaultDatabasePath();
-        _manifestPath = manifestPath;
+        _manifestPath = bundledGuest?.ManifestPath ?? manifestPath;
         _environment = environment ?? Environment.GetEnvironmentVariable;
         _managedCheck = managedCheck;
     }
@@ -86,7 +93,10 @@ public sealed class SubstrateLifecycle
         RunAsync(SubstrateChange.None, async output =>
         {
             if (_managedCheck is null)
+            {
+                if (_bundledGuest is not null) await _bundledGuest.RequireOwnedAsync(ct);
                 return await SubstrateDoctor.RunAsync(Doctor(), output, _wsl, _health, ledgerPath: _ledgerPath, ct: ct);
+            }
             SubstrateReport report = await _managedCheck(ct);
             await output.WriteAsync(report.Text);
             return report.ExitCode;
@@ -94,7 +104,15 @@ public sealed class SubstrateLifecycle
 
     /// <summary>Shows what mounting would change; a plan with steps left authorizes <see cref="ApplyAsync"/>.</summary>
     public Task<SubstrateReport> PlanMountAsync(CancellationToken ct = default) =>
-        RunAsync(SubstrateChange.Mount, output => Provision(apply: false, output, ct));
+        RunAsync(SubstrateChange.Mount, async output =>
+        {
+            if (_bundledGuest is not null)
+            {
+                _guestImportPlan = await _bundledGuest.PlanAsync(output, ct);
+                if (_guestImportPlan is not null) return 1;
+            }
+            return await Provision(apply: false, output, ct);
+        });
 
     /// <summary>Shows what unmounting would take out; a plan that found a manifest authorizes <see cref="ApplyAsync"/>.</summary>
     public Task<SubstrateReport> PlanUnmountAsync(CancellationToken ct = default) =>
@@ -111,10 +129,14 @@ public sealed class SubstrateLifecycle
         try
         {
             SubstrateChange change = Planned;
+            BundledWslGuest.ImportPlan? importPlan = _guestImportPlan;
             // Spent before it runs: a failed apply must be planned again, against the state it left.
             Planned = SubstrateChange.None;
+            _guestImportPlan = null;
             return change switch
             {
+                SubstrateChange.ImportGuest when importPlan is not null && _bundledGuest is not null =>
+                    await CaptureAsync(output => _bundledGuest.ImportAsync(importPlan, output, ct)),
                 SubstrateChange.Mount => await CaptureAsync(output => Provision(apply: true, output, ct)),
                 SubstrateChange.Unmount => await CaptureAsync(output => Unmount(apply: true, output, ct)),
                 _ => new SubstrateReport(1, "Nothing is planned, so nothing was changed. Plan a mount or an unmount first, read it, then apply it."),
@@ -137,12 +159,24 @@ public sealed class SubstrateLifecycle
             CeilingRemedy = "Mount, on the Kernel Lease page, writes one",
         };
 
-    private Task<int> Provision(bool apply, TextWriter output, CancellationToken ct) =>
-        IsManaged ? RefuseManagedChange(output) : SubstrateProvisioner.RunAsync(new ProvisionOptions(apply), output, _wsl, _health,
+    private async Task<int> Provision(bool apply, TextWriter output, CancellationToken ct)
+    {
+        if (IsManaged) return await RefuseManagedChange(output);
+        if (_bundledGuest is not null) await _bundledGuest.RequireOwnedAsync(ct);
+        return await SubstrateProvisioner.RunAsync(new ProvisionOptions(apply), output, _wsl, _health,
             agentBinaryPath: _daemonBinary, manifestPath: _manifestPath, ct: ct);
+    }
 
-    private Task<int> Unmount(bool apply, TextWriter output, CancellationToken ct) =>
-        IsManaged ? RefuseManagedChange(output) : SubstrateUnmounter.RunAsync(new UnmountOptions(apply, _manifestPath), output, _wsl, ct);
+    private async Task<int> Unmount(bool apply, TextWriter output, CancellationToken ct)
+    {
+        if (IsManaged) return await RefuseManagedChange(output);
+        if (_bundledGuest is not null)
+        {
+            await _bundledGuest.RequireOwnedAsync(ct);
+            output.WriteLine($"Guest {_bundledGuest.Distribution} and its data are retained; this unmount removes only recorded setup changes.");
+        }
+        return await SubstrateUnmounter.RunAsync(new UnmountOptions(apply, _manifestPath), output, _wsl, ct);
+    }
 
     private static Task<int> RefuseManagedChange(TextWriter output)
     {
@@ -166,9 +200,11 @@ public sealed class SubstrateLifecycle
         try
         {
             Planned = SubstrateChange.None;
+            _guestImportPlan = null;
             SubstrateReport report = await CaptureAsync(run);
             Planned = plans switch
             {
+                SubstrateChange.Mount when report.ExitCode == 1 && _guestImportPlan is not null => SubstrateChange.ImportGuest,
                 SubstrateChange.Mount when !report.Succeeded && report.ExitCode != CrashedExitCode => SubstrateChange.Mount,
                 SubstrateChange.Unmount when report.Succeeded => SubstrateChange.Unmount,
                 _ => SubstrateChange.None,

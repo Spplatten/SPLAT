@@ -11,6 +11,7 @@ param(
     [ValidatePattern('^\d{1,5}\.\d{1,5}\.\d{1,5}$')][string]$Version = '0.2.0',
     [string]$RootfsPath,
     [ValidatePattern('^[a-fA-F0-9]{64}$')][string]$RootfsSha256,
+    [string]$GuestBuildDirectory,
     [string]$SourceArchive,
     [string]$McpBuildManifest,
     [string]$TestResultsPath
@@ -19,6 +20,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 . "$PSScriptRoot\community-integrity.ps1"
+. "$PSScriptRoot\splat-guest-package.ps1"
+$guestBuild = $null
+if ($GuestBuildDirectory) {
+    if ($RootfsPath -or $RootfsSha256) { throw 'Use GuestBuildDirectory or raw RootfsPath/RootfsSha256, not both.' }
+    $guestBuild = Get-SplatGuestBuild -Directory $GuestBuildDirectory
+    $RootfsPath = $guestBuild.rootfsPath
+    $RootfsSha256 = $guestBuild.sha256
+}
 $payload = (Resolve-Path -LiteralPath $WindowsPayload).Path.TrimEnd('\')
 $output = [IO.Path]::GetFullPath($OutputDir).TrimEnd('\')
 if (Test-Path -LiteralPath $output) { throw 'Use a new output directory; existing payloads and installers are never overwritten.' }
@@ -75,7 +84,7 @@ $inventory = @(foreach ($file in $files) {
 Copy-Item -LiteralPath $McpBinary -Destination (Join-Path $stage 'Tools\splat-mcp.exe')
 Copy-Item -LiteralPath $DaemonBinary -Destination (Join-Path $stage 'Linux\splat-agent')
 if ($mcpBuild) { Copy-Item -LiteralPath $McpBuildManifest -Destination (Join-Path $stage 'MCP-BUILD-MANIFEST.json') }
-foreach ($name in @('bootstrap-community-wsl.ps1', 'provision-community-guest.sh', 'probe-caller-identity.ps1', 'verify-community-package.ps1')) {
+foreach ($name in @('bootstrap-community-wsl.ps1', 'provision-community-guest.sh', 'probe-caller-identity.ps1', 'verify-community-package.ps1', 'splat-guest-package.ps1')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $stage 'packaging')
 }
 if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'caller-identity-listener.c')) {
@@ -84,7 +93,7 @@ if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'caller-identity-listener.c'
 Copy-Item -LiteralPath (Join-Path $root 'docs\COMMUNITY-TESTING.md') -Destination (Join-Path $stage 'docs')
 Copy-Item -LiteralPath (Join-Path $root 'docs\audits\2026-10-06-community-distribution.md') -Destination (Join-Path $stage 'docs')
 # The 2.4 handoff moved to private/ on 2026-10-14; the threat model it assumed still ships.
-foreach ($name in @('THREAT-MODEL.md')) {
+foreach ($name in @('THREAT-MODEL.md', 'LITE-GUEST.md')) {
     Copy-Item -LiteralPath (Join-Path $root "docs\$name") -Destination (Join-Path $stage 'docs')
 }
 foreach ($name in @('daemon-probe.json', 'last-hop-probe.json')) {
@@ -93,7 +102,8 @@ foreach ($name in @('daemon-probe.json', 'last-hop-probe.json')) {
 & "$PSScriptRoot\write-distribution-license.ps1" -Destination $stage
 & "$PSScriptRoot\collect-community-dependencies.ps1" -WindowsPayload $payload -Destination $stage
 $dependencies = Get-Content -LiteralPath (Join-Path $stage 'DEPENDENCIES.json') -Raw | ConvertFrom-Json
-if ($RootfsPath) { Copy-Item -LiteralPath $RootfsPath -Destination (Join-Path $stage 'Linux\rootfs.tar.xz') }
+if ($guestBuild) { Copy-SplatGuestBuild -Build $guestBuild -Destination (Join-Path $stage 'Linux') }
+elseif ($RootfsPath) { Copy-Item -LiteralPath $RootfsPath -Destination (Join-Path $stage 'Linux\rootfs.tar.xz') }
 if ($SourceArchive) {
     Copy-Item -LiteralPath $SourceArchive -Destination (Join-Path $stage ('SPLAT-Source' + [IO.Path]::GetExtension($SourceArchive)))
 } else {
@@ -124,6 +134,8 @@ $manifest = [ordered]@{
     daemonSha256 = (Get-FileHash -LiteralPath (Join-Path $stage 'Linux\splat-agent') -Algorithm SHA256).Hash.ToLowerInvariant()
     rootfsSha256 = if ($RootfsPath) { $RootfsSha256.ToLowerInvariant() } else { $null }
     rootfsIncluded = [bool]$RootfsPath; tests = $testSummary
+    guestBuild = if ($guestBuild) { [ordered]@{ name = $guestBuild.name; base = $guestBuild.base
+        snapshot = $guestBuild.snapshot; packageCount = $guestBuild.packageCount; sourceStatus = $guestBuild.sourceStatus } } else { $null }
     distributionReady = $false; installerSignature = 'UNSIGNED'; cleanMachineInstallation = 'NOT_TESTED'
     secondaryPrincipalBridge = if ($mcpBuild) { $mcpBuild.managedBridge } else { 'NOT_ATTESTED' }; roadmap24Closed = $false
     mcpSha256 = (Get-FileHash -LiteralPath (Join-Path $stage 'Tools\splat-mcp.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
