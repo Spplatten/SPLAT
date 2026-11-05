@@ -1,0 +1,77 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  splat-alert-sidecar -> C:\C_AGENT_BUILDER\src\splat-alert-sidecar\bin\Release\net10.0\splat-alert-sidecar.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:11.30
+PASS Falcon parser, actual HTTP handler/SQLite admission, pressure recovery and legacy compatibility checks.
+PASS registrar: minimal exact composite lookup
+PASS registrar: minimal PID reuse refused
+PASS registrar: minimal ambiguity refused
+PASS registrar: begins in Admitting
+PASS registrar: unknown sensor cannot enroll itself
+PASS registrar: activation without sensor identity refused
+PASS registrar: recycled PID registration refused
+PASS registrar: cross-tenant registration refused
+PASS registrar: bound but not active refused
+PASS registrar: one observation resolves exactly one task
+PASS registrar: native composite field mismatch refused
+PASS registrar: native composite field mismatch refused
+PASS registrar: native composite field mismatch refused
+PASS registrar: native composite field mismatch refused
+PASS registrar: native composite field mismatch refused
+PASS registrar: native composite field mismatch refused
+PASS registrar: sensor composite field mismatch refused
+PASS registrar: sensor composite field mismatch refused
+PASS registrar: sensor composite field mismatch refused
+PASS registrar: sensor composite field mismatch refused
+PASS registrar: pre-admission timestamp refused
+PASS registrar: future timestamp refused
+PASS registrar: wrong rule refused
+PASS registrar: task UUID reuse refused
+PASS registrar: cgroup lifetime shared across tasks refused
+PASS registrar: unbound child sensor refused
+PASS registrar: enrolled child inherits task
+PASS registrar: exited root refused
+PASS registrar: root exit does not erase child
+PASS registrar: grandchild resolves through exact enrolled parent
+PASS registrar: delayed old child event cannot reach recycled PID
+PASS registrar: new generation has independent identity
+PASS registrar: lost fork sequence refused
+PASS registrar: lineage gap fences task
+PASS registrar: cross-boundary child refused
+PASS registrar: escape observation fences registration
+PASS registrar: cross-boundary child refused
+PASS registrar: escape observation fences registration
+PASS registrar: cross-boundary child refused
+PASS registrar: escape observation fences registration
+PASS registrar: unenrolled parent refused
+PASS registrar: lineage capacity fails closed
+PASS registrar: duplicate sensor identity quarantines both tasks
+PASS registrar: ambiguity has no winner
+PASS registrar: both conflicting tasks draining
+PASS registrar: delayed observation rejected
+PASS registrar: exact deadline rejected before sweep
+PASS registrar: expired registrations evicted
+PASS registrar: eviction preserves UUID tombstone
+PASS registrar: wall-clock rollback refused
+PASS registrar: rollback eviction cannot revive identity
+PASS registrar: monotonic expiry independent of wall clock
+PASS registrar: pre-drain snapshot resolves
+PASS registrar: stale resolution cannot commit after drain
+PASS registrar: concurrent readers see complete published snapshot
+PASS registrar: 100000 steady lookups allocate zero managed bytes on this thread
+PASS registrar: fixed-task mailbox rejects another task
+PASS registrar: concurrent publication exposes no active result after drain completes
+PASS registrar: HTTP constructor refuses mailbox for a different binding
+PASS registrar: HTTP cross-tenant event leaves mailbox idle
+PASS registrar: HTTP bare PID leaves mailbox idle
+PASS registrar: HTTP cannot enroll descendant
+PASS registrar: HTTP enrolled child commits cancellation to parent task mailbox
+PASS registrar: HTTP after drain rejected
+PASS 64 registrar checks; synthetic identity producers, no kernel/vendor qualification.
+PASS 138 checks: binding compatibility, Falcon schema/identity, HTTP admission, freshness, durable recovery and evidence semantics.
+PASS sidecar build and contract checks. Live provider/TLS/native validation is separate.

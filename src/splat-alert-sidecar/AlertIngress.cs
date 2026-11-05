@@ -13,13 +13,19 @@ internal sealed class AlertIngress : IDisposable
     private readonly Latch _latch;
     private readonly byte[] _authDigest;
     private readonly FalconAdapter? _falcon;
+    private readonly TrustedAdmissionRegistrar? _registrar;
     private readonly SemaphoreSlim _admissions = new(4);
     internal string Path => _falcon is null ? "/v1/alerts" : "/v1/falcon/alerts";
-    internal AlertIngress(Binding binding,Latch latch,byte[] authDigest,FalconAdapter? falcon=null)
+    internal AlertIngress(Binding binding,Latch latch,byte[] authDigest,FalconAdapter? falcon=null,
+        TrustedAdmissionRegistrar? registrar=null)
     {
-        if (authDigest.Length != 32 || (binding.Falcon != null) != (falcon != null))
+        if (authDigest.Length != 32 || (binding.Falcon != null) != (falcon != null)
+            || latch.BindingFingerprint != binding.Fingerprint)
             throw new InvalidDataException("Binding, adapter mode and authentication must agree.");
         _binding=binding; _latch=latch; _authDigest=(byte[])authDigest.Clone(); _falcon=falcon;
+        if (registrar != null && (falcon == null || !registrar.MatchesBinding(binding)))
+            throw new InvalidDataException("Registrar and fixed task/mailbox binding disagree.");
+        _registrar=registrar;
     }
     internal async Task HandleAsync(HttpContext http)
     {
@@ -47,11 +53,20 @@ internal sealed class AlertIngress : IDisposable
             }
             using var doc=StrictJson.Parse(bytes.AsMemory(0,used));
             long now=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var alert=_falcon is null ? doc.RootElement.Deserialize<Alert>(Binding.Json) : _falcon.Normalize(doc.RootElement,now);
-            if (alert == null || !_binding.Matches(alert,now)) { http.Response.StatusCode=409; return; }
+            if (_registrar != null)
+            {
+                var observation=_falcon!.Observe(doc.RootElement);
+                if (!_registrar.AdmitToMailbox(Guid.ParseExact(_binding.TaskId,"N"),observation,_latch))
+                { http.Response.StatusCode=409; return; }
+            }
+            else
+            {
+                var alert=_falcon is null ? doc.RootElement.Deserialize<Alert>(Binding.Json) : _falcon.Normalize(doc.RootElement,now);
+                if (alert == null || !_binding.Matches(alert,now)) { http.Response.StatusCode=409; return; }
+                _latch.Admit(alert.AlertId,alert.ObservedUnixMs,now);
+            }
             // Commit before acknowledgement. Only a validated event can reach the mailbox. Raw
             // provider payloads are never persisted here, exported or passed to native enforcement.
-            _latch.Admit(alert.AlertId,alert.ObservedUnixMs,now);
             http.Response.StatusCode=202;
             await http.Response.WriteAsJsonAsync(new { accepted=true,taskId=_binding.TaskId,
                 meaning="Cancellation signal persisted; workload termination is not confirmed." },http.RequestAborted);
