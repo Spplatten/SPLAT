@@ -3,7 +3,8 @@ param(
     [ValidateSet('Install','Upgrade','Remove','GuestInstall','GuestUpgrade','GuestRemove')][string]$Mode,
     [ValidatePattern('^Splat[A-Za-z0-9]{0,14}$')][string]$Instance = 'SplatManaged',
     [string]$Executable, [string]$Rootfs, [string]$RootfsSha256,
-    [string]$OperatorSid, [string]$Egress = ''
+    [string]$OperatorSid, [string]$Egress = '',
+    [switch]$WindowsOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -42,6 +43,13 @@ function New-Password {
     # Never serialize the credential. SCM stores its own service logon secret.
     ConvertTo-SecureString ('aA1!' + [Convert]::ToBase64String($bytes)) -AsPlainText -Force
 }
+# An instance installed with -WindowsOnly has no guest, and its manifest says so. Manifests written before
+# that option existed carry no Substrate and are guest installs; strict mode throws on a missing
+# property, so the field is looked up rather than read.
+function Test-WindowsOnly($Manifest) {
+    $field = $Manifest.PSObject.Properties['Substrate']
+    return [bool]($field -and $field.Value -eq 'Windows')
+}
 function Invoke-Guest([string]$Script) {
     # sh reads the script from a file of exact bytes: UTF-8 with no BOM, LF line endings. It used to
     # arrive through Process.StandardInput, whose Windows PowerShell writer prefixes the console
@@ -70,6 +78,7 @@ if ($Mode -in @('GuestInstall', 'GuestUpgrade', 'GuestRemove')) {
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     if ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value -ne $manifest.AccountSid) { throw 'Wrong guest owner.' }
     if ($manifest.Instance -ne $Instance -or $manifest.Root -ne $root) { throw 'Foreign deployment manifest.' }
+    if (Test-WindowsOnly $manifest) { throw 'This instance was installed Windows-only and has no guest.' }
     # Host drive access is needed only while the installed executable's daemon is copied in. Mode
     # 0700 and disabled Windows interop keep leased uid 65534 away from it meanwhile, and the final
     # configuration is restored even when the bootstrap fails, so a failed run never leaves the
@@ -156,7 +165,8 @@ function Start-Owner([PSCredential]$Credential, [string]$Action) {
 function Assert-Manifest {
     if ((Get-Item -LiteralPath $root).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Deployment root is a reparse point.' }
     $script:manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    if ($manifest.Schema -ne 1 -or $manifest.Instance -ne $Instance -or $manifest.Root -ne $root) { throw 'Foreign deployment manifest.' }
+    if ($manifest.Schema -notin @(1, 2) -or $manifest.Instance -ne $Instance -or $manifest.Root -ne $root) { throw 'Foreign deployment manifest.' }
+    if (($manifest.Schema -eq 2) -ne (Test-WindowsOnly $manifest)) { throw 'Manifest schema and substrate disagree.' }
     $acl = Get-Acl -LiteralPath $manifestPath
     if ($acl.Owner -notin @($adminSid.Translate([Security.Principal.NTAccount]).Value, $systemSid.Translate([Security.Principal.NTAccount]).Value)) { throw 'Manifest is not administrator-owned.' }
     foreach ($rule in $acl.Access) {
@@ -173,6 +183,7 @@ if ($Mode -eq 'Remove') {
     if ($Executable -and [IO.Path]::GetFullPath($Executable).StartsWith("$root\", [StringComparison]::OrdinalIgnoreCase)) {
         throw "Run the unmount from a published splat-mcp.exe, not the installed copy under $root."
     }
+    $windowsOnly = Test-WindowsOnly $manifest
     $account = Get-LocalUser -Name $Instance -ErrorAction SilentlyContinue
     if ($account -and $account.SID.Value -ne $manifest.AccountSid) { throw 'Account was substituted; refusing removal.' }
     $service = Get-CimInstance Win32_Service -Filter "Name='$Instance'"
@@ -180,7 +191,8 @@ if ($Mode -eq 'Remove') {
         if ($service.PathName -ne $manifest.ServiceCommand -or $service.StartName -ne ".\$Instance") { throw 'Service was substituted; refusing removal.' }
         Stop-Service -Name $Instance -ErrorAction Stop
     }
-    if ($account) {
+    # Only a guest install has a distro for its account to unregister.
+    if ($account -and -not $windowsOnly) {
         # Rotate only this manifest-owned account. No password is kept in a file for uninstall.
         $password = New-Password
         Set-LocalUser -SID $account.SID -Password $password
@@ -216,7 +228,7 @@ if ($Mode -eq 'Remove') {
         Write-Warning "Removed $Instance, but its retained state could not be moved aside ($($_.Exception.Message)). It is still at $root; move it before reinstalling."
         exit 0
     }
-    Write-Output "Removed $Instance service/account/distro; protected audit state retained at $archive."
+    Write-Output "Removed $Instance service/account$(if (-not $windowsOnly) { '/distro' }); protected audit state retained at $archive."
     exit 0
 }
 
@@ -245,7 +257,8 @@ if ($Mode -eq 'Upgrade') {
                 StartName = ".\$Instance"; StartPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
         } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
         if ($change.ReturnValue -ne 0) { throw "The service manager refused the rotated credential ($($change.ReturnValue))." }
-        Start-Owner ([PSCredential]::new(".\$Instance", $password)) 'GuestUpgrade'
+        # A Windows-only instance has no guest daemon to replace; the new executable is the whole upgrade.
+        if (-not (Test-WindowsOnly $manifest)) { Start-Owner ([PSCredential]::new(".\$Instance", $password)) 'GuestUpgrade' }
         $errorLog = Join-Path $state 'service-error.log'
         $before = if (Test-Path -LiteralPath $errorLog) { (Get-Item -LiteralPath $errorLog).Length } else { 0 }
         Start-Service -Name $Instance
@@ -289,10 +302,14 @@ function Get-RootfsName([string]$Path) {
     if ($read -eq 262 -and [Text.Encoding]::ASCII.GetString($head, 257, 5) -eq 'ustar') { return 'rootfs.tar' }
     throw 'The rootfs is not a tar, tar.gz or tar.xz archive.'
 }
-if (-not (Test-Path -LiteralPath $Rootfs -PathType Leaf) -or $RootfsSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
+if ($WindowsOnly) {
+    # No guest is created, so there is no image to verify or stage, and one passed anyway is refused
+    # rather than ignored.
+    if ($Rootfs -or $RootfsSha256) { throw 'A Windows-only install takes no rootfs.' }
+} elseif (-not (Test-Path -LiteralPath $Rootfs -PathType Leaf) -or $RootfsSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
     (Get-FileHash -LiteralPath $Rootfs -Algorithm SHA256).Hash -ne $RootfsSha256) { throw 'Rootfs must match its independently obtained publisher SHA-256.' }
 if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw 'Published executable is missing.' }
-$rootfsFile = Get-RootfsName $Rootfs
+if (-not $WindowsOnly) { $rootfsFile = Get-RootfsName $Rootfs }
 $operators = @($OperatorSid.Split(',') | Select-Object -Unique)
 foreach ($sid in $operators) {
     if ($sid -notmatch '^S-1-5-21-\d+-\d+-\d+-\d+$') { throw 'Explicit Windows account SIDs are required.' }
@@ -333,7 +350,12 @@ $null = New-Item -ItemType Directory -Path $root
 Set-ProtectedDirectory $root @()
 $password = New-Password
 $account = New-LocalUser -Name $Instance -Password $password -PasswordNeverExpires -UserMayNotChangePassword -Description 'SPLAT managed endpoint; do not use interactively'
-$manifest = [ordered]@{ Schema = 1; Instance = $Instance; Root = $root; AccountSid = $account.SID.Value; Status = 'Installing'; ServiceCommand = ('"{0}" bridge-service --configuration "{1}"' -f $installedExe, $configPath); RootfsFile = $rootfsFile }
+# A Windows-only manifest is schema 2. A deployment script from before Windows-only installs accepts only
+# schema 1, so it refuses one up front; reading it as a guest install, an older upgrade stopped the service
+# and then failed its own rollback on the missing distro.
+$manifest = [ordered]@{ Schema = $(if ($WindowsOnly) { 2 } else { 1 }); Instance = $Instance; Root = $root; AccountSid = $account.SID.Value; Status = 'Installing'; ServiceCommand = ('"{0}" bridge-service --configuration "{1}"' -f $installedExe, $configPath);
+    Substrate = $(if ($WindowsOnly) { 'Windows' } else { 'LinuxLease' }) }
+if (-not $WindowsOnly) { $manifest['RootfsFile'] = $rootfsFile }
 Write-Json $manifestPath $manifest
 Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $account
 Set-ProtectedDirectory $root (@($account.SID.Value) + $operators)
@@ -342,24 +364,33 @@ Set-ProtectedDirectory $state @() $account.SID.Value
 Set-ProtectedDirectory (Join-Path $root 'workspace') @() $account.SID.Value
 Copy-Item -LiteralPath $Executable -Destination $installedExe
 Copy-Item -LiteralPath $PSCommandPath -Destination $installedScript
-Copy-Item -LiteralPath $Rootfs -Destination (Join-Path $root $rootfsFile)
-if ((Get-FileHash -LiteralPath (Join-Path $root $rootfsFile)).Hash -ne $RootfsSha256) { throw 'Copied rootfs hash changed.' }
-$listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
-$listener.Start()
-$port = $listener.LocalEndpoint.Port
-$listener.Stop()
-Write-Json $configPath @{ Schema = 1; ServiceName = $Instance; ServiceSid = $account.SID.Value; PipeName = "$Instance-bridge"; Distribution = $Instance;
-    Port = $port; StateDirectory = $state; WorkspaceDirectory = (Join-Path $root 'workspace'); OperatorSids = $operators; Egress = $Egress }
+if ($WindowsOnly) {
+    # The port is the guest daemon's; with no guest the configuration names neither, and the service
+    # refuses a Windows-only configuration that names either.
+    $port = 0
+} else {
+    Copy-Item -LiteralPath $Rootfs -Destination (Join-Path $root $rootfsFile)
+    if ((Get-FileHash -LiteralPath (Join-Path $root $rootfsFile)).Hash -ne $RootfsSha256) { throw 'Copied rootfs hash changed.' }
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $port = $listener.LocalEndpoint.Port
+    $listener.Stop()
+}
+Write-Json $configPath @{ Schema = 1; ServiceName = $Instance; ServiceSid = $account.SID.Value; PipeName = "$Instance-bridge";
+    Distribution = $(if ($WindowsOnly) { '' } else { $Instance }); Port = $port; StateDirectory = $state; WorkspaceDirectory = (Join-Path $root 'workspace');
+    OperatorSids = $operators; Egress = $Egress; Substrate = $(if ($WindowsOnly) { 'windows-only' } else { 'linux-lease' }) }
 $key = New-Object byte[] 64
 $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
 try { $rng.GetBytes($key); [IO.File]::WriteAllBytes((Join-Path $state 'ledger.key'), $key) } finally { [Array]::Clear($key, 0, $key.Length); $rng.Dispose() }
 [SplatServiceLogon]::Grant($account.SID.Value)
 $credential = [PSCredential]::new(".\$Instance", $password)
-Start-Owner $credential 'GuestInstall'
-# Only this exact newly created staging file is removed. The guest's disk is never the input image.
-Remove-Item -LiteralPath (Join-Path $root $rootfsFile)
+if (-not $WindowsOnly) {
+    Start-Owner $credential 'GuestInstall'
+    # Only this exact newly created staging file is removed. The guest's disk is never the input image.
+    Remove-Item -LiteralPath (Join-Path $root $rootfsFile)
+}
 $null = New-Service -Name $Instance -BinaryPathName $manifest.ServiceCommand -Credential $credential -StartupType Automatic -Description 'SPLAT Windows caller boundary and private policy/audit host'
 Start-Service -Name $Instance
 $manifest.Status = 'Installed; requires managed boundary probe'
 Write-Json $manifestPath $manifest
-Write-Output "Installed $Instance. Client: splat-mcp managed --configuration `"$configPath`"."
+Write-Output "Installed $Instance$(if ($WindowsOnly) { ' Windows-only: no WSL guest, so run_command and run_code are refused' }). Client: splat-mcp managed --configuration `"$configPath`"."

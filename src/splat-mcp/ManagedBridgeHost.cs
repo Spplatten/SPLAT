@@ -137,17 +137,23 @@ internal static class ManagedBridgeHost
         return caller ?? throw new UnauthorizedAccessException("Missing pipe identity.");
     }
 
-    private static async Task<SubstrateReport> CheckManagedAsync(ManagedBridgeConfiguration config, CancellationToken ct)
+    internal static async Task<SubstrateReport> CheckManagedAsync(ManagedBridgeConfiguration config, CancellationToken ct,
+        SubstrateDoctor.WslRunner? wsl = null, WslAgentToken? token = null,
+        Func<CancellationToken, Task<int>>? startDaemon = null)
     {
+        if (!config.HasLinuxLease)
+            return new SubstrateReport(1, $"Managed service: {config.ServiceName}. {AbsentLinuxLease.Reason}");
         var guest = new ManagedGuest(config.Distribution);
-        var token = new WslAgentToken(guest.ReadTokenAsync);
+        token ??= new WslAgentToken(guest.ReadTokenAsync);
+        wsl ??= SubstrateDoctor.RunWslAsync;
+        var executor = new WslLeasedExecutor("127.0.0.1", config.Port, token, startDaemon ?? guest.StartDaemonAsync);
         using var output = new StringWriter();
         output.WriteLine($"Managed guest: {config.Distribution}; service: {config.ServiceName}");
         int exit = await SubstrateDoctor.RunAsync(new DoctorOptions(config.WorkspaceDirectory,
                 string.IsNullOrEmpty(config.Egress) ? McpEgressPolicy.None : McpEgressPolicy.Parse(config.Egress),
                 Path.Combine(config.StateDirectory, "ledger.key")) { LeasedWork = "managed Linux leases" }, output,
-            wsl: (args, cancellation) => SubstrateDoctor.RunWslAsync(new[] { "-d", config.Distribution }.Concat(args).ToArray(), cancellation),
-            health: new WslSubstrateHealthChecker("127.0.0.1", config.Port, token),
+            wsl: (args, cancellation) => wsl(new[] { "-d", config.Distribution }.Concat(args).ToArray(), cancellation),
+            health: new WslSubstrateHealthChecker("127.0.0.1", config.Port, token, connect: executor.ConnectToDaemonAsync),
             ledgerPath: Path.Combine(config.StateDirectory, "ledger.db"), ct: ct);
         return new SubstrateReport(exit, output.ToString());
     }

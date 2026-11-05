@@ -10,8 +10,20 @@ namespace MissionController.Host;
 public sealed record ManagedBridgeConfiguration(
     int Schema, string ServiceName, string ServiceSid, string PipeName, string Distribution,
     int Port, string StateDirectory, string WorkspaceDirectory, string[] OperatorSids, string Egress = "",
-    string? AgentId = null, string? AgentVersion = null)
+    string? AgentId = null, string? AgentVersion = null, string Substrate = ManagedBridgeConfiguration.LinuxLease)
 {
+    /// <summary>The service fronts a WSL guest's lease daemon, which Distribution and Port name.</summary>
+    public const string LinuxLease = "linux-lease";
+
+    /// <summary>
+    /// Installed where WSL is unavailable: no guest exists, so Distribution is empty and Port is 0, and
+    /// the Linux-lease tools refuse. Configurations written before this existed omit the field and
+    /// read as <see cref="LinuxLease"/>, which is what every one of them is.
+    /// </summary>
+    public const string WindowsOnly = "windows-only";
+
+    public bool HasLinuxLease => Substrate == LinuxLease;
+
     public static ManagedBridgeConfiguration Load(string path, bool serving = false)
     {
         path = Path.GetFullPath(path);
@@ -36,7 +48,14 @@ public sealed record ManagedBridgeConfiguration(
             && (!Regex.IsMatch(AgentId ?? "", @"\A[a-z][a-z0-9]*(?:-[a-z0-9]+)*\z")
                 || AgentId!.Length > 48 || !Regex.IsMatch(AgentVersion ?? "", @"\A[0-9a-f]{64}\z")))
             throw new InvalidDataException("Managed agent endpoints require an agent ID and approved contract version.");
-        if (Schema != 1 || !Name(ServiceName) || !Name(PipeName) || !Name(Distribution) || Port is < 1024 or > 65535)
+        if (Substrate is not (LinuxLease or WindowsOnly))
+            throw new InvalidDataException("Unknown managed substrate.");
+        // A Windows-only install created no guest. A distro or port in its configuration would point the
+        // service at a WSL instance the deployment never made and cannot vouch for.
+        bool guestNamed = HasLinuxLease
+            ? Name(Distribution) && Port is >= 1024 and <= 65535
+            : string.IsNullOrEmpty(Distribution) && Port == 0;
+        if (Schema != 1 || !Name(ServiceName) || !Name(PipeName) || !guestNamed)
             throw new InvalidDataException("Invalid managed bridge configuration.");
         _ = new SecurityIdentifier(ServiceSid);
         if (OperatorSids is not { Length: > 0 and <= 32 }) throw new InvalidDataException("Explicit operator SIDs are required.");

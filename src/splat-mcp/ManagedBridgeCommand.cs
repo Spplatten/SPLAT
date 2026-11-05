@@ -37,6 +37,7 @@ internal static class ManagedBridgeCommand
             Environment.SetEnvironmentVariable("SPLAT_REPLAY_DIR", null);
             if (bootstrap)
             {
+                if (!config.HasLinuxLease) throw new InvalidOperationException("A Windows-only managed instance has no guest to bootstrap.");
                 var guest = new ManagedGuest(config.Distribution);
                 var token = new MissionController.Infrastructure.Linux.WslAgentToken(guest.ReadTokenAsync);
                 return await SubstrateProvisioner.RunAsync(new ProvisionOptions(true,
@@ -55,7 +56,8 @@ internal static class ManagedBridgeCommand
         }
     }
 
-    internal sealed record DeploymentRequest(string Mode, string Instance, IReadOnlyDictionary<string, string> Options, bool Apply);
+    internal sealed record DeploymentRequest(string Mode, string Instance, IReadOnlyDictionary<string, string> Options, bool Apply,
+        bool WindowsOnly = false);
 
     // provision --managed installs, provision --managed --upgrade replaces a running instance's build
     // in place, and unmount --managed removes it. Parsed apart from running, so the combinations that
@@ -63,29 +65,38 @@ internal static class ManagedBridgeCommand
     internal static DeploymentRequest ParseDeployment(string[] args)
     {
         var options = new Dictionary<string, string>(StringComparer.Ordinal);
-        bool apply = false, upgrade = false;
+        bool apply = false, upgrade = false, windowsOnly = false;
         for (int i = 1; i < args.Length; i++)
         {
             if (args[i] == "--managed") continue;
             if (args[i] == "--apply") { if (apply) throw new ArgumentException("Duplicate --apply."); apply = true; continue; }
             if (args[i] == "--upgrade") { if (upgrade) throw new ArgumentException("Duplicate --upgrade."); upgrade = true; continue; }
+            if (args[i] == "--windows-only") { if (windowsOnly) throw new ArgumentException("Duplicate --windows-only."); windowsOnly = true; continue; }
             string option = args[i];
             if (option is not ("--rootfs" or "--rootfs-sha256" or "--operator-sid" or "--instance" or "--egress") || ++i == args.Length
                 || args[i].StartsWith('-') || !options.TryAdd(option, args[i]))
-                throw new ArgumentException("Managed deployment accepts --rootfs, --rootfs-sha256, --operator-sid, --instance, --egress, --upgrade and --apply.");
+                throw new ArgumentException("Managed deployment accepts --rootfs, --rootfs-sha256, --operator-sid, --instance, --egress, --windows-only, --upgrade and --apply.");
         }
         bool remove = args[0] == "unmount";
         if (remove && upgrade) throw new ArgumentException("--upgrade belongs to provision --managed, not unmount.");
+        // What an instance was installed as is recorded in its manifest, and an upgrade or removal follows
+        // the record. A flag here could only disagree with it.
+        if ((remove || upgrade) && windowsOnly)
+            throw new ArgumentException("--windows-only belongs to a new install; an upgrade or unmount follows what the instance was installed as.");
+        if (windowsOnly && (options.ContainsKey("--rootfs") || options.ContainsKey("--rootfs-sha256")))
+            throw new ArgumentException("A Windows-only install creates no guest and takes no --rootfs or --rootfs-sha256.");
+        if (windowsOnly && !options.ContainsKey("--operator-sid"))
+            throw new ArgumentException("Managed provision requires --operator-sid <Windows SID>.");
         string instance = options.GetValueOrDefault("--instance", "SplatManaged");
         if (!System.Text.RegularExpressions.Regex.IsMatch(instance, @"\ASplat[A-Za-z0-9]{0,14}\z"))
             throw new ArgumentException("Managed instance names start with Splat and contain at most 19 letters/digits.");
         if ((remove || upgrade) && options.Keys.Any(key => key != "--instance"))
             throw new ArgumentException($"Managed {(remove ? "unmount" : "upgrade")} accepts only --instance and --apply.");
-        if (!remove && !upgrade && (!options.ContainsKey("--rootfs") || !options.ContainsKey("--operator-sid")
+        if (!remove && !upgrade && !windowsOnly && (!options.ContainsKey("--rootfs") || !options.ContainsKey("--operator-sid")
             || !options.TryGetValue("--rootfs-sha256", out var rootfsHash)
             || !System.Text.RegularExpressions.Regex.IsMatch(rootfsHash, @"\A[0-9a-fA-F]{64}\z")))
-            throw new ArgumentException("Managed provision requires --rootfs <clean archive>, --rootfs-sha256 <publisher hash> and --operator-sid <Windows SID>.");
-        return new DeploymentRequest(remove ? "Remove" : upgrade ? "Upgrade" : "Install", instance, options, apply);
+            throw new ArgumentException("Managed provision requires --rootfs <clean archive>, --rootfs-sha256 <publisher hash> and --operator-sid <Windows SID>, or --windows-only and --operator-sid.");
+        return new DeploymentRequest(remove ? "Remove" : upgrade ? "Upgrade" : "Install", instance, options, apply, windowsOnly);
     }
 
     private static async Task<int> DeployAsync(string[] args)
@@ -98,8 +109,9 @@ internal static class ManagedBridgeCommand
         {
             Console.WriteLine(request.Mode switch
             {
-                "Remove" => $"Remove managed instance {request.Instance}: its service, account and WSL distro. The private ledger is kept and moved aside, administrators only.",
-                "Upgrade" => $"Upgrade managed instance {request.Instance} to this build: stop its service, replace the executable, re-run the guest bootstrap as its account and restart, restoring the previous build if it does not stay running.",
+                "Remove" => $"Remove managed instance {request.Instance}: its service, account and WSL distro, if it has one. The private ledger is kept and moved aside, administrators only.",
+                "Upgrade" => $"Upgrade managed instance {request.Instance} to this build: stop its service, replace the executable, re-run the guest bootstrap as its account (unless it is Windows-only) and restart, restoring the previous build if it does not stay running.",
+                _ when request.WindowsOnly => $"Install managed instance {request.Instance} Windows-only: dedicated non-admin account, Windows bridge service and private ledger, and no WSL distro. With no Linux lease, run_command and run_code are refused.",
                 _ => $"Install managed instance {request.Instance}: dedicated non-admin account, WSL distro, Windows bridge service and private ledger.",
             } + " Use --apply from an elevated Windows terminal.");
             return 0;
@@ -121,6 +133,7 @@ internal static class ManagedBridgeCommand
                 "-Mode", request.Mode, "-Instance", request.Instance, "-Executable", executable }) start.ArgumentList.Add(arg);
             foreach (var pair in new[] { ("--rootfs", "-Rootfs"), ("--rootfs-sha256", "-RootfsSha256"), ("--operator-sid", "-OperatorSid"), ("--egress", "-Egress") })
                 if (request.Options.TryGetValue(pair.Item1, out string? value)) { start.ArgumentList.Add(pair.Item2); start.ArgumentList.Add(value); }
+            if (request.WindowsOnly) start.ArgumentList.Add("-WindowsOnly");
             using var process = new Process { StartInfo = start };
             process.OutputDataReceived += (_, e) => { if (e.Data is not null) Console.Out.WriteLine(e.Data); };
             process.ErrorDataReceived += (_, e) => { if (e.Data is not null) Console.Error.WriteLine(e.Data); };
