@@ -1,3 +1,4 @@
+using System.Buffers.Text;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
@@ -32,6 +33,9 @@ internal sealed partial class A2aBridge : IAsyncDisposable
     // Execution, cancellation, delegation, polling and compilation do not hold it.
     private readonly SemaphoreSlim _admissionGate = new(1);
     private readonly ConcurrentDictionary<string, Work> _tasks = new(StringComparer.Ordinal);
+    // One sensor registration per task id, in memory only: a restart fails every live task (no
+    // replay), so a registration has nothing left to cancel and needs no durable form.
+    private readonly ConcurrentDictionary<string, A2aCaller> _sensors = new(StringComparer.Ordinal);
     private readonly ILeaseReceiptLookup? _receiptLookup;
     private readonly SemaphoreSlim _receiptSlots = new(4);
     private readonly SemaphoreSlim[] _receiptGates = Enumerable.Range(0, 32).Select(_ => new SemaphoreSlim(1)).ToArray();
@@ -90,14 +94,24 @@ internal sealed partial class A2aBridge : IAsyncDisposable
         }
     }
 
-    internal A2aCaller? Authenticate(string authorization) => _config.Authenticate(authorization);
+    internal A2aCaller? Authenticate(string authorization) =>
+        _config.Authenticate(authorization) ?? A2aConfiguration.Match(authorization, _sensors.Values);
 
     internal async Task CheckCallerAsync(A2aCaller caller, CancellationToken ct)
     {
-        if (!_config.Callers.Any(c => ReferenceEquals(c, caller)) || caller.ExpiresUtc <= DateTimeOffset.UtcNow)
+        // A sensor credential is live only while it is the registration on file for its task, so a
+        // rotation ends the old one even for a request that authenticated before the rotation.
+        bool current = caller.TaskScope is { } task
+            ? _sensors.TryGetValue(task, out var registered) && ReferenceEquals(registered, caller)
+            : _config.Callers.Any(c => ReferenceEquals(c, caller));
+        if (!current || caller.ExpiresUtc <= DateTimeOffset.UtcNow)
             throw new A2aException(-32000, "Authentication required.", 401);
-        if (_revocations is not null && (await _revocations.CheckRevocationAsync(caller.Identity.ToLedgerIdentity(), ct)).IsRevoked)
-            throw new A2aException(-32000, "Caller access has been revoked.", 403);
+        if (_revocations is null) return;
+        // Revoking an owner revokes every sensor it registered; a sensor can also be revoked alone.
+        A2aCaller[] principals = caller.TaskScope is null ? [caller] : [caller, caller with { TaskScope = null }];
+        foreach (var principal in principals)
+            if ((await _revocations.CheckRevocationAsync(principal.Identity.ToLedgerIdentity(), ct)).IsRevoked)
+                throw new A2aException(-32000, "Caller access has been revoked.", 403);
     }
 
     internal object Card(A2aCaller caller) => new
@@ -120,6 +134,13 @@ internal sealed partial class A2aBridge : IAsyncDisposable
         // The HTTP boundary supplies this exact configuration object. Never accept an equivalent
         // caller record constructed from message fields, including a client-supplied tenant.
         await CheckCallerAsync(caller, ct);
+        // A sensor credential reads and cancels the one task it was registered for, and nothing else:
+        // it cannot start work, list its owner's tasks, register another sensor or name another task.
+        if (caller.TaskScope is { } scope && (method is not ("GetTask" or "CancelTask")
+            || parameters.ValueKind != JsonValueKind.Object || !parameters.TryGetProperty("id", out var target)
+            || target.ValueKind != JsonValueKind.String || target.GetString() != scope))
+            throw new A2aException(-32000, "This credential reads and cancels one task only.", 403);
+        if (method == "splat/RegisterSensor") return await RegisterSensorAsync(caller, parameters, ct);
         if (method == "splat/DelegateTask") return await DelegateAsync(caller, parameters, ct);
         if (method == "SendMessage") return new { task = await SendAsync(caller, parameters, ct) };
         if (method == "GetTask" || method == "CancelTask")
@@ -185,6 +206,44 @@ internal sealed partial class A2aBridge : IAsyncDisposable
         if (method.Contains("PushNotification", StringComparison.Ordinal))
             throw new A2aException(-32003, "Push notifications are not supported.");
         throw new A2aException(-32601, "Method not found.");
+    }
+
+    /// <summary>
+    /// Issues the credential an out-of-band sensor cancels one task with. It reads and cancels that task
+    /// and nothing else, ends with the task's authority or its owner's credential, and a new registration
+    /// for the task replaces it. The owner's own credential, handed to a sidecar instead, would let whoever
+    /// reads the sidecar's environment start new work under every skill the owner holds.
+    /// </summary>
+    private async Task<object> RegisterSensorAsync(A2aCaller caller, JsonElement parameters, CancellationToken ct)
+    {
+        A2aJson.Fields(parameters, "id");
+        var id = A2aJson.Text(parameters, "id");
+        Work work = Owned(caller, id);
+        await work.Gate.WaitAsync(ct);
+        try
+        {
+            var record = work.Record;
+            var now = DateTimeOffset.UtcNow;
+            if (Terminal(record.State) || record.AuthorityExpiresUtc is not { } authority || authority <= now)
+                throw new A2aException(-32002, "Task is no longer cancelable.");
+            foreach (var lapsed in _sensors.Where(s => s.Value.ExpiresUtc <= now).ToArray()) _sensors.TryRemove(lapsed);
+            if (!_sensors.ContainsKey(id) && _sensors.Count >= _config.MaxTasks)
+                throw new A2aException(-32000, "Sensor registrations are at capacity.", 429);
+            string token = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+            var sensor = caller with
+            {
+                TokenSha256 = Convert.ToHexStringLower(SHA256.HashData(Encoding.ASCII.GetBytes(token))),
+                Skills = [record.Skill], TaskScope = id, RequireDelegation = false,
+                MaxConcurrentTasks = null, MaxRetainedTasks = null,
+                ExpiresUtc = authority < caller.ExpiresUtc ? authority : caller.ExpiresUtc
+            };
+            // Audited before the token can authenticate: a ledger failure leaves no unrecorded sensor.
+            await Audit(caller, record, "A2A_SENSOR_REGISTERED", ct);
+            _sensors[id] = sensor;
+            return new { id, token, expiresUtc = sensor.ExpiresUtc,
+                leaseCgroup = record.AdmittedLease is { } admitted ? LinuxLeaseSubstrate.LeaseCgroupPath(admitted.MissionId) : null };
+        }
+        finally { work.Gate.Release(); }
     }
 
     private async Task<object> SendAsync(A2aCaller caller, JsonElement parameters, CancellationToken ct)

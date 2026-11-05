@@ -117,8 +117,11 @@ up to one second for a handler before it is refused, so a sensor's burst becomes
 Startup arguments are admission-binding JSON, SQLite mailbox path and HTTPS PFX path. Environment
 inputs are SPLAT_ALERT_TOKEN (base64 32 bytes), SPLAT_ALERT_CERT_PASSWORD (when needed),
 SPLAT_A2A_CALLER_TOKEN, and optionally SPLAT_LOGSCALE_INGEST_URL plus SPLAT_LOGSCALE_INGEST_TOKEN.
-Protect those inputs and the mailbox directory with operator ACLs. The A2A credential must be the
-task owner. The listener certificate must validate for 127.0.0.1; no certificate bypass is installed.
+Protect those inputs and the mailbox directory with operator ACLs. The A2A credential should be the
+one `splat/RegisterSensor` issues for the bound task, which reads and cancels that task only
+([sensor registration](A2A-TEMPLATE-BRIDGE.md#sensor-registration)); the task owner's own credential
+still works, but whoever reads it can also start new work under every skill the owner holds.
+The listener certificate must validate for 127.0.0.1; no certificate bypass is installed.
 Disable automatic HTTP redirects. The loopback service is not a public cloud-webhook endpoint:
 a separately secured collector/relay is required.
 

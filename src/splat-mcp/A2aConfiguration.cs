@@ -8,11 +8,15 @@ using MissionController.Infrastructure.Data.Catalog;
 
 namespace SplatMcp;
 
+// TaskScope is set only on a sensor credential A2aBridge issues at runtime, never in configuration:
+// it names the one task that credential may read and cancel.
 internal sealed record A2aCaller(string TenantId, string CallerId, string TokenSha256,
     string[] Skills, DateTimeOffset ExpiresUtc, bool RequireDelegation = false,
-    int? MaxConcurrentTasks = null, int? MaxRetainedTasks = null)
+    int? MaxConcurrentTasks = null, int? MaxRetainedTasks = null, string? TaskScope = null)
 {
-    internal OperatorIdentity Identity => new(CallerId, $"a2a:{TenantId}:{CallerId}",
+    // A sensor's actions carry their own principal, so the ledger tells the owner from its sensor.
+    internal OperatorIdentity Identity => new(CallerId,
+        TaskScope is null ? $"a2a:{TenantId}:{CallerId}" : $"a2a:{TenantId}:{CallerId}:sensor:{TaskScope}",
         OperatorAuthenticationMethod.ApiKey, "a2a-https");
 }
 
@@ -54,6 +58,7 @@ internal sealed record A2aConfiguration(int SchemaVersion, string AgentId, strin
         {
             if (caller is null || !A2aJson.Identifier(caller.TenantId) || !A2aJson.Identifier(caller.CallerId)
                 || !identities.Add(caller.TenantId + ":" + caller.CallerId)
+                || caller.TaskScope is not null
                 || caller.TokenSha256 is null || !Regex.IsMatch(caller.TokenSha256, "\\A[0-9a-f]{64}\\z")
                 || !hashes.Add(caller.TokenSha256) || caller.ExpiresUtc == default
                 || caller.Skills is null || caller.Skills.Length is < 1 or > 6
@@ -67,15 +72,17 @@ internal sealed record A2aConfiguration(int SchemaVersion, string AgentId, strin
         A2aDelegation.ValidateConfiguration(this);
     }
 
-    internal A2aCaller? Authenticate(string authorization)
+    internal A2aCaller? Authenticate(string authorization) => Match(authorization, Callers);
+
+    internal static A2aCaller? Match(string authorization, IEnumerable<A2aCaller> principals)
     {
         if (!authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return null;
         var token = authorization[7..];
         if (!Regex.IsMatch(token, "\\A[A-Za-z0-9_-]{43,128}\\z")) return null;
         var digest = SHA256.HashData(Encoding.ASCII.GetBytes(token));
         A2aCaller? found = null;
-        // A token authorizes one configured principal. Caller IDs in messages are never identity.
-        foreach (var caller in Callers)
+        // A token authorizes one principal. Caller IDs in messages are never identity.
+        foreach (var caller in principals)
             if (CryptographicOperations.FixedTimeEquals(digest, Convert.FromHexString(caller.TokenSha256))
                 && caller.ExpiresUtc > DateTimeOffset.UtcNow) found = caller;
         return found;
