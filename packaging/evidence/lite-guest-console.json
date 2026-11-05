@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "recordedUtc": "2026-10-22T15:10:33.4313075+00:00",
+  "verdict": "INCOMPLETE",
+  "scope": "Direct invocation of compiled BundledWslGuestTests with a recording WSL stand-in; not a VSTest suite run",
+  "sourceHashEncoding": "UTF-8 with LF line endings",
+  "sourceSha256": {
+    "src/MissionController.Host/BundledWslGuest.cs": "4a72baa4483991d868b0c5d40f42943b9eb0f8f41f34b466a22af96b33fe54e9",
+    "src/MissionController.Host/SubstrateLifecycle.cs": "679439d729b86e2eaf696e0346cbe0077a1e20f12e42fa1e4c3873828b814c30",
+    "src/MissionController.UI/App.xaml.cs": "ef3d1fd78729b753b792c2cc4d76b201dc1169dc16f5fe2fbe1e1b67e3724933",
+    "src/MissionController.UI/KernelLeaseViewModel.cs": "3cd8a6741f5ac2ee206cc8e814543d8db22ae6ca046d6e212aa6fc9ce7bafaf5",
+    "tests/MissionController.Tests/BundledWslGuestTests.cs": "f9948f3d9d6962631388fa7311c4192323cded1cafe3bf19fdb859926a423a9a"
+  },
+  "checksPassed": 9,
+  "checks": [
+    "ChangedArchiveAndMetadata_RequireANewPlan",
+    "CorruptArchive_AuthorizesNothing",
+    "ExistingUnownedName_IsNeverAdopted",
+    "ANameClaimedAfterPlanning_PreventsImport",
+    "PartialImport_IsRecorded_AndCannotBeRetriedOrRemovedAutomatically(False)",
+    "PartialImport_IsRecorded_AndCannotBeRetriedOrRemovedAutomatically(True)",
+    "CheckSpendsTheImportPlan_WithoutFallingBackToTheDefaultGuest",
+    "DataRoots_GetDistinctGuestNames_AndLegacyRawImagesDoNotSelectLite",
+    "ManagedAndBundledGuests_CannotBeSelectedTogether"
+  ],
+  "checksFailed": 3,
+  "incomplete": {
+    "ImportPlan_IsReadOnly_AndApplyImportsOnlyTheReviewedGuestOnce": "Assert.True() Failure\r\nExpected: True\r\nActual:   False",
+    "OwnedCommands_AreBoundToTheImportedGuest_AndRejectAReplacedMarker": "Importing SPLAT-Lite-f9fbc1d7a790. Recovery receipt: C:\\Users\\s_pla\\AppData\\Local\\Packages\\sandbox.{2159e1bb-393d-4d61-ad01-c254b22a9013}\\AC\\Temp\\splat-lite-test-1c33d9cc046b482cb72fbdee754f8ecc\\data\\lite-guest\\import.json\r\n\r\nStopped: Access to the path is denied.\r\n",
+    "MissingPackageRecords_DoNotRedirectAnOwnedGuestToTheDefaultDistro": "Importing SPLAT-Lite-81c3c8e5ee62. Recovery receipt: C:\\Users\\s_pla\\AppData\\Local\\Packages\\sandbox.{2159e1bb-393d-4d61-ad01-c254b22a9013}\\AC\\Temp\\splat-lite-test-1945e11ca9d04b84975cf7baefc410f3\\data\\lite-guest\\import.json\r\n\r\nStopped: Access to the path is denied.\r\n"
+  },
+  "environmentFinding": "File.Move(source, destination, overwrite: true) was independently reproduced as UnauthorizedAccessException in this sandbox\u0027s temporary directory. Atomic receipt replacement and the three dependent checks remain unproven here.",
+  "realGuestImported": false,
+  "kernelEnforcementProven": false,
+  "cleanMachineTested": false,
+  "upgradeTested": false,
+  "uninstallTested": false,
+  "distributionReady": false
+}

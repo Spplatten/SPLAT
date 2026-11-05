@@ -99,30 +99,31 @@ public class SiemAndEdrIntegrationTests
         Assert.NotEmpty(posture.DeviceId);
         Assert.NotEmpty(posture.Hostname);
         Assert.NotEmpty(posture.AntivirusEngineVersion);
-        Assert.Equal(EndpointIsolationState.NotIsolated, posture.IsolationState);
+        Assert.Equal(EndpointIsolationState.Unknown, posture.IsolationState);
+        Assert.Null(posture.RealTimeProtectionEnabled);
 
         var alerts = await bridge.GetRecentAlertsAsync(5);
         Assert.NotNull(alerts);
-        Assert.NotEmpty(alerts);
+        // A host with no readable provider events must not receive fabricated fallback alerts.
     }
 
     [Fact]
-    public async Task EdrIngestionBridge_TogglesIsolationState_RecordsAuditAlert()
+    public async Task EdrIngestionBridge_RefusesUnsupportedIsolation_WithoutFabricatingSuccess()
     {
         var bridge = new EdrIngestionBridge();
 
         bool isolated = await bridge.SetDeviceIsolationStateAsync("TEST-DEV-01", true, "Potential C2 Beaconing Detected");
-        Assert.True(isolated);
+        Assert.False(isolated);
 
         var posture = await bridge.GetLocalDevicePostureAsync();
-        Assert.Equal(EndpointIsolationState.Isolated, posture.IsolationState);
+        Assert.Equal(EndpointIsolationState.Unknown, posture.IsolationState);
 
         var alerts = await bridge.GetRecentAlertsAsync(5);
-        Assert.Contains(alerts, a => a.Title.Contains("Isolation Activated", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(alerts, a => a.AlertId.StartsWith("EDR-ISO-", StringComparison.Ordinal));
 
-        // Revert back
-        await bridge.SetDeviceIsolationStateAsync("TEST-DEV-01", false, "Investigation Concluded - False Positive");
+        // A release request must not claim success either: neither actuator exists.
+        Assert.False(await bridge.SetDeviceIsolationStateAsync("TEST-DEV-01", false, "Investigation Concluded - False Positive"));
         var postureReverted = await bridge.GetLocalDevicePostureAsync();
-        Assert.Equal(EndpointIsolationState.NotIsolated, postureReverted.IsolationState);
+        Assert.Equal(EndpointIsolationState.Unknown, postureReverted.IsolationState);
     }
 }

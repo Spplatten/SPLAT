@@ -258,6 +258,10 @@ public interface ISiemForwarder
     Task ForwardAuditEntryAsync(AuditLogEntry entry, SiemConfiguration config, CancellationToken cancellationToken = default);
     Task ForwardCefEventAsync(CefEvent cefEvent, SiemConfiguration config, CancellationToken cancellationToken = default);
     Task<bool> TestConnectionAsync(SiemConfiguration config, CancellationToken cancellationToken = default);
+    /// <summary>Reports the observed assurance level; legacy implementations provide no evidence.</summary>
+    Task<SiemConnectionCheck> ProbeConnectionAsync(SiemConfiguration config, CancellationToken cancellationToken = default)
+        => Task.FromResult(new SiemConnectionCheck(SiemConnectionEvidence.None,
+            "This forwarder does not expose connection evidence."));
 }
 
 public interface IEdrIngestionBridge

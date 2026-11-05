@@ -1,5 +1,11 @@
 # Milestone run 1: protocol
 
+**Candidate revision, 2026-10-28: audit-gap fixes.** This source changes the authority lifetime
+contract and deployment admission checks. The 2026-10-27 results remain evidence for their original
+commit; they are not results for this revision. Apply the additional acceptance criteria in
+`AUDIT_GAP_PROTOCOL.md`, and label a new bundle separately. Native execution of this revision is
+pending. The condition counts below remain the registered counts for the existing experiments.
+
 Fixed before the run. The commit that adds this file is its timestamp; `build_842.sh` stages it, so
 the bundle's `SHA256SUMS` binds the run to it. A change after the run is a protocol revision and
 produces a separately labelled dataset.

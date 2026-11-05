@@ -87,3 +87,6 @@ demo/
 docs/A2A-TEMPLATE-BRIDGE.md
 docs/AGENT-MANIFEST-BINDING.md
 native/splat-agent/EXECUTION_POLICY.md
+
+# Local operator manuscripts at repo root
+*.docx

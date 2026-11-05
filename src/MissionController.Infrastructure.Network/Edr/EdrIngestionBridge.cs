@@ -17,11 +17,9 @@ namespace MissionController.Infrastructure.Network.Edr;
 [SupportedOSPlatform("windows")]
 public sealed class EdrIngestionBridge : IEdrIngestionBridge
 {
-    private static EndpointIsolationState _currentIsolationState = EndpointIsolationState.NotIsolated;
-    private static readonly List<EdrSecurityAlert> _manualAlerts = new();
-
     public Task<EdrDevicePosture> GetLocalDevicePostureAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         string hostname = Environment.MachineName.ToLowerInvariant();
         string deviceId = $"WIN-{Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(hostname)).Substring(0, Math.Min(12, hostname.Length * 2))}";
 
@@ -30,18 +28,27 @@ public sealed class EdrIngestionBridge : IEdrIngestionBridge
         bool isSentinelOneActive = false;
         string engineVersion = "Unavailable";
         string intelligenceVersion = "Unavailable";
-        bool realTimeEnabled = false;
 
         try
         {
             var processes = Process.GetProcesses();
-            isDefenderProcessActive = processes.Any(p => p.ProcessName.Equals("MsMpEng", StringComparison.OrdinalIgnoreCase) || p.ProcessName.Equals("Sense", StringComparison.OrdinalIgnoreCase));
-            isCrowdStrikeActive = processes.Any(p => p.ProcessName.Equals("CSFalconService", StringComparison.OrdinalIgnoreCase) || p.ProcessName.Equals("CSFalconContainer", StringComparison.OrdinalIgnoreCase));
-            isSentinelOneActive = processes.Any(p => p.ProcessName.Equals("SentinelAgent", StringComparison.OrdinalIgnoreCase) || p.ProcessName.Equals("SentinelService", StringComparison.OrdinalIgnoreCase));
+            try
+            {
+                isDefenderProcessActive = processes.Any(p => p.ProcessName.Equals("MsMpEng", StringComparison.OrdinalIgnoreCase) || p.ProcessName.Equals("Sense", StringComparison.OrdinalIgnoreCase));
+                isCrowdStrikeActive = processes.Any(p => p.ProcessName.Equals("CSFalconService", StringComparison.OrdinalIgnoreCase) || p.ProcessName.Equals("CSFalconContainer", StringComparison.OrdinalIgnoreCase));
+                isSentinelOneActive = processes.Any(p => p.ProcessName.Equals("SentinelAgent", StringComparison.OrdinalIgnoreCase) || p.ProcessName.Equals("SentinelService", StringComparison.OrdinalIgnoreCase));
+            }
+            finally
+            {
+                foreach (var process in processes) process.Dispose();
+            }
         }
         catch
         {
-            isDefenderProcessActive = true;
+            // Failed observation cannot establish that a security provider is running.
+            isDefenderProcessActive = false;
+            isCrowdStrikeActive = false;
+            isSentinelOneActive = false;
         }
 
         if (OperatingSystem.IsWindows())
@@ -58,27 +65,10 @@ public sealed class EdrIngestionBridge : IEdrIngestionBridge
                     if (!string.IsNullOrWhiteSpace(sig)) intelligenceVersion = sig;
                 }
 
-                using var rtpKey = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows Defender\Real-Time Protection");
-                if (rtpKey != null)
-                {
-                    var disableRtp = rtpKey.GetValue("DisableRealtimeMonitoring");
-                    if (disableRtp is int dVal)
-                    {
-                        realTimeEnabled = dVal == 0 && isDefenderProcessActive;
-                    }
-                    else
-                    {
-                        realTimeEnabled = isDefenderProcessActive;
-                    }
-                }
-                else
-                {
-                    realTimeEnabled = isDefenderProcessActive;
-                }
             }
             catch
             {
-                realTimeEnabled = isDefenderProcessActive;
+                // Missing registry observations remain unavailable.
             }
         }
 
@@ -99,8 +89,9 @@ public sealed class EdrIngestionBridge : IEdrIngestionBridge
             DeviceId: deviceId,
             Hostname: hostname,
             Provider: provider,
-            IsolationState: _currentIsolationState,
-            RealTimeProtectionEnabled: realTimeEnabled || isCrowdStrikeActive || isSentinelOneActive,
+            // Neither process names nor a local request establish the provider's enforcement state.
+            IsolationState: EndpointIsolationState.Unknown,
+            RealTimeProtectionEnabled: null,
             AntivirusEngineVersion: engineVersion,
             SecurityIntelligenceVersion: intelligenceVersion,
             LastSyncTimeUtc: DateTimeOffset.UtcNow,
@@ -111,12 +102,8 @@ public sealed class EdrIngestionBridge : IEdrIngestionBridge
 
     public Task<IReadOnlyList<EdrSecurityAlert>> GetRecentAlertsAsync(int maxCount = 20, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var alerts = new List<EdrSecurityAlert>();
-
-        lock (_manualAlerts)
-        {
-            alerts.AddRange(_manualAlerts);
-        }
 
         var liveEvents = QueryLiveDefenderEvents(maxCount);
         alerts.AddRange(liveEvents);
@@ -131,22 +118,10 @@ public sealed class EdrIngestionBridge : IEdrIngestionBridge
 
     public Task<bool> SetDeviceIsolationStateAsync(string deviceId, bool isolate, string justification, CancellationToken cancellationToken = default)
     {
-        _currentIsolationState = isolate ? EndpointIsolationState.Isolated : EndpointIsolationState.NotIsolated;
-
-        lock (_manualAlerts)
-        {
-            _manualAlerts.Insert(0, new EdrSecurityAlert(
-                AlertId: $"EDR-ISO-{Guid.NewGuid():N}".Substring(0, 16).ToUpperInvariant(),
-                Title: isolate ? "Endpoint Network Isolation Activated" : "Endpoint Network Isolation Released",
-                Category: "Containment",
-                Severity: isolate ? "High" : "Informational",
-                Status: "Active",
-                DetectedTimeUtc: DateTimeOffset.UtcNow,
-                Description: $"Operator justification: {justification}. Isolation state transitioned to {_currentIsolationState}.",
-                MitreTechniqueId: "T1071"));
-        }
-
-        return Task.FromResult(true);
+        cancellationToken.ThrowIfCancellationRequested();
+        // No authenticated provider actuator is implemented. Do not fabricate a successful
+        // containment action, a provider receipt, or an isolation-state transition.
+        return Task.FromResult(false);
     }
 
     private static List<EdrSecurityAlert> QueryLiveDefenderEvents(int maxCount)

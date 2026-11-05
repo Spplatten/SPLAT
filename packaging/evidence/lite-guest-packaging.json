@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "recordedUtc": "2026-10-22T15:06:28.5431893+00:00",
+  "verdict": "PASS",
+  "scope": "Guest build validation and byte-verified staging; synthetic package verification controls",
+  "powershell": "7.6.5",
+  "sourceHashEncoding": "UTF-8 with LF line endings",
+  "sourceSha256": {
+    "packaging/splat-guest-package.ps1": "a7819a13d849906a64c7e6b78718dd8957ebe71dcbef569997bdff3e12d91628",
+    "packaging/test-splat-guest-package.ps1": "fdaa1060389b274fb666cb140ca14f27bc4e89a2195a2abce30d588ef9ac3bee",
+    "packaging/probe-splat-guest-package.ps1": "850ac8759f157b07637cdf3af85339c09eb5731f0cebfe6b6f083f2823da0190",
+    "packaging/build-community-installer.ps1": "f748aec7a64c4a36ddbebdb24607b0328010b289bf95e2b5fd3df85508308866",
+    "packaging/verify-community-package.ps1": "580d90a8d286c1f90d0cb7772dd954e874a112a64242f134c859c228c1570cf4"
+  },
+  "checks": [
+    "PASS Valid",
+    "PASS ArchiveTamper",
+    "PASS MissingLicense",
+    "PASS SourceVersion",
+    "PASS PackageCount",
+    "PASS ChangedDuringCopy",
+    "PASS SourceFiles",
+    "PASS FalseSourceClaim"
+  ],
+  "checksPassed": 8,
+  "guest": {
+    "name": "SPLAT Guest",
+    "base": "Debian 13 (trixie) packages, minbase",
+    "snapshot": "20261014T000000Z",
+    "sha256": "f238c13abf4586ce56e6b56d59c905fd7bd64d5a9aebea34ffef2183bb20a09f",
+    "packageCount": 131,
+    "stagedFiles": 137,
+    "sourceStatus": "NOT_INCLUDED"
+  },
+  "installerCompiled": false,
+  "guestImported": false,
+  "cleanMachineTested": false,
+  "sourceCompletenessEstablished": false,
+  "distributionReady": false
+}

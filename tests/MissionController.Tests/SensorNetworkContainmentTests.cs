@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using MissionController.Core.Enums;
 using MissionController.Core.Models;
@@ -239,7 +240,7 @@ public class SensorNetworkContainmentTests
                 ? "CONTAINMENT BREACH: a network-denied sensor resolved a name it chose."
                 : $"The network-denied sensor exited {confined}, neither resolving nor refused. Nothing about containment can be concluded.");
 
-        string? cache = ResolverCache();
+        string? cache = ResolverCache(open, denied);
         Assert.True(cache is not null,
             "UNPROVEN: DNS Client cache is unavailable. Resolution refusal alone does not prove the query never left.");
 
@@ -261,7 +262,18 @@ public class SensorNetworkContainmentTests
         }
     }
 
-    private static string? ResolverCache()
+    private const ushort DnsTypeA = 1;
+    private const uint DnsQueryCacheOnlyNoFlagsMatch = 0x8010;
+    private const int DnsFreeRecordList = 1;
+
+    [DllImport("dnsapi.dll", EntryPoint = "DnsQuery_W", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int DnsQuery(
+        string pszName, ushort wType, uint options, IntPtr pExtra, out IntPtr ppQueryResults, IntPtr pReserved);
+
+    [DllImport("dnsapi.dll", ExactSpelling = true)]
+    private static extern void DnsRecordListFree(IntPtr pRecordList, int freeType);
+
+    private static string? ResolverCache(params string[] candidateNames)
     {
         var psi = new System.Diagnostics.ProcessStartInfo(@"C:\Windows\System32\ipconfig.exe", "/displaydns")
         {
@@ -272,7 +284,36 @@ public class SensorNetworkContainmentTests
         using var ipconfig = System.Diagnostics.Process.Start(psi)!;
         string text = ipconfig.StandardOutput.ReadToEnd();
         ipconfig.WaitForExit();
-        return ipconfig.ExitCode == 0 ? text : null;
+        if (ipconfig.ExitCode == 0)
+        {
+            return text;
+        }
+
+        // Windows 11 24H2 restricts full-table dumps (`ipconfig /displaydns`) to elevated tokens so a
+        // standard user cannot enumerate other sessions' lookups. Pointed cache-only queries against
+        // `dnsapi.dll!DnsQuery_W` (`DNS_QUERY_NO_WIRE_QUERY | DNS_QUERY_CACHE_NO_FLAGS_MATCH = 0x8010`)
+        // ask the same `Dnscache` service about these exact labels without sending any packet on the
+        // wire or requiring elevation: 0 (ERROR_SUCCESS) = cached; 9701/9501 = absent from cache.
+        var cached = new System.Collections.Generic.List<string>();
+        foreach (string name in candidateNames)
+        {
+            int rc = DnsQuery(name, DnsTypeA, DnsQueryCacheOnlyNoFlagsMatch, IntPtr.Zero, out IntPtr records, IntPtr.Zero);
+            if (records != IntPtr.Zero)
+            {
+                DnsRecordListFree(records, DnsFreeRecordList);
+            }
+
+            if (rc == 0)
+            {
+                cached.Add(name);
+            }
+            else if (rc is not 9701 and not 9501)
+            {
+                return null;
+            }
+        }
+
+        return string.Join(Environment.NewLine, cached);
     }
 
     /// <summary>

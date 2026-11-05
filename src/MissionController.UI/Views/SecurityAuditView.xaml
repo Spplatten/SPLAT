@@ -100,8 +100,8 @@
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button Content="Test Sentinel" FontSize="10" Padding="6,2" Click="TestSentinel_Click" IsEnabled="{x:Bind ViewModel.IsProcessing, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}" />
                         <Button Content="Test Syslog" FontSize="10" Padding="6,2" Click="TestSyslog_Click" IsEnabled="{x:Bind ViewModel.IsProcessing, Mode=OneWay, Converter={StaticResource BoolNegationConverter}}" />
-                        <TextBlock Text="{x:Bind ViewModel.SiemStatusMessage, Mode=OneWay}" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="180" />
                     </StackPanel>
+                    <TextBlock Text="{x:Bind ViewModel.SiemStatusMessage, Mode=OneWay}" FontSize="10" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
         </Grid>

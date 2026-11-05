@@ -84,6 +84,16 @@ if ($manifest.rootfsIncluded) {
         $failures.Add('Linux\rootfs.tar.xz differs from the manifest''s rootfsSha256')
     }
 }
+if ($manifest.guestBuild) {
+    if (-not $manifest.rootfsIncluded) { $failures.Add('Guest build records require a bundled rootfs.') }
+    try {
+        . "$PSScriptRoot\splat-guest-package.ps1"
+        $guest = Get-SplatGuestBuild -Directory (Join-Path $root 'Linux\Guest') -RootfsPath (Join-Path $root 'Linux\rootfs.tar.xz')
+        foreach ($property in @('name', 'base', 'snapshot', 'packageCount', 'sourceStatus')) {
+            if ($guest.$property -cne $manifest.guestBuild.$property) { $failures.Add("Guest build differs from manifest: $property") }
+        }
+    } catch { $failures.Add("Guest build records failed verification: $($_.Exception.Message)") }
+}
 
 if ($failures.Count) {
     $failures | ForEach-Object { Write-Host "FAIL  $_" }

@@ -463,7 +463,7 @@ public record EdrDevicePosture(
     string Hostname,
     EdrProviderType Provider,
     EndpointIsolationState IsolationState,
-    bool RealTimeProtectionEnabled,
+    bool? RealTimeProtectionEnabled,
     string AntivirusEngineVersion,
     string SecurityIntelligenceVersion,
     DateTimeOffset LastSyncTimeUtc,

@@ -205,6 +205,13 @@ As option 1 said, this does not exclude a local administrator, who can reach the
 other means. The stdio bridge on the operator's own distro is unchanged, and the finding above still
 holds for it.
 
+**Windows-only managed installs (`provision --managed --windows-only`) are not covered by that gate.**
+They are for machines where WSL is disabled. They create the account, the service, the pipe and the
+keyed ledger, but no distro. With no Linux lease, `run_command` and `run_code` refuse with that reason,
+and `get_substrate_health` reports the lease absent. No kernel lease runs, so none is claimed. The gate
+above proved a guest install; no Windows-only install has run it, and its first run
+(`OwnerPositiveControl`) cannot pass without a lease.
+
 ---
 
 ## What SPLAT does not defend against

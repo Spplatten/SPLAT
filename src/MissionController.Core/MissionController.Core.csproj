@@ -6,4 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="../../LICENSE" LogicalName="Splat.Licenses.AGPL-3.0-only.txt" />
+  </ItemGroup>
+
 </Project>

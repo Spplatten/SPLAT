@@ -30,15 +30,23 @@ public sealed class SiemForwarder : ISiemForwarder
 
     private readonly HttpClient _httpClient;
     private readonly EgressFirewallHandler? _firewallHandler;
+    private readonly TimeSpan _operationTimeout;
 
-    public SiemForwarder(HttpClient httpClient, EgressFirewallHandler? firewallHandler = null)
+    public SiemForwarder(HttpClient httpClient, EgressFirewallHandler? firewallHandler = null,
+        TimeSpan? operationTimeout = null)
     {
         _httpClient = httpClient;
         _firewallHandler = firewallHandler;
+        _operationTimeout = operationTimeout ?? TimeSpan.FromSeconds(5);
+        if (_operationTimeout <= TimeSpan.Zero || _operationTimeout > TimeSpan.FromMinutes(5))
+            throw new ArgumentOutOfRangeException(nameof(operationTimeout));
     }
 
     public async Task ForwardAuditEntryAsync(AuditLogEntry entry, SiemConfiguration config, CancellationToken cancellationToken = default)
     {
+        ValidateConfiguration(config);
+        using var deadline = CreateDeadline(cancellationToken);
+        cancellationToken = deadline.Token;
         switch (config.Protocol)
         {
             case SiemProtocol.SyslogUdp:
@@ -57,54 +65,106 @@ public sealed class SiemForwarder : ISiemForwarder
             case SiemProtocol.MicrosoftSentinel:
                 await SendMicrosoftSentinelAsync(entry, config, cancellationToken);
                 break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(config));
         }
     }
 
     public async Task ForwardCefEventAsync(CefEvent cefEvent, SiemConfiguration config, CancellationToken cancellationToken = default)
     {
+        ValidateConfiguration(config);
+        if (config.Protocol == SiemProtocol.MicrosoftSentinel)
+            throw new ArgumentException("Use ForwardAuditEntryAsync for Sentinel REST ingestion.", nameof(config));
+        using var deadline = CreateDeadline(cancellationToken);
         string formattedCef = FormatCef(cefEvent);
-        await SendSyslogNetworkAsync(formattedCef, config, cancellationToken);
+        await SendSyslogNetworkAsync(formattedCef, config, deadline.Token);
     }
 
+    /// <summary>Compatibility API: true means the probe completed, not that an event was retained.</summary>
     public async Task<bool> TestConnectionAsync(SiemConfiguration config, CancellationToken cancellationToken = default)
+        => (await ProbeConnectionAsync(config, cancellationToken)).Succeeded;
+
+    public async Task<SiemConnectionCheck> ProbeConnectionAsync(SiemConfiguration config, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var deadline = CreateDeadline(cancellationToken);
         try
         {
+            ValidateConfiguration(config);
             if (config.Protocol == SiemProtocol.MicrosoftSentinel)
             {
-                if (string.IsNullOrWhiteSpace(config.WorkspaceId) || string.IsNullOrWhiteSpace(config.SharedKey))
-                {
-                    return false;
-                }
                 var testEntry = new AuditLogEntry(
                     0, DateTime.UtcNow, Guid.NewGuid(), "TEST_CONN", "PING", "HealthCheck Connection Test", "SYSTEM", "0000000000000000000000000000000000000000000000000000000000000000", "0000000000000000000000000000000000000000000000000000000000000000");
-                await SendMicrosoftSentinelAsync(testEntry, config, cancellationToken);
-                return true;
+                await SendMicrosoftSentinelAsync(testEntry, config, deadline.Token);
+                return new(SiemConnectionEvidence.IngestionApiAccepted,
+                    "Sentinel ingestion API accepted the authenticated test request. Indexing and retention are not verified.");
             }
 
             if (config.Protocol == SiemProtocol.SyslogUdp)
             {
                 using var udp = new UdpClient();
                 byte[] ping = Encoding.UTF8.GetBytes("<14>1 " + DateTime.UtcNow.ToString("O") + " localhost MissionController - - - PING\n");
-                await udp.SendAsync(ping, ping.Length, config.HostOrUrl, config.Port);
-                return true;
+                await udp.SendAsync(ping, config.HostOrUrl, config.Port, deadline.Token);
+                return new(SiemConnectionEvidence.LocalDatagramSent,
+                    "UDP datagram submitted locally. Receiver reachability, receipt and retention are not verified.");
             }
 
             if (config.Protocol == SiemProtocol.SyslogTcpTls || config.Protocol == SiemProtocol.Cef)
             {
                 using var tcp = new TcpClient();
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                cts.CancelAfter(5000);
-                await tcp.ConnectAsync(config.HostOrUrl, config.Port, cts.Token);
-                return tcp.Connected;
+                await tcp.ConnectAsync(config.HostOrUrl, config.Port, deadline.Token);
+                if (config.UseTls)
+                {
+                    using var ssl = new SslStream(tcp.GetStream(), false);
+                    await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+                    {
+                        TargetHost = config.HostOrUrl
+                    }, deadline.Token);
+                    return new(SiemConnectionEvidence.TlsAuthenticated,
+                        "TLS handshake and server certificate validation succeeded. Event ingestion and retention are not verified.");
+                }
+                return new(SiemConnectionEvidence.TcpConnected,
+                    "TCP connection established without TLS. Event ingestion and retention are not verified.");
             }
 
-            return false;
+            return new(SiemConnectionEvidence.None, "Unsupported SIEM protocol.");
         }
-        catch
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return false;
+            throw;
         }
+        catch (OperationCanceledException)
+        {
+            return new(SiemConnectionEvidence.None, "SIEM probe timed out before completing the configured transport check.");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or SecurityException
+            or IOException or SocketException or System.Security.Authentication.AuthenticationException
+            or HttpRequestException or FormatException)
+        {
+            // Exception messages can contain endpoint details or credential material; expose only the category.
+            return new(SiemConnectionEvidence.None, $"SIEM probe failed ({ex.GetType().Name}); no successful delivery claim.");
+        }
+    }
+
+    private CancellationTokenSource CreateDeadline(CancellationToken cancellationToken)
+    {
+        var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(_operationTimeout);
+        return deadline;
+    }
+
+    private static void ValidateConfiguration(SiemConfiguration config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        if (!Enum.IsDefined(config.Protocol))
+            throw new ArgumentException("Unsupported SIEM protocol.", nameof(config));
+        if (config.Protocol == SiemProtocol.SyslogUdp && config.UseTls)
+            throw new ArgumentException("UDP syslog does not provide TLS; select a TLS transport or explicitly disable TLS.", nameof(config));
+        if ((config.Protocol == SiemProtocol.SyslogTcpTls || config.Protocol == SiemProtocol.MicrosoftSentinel) && !config.UseTls)
+            throw new ArgumentException("The selected SIEM protocol requires TLS.", nameof(config));
+        if (config.Protocol != SiemProtocol.MicrosoftSentinel &&
+            (string.IsNullOrWhiteSpace(config.HostOrUrl) || config.Port < 1 || config.Port > 65535))
+            throw new ArgumentException("A host and valid port are required.", nameof(config));
     }
 
     private static SyslogMessage CreateSyslogMessage(AuditLogEntry entry, SiemConfiguration config)
@@ -123,7 +183,7 @@ public sealed class SiemForwarder : ISiemForwarder
         return new SyslogMessage(
             Facility: config.Facility,
             Severity: config.DefaultSeverity,
-            Timestamp: DateTimeOffset.UtcNow,
+            Timestamp: new DateTimeOffset(DateTime.SpecifyKind(entry.TimestampUtc, DateTimeKind.Utc)),
             Hostname: Environment.MachineName.ToLowerInvariant(),
             AppName: "MissionController",
             ProcessId: Environment.ProcessId.ToString(),
@@ -142,7 +202,7 @@ public sealed class SiemForwarder : ISiemForwarder
             ["cs2"] = entry.MissionId.ToString("D"),
             ["cs2Label"] = "MissionId",
             ["suser"] = entry.OperatorIdentity,
-            ["msg"] = entry.Details.Replace("|", "\\|").Replace("=", "\\="),
+            ["msg"] = entry.Details,
             ["deviceCustomDate1"] = entry.TimestampUtc.ToString("O"),
             ["deviceCustomDate1Label"] = "AuditTimestamp",
             ["externalId"] = entry.EntryHash
@@ -160,22 +220,26 @@ public sealed class SiemForwarder : ISiemForwarder
 
     public static string FormatRfc5424(SyslogMessage msg)
     {
+        if (msg.Facility is < 0 or > 23 || msg.Severity is < 0 or > 7)
+            throw new ArgumentException("Invalid syslog facility or severity.", nameof(msg));
         int pri = (msg.Facility * 8) + msg.Severity;
         string timestamp = msg.Timestamp.ToString("yyyy-MM-ddTHH:mm:ss.ffffffzzz", CultureInfo.InvariantCulture);
-        string hostname = string.IsNullOrWhiteSpace(msg.Hostname) ? "-" : msg.Hostname;
-        string appName = string.IsNullOrWhiteSpace(msg.AppName) ? "-" : msg.AppName;
-        string procId = string.IsNullOrWhiteSpace(msg.ProcessId) ? "-" : msg.ProcessId;
-        string msgId = string.IsNullOrWhiteSpace(msg.MessageId) ? "-" : msg.MessageId;
+        string hostname = HeaderToken(msg.Hostname, 255);
+        string appName = HeaderToken(msg.AppName, 48);
+        string procId = HeaderToken(msg.ProcessId, 128);
+        string msgId = HeaderToken(msg.MessageId, 32);
 
         var sdBuilder = new StringBuilder();
         if (msg.StructuredData != null && msg.StructuredData.Count > 0)
         {
             foreach (var (sdId, parameters) in msg.StructuredData)
             {
+                ValidateStructuredName(sdId);
                 sdBuilder.Append($"[{sdId}");
                 foreach (var (k, v) in parameters)
                 {
-                    string escapedVal = v.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("]", "\\]");
+                    ValidateStructuredName(k);
+                    string escapedVal = EscapeLines(v.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("]", "\\]"));
                     sdBuilder.Append($" {k}=\"{escapedVal}\"");
                 }
                 sdBuilder.Append(']');
@@ -186,19 +250,55 @@ public sealed class SiemForwarder : ISiemForwarder
             sdBuilder.Append('-');
         }
 
-        return $"<{pri}>1 {timestamp} {hostname} {appName} {procId} {msgId} {sdBuilder} {msg.Message}\n";
+        return $"<{pri}>1 {timestamp} {hostname} {appName} {procId} {msgId} {sdBuilder} {EscapeLines(msg.Message)}\n";
     }
 
     public static string FormatCef(CefEvent cef)
     {
+        if (cef.Severity is < 0 or > 10)
+            throw new ArgumentException("CEF severity must be between 0 and 10.", nameof(cef));
         var extSb = new StringBuilder();
         foreach (var (k, v) in cef.ExtensionFields)
         {
-            extSb.Append($"{k}={v} ");
+            if (string.IsNullOrEmpty(k) || !System.Linq.Enumerable.All(k, char.IsAsciiLetterOrDigit))
+                throw new ArgumentException("CEF extension keys must be ASCII letters or digits.", nameof(cef));
+            extSb.Append($"{k}={EscapeLines(v.Replace("\\", "\\\\").Replace("=", "\\="))} ");
         }
 
         string rawExtensions = extSb.ToString().TrimEnd();
-        return $"CEF:0|{cef.DeviceVendor}|{cef.DeviceProduct}|{cef.DeviceVersion}|{cef.DeviceEventClassId}|{cef.Name}|{cef.Severity}|{rawExtensions}\n";
+        return $"CEF:0|{CefHeader(cef.DeviceVendor)}|{CefHeader(cef.DeviceProduct)}|{CefHeader(cef.DeviceVersion)}|{CefHeader(cef.DeviceEventClassId)}|{CefHeader(cef.Name)}|{cef.Severity}|{rawExtensions}\n";
+    }
+
+    private static string EscapeLines(string value) => value.Replace("\r", "\\r").Replace("\n", "\\n");
+    private static string CefHeader(string value) => EscapeLines(value.Replace("\\", "\\\\").Replace("|", "\\|"));
+
+    private static string HeaderToken(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value)) return "-";
+        if (value.Length > maxLength || System.Linq.Enumerable.Any(value, c => c < '!' || c > '~'))
+            throw new ArgumentException("Invalid syslog header token.");
+        return value;
+    }
+
+    private static void ValidateStructuredName(string value)
+    {
+        if (string.IsNullOrEmpty(value)) throw new ArgumentException("Empty syslog structured-data name.");
+        HeaderToken(value, 32);
+        if (value.IndexOfAny(['=', ']', '"']) >= 0)
+            throw new ArgumentException("Invalid syslog structured-data name.");
+    }
+
+    /// <summary>Octet-counted TLS framing; removes the formatter's single LF terminator.</summary>
+    public static byte[] FrameSyslogTls(string payload)
+    {
+        string message = payload.EndsWith('\n') ? payload[..^1] : payload;
+        byte[] body = Encoding.UTF8.GetBytes(message);
+        if (body.Length == 0) throw new ArgumentException("Empty syslog message.", nameof(payload));
+        byte[] prefix = Encoding.ASCII.GetBytes(body.Length.ToString(CultureInfo.InvariantCulture) + " ");
+        var frame = new byte[prefix.Length + body.Length];
+        prefix.CopyTo(frame, 0);
+        body.CopyTo(frame, prefix.Length);
+        return frame;
     }
 
     private static async Task SendSyslogNetworkAsync(string payload, SiemConfiguration config, CancellationToken cancellationToken)
@@ -208,7 +308,7 @@ public sealed class SiemForwarder : ISiemForwarder
         if (config.Protocol == SiemProtocol.SyslogUdp)
         {
             using var udp = new UdpClient();
-            await udp.SendAsync(bytes, bytes.Length, config.HostOrUrl, config.Port);
+            await udp.SendAsync(bytes, config.HostOrUrl, config.Port, cancellationToken);
             return;
         }
 
@@ -220,9 +320,17 @@ public sealed class SiemForwarder : ISiemForwarder
 
         if (config.UseTls && stream is SslStream ssl)
         {
-            await ssl.AuthenticateAsClientAsync(config.HostOrUrl);
+            await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+            {
+                TargetHost = config.HostOrUrl
+            }, cancellationToken);
         }
 
+        // RFC 5425 requires octet counting. CEF keeps its single-line framing for existing receivers.
+        if (config.Protocol == SiemProtocol.SyslogTcpTls)
+        {
+            bytes = FrameSyslogTls(payload);
+        }
         await stream.WriteAsync(bytes, cancellationToken);
         await stream.FlushAsync(cancellationToken);
     }

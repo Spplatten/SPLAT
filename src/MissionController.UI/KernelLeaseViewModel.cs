@@ -48,6 +48,7 @@ public partial class KernelLeaseViewModel : ObservableObject
 
     public string ApplyLabel => Planned switch
     {
+        SubstrateChange.ImportGuest => "Import Lite guest: apply the plan below",
         SubstrateChange.Mount => "Mount: apply the plan below",
         SubstrateChange.Unmount => "Unmount: apply the plan below",
         _ => "Apply (plan first)",
@@ -64,7 +65,12 @@ public partial class KernelLeaseViewModel : ObservableObject
 
     [RelayCommand]
     public Task ApplyAsync() =>
-        RunAsync(_substrate.ApplyAsync, Planned == SubstrateChange.Unmount ? "Unmounting..." : "Mounting...");
+        RunAsync(_substrate.ApplyAsync, Planned switch
+        {
+            SubstrateChange.ImportGuest => "Importing the Lite guest...",
+            SubstrateChange.Unmount => "Unmounting...",
+            _ => "Mounting...",
+        });
 
     private async Task RunAsync(Func<CancellationToken, Task<SubstrateReport>> run, string working)
     {

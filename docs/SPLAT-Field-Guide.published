@@ -46,8 +46,8 @@
 # matches `<header class="hero">`, and an earlier republish lost that opening tag, so the live page
 # rendered its title placard as bare text for months while every other copy looked right.
 
-published  2026-10-21
-version    68
+published  2026-10-22
+version    69
 source     docs/SPLAT-Field-Guide.html
-sha256     c7acfea8bc36c7d9bc94e472db1dc99b8372ee76600d0650cd17eeddd9685f6c
-handoff    A2A branch merged: RARE consumer sensors moved to Linux leases with pinned addresses; Linux 15, network-denied 8, connected 38, zero dial on Windows
+sha256     5440d8d45cde67ed2c24e6facd72119c82d4b0627f5f5db2c03ac38882bf3632
+handoff    Agent-builder section rewritten: SPLAT acts through declared lease steps (egress pin, brokered secret, signed record); platform actions marked roadmap P5, no browser RPA

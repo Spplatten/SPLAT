@@ -1,5 +1,12 @@
 # Live-state validation experiment 8.4.2
 
+**Integration status, 2026-10-28:** the audit fixes and research apparatus are now integrated with
+the working tree's 16-byte `lease_state { deadline_ns, epoch }` ABI. Native verification is pending.
+`profile.json` deliberately leaves both expected program tags null: the historical 8-byte-build
+tags cannot certify this build. The gate refuses until tags for the reviewed merged build are
+recorded. The epoch is retained but not used by the current kernel as a generation guarantee.
+See `AUDIT_GAP_PROTOCOL.md` for the authority contract and remaining validation.
+
 **Research harness, not a product feature.** It runs one experiment: does semantic validation of the
 kernel's installed exec policy catch an unauthorized grant that byte readback accepts? The daemon's
 `--admission-gate` flag exists for it; without the flag the daemon admits as before.
@@ -24,7 +31,7 @@ What B3 shares with the writer, and therefore cannot be independent of: the kern
 encoding (`major << 20 | minor`), the assumption that the jail's bind mounts preserve inode identity,
 the approval file's integrity (root-owned, not signed), and the profile's reading of the BPF source.
 The profile is written from the source, not derived from the loaded bytecode. The bundle records the
-kernel's program tag, which was the same across separate loads of this build (`debffec9428e2ccf`);
+kernel's program tag, which was the same across separate loads of the historical build (`debffec9428e2ccf`);
 the translated-dump hashes it also keeps change per load, because the dump embeds map ids.
 
 A gate run is indeterminate, and refuses, when any program other than the daemon's own decides

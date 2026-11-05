@@ -106,7 +106,12 @@ public class WslSubstrateHealthChecker
 
         try
         {
-            // The token is read first, under a budget of its own, and only then does the daemon's clock
+            // A host allowed to start the daemon must reach it before reading its token: the token
+            // may not exist until first startup. Neither startup nor token retrieval spends the
+            // reply budget. Without a connector the check remains passive and connects only below.
+            using var client = _connect is null ? new TcpClient() : await _connect(ct);
+
+            // The token is read under a budget of its own, and only then does the daemon's reply clock
             // start. Reading it spawns wsl.exe, which is always cold in a one-shot command - doctor,
             // provision - and slowest exactly when provision runs: straight after the `wsl --shutdown` it
             // asks for, on a guest still booting. Timed inside the daemon's two seconds, that spawn alone
@@ -119,12 +124,6 @@ public class WslSubstrateHealthChecker
                 token = await _token.GetAsync(tokenCts.Token);
             }
 
-            // A daemon this host may start is reached first, outside the exchange's budget. The managed
-            // service's guest stops at the end of every upgrade, so its first health check met a daemon
-            // that was not yet listening. A refused loopback connect costs Windows about two seconds,
-            // which was the whole budget, so the check read "unreachable", while the lease right after it
-            // started the daemon and ran (2026-10-21).
-            using var client = _connect is null ? new TcpClient() : await _connect(ct);
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(_timeout);
 

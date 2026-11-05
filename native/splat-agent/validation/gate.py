@@ -35,6 +35,32 @@ BPFTOOL = "/usr/sbin/bpftool"
 ADMIT, REJECT, INDETERMINATE = 0, 1, 2
 
 
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('duplicate JSON key: ' + key)
+        result[key] = value
+    return result
+
+
+def read_json(stream):
+    return json.load(stream, object_pairs_hook=unique_object)
+
+
+def approved_deadline(approval):
+    if approval.get('clock') != 'guest-boottime':
+        raise Indeterminate('approval must name the guest-boottime clock')
+    start, deadline, seconds = (approval.get(k) for k in ('approvedAtBootNs', 'deadlineBootNs', 'leaseDurationSeconds'))
+    if any(type(v) is not int for v in (start, deadline, seconds)):
+        raise Indeterminate('approval lifetime fields must be integers')
+    if not 0 <= start < deadline < 2**64 or not 5 <= seconds <= 300:
+        raise Indeterminate('approval lifetime is outside supported bounds')
+    if deadline != start + seconds * 1_000_000_000:
+        raise Indeterminate('approval deadline disagrees with its start and duration')
+    return deadline
+
+
 class Indeterminate(Exception):
     """A required observation could not be made. Never an admission."""
 
@@ -116,6 +142,11 @@ def observe_deployment(profile, daemon_pid):
         prog = bpftool("prog", "show", "id", str(ours[0]["prog_id"]))
         if prog.get("name") != want["name"] or prog.get("type") != want["progType"]:
             raise Indeterminate(f"the daemon's program on {want['attachFunc']} is {prog.get('type')}/{prog.get('name')}, not the profiled one")
+        expected_tag = want.get('expectedTag')
+        if not isinstance(expected_tag, str) or not re.fullmatch(r'[0-9a-f]{16}', expected_tag):
+            raise Indeterminate(f"profile has no valid expected tag for {role}")
+        if prog.get('tag') != expected_tag:
+            raise Indeterminate(f"program tag mismatch for {role}: expected {expected_tag}, observed {prog.get('tag')}")
         programs[role] = {"link": ours[0], "prog": prog, "attachFunc": want["attachFunc"]}
 
     maps = {}
@@ -239,12 +270,19 @@ def check_b3(state, approval, cgroup_id, mission_id, now_boot_ns):
     lease = entries_for(state["leased_cgroups"], cgroup_id)
     if len(lease) != 1:
         return ["the cgroup holds no lease, so the program applies no policy to it"], {}
-    deadline = int.from_bytes(bytes.fromhex(lease[0][1]), "little")
+    raw_lease = bytes.fromhex(lease[0][1])
+    if len(raw_lease) != 16:
+        raise Indeterminate("leased_cgroups value is not a 16-byte deadline/epoch record")
+    deadline = int.from_bytes(raw_lease[:8], "little")
+    epoch = int.from_bytes(raw_lease[8:], "little")
+    expected_deadline = approved_deadline(approval)
+    if deadline != expected_deadline:
+        reasons.append('installed deadline differs from the approved absolute deadline')
     remaining = deadline - now_boot_ns
     if remaining <= 0:
         reasons.append("the installed deadline has already passed")
-    if remaining > approval["leaseDurationSeconds"] * 1_000_000_000:
-        reasons.append("the installed deadline is later than the approval allows")
+    if now_boot_ns < approval['approvedAtBootNs']:
+        reasons.append('observation precedes approval on the guest clock')
 
     granted = decode_inode_keys(entries_for(state["allowed_exec"], cgroup_id))
     if entries_for(state["scratch_exec_devs"], cgroup_id):
@@ -257,7 +295,7 @@ def check_b3(state, approval, cgroup_id, mission_id, now_boot_ns):
         reasons.append(f"unauthorized exec grant: dev {dev:#x} ino {ino}")
     for ident in missing:
         reasons.append(f"approved executable not granted (over-restriction): {approved[ident]}")
-    semantics = {"deadlineBootNs": deadline, "remainingNs": remaining,
+    semantics = {"deadlineBootNs": deadline, "epoch": epoch, "remainingNs": remaining,
                  "granted": [{"dev": d, "ino": i, "approvedPath": approved.get((d, i))} for d, i in sorted(granted)],
                  "approved": [{"dev": d, "ino": i, "path": p} for (d, i), p in sorted(approved.items())]}
 
@@ -302,11 +340,11 @@ def main():
         return INDETERMINATE
 
     started = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
-    written = json.load(sys.stdin)
+    written = read_json(sys.stdin)
     with open(CONFIG) as f:
-        config = json.load(f)
+        config = read_json(f)
     with open(PROFILE) as f:
-        profile = json.load(f)
+        profile = read_json(f)
     record = {"missionId": args.mission_id, "cgroupId": args.cgroup_id, "cgroupPath": args.cgroup_path,
               "variant": config["variant"], "written": written, "gateStartedBootNs": started}
     code = INDETERMINATE
@@ -343,7 +381,7 @@ def main():
             reasons = check_b2(state, written, args.cgroup_id)
         elif config["variant"] == "B3":
             with open(os.path.join(APPROVALS, args.mission_id + ".json")) as f:
-                approval = json.load(f)
+                approval = read_json(f)
             record["approval"] = approval
             reasons, record["semantics"] = check_b3(state, approval, args.cgroup_id, args.mission_id, now)
         else:
@@ -363,6 +401,11 @@ def main():
         record["reasons"] = [f"{type(e).__name__}: {e}"]
         record["decision"] = "indeterminate"
     record["gateFinishedBootNs"] = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+    if code == ADMIT and config["variant"] == "B3":
+        if record["gateFinishedBootNs"] >= approved_deadline(record["approval"]):
+            record["reasons"].append("approval expired while validation ran")
+            record["decision"] = "reject"
+            code = REJECT
     with open(os.path.join(config["recordDir"], args.mission_id + ".gate.json"), "w") as f:
         json.dump(record, f, indent=2)
     print(json.dumps({"variant": config["variant"], "decision": record["decision"], "reasons": record["reasons"]}))

@@ -1,6 +1,8 @@
+using System;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MissionController.Core;
 using MissionController.Core.Interfaces;
 using MissionController.Infrastructure.Network.Ai;
 
@@ -36,6 +38,23 @@ public partial class WelcomeOnboardingViewModel : ObservableObject
     [ObservableProperty]
     private bool _egressFirewallReady = true;
 
+    [ObservableProperty]
+    private bool _isLegalViewerExpanded;
+
+    [ObservableProperty]
+    private string _selectedLegalKey = "eula";
+
+    [ObservableProperty]
+    private string _activeLegalTitle = SplatLegalTerms.EulaTitle;
+
+    [ObservableProperty]
+    private string _activeLegalSummary = SplatLegalTerms.AllDocuments[0].Summary;
+
+    [ObservableProperty]
+    private string _activeLegalText = SplatLegalTerms.EulaText;
+
+    public string LegalShortNotice => SplatLegalTerms.ShortNotice;
+
     public WelcomeOnboardingViewModel(
         ICredentialVault vault,
         GeminiStreamClient geminiClient,
@@ -44,6 +63,34 @@ public partial class WelcomeOnboardingViewModel : ObservableObject
         _vault = vault;
         _geminiClient = geminiClient;
         _claudeClient = claudeClient;
+    }
+
+    [RelayCommand]
+    public void SelectLegalDocument(string? key)
+    {
+        string normalized = string.IsNullOrWhiteSpace(key) ? "eula" : key.Trim().ToLowerInvariant();
+        if (string.Equals(normalized, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            SelectedLegalKey = "all";
+            ActiveLegalTitle = "PLATTEN INDUSTRIES LLC — Complete Legal Agreement Bundle";
+            ActiveLegalSummary = "Community AGPL license, warranty notice, operating guidance and privacy policy. No additional EULA acceptance is required.";
+            ActiveLegalText = SplatLegalTerms.FormatAll();
+            IsLegalViewerExpanded = true;
+            return;
+        }
+
+        var doc = SplatLegalTerms.TryGetByKeyOrUri(normalized) ?? SplatLegalTerms.AllDocuments[0];
+        SelectedLegalKey = doc.Key;
+        ActiveLegalTitle = doc.Title;
+        ActiveLegalSummary = doc.Summary;
+        ActiveLegalText = doc.FullText;
+        IsLegalViewerExpanded = true;
+    }
+
+    [RelayCommand]
+    public void ToggleLegalViewer()
+    {
+        IsLegalViewerExpanded = !IsLegalViewerExpanded;
     }
 
     private System.Threading.CancellationTokenSource? _autoValidationCts;
@@ -158,6 +205,7 @@ public partial class WelcomeOnboardingViewModel : ObservableObject
     [RelayCommand]
     public void NextStep()
     {
+        // AGPL section 9: no additional EULA acceptance is required to run Community.
         if (CurrentStep < 3)
         {
             CurrentStep++;

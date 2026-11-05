@@ -254,7 +254,10 @@ public partial class App : Application
         // always has. A leased mission reaches the daemon the way run_command does, through the
         // same bridge, with its lease compiled from the template rather than authored by a caller.
         var managedBridge = ManagedBridgeClient.FromEnvironment();
-        services.AddSingleton<ILeasedExecutor>(_ => managedBridge is not null ? managedBridge : new WslLeasedExecutor());
+        var bundledGuest = managedBridge is null
+            ? BundledWslGuest.BesideApp(AppContext.BaseDirectory, SplatDataRoot.Current.Root) : null;
+        services.AddSingleton<ILeasedExecutor>(_ => managedBridge is not null
+            ? managedBridge : bundledGuest?.Executor ?? new WslLeasedExecutor());
         services.AddSingleton<ITemplatePolicyCompiler, TemplatePolicyCompiler>();
         services.AddSingleton<IMissionSubstrateSelector, LinuxLeaseSubstrate>();
         // The same doctor, mount and unmount splat-mcp runs, so the console can install, check and remove
@@ -262,7 +265,8 @@ public partial class App : Application
         // console mounts the daemon shipped beside it; a developer build has none and builds it with cargo.
         services.AddSingleton(_ => new SubstrateLifecycle(
             daemonBinary: SubstrateLifecycle.DaemonBesideApp(AppContext.BaseDirectory),
-            managedCheck: managedBridge is null ? null : managedBridge.CheckAsync));
+            managedCheck: managedBridge is null ? null : managedBridge.CheckAsync,
+            bundledGuest: bundledGuest));
 
         // Core Engine & Cognitive Brain
         services.AddSingleton<IDiagnosticFindingsExtractor, JsonFindingsExtractor>();

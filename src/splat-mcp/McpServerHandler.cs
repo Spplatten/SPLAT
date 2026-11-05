@@ -28,6 +28,13 @@ public partial class McpServerHandler
     private readonly ICredentialSanitizer _credentialSanitizer;
     private readonly IDataLossPreventionSanitizer _dlpSanitizer;
     private readonly WslSubstrateHealthChecker _healthChecker;
+
+    /// <summary>
+    /// Set when this host was installed without a Linux lease (a Windows-only managed instance): the
+    /// reason get_substrate_health reports instead of probing for a daemon that was never installed.
+    /// </summary>
+    internal string? LinuxLeaseAbsent { get; init; }
+
     private readonly IMissionExecutionEngine? _missionEngine;
     private readonly IMissionRunRecordAssembler? _runRecords;
     private readonly RunRecordLedgerVerifier? _recordVerifier;
@@ -799,6 +806,31 @@ public partial class McpServerHandler
         }
         var missionId = approvedLease?.MissionId ?? Guid.NewGuid();
 
+        // A Windows-only install has no Linux lease to author. Refused here, the record says nothing ran
+        // and why; handed to an executor, it would read as a tool that ran in a guest and failed.
+        if (LinuxLeaseAbsent is { } absent)
+        {
+            string refusedActor = await ResolveActorAsync(ct);
+            await AppendScrubbedLogAsync(missionId, ledgerTool, "LINUX_LEASE_ABSENT", $"Command='{command}' | {absent}", refusedActor, ct);
+            var absentFacts = NewLeaseFacts(missionId, ledgerTool, refusedActor, startedAtUtc, command, argumentsForLog, workDir, timeoutSec);
+            absentFacts.TemplateSha256 = "none: the call was refused before a lease was authored";
+            absentFacts.WorkspacePath = null;
+            absentFacts.Substrate = "none: Windows-only install, no Linux lease";
+            absentFacts.OsDescription = "not applicable: nothing ran";
+            absentFacts.Admission = $"Refused: {absent}";
+            absentFacts.ExecutionState = "Refused";
+            absentFacts.TerminalReason = absent;
+            await SealLeaseFactsAsync(absentFacts);
+            return new McpToolCallResult
+            {
+                IsError = true,
+                Content = new List<McpContentItem>
+                {
+                    new() { Type = "text", Text = $"[LINUX_LEASE_ABSENT] {toolName} was refused before any lease was requested. {absent}" }
+                }
+            };
+        }
+
         // The network half of the lease is the operator's. allowNetwork and allowedEgressIps used to
         // go into it as sent, loopback filled in and 80 and 443 added for every address, so an agent
         // could author its own egress to any address it named - the same request-as-its-own-
@@ -1384,7 +1416,10 @@ public partial class McpServerHandler
 
     private async Task<McpToolCallResult> ExecuteGetSubstrateHealthAsync(CancellationToken ct)
     {
-        var health = await _healthChecker.CheckHealthAsync(ct);
+        // "Unreachable" would send an operator looking for a daemon this install never created.
+        var health = LinuxLeaseAbsent is { } absent
+            ? new WslSubstrateStatus(false, false, false, false, false, "None", 0, absent)
+            : await _healthChecker.CheckHealthAsync(ct);
         var json = JsonSerializer.Serialize(health, new JsonSerializerOptions { WriteIndented = true });
 
         // A daemon that answers but enforces nothing is not a healthy substrate. Reporting only on

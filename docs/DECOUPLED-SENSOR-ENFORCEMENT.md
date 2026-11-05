@@ -138,7 +138,8 @@ Those responses require retry at the collector. No response says an alert restor
 ## 4. Kernel experiment and benchmark contract
 
 `native/experiments/lease-open/open_guard.bpf.c` is separate lab source. It does not replace the
-shipping 8-byte `struct lease_state` (one `__u64 deadline_ns`, `native/splat-agent/src/bpf/lease_lsm.bpf.c`).
+shipping 16-byte `struct lease_state` (`__u64 deadline_ns` and a reserved `__u64 epoch` the kernel does
+not yet check, `native/splat-agent/src/bpf/lease_lsm.bpf.c`).
 Its 32-byte open_lease holds a BOOTTIME deadline, protected inode,
 epoch, kernel device number and denied read/write f_mode bits. Preallocated hash entries are installed
 before launch and remain immutable during a workload. Do not edit a multiword policy in place and

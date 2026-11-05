@@ -1248,7 +1248,7 @@ time.sleep(60)
         info = info[0] if isinstance(info, list) else info
         pin.rename(backup)
         try:
-            bpftool("map", "create", pin, "type", "hash", "key", "8", "value", "8",
+            bpftool("map", "create", pin, "type", "hash", "key", str(info["bytes_key"]), "value", str(info["bytes_value"]),
                     "entries", info["max_entries"], "name", info["name"], "flags", info.get("flags", 0))
             feature_checks["pins_foreign_map_refused"] = refuses_owned_start("pinned hook does not match")
         finally:
@@ -1265,16 +1265,23 @@ time.sleep(60)
             shutil.rmtree(ws)
 
 def pinned_value(name, wanted):
-    # bpftool prints an integer where BTF lets it, a struct as a dict, and raw little-endian hex
-    # bytes where it has no BTF. Every value read here is one u64, whichever form carries it.
-    def as_int(v):
+    # Explicitly decode the deadline field of the 16-byte lease state; never treat its epoch
+    # as the upper half of a timestamp. Other maps queried here hold one u64.
+    def as_int(v, lease_value=False):
         if isinstance(v, dict):
-            return as_int(next(iter(v.values())))
-        return v if isinstance(v, int) else int.from_bytes(bytes(int(b, 16) for b in v), "little")
+            return as_int(v["deadline_ns"] if lease_value else next(iter(v.values())))
+        if isinstance(v, int):
+            if lease_value:
+                raise ValueError("lease state must retain its 16-byte shape")
+            return v
+        raw = bytes(int(b, 16) for b in v)
+        if lease_value and len(raw) != 16:
+            raise ValueError("unexpected leased_cgroups value size")
+        return int.from_bytes(raw[:8] if lease_value else raw, "little")
     directory = Path("/sys/fs/bpf/splat") / hashlib.sha256(Path("src/bpf/lease_lsm.bpf.c").read_bytes()).hexdigest()
     for entry in bpftool("map", "dump", "pinned", directory / name) or []:
         if as_int(entry.get("key")) == wanted:
-            return as_int(entry.get("value"))
+            return as_int(entry.get("value"), lease_value=name in ("leased_cgroups", "map_leased_cgroups"))
     return None
 
 def cgroup_populated(cg):
