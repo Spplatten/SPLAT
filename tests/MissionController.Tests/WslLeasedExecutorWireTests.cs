@@ -77,7 +77,7 @@ public class WslLeasedExecutorWireTests
     {
         foreach (string declaration in ChildProcessDeclarations())
         {
-            Match program = Regex.Match(declaration, @"Arguments = \$?""-u root -e /(?:usr/)?bin/(?<name>[a-z]+) ");
+            Match program = Regex.Match(declaration, @"Arguments = \$?""(?:-d \{_wslDistro\} )?-u root -e (?:/(?:usr/)?bin/(?<name>[a-z]+)|/opt/splat/(?<name>splat-agent)) ");
             Assert.True(program.Success, "A child of the bridge is not one program under /bin, run with -e:\n" + declaration);
             Assert.DoesNotContain(program.Groups["name"].Value, new[] { "sh", "bash", "dash", "env" });
         }
