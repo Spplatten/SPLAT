@@ -26,19 +26,30 @@ internal sealed class TrustedAdmissionRegistrar
         _wallHighWater = _clock.GetUtcNow().ToUnixTimeMilliseconds();
     }
 
+    // A wall-clock step back up to this size (an NTP correction) is absorbed by reporting the mark;
+    // only a larger one is rollback. Far inside the 30 s staleness window, and harmless by the clamp.
+    private const long RollbackToleranceMs = 1_000;
+
     private bool ReadClock(out long now)
     {
-        now = _clock.GetUtcNow().ToUnixTimeMilliseconds();
-        long previous = Volatile.Read(ref _wallHighWater);
-        while (now >= previous)
+        // Mark before sample: whoever published the mark sampled before this read, so on a clock
+        // that has not gone back this sample is at or past it. Sampling first let a reader that a
+        // concurrent reader overtook look like rollback and refuse a valid alert, which for a
+        // sidecar that can only cancel means the flagged workload kept running.
+        long mark = Volatile.Read(ref _wallHighWater);
+        long sample = _clock.GetUtcNow().ToUnixTimeMilliseconds();
+        if (mark - sample > RollbackToleranceMs) { now = mark; return false; }
+        // Report the later of sample and mark, so time as the registrar sees it never runs
+        // backwards: a step inside the tolerance cannot make a stale event fresh or an expired task
+        // live. Monotonic lifetime is checked separately in Expired.
+        while (sample > mark)
         {
-            long actual = Interlocked.CompareExchange(ref _wallHighWater, now, previous);
-            if (actual == previous) return true;
-            previous = actual;
+            long actual = Interlocked.CompareExchange(ref _wallHighWater, sample, mark);
+            if (actual == mark) { now = sample; return true; }
+            mark = actual;
         }
-        // Wall-clock rollback must not revive stale events. Monotonic lifetime is checked as well.
-        // A concurrent later sample may conservatively reject an earlier request; never broaden it.
-        return false;
+        now = mark;
+        return true;
     }
     private long Now() => ReadClock(out long now) ? now : throw new InvalidDataException("Clock rollback.");
     private bool Expired(RegisteredTask t, long now) => now >= t.ExpiresUnixMs

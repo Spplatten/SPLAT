@@ -10,7 +10,15 @@ internal static class RegistrarChecks
     private sealed class Clock : TimeProvider
     {
         internal long Wall = 1_800_000_000_000, Ticks;
-        public override DateTimeOffset GetUtcNow() => DateTimeOffset.FromUnixTimeMilliseconds(Wall);
+        // Runs once, after the next sample is taken and before it is returned: another reader
+        // acting between a reader's clock sample and whatever that reader does next.
+        internal Action? OnNextRead;
+        public override DateTimeOffset GetUtcNow()
+        {
+            long wall = Wall;
+            Interlocked.Exchange(ref OnNextRead, null)?.Invoke();
+            return DateTimeOffset.FromUnixTimeMilliseconds(wall);
+        }
         public override long TimestampFrequency => 1000;
         public override long GetTimestamp() => Ticks;
         internal void Advance(long ms) { Wall += ms; Ticks += ms; }
@@ -120,10 +128,20 @@ internal static class RegistrarChecks
         expired.EvictExpired(); Verify(expired.State(task) == AdmissionState.Evicted, "expired registrations evicted");
         Refused(() => expired.Begin(task, root, "tenant", "agent", sensor.ProfileHash, "rule", clock.Wall + 1000), "eviction preserves UUID tombstone");
         var rollback = Seed(); rollback.BindSensor(task, root, sensor); rollback.Activate(task);
-        clock.Wall--;
+        clock.Advance(40_000);
+        // A concurrent reader publishes a time 2 s later (past the tolerance) between this reader's
+        // clock sample and its next step: interleaving on a loaded host, not a clock going back.
+        clock.OnNextRead = () => { clock.Wall += 2_000; _ = rollback.Resolve(Event()); };
+        Verify(rollback.Resolve(Event(time: clock.Wall)).Task == task, "reader overtaken by a concurrent reader resolves");
+        long mark = clock.Wall;
+        clock.Wall -= 5;
+        Verify(rollback.Resolve(Event(time: mark)).Task == task, "wall-clock step back inside the tolerance resolves");
+        Verify(rollback.Resolve(Event(time: mark - 30_001)).Status == ResolutionStatus.Stale,
+            "step back cannot make a stale event fresh");
+        clock.Wall = mark - 60_000;
         Verify(rollback.Resolve(Event()).Status == ResolutionStatus.ClockRollback, "wall-clock rollback refused");
         rollback.EvictExpired(); Verify(rollback.State(task) == AdmissionState.Evicted, "rollback eviction cannot revive identity");
-        clock.Wall++;
+        clock.Wall = mark;
         var monotonic = Seed(); monotonic.BindSensor(task, root, sensor); monotonic.Activate(task);
         clock.Ticks += 60_000;
         Verify(monotonic.Resolve(Event()).Status == ResolutionStatus.Inactive, "monotonic expiry independent of wall clock");

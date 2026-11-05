@@ -164,9 +164,13 @@ expiry or synchronization and is not installed on the HTTP path.
 | `Resolve` | Acquires one immutable snapshot and returns Unique, Unknown, Ambiguous, Inactive, Stale, IdentityMismatch or ClockRollback. |
 | `AdmitToMailbox` | Resolves again under the writer lock, requires the fixed task UUID, then performs the durable SQLite admission. |
 
-Expiry checks both wall time and elapsed monotonic time. Clock rollback rejects lookups and
-causes sweeping to evict registrations. Event time must be within the existing 30-second past /
-2-second future window, at or after native enrollment, and strictly before task expiry.
+Expiry checks both wall time and elapsed monotonic time. Before a reader samples the clock, it
+reads the wall-clock high-water mark. So a reader that a concurrent reader overtook is never
+mistaken for rollback. Time is judged as the later of the sample and the mark, so a step back of
+up to one second is absorbed and cannot make a stale event fresh. A larger step back is rollback:
+it rejects lookups and causes sweeping to evict registrations. Event time must be within the
+existing 30-second past / 2-second future window, at or after native enrollment, and strictly
+before task expiry.
 These clocks govern the host registration; they do not redefine the guest kernel lease clock.
 
 Reader lookup is lock-free, with a measured allocation-free steady path on the test thread.
