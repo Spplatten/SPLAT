@@ -282,7 +282,9 @@ silence, watchdog and HTTP cases); `dotnet build -warnaserror` reported zero war
 not recur. Four deliberate mutants (accepting any lease, accepting a non-canonical lease spelling,
 ignoring a moved loss counter, answering foreign traffic with 409) each failed it. The suite runs the
 same checks in `AlertSidecarSelfTests`; dropping the Falco group (74 ran) and admitting any lease
-(assertion 102) each failed it. Still synthetic: no alert from a running Falco has been classified yet.
+(assertion 102) each failed it. With the [admission registrar](TRUSTED-ADMISSION-REGISTRAR.md)'s
+group merged the self-test runs 201 checks, and the suite fails below that. Still synthetic: no
+alert from a running Falco has been classified yet.
 
 - Days 1-7: authoritative admission binding/descendant lifecycle registration, scoped collector
   credentials, and independent native receipt verification. Preserve the existing lease ABI.

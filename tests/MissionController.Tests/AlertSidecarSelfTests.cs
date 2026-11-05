@@ -10,10 +10,10 @@ namespace MissionController.Tests;
 /// </summary>
 public sealed class AlertSidecarSelfTests
 {
-    // What ran on 2026-11-05, the run docs/DECOUPLED-SENSOR-ENFORCEMENT.md cites. A floor, not a pin:
-    // a new check must not fail the suite, but a dropped check group passes every check it still has
-    // and is visible only here.
-    private const int ChecksAtLeast = 137;
+    // What ran on 2026-11-05 once the Falco and admission-registrar groups were merged, the run
+    // docs/DECOUPLED-SENSOR-ENFORCEMENT.md cites. A floor, not a pin: a new check must not fail the
+    // suite, but a dropped check group passes every check it still has and is visible only here.
+    private const int ChecksAtLeast = 201;
 
     [Fact]
     public async Task TheSidecarsOwnChecks_AllRun_AndAllPass()

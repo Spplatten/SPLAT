@@ -2,10 +2,12 @@
 [CmdletBinding()]
 param(
     [string]$DotNetPath=(Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'),
-    [string]$ResultsDirectory=(Join-Path $PSScriptRoot '..\private\focused-regressions'),
+    [string]$ResultsDirectory,
     [switch]$PreflightOnly
 )
 $ErrorActionPreference='Stop'
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty in a param() default under -File.
+if (-not $ResultsDirectory) { $ResultsDirectory=Join-Path $PSScriptRoot '..\private\focused-regressions' }
 $repoRoot=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 if (-not (Test-Path -LiteralPath $DotNetPath -PathType Leaf)) { throw 'Supply the installed .NET 10 executable using -DotNetPath.' }
 $sdkVersion=& $DotNetPath --version
@@ -35,6 +37,9 @@ try {
 if ($PreflightOnly) { Write-Output 'PASS loopback prerequisite. No tests requested.'; return }
 
 $project=Join-Path $repoRoot 'tests\MissionController.Tests\MissionController.Tests.csproj'
+# Windows PowerShell 5.1 wraps every stderr line of a redirected native command in an error record,
+# which 'Stop' makes terminating before the exit code is read. The exit code is the verdict here.
+$ErrorActionPreference='Continue'
 & $DotNetPath build $project -c Debug -m:1 -p:UseSharedCompilation=false 2>&1 | Tee-Object -FilePath (Join-Path $results 'build.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Test project build failed.' }
 $filter='FullyQualifiedName~DocumentationDriftTests|FullyQualifiedName~SiemTransportInvariantTests|FullyQualifiedName~WslLeasedExecutorWireTests|FullyQualifiedName~SensorNetworkContainmentTests'

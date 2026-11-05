@@ -19,9 +19,9 @@ binding path must not be described as automatic trusted registration.
 
 Evidence: [sidecar gate](audits/evidence/2026-11-05-admission-registrar/sidecar-gate.txt),
 [offline audit](audits/evidence/2026-11-05-admission-registrar/offline-audit.txt),
-[VSTest host trace](audits/evidence/2026-11-05-admission-registrar/vstest-host.txt),
-[TRX](audits/evidence/2026-11-05-admission-registrar/focused.trx), and
+[VSTest host trace](audits/evidence/2026-11-05-admission-registrar/vstest-host.txt), and
 [source/log manifest](audits/evidence/2026-11-05-admission-registrar/verification.json).
+The aborted run's TRX was not committed: it recorded no tests and named the machine and account.
 The gate prints the actual check count, including the earlier 74 checks. New checks use synthetic
 host/sensor records and real registrar, HTTP-handler and SQLite code. No live kernel, socket,
 Falcon tenant, native drain or SOC 2 qualification follows from these tests.
@@ -77,49 +77,33 @@ This environment returns a clear nonzero failure before tests. The focused suite
 an authorized runner where loopback is permitted; the failed preflight is **not a suite pass**.
 
 ```powershell
-$sdk = 'C:\Users\s_pla\AppData\Local\Microsoft\dotnet\dotnet.exe'
+$sdk = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'
 & .\packaging\test-alert-sidecar.ps1 -DotNetPath $sdk
 python -I .\native\splat-agent\validation\test_audit_gaps.py
 & .\packaging\test-focused-regressions.ps1 -DotNetPath $sdk
 ```
 
-- `$sdk` identifies the installed .NET 10 executable; the sandbox redirects `LOCALAPPDATA`.
+- `$sdk` names the installed .NET 10 executable; where a sandbox redirects `LOCALAPPDATA`, set it
+  to that executable's real path.
 - `test-alert-sidecar.ps1` performs a normal warning-gated Release build and in-process checks.
 - `python -I` executes the existing 33 offline native-audit regressions in isolated Python mode.
 - `test-focused-regressions.ps1` requires loopback, then builds with `-m:1` and
   `UseSharedCompilation=false`, then invokes VSTest with `--no-build` and retains TRX/diagnostics.
 
-Git branch creation again failed because `.git` is read-only in this session. No commit or
-push succeeded. The checkout remains on `main`; new feature changes and the previous cleanup
-remain uncommitted. Run the following from an authorized operator shell after reviewing the
-diff and the required test results. These are two separate, path-scoped commits, not a command
-to include all uncommitted work. Stop if another worker has changed any listed file.
+The session that wrote this could not commit, because its `.git` was read-only. On 2026-11-05 its
+changes were committed verbatim, in the two path-scoped commits it proposed, on
+`peer/trusted-admission-registrar` (`d334e5e`, `65c2e40`). The two ignored TRX files were not
+force-added. The branch was then merged with the Falco lease binding (PR #28).
 
-```powershell
-git status --short
-git diff -- docs/DECOUPLED-SENSOR-ENFORCEMENT.md packaging/test-alert-sidecar.ps1
-git switch -c codex/trusted-admission-registrar
-git add -- docs/DECOUPLED-SENSOR-ENFORCEMENT.md packaging/test-alert-sidecar.ps1 docs/FALCON-SIDECAR.md docs/audits/2026-11-05-reconciliation-follow-up.md docs/audits/evidence/2026-11-05-reconciliation/focused-tests.txt docs/audits/evidence/2026-11-05-reconciliation/sidecar-gate.txt docs/audits/evidence/2026-11-05-reconciliation/tests-build.txt docs/audits/evidence/2026-11-05-reconciliation/verification.json
-git add -f -- docs/audits/evidence/2026-11-05-reconciliation/focused-tests.trx
-git diff --cached --check
-git diff --cached
-git commit -m "Document Falcon adapter reconciliation and explicit SDK selection"
-git add -- src/splat-alert-sidecar/AdmissionIdentity.cs src/splat-alert-sidecar/TrustedAdmissionRegistrar.cs src/splat-alert-sidecar/RegistrarChecks.cs src/splat-alert-sidecar/AlertIngress.cs src/splat-alert-sidecar/FalconAdapter.cs src/splat-alert-sidecar/Contract.cs src/splat-alert-sidecar/Latch.cs src/splat-alert-sidecar/SelfTest.cs packaging/test-focused-regressions.ps1 docs/TRUSTED-ADMISSION-REGISTRAR.md docs/audits/evidence/2026-11-05-admission-registrar/sidecar-gate.txt docs/audits/evidence/2026-11-05-admission-registrar/offline-audit.txt docs/audits/evidence/2026-11-05-admission-registrar/vstest-host.txt docs/audits/evidence/2026-11-05-admission-registrar/preflight.txt docs/audits/evidence/2026-11-05-admission-registrar/verification.json
-git add -f -- docs/audits/evidence/2026-11-05-admission-registrar/focused.trx
-git diff --cached --check
-git diff --cached
-git commit -m "Add bounded admission registrar candidate and diagnose VSTest prerequisite"
-git status --short
-```
+On a machine that permits loopback, VSTest connects and the four focused classes run: 77 tests
+pass. The run first exposed two defects that the blocked sandbox could not see. This document
+linked to the uncommitted TRX, which `EveryRelativeLinkInTheDocs_ResolvesOnDisk` caught.
+`test-focused-regressions.ps1` also failed under Windows PowerShell 5.1, for two reasons:
+- `$PSScriptRoot` is empty in a `param()` default under `-File`.
+- `ErrorActionPreference='Stop'` turned any stderr line from `dotnet test` into a terminating
+  error, before the script could report its own diagnosis.
 
-- `status` and both diffs identify the exact shared-tree content being reviewed.
-- `switch -c` creates an in-place branch; it creates no worktree.
-- The first explicit `add` stages only the prior cleanup and its historical evidence.
-- The second explicit `add` stages this registrar implementation, tests, diagnosis and evidence.
-- `diff --cached` is the final review boundary before each `commit`; stop on unexpected content.
-- The two explicit `git add -f` commands retain only the named TRX evidence files, which the general test-output ignore rule otherwise excludes.
-- Neither commit implies native qualification. No push is included. Before any later push,
-  run `git log origin/main..HEAD` as a separate command and inspect it.
+Both are fixed.
 
 ## 3. Identity and descendant topology
 

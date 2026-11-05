@@ -17,7 +17,7 @@ checkout. No remote fetch or push was performed, so this is not a fresh remote-s
 | Falcon operator handoff | Added [FALCON-SIDECAR.md](../FALCON-SIDECAR.md): admission identity, profile fields/hash, offline commands, authenticated route, retry semantics, relay boundary, acceptance criteria and rollback. |
 | Architecture status | Updated [DECOUPLED-SENSOR-ENFORCEMENT.md](../DECOUPLED-SENSOR-ENFORCEMENT.md) to describe the adapter and distinguish the historical 28-check run from the current 74-check gate. |
 | Test project compilation | Separate Debug build passed with zero warnings/errors. [Output](evidence/2026-11-05-reconciliation/tests-build.txt). |
-| Focused .NET regression rerun | **Aborted before tests executed.** VSTest could not connect to testhost within 90 seconds. [Output](evidence/2026-11-05-reconciliation/focused-tests.txt), [TRX](evidence/2026-11-05-reconciliation/focused-tests.trx). No passing regression-suite claim is made for this invocation. |
+| Focused .NET regression rerun | **Aborted before tests executed.** VSTest could not connect to testhost within 90 seconds. [Output](evidence/2026-11-05-reconciliation/focused-tests.txt); the TRX was not committed. No passing regression-suite claim is made for this invocation. |
 | Offline native audit checks | `python -I native/splat-agent/validation/test_audit_gaps.py`: 33 tests passed. These simulate kernel observations; they are not a kernel reproof. |
 | Shipping native proof | Both committed proof records say PASS and name the current LF-normalized BPF source hash, `d5bb4cad4c3397f1e12c0ca7952b10c1b2a2694b777ec84d30266d21b2b0af80`. The records were inspected, not rerun. |
 

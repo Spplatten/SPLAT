@@ -62,16 +62,16 @@ and exponent encodings are rejected. Configuration files and request bodies are 
 ## Build and inspect without dispatch
 
 ```powershell
-$sdk = 'C:\Users\s_pla\AppData\Local\Microsoft\dotnet\dotnet.exe'
+$sdk = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'
 ./packaging/test-alert-sidecar.ps1 -DotNetPath $sdk
 $sidecar = './src/splat-alert-sidecar/bin/Release/net10.0/splat-alert-sidecar.dll'
 & $sdk $sidecar --inspect-falcon-profile ./approved-falcon-profile.json
 & $sdk $sidecar --check-falcon-event ./admission-binding.json ./approved-falcon-profile.json ./sample-event.json
 ```
 
-- `$sdk` identifies the installed .NET 10 executable on this development host; choose the installed
-  SDK path on another machine. `-DotNetPath` handles runners that redirect `LOCALAPPDATA` without
-  silently using the machine-wide .NET 9 SDK or suppressing warnings.
+- `$sdk` names the installed .NET 10 executable; where a runner redirects `LOCALAPPDATA`, set it to
+  that executable's real path. `-DotNetPath` never falls back to the machine-wide .NET 9 SDK or
+  suppresses warnings.
 - `test-alert-sidecar.ps1` builds first, then runs `--self-test`; either failure fails the gate.
 - `$sidecar` names the Release assembly produced by that build.
 - `--inspect-falcon-profile` returns the exact profile hash after syntax checks; it does not approve
@@ -83,7 +83,10 @@ $sidecar = './src/splat-alert-sidecar/bin/Release/net10.0/splat-alert-sidecar.dl
 ## Start an isolated pilot
 
 Provide `SPLAT_ALERT_TOKEN` as a separate base64-encoded 32-byte random secret and
-`SPLAT_A2A_CALLER_TOKEN` as the existing task owner's credential. Supply
+`SPLAT_A2A_CALLER_TOKEN` as the token `splat/RegisterSensor` returns for the bound task
+([sensor registration](A2A-TEMPLATE-BRIDGE.md#sensor-registration)), which reads and cancels that
+task only. The owner's own credential also works, but it can start new work under every skill the
+owner holds. Supply
 `SPLAT_ALERT_CERT_PASSWORD` if the PFX requires it. The listener certificate must validate for
 `127.0.0.1`. A2A peer certificate validation remains enabled; never bypass it to make a pilot work.
 
