@@ -8,6 +8,11 @@ namespace MissionController.Tests;
 /// packaging/test-alert-sidecar.ps1, so an edit that breaks lease attribution, the latch or the
 /// blindness policy fails the build that carries it instead of waiting for someone to run the gate.
 /// </summary>
+// Serial: the self-test races 128 writers against a mailbox whose SQLite busy timeout is one second,
+// as the sidecar's own gate runs it. Beside the rest of the suite's disk traffic a writer once waited
+// longer (2026-11-06, "database is locked"), which in the sidecar is a 503 and a collector retry, not
+// a defect, and in a suite is a red build.
+[Collection(SerialProcessSpawning.Name)]
 public sealed class AlertSidecarSelfTests
 {
     // What ran on 2026-11-06 once the Falco, admission-registrar and cancellation-proof groups were
