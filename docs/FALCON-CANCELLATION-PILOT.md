@@ -107,9 +107,10 @@ Redeploy the updated observer and repin its actual bytes before a pilot run.
 - This check covers the observer alone. A SPLAT lease, A2A cancellation, a signed receipt and a
   sensor event remain the B pilot's.
 
-**First run, 2026-11-06** ([evidence](audits/evidence/2026-11-06-native-witness/first-run.json):
-Ubuntu 26.04.1, kernel 6.18.33.2-microsoft-standard-WSL2, Python 3.14.4). Six of seven scenarios
-passed:
+**First two runs, 2026-11-06**, on separate boots ([first](audits/evidence/2026-11-06-native-witness/first-run.json),
+[second](audits/evidence/2026-11-06-native-witness/second-run.json): Ubuntu 26.04.1, kernel
+6.18.33.2-microsoft-standard-WSL2, Python 3.14.4). Both runs gave the same result, and six of seven
+scenarios passed:
 - The witness accepted both drains.
 - It refused the surviving descendant, the replaced pathname, the stalled control and the recycled
   start time.

@@ -1,0 +1,89 @@
+{
+  "schema": 1,
+  "recordedUtc": "2026-11-06T21:16:33Z",
+  "verdict": "FAIL",
+  "scope": "Witness only: real pidfds and cgroup v2 on this kernel, fixture as uid 65534. No SPLAT lease, A2A, signed receipt or sensor event.",
+  "kernel": "6.18.33.2-microsoft-standard-WSL2",
+  "distro": "Ubuntu 26.04.1 LTS",
+  "python": "3.14.4",
+  "boot": "efad0e11-de59-4337-8f40-2a2459227071",
+  "witnessSha256": "d33c1c6f8204db15ce6a3371ec909d0e18e7c72dfe33ca5b879c959891a6b8a2",
+  "fixtureSha256": "756f25023d3d4721c02ddcddd968df21817a4653e441c16c2713f8d018c6a76f",
+  "removedCgroupProbe": {
+    "eventsThroughHeldFd": "ENOENT",
+    "heldPathMarkedDeleted": true
+  },
+  "scenarios": [
+    {
+      "scenario": "killed cgroup drains",
+      "expect": "accept",
+      "exit": 0,
+      "phases": [
+        "before",
+        "check",
+        "after"
+      ],
+      "refusal": null,
+      "passed": true
+    },
+    {
+      "scenario": "removed cgroup drains",
+      "expect": "accept",
+      "exit": 0,
+      "phases": [
+        "before",
+        "check",
+        "after"
+      ],
+      "refusal": null,
+      "passed": true
+    },
+    {
+      "scenario": "root exits, descendant survives",
+      "expect": "refuse",
+      "exit": 2,
+      "phases": [
+        "before",
+        "check"
+      ],
+      "refusal": "Native witness refused: ValueError",
+      "passed": true
+    },
+    {
+      "scenario": "renamed cgroup keeps a survivor",
+      "expect": "refuse",
+      "harnessError": "PermissionError: [Errno 1] Operation not permitted: '/sys/fs/cgroup/splat_leases/mission_93567312-132d-49d5-b8e9-660047e47f5f' -> '/sys/fs/cgroup/splat_leases/mission_93567312-132d-49d5-b8e9-660047e47f5f_renamed'",
+      "passed": false
+    },
+    {
+      "scenario": "pathname replaced by a new cgroup",
+      "expect": "refuse",
+      "exit": 2,
+      "phases": [
+        "before",
+        "check"
+      ],
+      "refusal": "Native witness refused: ValueError",
+      "passed": true
+    },
+    {
+      "scenario": "control stops progressing",
+      "expect": "refuse",
+      "exit": 2,
+      "phases": [
+        "before",
+        "check"
+      ],
+      "refusal": "Native witness refused: ValueError",
+      "passed": true
+    },
+    {
+      "scenario": "recycled PID: start ticks differ",
+      "expect": "refuse at start",
+      "exit": 2,
+      "phases": [],
+      "refusal": "Native witness refused: ValueError",
+      "passed": true
+    }
+  ]
+}
