@@ -928,12 +928,17 @@ public partial class McpServerHandler
         var violations = new BoundedViolationLog();
         var violationProgress = new SynchronousProgress<LeaseViolationEvent>(violations.Add);
 
-        var execResult = await _leasedExecutor.ExecuteLeasedAsync(
-            lease,
-            command,
-            argv,
-            violations: violationProgress,
-            ct: ct);
+        // Only a bound invocation asks for the installed lease; every other path keeps the original
+        // overload, so an executor or test double that never reports installation behaves as before.
+        var execResult = _agentInstalled is { } onInstalled
+            ? await _leasedExecutor.ExecuteLeasedAsync(lease, command, argv, null, null, violationProgress,
+                new SynchronousProgress<LeaseOutcome>(onInstalled), ct)
+            : await _leasedExecutor.ExecuteLeasedAsync(
+                lease,
+                command,
+                argv,
+                violations: violationProgress,
+                ct: ct);
 
         _agentResult?.Invoke(execResult);
         // Cancellation stops the workload, not the durable account of its final receipt.

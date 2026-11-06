@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
@@ -44,6 +45,17 @@ public sealed class LinuxLeaseSubstrate : IMissionSubstrateSelector
     /// never hands to another lease, where a PID is recycled.
     /// </summary>
     public static string LeaseCgroupPath(Guid missionId) => "/splat_leases/mission_" + missionId.ToString("D");
+
+    /// <summary>
+    /// A bound lease's execution context exactly as it is sent to the daemon, which signs these bytes
+    /// into the receipt. A proof compares strings, so this is the one serialization, not a copy of it.
+    /// </summary>
+    public static string ExecutionContextWire(LeaseExecutionContext context) =>
+        JsonSerializer.Serialize(context, BoundLeaseReceipt.Json);
+
+    /// <summary>The requested execution policy's digest as a bound receipt signs it, or "none".</summary>
+    public static string ExecutionPolicySha256(ExecutionPolicy? policy) =>
+        policy is null ? "none" : BoundLeaseReceipt.Hash(JsonSerializer.Serialize(policy, BoundLeaseReceipt.Json));
 
     private readonly ILeasedExecutor _executor;
     private readonly ITemplatePolicyCompiler _compiler;

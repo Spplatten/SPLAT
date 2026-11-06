@@ -802,6 +802,45 @@ public class WslLeasedExecutorWireTests
     }
 
     /// <summary>
+    /// The LEASE frame's installed-policy digest reaches the caller when the frame arrives, before the
+    /// tool's exit: admission evidence a cancellation proof pins while no receipt exists. A malformed
+    /// digest is dropped, never passed on as evidence.
+    /// </summary>
+    [Theory]
+    [InlineData("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", true)]
+    [InlineData("EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE", false)]
+    [InlineData("eeee", false)]
+    public async Task TheInstalledLeaseIsReported_AsTheFrameArrives_WithOnlyAWellFormedDigest(string digest, bool kept)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var daemon = RunStandInDaemonAsync(
+            listener,
+            "{\"type\":\"LEASE\",\"cgroupId\":4023,\"enforcing\":true,\"workloadUid\":65534,\"effectivePolicySha256\":\"" + digest + "\"}",
+            "{\"type\":\"EXIT\",\"exitCode\":0,\"violationsDropped\":0}");
+
+        var reports = new List<LeaseOutcome>();
+        var executor = new WslLeasedExecutor("127.0.0.1", port, authToken: TestToken, holdGuestAwake: NoGuest);
+        var result = await executor.ExecuteLeasedAsync(SampleLease(), "/bin/sh", new[] { "-c", "ls" },
+            null, null, null, new InlineProgress<LeaseOutcome>(reports.Add));
+
+        await daemon;
+        listener.Stop();
+
+        var installed = Assert.Single(reports);
+        Assert.Equal(4023UL, installed.CgroupId);
+        Assert.Equal(kept ? digest : null, installed.EffectivePolicySha256);
+        Assert.Equal(4023UL, result.Lease!.CgroupId);
+    }
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
+
+    /// <summary>
     /// A daemon that predates the count sends neither field, and the outcome reports unknown rather
     /// than a confident zero - which would be the same defect wearing the other mask.
     /// </summary>

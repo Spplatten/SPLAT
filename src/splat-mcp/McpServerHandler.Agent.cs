@@ -11,14 +11,17 @@ public partial class McpServerHandler
 {
     private LeaseSpec? _agentInvocation;
     private Action<ProcessExecutionResult>? _agentResult;
+    private Action<LeaseOutcome>? _agentInstalled;
 
-    internal void BindAgentInvocation(LeaseSpec lease, Action<ProcessExecutionResult> result)
+    internal void BindAgentInvocation(LeaseSpec lease, Action<ProcessExecutionResult> result,
+        Action<LeaseOutcome>? installed = null)
     {
         if (_agentInvocation is not null || _agent is null || lease.ExecutionContext?.AgentId != _agent.AgentId
             || lease.ExecutionContext.ContractSha256 != _agent.Sha256)
             throw new InvalidOperationException("An invocation must bind this host's approved agent exactly once.");
         _agentInvocation = lease;
         _agentResult = result;
+        _agentInstalled = installed;
     }
     private McpJsonRpcMessage ListAgentTools(McpJsonRpcMessage request)
     {

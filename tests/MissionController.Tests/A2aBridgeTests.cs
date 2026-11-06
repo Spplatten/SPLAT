@@ -257,6 +257,26 @@ public sealed partial class A2aBridgeTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ARunningTaskShowsTheLeaseTheGuestInstalledBeforeAnyReceiptExists()
+    {
+        _executor.Block = true;
+        string id = (await Call("SendMessage", Message(immediate: true))).GetProperty("task").GetProperty("id").GetString()!;
+        await _executor.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var lease = Assert.Single(_executor.Leases);
+        var running = await Call("GetTask", new { id });
+        Assert.Equal("TASK_STATE_WORKING", running.GetProperty("status").GetProperty("state").GetString());
+        // What a cancellation proof pins as admission evidence, read while no receipt exists yet.
+        var installed = Metadata(running).GetProperty("installedLease");
+        Assert.Equal(77UL, installed.GetProperty("cgroupId").GetUInt64());
+        Assert.Equal(new string('e', 64), installed.GetProperty("effectivePolicySha256").GetString());
+        Assert.Equal(LinuxLeaseSubstrate.ExecutionContextWire(lease.ExecutionContext!),
+            Metadata(running).GetProperty("executionContextJson").GetString());
+        Assert.Equal(LinuxLeaseSubstrate.ExecutionPolicySha256(lease.ExecutionPolicy),
+            Metadata(running).GetProperty("executionPolicySha256").GetString());
+        Assert.Equal("TASK_STATE_CANCELED", (await Call("CancelTask", new { id })).GetProperty("status").GetProperty("state").GetString());
+    }
+
+    [Fact]
     public async Task ASensorCredentialReadsAndCancelsItsOneTaskAndNothingElse()
     {
         _executor.Block = true;
@@ -450,6 +470,16 @@ public sealed partial class A2aBridgeTests : IAsyncLifetime
             if (Disconnect) throw new IOException("Synthetic lost daemon connection");
             if (Block) await Task.Delay(Timeout.InfiniteTimeSpan, ct);
             return new ProcessExecutionResult(0, "synthetic local reading", "", false, JobResourceMetrics.Unavailable);
+        }
+
+        // A guest that states its installed lease before the tool runs, as the LEASE frame does.
+        public Task<ProcessExecutionResult> ExecuteLeasedAsync(LeaseSpec lease, string command, IReadOnlyList<string> argv,
+            IProgress<string>? stdout, IProgress<string>? stderr, IProgress<LeaseViolationEvent>? violations,
+            IProgress<LeaseOutcome>? installed, CancellationToken ct = default)
+        {
+            installed?.Report(new LeaseOutcome(77, "/sys/fs/cgroup/splat_leases/mission_" + lease.MissionId.ToString("D"),
+                true, true, false, null, false, null, 200000, EffectivePolicySha256: new string('e', 64)));
+            return ExecuteLeasedAsync(lease, command, argv, stdout, stderr, violations, ct);
         }
     }
 }

@@ -102,13 +102,24 @@ public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
         _holdGuestAwake = holdGuestAwake ?? GuestHold.Acquire;
     }
 
-    public async Task<ProcessExecutionResult> ExecuteLeasedAsync(
+    public Task<ProcessExecutionResult> ExecuteLeasedAsync(
         LeaseSpec lease,
         string command,
         IReadOnlyList<string> argv,
         IProgress<string>? stdout = null,
         IProgress<string>? stderr = null,
         IProgress<LeaseViolationEvent>? violations = null,
+        CancellationToken ct = default)
+        => ExecuteLeasedAsync(lease, command, argv, stdout, stderr, violations, installed: null, ct);
+
+    public async Task<ProcessExecutionResult> ExecuteLeasedAsync(
+        LeaseSpec lease,
+        string command,
+        IReadOnlyList<string> argv,
+        IProgress<string>? stdout,
+        IProgress<string>? stderr,
+        IProgress<LeaseViolationEvent>? violations,
+        IProgress<LeaseOutcome>? installed,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(lease);
@@ -327,7 +338,13 @@ public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
                                 Workspace: root.TryGetProperty("workspace", out var wsp) ? wsp.GetString() : null,
                                 WorkspaceCreated: root.TryGetProperty("workspaceCreated", out var wcp) && wcp.ValueKind == JsonValueKind.True,
                                 WorkspaceRemoved: null,
-                                WorkloadUid: root.TryGetProperty("workloadUid", out var wup) && wup.TryGetUInt32(out uint wuid) ? wuid : null);
+                                WorkloadUid: root.TryGetProperty("workloadUid", out var wup) && wup.TryGetUInt32(out uint wuid) ? wuid : null,
+                                // The installed policy's digest, stated before the tool runs. A bound receipt must
+                                // sign the same one; a cancellation proof pins it from here, never from that receipt.
+                                EffectivePolicySha256: root.TryGetProperty("effectivePolicySha256", out var eps)
+                                    && eps.ValueKind == JsonValueKind.String && eps.GetString() is { Length: 64 } digest
+                                    && digest.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f') ? digest : null);
+                            installed?.Report(outcome);
                             if (limitsRead && root.TryGetProperty("limits", out var lim))
                             {
                                 long? mem = lim.TryGetProperty("maxMemoryBytes", out var m) && m.TryGetInt64(out long memBytes) ? memBytes : null;

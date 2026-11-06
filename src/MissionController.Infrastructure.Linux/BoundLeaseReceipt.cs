@@ -34,6 +34,8 @@ internal static class BoundLeaseReceipt
             || !Equal("workspaceRemoved", outcome.WorkspaceRemoved?.ToString().ToLowerInvariant() ?? "n/a")
             || !Equal("executionContext", context) || !Equal("executionPolicySha256", policy)
             || !Equal("workloadDrained", "true") || !Equal("effectivePolicySha256", Read("effectivePolicySha256"))
+            // A daemon that stated its installed policy at admission must sign that same policy.
+            || outcome.EffectivePolicySha256 is { } admitted && admitted != Read("effectivePolicySha256")
             || !IsHash(Read("effectivePolicySha256")) || Read("executionContext") != context
             || Read("executionPolicySha256") != policy || !frame.GetProperty("workloadDrained").GetBoolean()
             || !Equal("cancellationAccepted", frame.GetProperty("cancellationAccepted").GetBoolean() ? "true" : "false"))
