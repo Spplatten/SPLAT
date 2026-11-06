@@ -116,8 +116,17 @@ scenarios passed:
   start time.
 - The seventh failed in the harness, not the witness: cgroup v2 refused the rename with EPERM.
 
-The harness now records that refusal and still requires the visible survivor to be refused. A
-rerun of the corrected harness is pending.
+The harness now records that refusal and still requires the visible survivor to be refused.
+
+**Corrected harness, 2026-11-06: PASS, 7 of 7**
+([evidence](audits/evidence/2026-11-06-native-witness/third-run.json), a third boot):
+- The kernel again refused the rename (EPERM), and the witness refused the visible survivor.
+- The removed cgroup again showed ENOENT through the held descriptor, with procfs marking it
+  `(deleted)`.
+
+The witness bytes were the committed blob, pinned by SHA-256 `d33c1c6f…`. This proves the
+observer on the real kernel. It is not the B chain: no SPLAT lease, A2A cancellation, signed
+receipt or sensor event was involved.
 
 This exercises loss of the **intake response body**, duplicate intake and durable admission.
 It does not claim a sidecar-crash, power-loss or lost-`CancelTask`-response experiment. Those

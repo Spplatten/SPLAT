@@ -51,7 +51,9 @@ $sdk = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'
   contract tests, 11 process-pipe checks and 33 offline audit tests. The four focused VSTest
   classes pass 77 tests.
 - No shipping daemon/BPF source or enforcement proof was changed.
-- Native pidfd/cgroup execution and the live Falcon pilot have not been run.
+- Later the same day the witness passed on the real kernel, 7 of 7, in the runbook's
+  [native witness check](../FALCON-CANCELLATION-PILOT.md#native-witness-check). The B chain end to
+  end and the live Falcon pilot have not been run.
 
 ## Mapping to the reconciliation gaps
 
