@@ -1,14 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Runs native_witness_run.py as root in a WSL guest: the committed witness against real pidfds and
 # cgroup v2 on the guest kernel. Root is needed only to create, kill and remove the disposable
-# mission cgroups; the fixture inside them runs as uid 65534. Writes one evidence directory.
+# mission cgroups; the fixture inside them runs as uid 65534. Writes one evidence directory under
+# the ignored private/, so a run never leaves untracked files in docs/ to collide with a later pull;
+# evidence worth keeping is committed under docs/audits/evidence/ deliberately.
 [CmdletBinding()]
 param([string]$Distro='Ubuntu', [switch]$DryRun)
 $ErrorActionPreference='Stop'
 $repoRoot=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $stamp=[DateTime]::UtcNow.ToString('yyyyMMddTHHmmss')
 $stage=Join-Path ([IO.Path]::GetTempPath()) "splat-native-witness-$stamp"
-$evidenceDir=Join-Path $repoRoot "docs\audits\evidence\native-witness-$stamp"
+$evidenceDir=Join-Path $repoRoot "private\native-witness-$stamp"
 New-Item -ItemType Directory -Path $stage | Out-Null
 function WslPath([string]$path) {
     $converted=(& wsl.exe -d $Distro -e wslpath -a -u $path.Replace('\','/'))
