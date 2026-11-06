@@ -160,6 +160,20 @@ This is a SPLAT extension, not generic OAuth delegation or an A2A-standard capab
 Immediate issuers can be revoked as `a2a-agent:<agentId>@<contractSha256>`. Transitive federated
 revocation, cross-machine trust provisioning and public remote ingress remain outside this profile.
 
+## Sensor registration
+
+A task's owner calls the SPLAT extension `splat/RegisterSensor` with the live task's `id`. The host
+returns a bearer `token` once, with the task's `leaseCgroup` and `expiresUtc`. That credential reads
+(`GetTask`) and cancels (`CancelTask`) that one task and nothing else: `SendMessage`, `ListTasks`,
+`splat/DelegateTask`, another registration or any other task id answers 403. It is what an alert
+sidecar should hold instead of the owner's credential, which can start new work under every skill
+the owner holds. It expires with the task's authority or the owner's credential, whichever comes
+first; registering again replaces it at once; revoking the owner revokes it, and it can be revoked
+alone as the principal `a2a:<tenant>:<caller>:sensor:<taskId>`, under which the ledger records its
+actions. Registrations are held in memory only: a restart fails every live task without replay, so
+nothing is left for a registration to cancel. `A2aBridgeTests` covers scope, rotation, the audit
+identity and revocation.
+
 ## Community and Corporate
 
 Both editions use the same adapter and containment path. The adapter adds the ASP.NET Core shared

@@ -35,6 +35,9 @@
     <ProjectReference Include="..\..\src\MissionController.Infrastructure.Linux\MissionController.Infrastructure.Linux.csproj" />
     <ProjectReference Include="..\..\src\MissionController.Host\MissionController.Host.csproj" />
     <ProjectReference Include="..\..\src\splat-mcp\splat-mcp.csproj" />
+    <!-- Aliased: the sidecar's top-level statements compile to a global internal Program, which the
+         sidecar's InternalsVisibleTo would let shadow splat-mcp's Program in every test that names it. -->
+    <ProjectReference Include="..\..\src\splat-alert-sidecar\splat-alert-sidecar.csproj" Aliases="sidecar" />
   </ItemGroup>
 
 </Project>

@@ -3,8 +3,15 @@ namespace Splat.AlertSidecar;
 
 internal static class SelfTest
 {
-    // Real parser, SQL transactions and restart recovery. No fabricated vendor/network success.
     internal static int Run()
+    {
+        Console.WriteLine($"PASS {Checks()} checks: binding compatibility, Falcon schema/identity, Falco lease attribution, HTTP admission, freshness, durable recovery and evidence semantics.");
+        return 0;
+    }
+
+    // Real parser, SQL transactions and restart recovery. No fabricated vendor/network success.
+    // Returns how many checks ran, so the suite can tell a dropped check group from a passing one.
+    internal static int Checks()
     {
         int assertions = 0;
         void Check(bool value) { assertions++; if (!value) throw new InvalidOperationException("Assertion " + assertions); }
@@ -65,8 +72,8 @@ internal static class SelfTest
             Check(!b.Matches(a with { Node="other-node" },now));
             Check(!b.Matches(a with { AlertId="event\ninjected" },now));
             FalconChecks.RunAsync(directory,Check).GetAwaiter().GetResult();
-            Console.WriteLine($"PASS {assertions} checks: binding compatibility, Falcon schema/identity, HTTP admission, freshness, durable recovery and evidence semantics.");
-            return 0;
+            FalcoChecks.RunAsync(directory,Check).GetAwaiter().GetResult();
+            return assertions;
         }
         finally { Directory.Delete(directory, recursive:true); }
     }

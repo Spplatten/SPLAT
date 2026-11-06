@@ -81,6 +81,15 @@ public sealed partial class A2aBridgeTests : IAsyncLifetime
         Assert.True(lease.RequireEnforcing);
         Assert.True(lease.EphemeralWorkspace);
         Assert.False(lease.AllowNetwork);
+        // The cgroup a sensor binds to is the one the daemon creates for this lease's mission id.
+        Assert.Equal("/splat_leases/mission_" + lease.MissionId.ToString("D"),
+            Metadata(task).GetProperty("leaseCgroup").GetString());
+        var daemon = new DirectoryInfo(AppContext.BaseDirectory);
+        while (daemon is not null && !File.Exists(Path.Combine(daemon.FullName, "native", "splat-agent", "src", "cgroup.rs")))
+            daemon = daemon.Parent;
+        string cgroups = File.ReadAllText(Path.Combine(daemon!.FullName, "native", "splat-agent", "src", "cgroup.rs"));
+        Assert.Contains("BASE_PATH: &str = \"/sys/fs/cgroup/splat_leases\"", cgroups);
+        Assert.Contains("format!(\"mission_{mission_id}\")", cgroups);
         var audit = await _ledger.GetAuditLogsAsync(null, 30);
         Assert.Contains(audit, row => row.Action == "A2A_TASK_AUTHORIZED" && row.Details.Contains(_approval.Sha256)
             && row.OperatorIdentity.Contains("a2a:tenant-one:alice"));
@@ -248,6 +257,44 @@ public sealed partial class A2aBridgeTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ASensorCredentialReadsAndCancelsItsOneTaskAndNothingElse()
+    {
+        _executor.Block = true;
+        string id = (await Call("SendMessage", Message(immediate: true))).GetProperty("task").GetProperty("id").GetString()!;
+        await _executor.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var registration = await Call("splat/RegisterSensor", new { id });
+        string sensor = registration.GetProperty("token").GetString()!;
+        Assert.Equal("/splat_leases/mission_" + Assert.Single(_executor.Leases).MissionId.ToString("D"),
+            registration.GetProperty("leaseCgroup").GetString());
+
+        // Whatever its owner may do, the sensor reads and cancels this one task and nothing else.
+        foreach (var (method, parameters) in new (string, object)[]
+        {
+            ("SendMessage", Message()), ("ListTasks", new { }), ("splat/RegisterSensor", new { id }),
+            ("splat/DelegateTask", new { parentTaskId = id }), ("GetTask", new { id = Guid.NewGuid().ToString("N") }),
+            ("CancelTask", new { id = Guid.NewGuid().ToString("N") })
+        })
+            Assert.Equal(403, (await Assert.ThrowsAsync<A2aException>(() => Call(method, parameters, sensor))).HttpStatus);
+        await Assert.ThrowsAsync<A2aException>(() => Call("splat/RegisterSensor", new { id }, OtherTenantToken));
+        Assert.Equal(id, (await Call("GetTask", new { id }, sensor)).GetProperty("id").GetString());
+
+        // A new registration replaces the old credential at once.
+        string rotated = (await Call("splat/RegisterSensor", new { id })).GetProperty("token").GetString()!;
+        Assert.Null(_bridge.Authenticate("Bearer " + sensor));
+        var canceled = await Call("CancelTask", new { id }, rotated);
+        Assert.Equal("TASK_STATE_CANCELED", canceled.GetProperty("status").GetProperty("state").GetString());
+        Assert.Single(_executor.Leases);
+        var audit = await _ledger.GetAuditLogsAsync(null, 50);
+        Assert.Equal(2, audit.Count(r => r.Action == "A2A_SENSOR_REGISTERED" && r.Details.Contains(id)));
+        Assert.Contains(audit, r => r.Action == "A2A_CANCEL_REQUESTED" && r.OperatorIdentity.Contains("a2a:tenant-one:alice:sensor:" + id));
+
+        // A finished task takes no new sensor, and revoking the owner revokes the sensor it registered.
+        Assert.Equal(-32002, (await Assert.ThrowsAsync<A2aException>(() => Call("splat/RegisterSensor", new { id }))).Code);
+        await _revocations.RevokeAsync(Caller().Identity.ToLedgerIdentity(), "agent", "test revocation", "operator");
+        Assert.Equal(403, (await Assert.ThrowsAsync<A2aException>(() => Call("GetTask", new { id }, rotated))).HttpStatus);
+    }
+
+    [Fact]
     public void InvalidConfigurationCannotExpandTheApprovedAuthority()
     {
         var wrongVersion = _config with { AgentVersion = new string('0', 64) };
@@ -259,6 +306,9 @@ public sealed partial class A2aBridgeTests : IAsyncLifetime
         var duplicatePrincipal = _config with { Callers = [_config.Callers[0], _config.Callers[0] with { TokenSha256 = _config.Callers[1].TokenSha256 }] };
         Assert.Throws<InvalidOperationException>(duplicatePrincipal.Validate);
         Assert.Throws<InvalidOperationException>(() => (_config with { MaxConcurrentTasks = 0 }).Validate());
+        // Only the bridge issues a task-scoped credential; configuration cannot declare one.
+        var scoped = _config with { Callers = [_config.Callers[0] with { TaskScope = Guid.NewGuid().ToString("N") }] };
+        Assert.Throws<InvalidOperationException>(scoped.Validate);
         Assert.Empty(_executor.Leases);
     }
 

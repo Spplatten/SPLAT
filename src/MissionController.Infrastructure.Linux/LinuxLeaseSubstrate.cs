@@ -35,6 +35,16 @@ public sealed class LinuxLeaseSubstrate : IMissionSubstrateSelector
     /// <summary>Where the daemon makes each mission's workspace, unless the host names another root.</summary>
     public const string DefaultMissionsRoot = "/var/lib/splat/missions";
 
+    /// <summary>
+    /// The guest cgroup holding a lease's workload, relative to the cgroup v2 root. The daemon creates
+    /// it exclusively as <c>mission_{missionId}</c> under <c>/sys/fs/cgroup/splat_leases</c>
+    /// (native/splat-agent/src/cgroup.rs) from the id <see cref="WslLeasedExecutor"/> sends, and an
+    /// enforcing daemon refuses to run a lease without it. Every descendant inherits it and the
+    /// unprivileged workload cannot leave it, so it names the whole process tree by a GUID the kernel
+    /// never hands to another lease, where a PID is recycled.
+    /// </summary>
+    public static string LeaseCgroupPath(Guid missionId) => "/splat_leases/mission_" + missionId.ToString("D");
+
     private readonly ILeasedExecutor _executor;
     private readonly ITemplatePolicyCompiler _compiler;
     private readonly string _missionsRoot;
