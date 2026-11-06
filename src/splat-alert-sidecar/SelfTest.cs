@@ -5,7 +5,7 @@ internal static class SelfTest
 {
     internal static int Run()
     {
-        Console.WriteLine($"PASS {Checks()} checks: binding compatibility, Falcon schema/identity, Falco lease attribution, admission registrar, HTTP admission, freshness, durable recovery and evidence semantics.");
+        Console.WriteLine($"PASS {Checks()} checks: binding compatibility, Falcon schema/identity, Falco lease attribution, admission registrar, cancellation proof, HTTP admission, freshness, durable recovery and evidence semantics.");
         return 0;
     }
 
@@ -74,6 +74,7 @@ internal static class SelfTest
             FalconChecks.RunAsync(directory,Check).GetAwaiter().GetResult();
             FalcoChecks.RunAsync(directory,Check).GetAwaiter().GetResult();
             RegistrarChecks.RunAsync(directory,Check).GetAwaiter().GetResult();
+            PilotProofChecks.Run(directory,Check);
             return assertions;
         }
         finally { Directory.Delete(directory, recursive:true); }

@@ -1,0 +1,11 @@
+{
+  "recordedUtc": "2026-11-06T18:28:53.2586697Z",
+  "focusedVSTest": "BLOCKED before test execution: loopback TCP 10013",
+  "nativeExperiment": "NOT_RUN: Wsl/E_ACCESSDENIED",
+  "liveFalconPilot": "NOT_RUN: authorized deployment and fresh tenant event unavailable",
+  "gitCommit": "NOT_CREATED: Git metadata writes denied",
+  "logSha256": {
+    "loopback-preflight.txt": "b37e28de2c7321ae13f36c588bd54d8bb5afe6c12f8f85d84d4c8fe73f530600",
+    "wsl-preflight.json": "63974abf5dddb2a4c31aab7e411188afd08a2cb2b43eaed9abd3cb2b846d76e2"
+  }
+}
