@@ -3,9 +3,11 @@
 param(
     [string]$DotNetPath=(Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'),
     [string]$PythonPath='python',
-    [string]$ResultsDirectory=(Join-Path $PSScriptRoot ('..\private\falcon-local-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfff')))
+    [string]$ResultsDirectory
 )
 $ErrorActionPreference='Stop'
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty in a param() default under -File.
+if (-not $ResultsDirectory) { $ResultsDirectory=Join-Path $PSScriptRoot ('..\private\falcon-local-' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfff')) }
 $repoRoot=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 if (Test-Path -LiteralPath $ResultsDirectory) { throw 'Use a new results directory; existing evidence is never overwritten.' }
 $sdkVersion=& $DotNetPath --version

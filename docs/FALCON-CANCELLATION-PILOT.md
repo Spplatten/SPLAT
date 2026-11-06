@@ -133,14 +133,18 @@ These are deployment inputs, not example credentials or fabricated measured iden
 
 `binding.json` and `profile.json` use the existing [Falcon operator contract](FALCON-SIDECAR.md).
 `event.json` contains the original fresh vendor event, or a clearly labeled synthetic B control.
-Configure `SPLAT_ALERT_TOKEN` and `SPLAT_A2A_CALLER_TOKEN` in the operator process environment;
-they are not plan fields and are never copied into evidence. The current A2A credential retains
-its existing scope; this work does not create a cancellation-only credential.
+Configure `SPLAT_ALERT_TOKEN` and `SPLAT_A2A_CALLER_TOKEN` in each process's environment; they
+are not plan fields and are never copied into evidence.
+- Give the sidecar the token that `splat/RegisterSensor` returns for the target task
+  ([sensor registration](A2A-TEMPLATE-BRIDGE.md#sensor-registration)). That token reads and
+  cancels that one task only.
+- `--run-falcon-pilot` reads both the target and the control task, which a target-scoped token
+  cannot do, so run it with the owner's credential. It calls only `GetTask`.
 
 ## Commands
 
 ```powershell
-$sdk = 'C:\Users\s_pla\AppData\Local\Microsoft\dotnet\dotnet.exe'
+$sdk = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'
 & .\packaging\test-falcon-pilot.ps1 -DotNetPath $sdk
 $sidecar = '.\src\splat-alert-sidecar\bin\Release\net10.0\splat-alert-sidecar.dll'
 & $sdk $sidecar --inspect-pilot-context .\control-context.json

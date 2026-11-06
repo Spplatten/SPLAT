@@ -20,6 +20,7 @@ if (args.Length is not (3 or 4))
     Console.Error.WriteLine("Proof: --verify-cancellation <expectation.json> <task.json>; --inspect-pilot-context <context.json>");
     Console.Error.WriteLine("Pilot: --run-falcon-pilot <plan.json> <binding.json> <profile.json> <event.json> <new-output-directory>");
     Console.Error.WriteLine("Offline: --check-falcon-pilot <plan.json> <binding.json> <profile.json> <event.json>");
+    Console.Error.WriteLine("Falco: --check-falco-event <binding.json> <event.json>");
     return 2;
 }
 try
