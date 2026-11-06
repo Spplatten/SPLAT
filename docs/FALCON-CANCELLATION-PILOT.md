@@ -10,22 +10,22 @@ and progress by an unrelated control workload after cancellation.
 | --- | --- | --- |
 | Independent receipt verification | [CancellationReceiptProof.cs](../src/splat-alert-sidecar/CancellationReceiptProof.cs) | Real RSA signature tests against synthetic receipt fixtures; not a native execution result. |
 | Live cancellation/pilot runner | [FalconPilot.cs](../src/splat-alert-sidecar/FalconPilot.cs) | Compiled; no live HTTP/native run in this environment. Requires real deployment inputs. |
-| Native observer | [witness.py](../native/experiments/alert-cancellation/witness.py) | Python syntax and portable contract/parser tests passed; pidfd/cgroup execution remains unproven. |
+| Native observer | [witness.py](../native/experiments/alert-cancellation/witness.py) | Python syntax and portable contract/parser tests passed; pidfd/cgroup execution remains unproven until the [native witness check](#native-witness-check) runs. |
 | Harmless workload fixture | [workload_fixture.py](../native/experiments/alert-cancellation/workload_fixture.py) | Bounded target/descendant/control roles supplied; not executed under a lease here. |
 | Regression evidence | [Current closure manifest](audits/evidence/2026-11-06-falcon-closure/verification.json); [initial harness manifest](audits/evidence/falcon-cancellation-pilot/verification.json) | Names exact source/log hashes and actual gate counts. Initial evidence is historical, not proof of later bytes. |
 
-Option A was preserved in commits `d334e5e` and `65c2e40` on
-`peer/trusted-admission-registrar`; `main` remained at `35258c5`. The 23 text files from that
-snapshot were restored to the working tree, without changing the Git index or branch, after
-`git restore` could not create its index lock. New B/C work is layered on those files. No merge,
-commit or push succeeded in this session. The Option A deployment limits remain unchanged:
-the CLI still uses a manually supplied root-process binding, not an automatic native registrar.
+Option A (`d334e5e`, `65c2e40`) and this B/C work (`c385cf9`) were written in a session that
+could not commit. They were committed verbatim and merged to `main` with PRs #28 and #29 on
+2026-11-06. The Option A deployment limits are unchanged: the CLI still uses a manually
+supplied root-process binding, not an automatic native registrar.
 
 **B is implemented as a proof harness, not yet demonstrated end to end. C is prepared for a live
-pilot, not completed.** WSL returns `Wsl/E_ACCESSDENIED`, and the loopback preflight returns
-socket error 10013. No Falcon/LogScale credentials are configured in this session. Discovery
-found no available CrowdStrike connector. No tenant event, detection rule, subscription or
-vendor connection was fabricated or modified.
+pilot, not completed.** The writing session saw `Wsl/E_ACCESSDENIED` and loopback socket error
+10013. On a machine without those limits, the local gates and the focused tests pass (see the
+[closure audit](audits/2026-11-06-falcon-closure.md)). No Falcon/LogScale credentials are
+configured, and the connector registry offers no CrowdStrike connector, so C needs an operator
+with an authorized tenant. No tenant event, detection rule, subscription or vendor connection was
+fabricated or modified.
 
 ## B: proof sequence and failure semantics
 
@@ -68,6 +68,35 @@ and a still-absent original pathname. Permission errors, renamed handles and rep
 fail closed. These branches have injected-OS regression tests; their behavior on the deployed
 kernel remains unproven until the native run. Redeploy the updated observer and repin its actual
 bytes before that run.
+
+### Native witness check
+
+```powershell
+& .\packaging\run-native-witness.ps1 -DryRun
+& .\packaging\run-native-witness.ps1
+```
+
+- `-DryRun` stages the committed `witness.py` and `workload_fixture.py`, proves each staged file
+  is the committed blob, and maps every path in the guest. Nothing runs as root.
+- Without it, the script runs
+  [native_witness_run.py](../native/experiments/alert-cancellation/native_witness_run.py) as root
+  in a WSL guest. The default guest is `Ubuntu`: every WSL2 distribution shares the SPLAT Guest's
+  kernel, and `-Distro` selects another.
+- The fixture runs as uid 65534, born inside disposable mission cgroups. The harness drives the
+  witness through its real stdin protocol.
+  - The witness must accept a killed cgroup, and a killed cgroup that was then removed.
+  - It must refuse all of these:
+    - a surviving descendant
+    - a renamed cgroup that still holds a survivor
+    - a pathname replaced by a new cgroup
+    - a stalled control
+    - a recycled start time
+- It records what this kernel serves through a held descriptor once its cgroup is removed. It
+  writes `docs/audits/evidence/native-witness-<time>/evidence.json` and touches no cgroup it did
+  not create.
+- Root is needed only to create, kill and remove those cgroups.
+- This check covers the observer alone. A SPLAT lease, A2A cancellation, a signed receipt and a
+  sensor event remain the B pilot's.
 
 This exercises loss of the **intake response body**, duplicate intake and durable admission.
 It does not claim a sidecar-crash, power-loss or lost-`CancelTask`-response experiment. Those
