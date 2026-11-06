@@ -1,0 +1,38 @@
+test_failed_manifest_has_nonzero_driver_exit (__main__.DriverVerdictTests.test_failed_manifest_has_nonzero_driver_exit) ... ok
+test_matching_pass_manifests_have_zero_exit (__main__.DriverVerdictTests.test_matching_pass_manifests_have_zero_exit) ... ok
+test_audit_extension_no_longer_accepted (__main__.LifetimeTests.test_audit_extension_no_longer_accepted) ... ok
+test_authority_mints_exact_deadline (__main__.LifetimeTests.test_authority_mints_exact_deadline) ... ok
+test_authority_refuses_invalid_or_overflowing_inputs (__main__.LifetimeTests.test_authority_refuses_invalid_or_overflowing_inputs) ... ok
+test_b2_still_compares_writer_bytes (__main__.LifetimeTests.test_b2_still_compares_writer_bytes) ... ok
+test_clock_before_approval_is_refused (__main__.LifetimeTests.test_clock_before_approval_is_refused) ... ok
+test_duplicate_json_keys_refused (__main__.LifetimeTests.test_duplicate_json_keys_refused) ... ok
+test_epoch_is_recorded_without_becoming_deadline_high_bits (__main__.LifetimeTests.test_epoch_is_recorded_without_becoming_deadline_high_bits) ... ok
+test_even_one_nanosecond_change_is_refused (__main__.LifetimeTests.test_even_one_nanosecond_change_is_refused) ... ok
+test_exact_deadline_control (__main__.LifetimeTests.test_exact_deadline_control) ... ok
+test_exec_overgrant_and_missing_protection_still_refused (__main__.LifetimeTests.test_exec_overgrant_and_missing_protection_still_refused) ... ok
+test_expiry_boundary_is_refused (__main__.LifetimeTests.test_expiry_boundary_is_refused) ... ok
+test_expiry_during_gate_validation_refused_and_recorded (__main__.LifetimeTests.test_expiry_during_gate_validation_refused_and_recorded) ... ok
+test_inconsistent_start_duration_deadline_refused (__main__.LifetimeTests.test_inconsistent_start_duration_deadline_refused) ... ok
+test_invalid_lifetime_fields_are_refused (__main__.LifetimeTests.test_invalid_lifetime_fields_are_refused) ... ok
+test_missing_or_wrong_clock_is_refused (__main__.LifetimeTests.test_missing_or_wrong_clock_is_refused) ... ok
+test_old_or_malformed_lease_layout_is_refused (__main__.LifetimeTests.test_old_or_malformed_lease_layout_is_refused) ... ok
+test_two_pass_capture_still_detects_mutation (__main__.LifetimeTests.test_two_pass_capture_still_detects_mutation) ... ok
+test_wrong_boot_and_mission_are_refused (__main__.LifetimeTests.test_wrong_boot_and_mission_are_refused) ... ok
+test_btf_deadline_is_selected_by_name_not_field_order (__main__.ProbeLayoutTests.test_btf_deadline_is_selected_by_name_not_field_order) ... ok
+test_counter_scalar_is_unchanged (__main__.ProbeLayoutTests.test_counter_scalar_is_unchanged) ... ok
+test_raw_deadline_ignores_epoch_word (__main__.ProbeLayoutTests.test_raw_deadline_ignores_epoch_word) ... ok
+test_wrong_lease_layout_is_refused (__main__.ProbeLayoutTests.test_wrong_lease_layout_is_refused) ... ok
+test_foreign_program_still_refused (__main__.ProgramIdentityTests.test_foreign_program_still_refused) ... ok
+test_missing_observed_tag_refused (__main__.ProgramIdentityTests.test_missing_observed_tag_refused) ... ok
+test_missing_or_malformed_profile_tag_refused (__main__.ProgramIdentityTests.test_missing_or_malformed_profile_tag_refused) ... ok
+test_reviewed_programs_admitted (__main__.ProgramIdentityTests.test_reviewed_programs_admitted) ... ok
+test_same_name_different_exec_tag_refused (__main__.ProgramIdentityTests.test_same_name_different_exec_tag_refused) ... ok
+test_same_name_different_open_tag_refused (__main__.ProgramIdentityTests.test_same_name_different_open_tag_refused) ... ok
+test_unreviewed_shipped_profile_refuses_admission (__main__.ProgramIdentityTests.test_unreviewed_shipped_profile_refuses_admission) ... ok
+test_missing_cpu_statistics_do_not_report_zero (__main__.TraceEvidenceTests.test_missing_cpu_statistics_do_not_report_zero) ... ok
+test_raw_cpu_statistics_are_saved_with_derived_total (__main__.TraceEvidenceTests.test_raw_cpu_statistics_are_saved_with_derived_total) ... ok
+
+----------------------------------------------------------------------
+Ran 33 tests in 1.482s
+
+OK

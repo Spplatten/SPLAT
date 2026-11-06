@@ -1,0 +1,5 @@
+{
+  "exitCode": -1,
+  "output": "Access is denied. \r\n\r\nError code: Wsl/E_ACCESSDENIED",
+  "command": "wsl.exe --list --quiet"
+}

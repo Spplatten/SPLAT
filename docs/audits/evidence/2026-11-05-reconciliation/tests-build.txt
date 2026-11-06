@@ -1,0 +1,16 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  MissionController.Core -> C:\C_AGENT_BUILDER\src\MissionController.Core\bin\Debug\net10.0\MissionController.Core.dll
+  MissionController.Infrastructure.Windows -> C:\C_AGENT_BUILDER\src\MissionController.Infrastructure.Windows\bin\Debug\net10.0-windows\MissionController.Infrastructure.Windows.dll
+  MissionController.Infrastructure.Network -> C:\C_AGENT_BUILDER\src\MissionController.Infrastructure.Network\bin\Debug\net10.0\MissionController.Infrastructure.Network.dll
+  MissionController.Infrastructure.Data -> C:\C_AGENT_BUILDER\src\MissionController.Infrastructure.Data\bin\Debug\net10.0\MissionController.Infrastructure.Data.dll
+  MissionController.Infrastructure.Linux -> C:\C_AGENT_BUILDER\src\MissionController.Infrastructure.Linux\bin\Debug\net10.0\MissionController.Infrastructure.Linux.dll
+  MissionController.Host -> C:\C_AGENT_BUILDER\src\MissionController.Host\bin\Debug\net10.0\MissionController.Host.dll
+  splat-mcp -> C:\C_AGENT_BUILDER\src\splat-mcp\bin\Debug\net10.0-windows\splat-mcp.dll
+  MissionController.Tests -> C:\C_AGENT_BUILDER\tests\MissionController.Tests\bin\Debug\net10.0-windows\MissionController.Tests.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:38.68
