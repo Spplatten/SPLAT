@@ -410,7 +410,7 @@ internal sealed partial class A2aBridge : IAsyncDisposable
             finally { work.Gate.Release(); }
             var handler = _handler(caller);
             handler.BindAgentInvocation(work.Record.AdmittedLease!, result =>
-                work.Drained = result.Lease?.WorkloadDrained == true);
+                work.Drained = result.Lease?.WorkloadDrained == true, installed => RecordInstalled(work, installed));
             var response = await handler.ProcessMessageAsync(new McpJsonRpcMessage
             {
                 Id = JsonSerializer.SerializeToElement(work.Record.Id), Method = "tools/call",
@@ -466,6 +466,20 @@ internal sealed partial class A2aBridge : IAsyncDisposable
             }
         }
         finally { Interlocked.Decrement(ref _running); work.Gate.Release(); }
+    }
+
+    // Runs on the executor's frame reader as the workload starts. Dispatch releases the gate before the
+    // tool runs, so this waits only on a concurrent cancel's brief bookkeeping, never on the execution.
+    private void RecordInstalled(Work work, LeaseOutcome lease)
+    {
+        work.Gate.Wait();
+        try
+        {
+            work.Record = work.Record with { InstalledLease = new A2aInstalledLease(lease.CgroupId, lease.CgroupPath,
+                lease.Enforcing, lease.EffectivePolicySha256) };
+            _store.Save(work.Record);
+        }
+        finally { work.Gate.Release(); }
     }
 
     private Task Audit(A2aCaller caller, A2aTaskRecord record, string action, CancellationToken ct) =>
@@ -530,7 +544,14 @@ internal sealed partial class A2aBridge : IAsyncDisposable
             executionContext = record.AdmittedLease?.ExecutionContext, failure = record.Failure,
             // Lets an out-of-band sensor's alert be attributed to this task by the cgroup it fired in,
             // which SPLAT states, rather than by a PID the caller would have to guess at.
-            leaseCgroup = record.AdmittedLease is { } admitted ? LinuxLeaseSubstrate.LeaseCgroupPath(admitted.MissionId) : null
+            leaseCgroup = record.AdmittedLease is { } admitted ? LinuxLeaseSubstrate.LeaseCgroupPath(admitted.MissionId) : null,
+            // Admission evidence a cancellation proof pins before any receipt exists: the exact context
+            // bytes and requested-policy digest this host sent, and what the guest says it installed.
+            // A receipt is checked against these, never the other way round.
+            executionContextJson = record.AdmittedLease?.ExecutionContext is { } context
+                ? LinuxLeaseSubstrate.ExecutionContextWire(context) : null,
+            executionPolicySha256 = record.AdmittedLease is { } bound ? LinuxLeaseSubstrate.ExecutionPolicySha256(bound.ExecutionPolicy) : null,
+            installedLease = record.InstalledLease
         } }
     };
     private static bool Terminal(string state) => state is "TASK_STATE_COMPLETED" or "TASK_STATE_FAILED" or "TASK_STATE_CANCELED" or "TASK_STATE_REJECTED";
