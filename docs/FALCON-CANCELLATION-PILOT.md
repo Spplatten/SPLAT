@@ -10,7 +10,7 @@ and progress by an unrelated control workload after cancellation.
 | --- | --- | --- |
 | Independent receipt verification | [CancellationReceiptProof.cs](../src/splat-alert-sidecar/CancellationReceiptProof.cs) | Real RSA signature tests against synthetic receipt fixtures; not a native execution result. |
 | Live cancellation/pilot runner | [FalconPilot.cs](../src/splat-alert-sidecar/FalconPilot.cs) | Compiled; no live HTTP/native run in this environment. Requires real deployment inputs. |
-| Native observer | [witness.py](../native/experiments/alert-cancellation/witness.py) | Python syntax and portable contract/parser tests passed; pidfd/cgroup execution remains unproven until the [native witness check](#native-witness-check) runs. |
+| Native observer | [witness.py](../native/experiments/alert-cancellation/witness.py) | Python syntax and portable contract/parser tests passed. On the real kernel (2026-11-06), the [native witness check](#native-witness-check) saw it accept both drains and refuse every constructible bypass. Not yet run inside a SPLAT lease. |
 | Harmless workload fixture | [workload_fixture.py](../native/experiments/alert-cancellation/workload_fixture.py) | Bounded target/descendant/control roles supplied; not executed under a lease here. |
 | Regression evidence | [Current closure manifest](audits/evidence/2026-11-06-falcon-closure/verification.json); [initial harness manifest](audits/evidence/falcon-cancellation-pilot/verification.json) | Names exact source/log hashes and actual gate counts. Initial evidence is historical, not proof of later bytes. |
 
@@ -65,9 +65,15 @@ A missing cgroup pathname alone is insufficient drain evidence. The observer rea
 relative to the retained directory descriptor. If kernfs has removed the interface, it requires
 an ENOENT/ENODEV result, the retained descriptor's original pathname marked deleted by procfs,
 and a still-absent original pathname. Permission errors, renamed handles and replacement paths
-fail closed. These branches have injected-OS regression tests; their behavior on the deployed
-kernel remains unproven until the native run. Redeploy the updated observer and repin its actual
-bytes before that run.
+fail closed. These branches have injected-OS regression tests. On kernel
+6.18.33.2-microsoft-standard-WSL2, the [native witness check](#native-witness-check) observed two
+things:
+- **Removal:** once the cgroup is removed, reading `cgroup.events` through the held descriptor
+  returns ENOENT, and procfs marks the descriptor's path `(deleted)`.
+- **Rename:** cgroup v2 refuses to rename the directory (EPERM). So a renamed handle that still
+  has survivors cannot arise there, and the witness's rename defense is depth, not the main barrier.
+
+Redeploy the updated observer and repin its actual bytes before a pilot run.
 
 ### Native witness check
 
@@ -87,16 +93,31 @@ bytes before that run.
   - The witness must accept a killed cgroup, and a killed cgroup that was then removed.
   - It must refuse all of these:
     - a surviving descendant
-    - a renamed cgroup that still holds a survivor
+    - a rename that would hide a survivor (cgroup v2 refuses the rename, so the survivor stays
+      visible and must still be refused)
     - a pathname replaced by a new cgroup
     - a stalled control
     - a recycled start time
-- It records what this kernel serves through a held descriptor once its cgroup is removed. It
-  writes `docs/audits/evidence/native-witness-<time>/evidence.json` and touches no cgroup it did
-  not create.
+- It records what this kernel serves through a held descriptor once its cgroup is removed, and
+  whether it allows a rename. It writes `private/native-witness-<time>/evidence.json`, under the
+  ignored `private/`, so a run leaves nothing in `docs/` to collide with a later pull. Commit
+  evidence worth keeping under `docs/audits/evidence/`. The harness touches no cgroup it did not
+  create.
 - Root is needed only to create, kill and remove those cgroups.
 - This check covers the observer alone. A SPLAT lease, A2A cancellation, a signed receipt and a
   sensor event remain the B pilot's.
+
+**First two runs, 2026-11-06**, on separate boots ([first](audits/evidence/2026-11-06-native-witness/first-run.json),
+[second](audits/evidence/2026-11-06-native-witness/second-run.json): Ubuntu 26.04.1, kernel
+6.18.33.2-microsoft-standard-WSL2, Python 3.14.4). Both runs gave the same result, and six of seven
+scenarios passed:
+- The witness accepted both drains.
+- It refused the surviving descendant, the replaced pathname, the stalled control and the recycled
+  start time.
+- The seventh failed in the harness, not the witness: cgroup v2 refused the rename with EPERM.
+
+The harness now records that refusal and still requires the visible survivor to be refused. A
+rerun of the corrected harness is pending.
 
 This exercises loss of the **intake response body**, duplicate intake and durable admission.
 It does not claim a sidecar-crash, power-loss or lost-`CancelTask`-response experiment. Those

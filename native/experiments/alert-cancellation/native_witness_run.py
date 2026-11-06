@@ -96,7 +96,16 @@ class Lease:
 
     def rename(self):
         moved = self.path + "_renamed"
-        os.rename(self.path, moved)
+        try:
+            os.rename(self.path, moved)
+        except PermissionError:
+            # cgroup v2 has no rename operation and kernfs answers EPERM (first native run,
+            # 2026-11-06): a survivor cannot be hidden behind a new name at all. The scenario then
+            # still checks that the visible survivor is refused; the witness's own rename defense
+            # is exercised wherever a kernel allows the rename.
+            self.run.facts["cgroupRename"] = "EPERM"
+            return
+        self.run.facts["cgroupRename"] = "allowed"
         self.run.owned[self.run.owned.index(self.path)] = moved
 
     def replace(self):
@@ -109,6 +118,7 @@ class Run:
     def __init__(self, witness, fixture):
         self.owned = []
         self.procs = []
+        self.facts = {}
         self.created_base = False
         self.deploy = tempfile.mkdtemp(prefix="splat-witness-", dir="/run")
         os.chmod(self.deploy, 0o755)
@@ -218,7 +228,7 @@ def main():
         ("killed cgroup drains", "accept", lambda t, c: t.drain(), None),
         ("removed cgroup drains", "accept", None, None),
         ("root exits, descendant survives", "refuse", lambda t, c: t.kill_root(), None),
-        ("renamed cgroup keeps a survivor", "refuse", lambda t, c: (t.rename(), t.kill_root()), None),
+        ("rename cannot hide a survivor", "refuse", lambda t, c: (t.rename(), t.kill_root()), None),
         ("pathname replaced by a new cgroup", "refuse", lambda t, c: (t.drain(), t.remove(), t.replace()), None),
         ("control stops progressing", "refuse", lambda t, c: (os.kill(c.identity["pid"], signal.SIGSTOP), t.drain()), None),
         ("recycled PID: start ticks differ", "refuse at start", lambda t, c: None,
@@ -260,7 +270,7 @@ def main():
                  "No SPLAT lease, A2A, signed receipt or sensor event.",
         "kernel": platform.release(), "distro": distro.strip('"'), "python": platform.python_version(),
         "boot": run.boot, "witnessSha256": run.witness_sha, "fixtureSha256": run.fixture_sha,
-        "removedCgroupProbe": probe, "scenarios": results,
+        "removedCgroupProbe": probe, "kernelFacts": run.facts, "scenarios": results,
     }
     with open(evidence, "w", encoding="utf-8") as stream:
         json.dump(record, stream, indent=2)
