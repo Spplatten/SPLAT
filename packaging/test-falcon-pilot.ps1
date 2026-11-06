@@ -37,7 +37,7 @@ try {
     Run-Gate 'witness-contract' $python @('-I','native/experiments/alert-cancellation/test_witness.py')
     Run-Gate 'witness-wire' $DotNetPath @($assembly,'--self-test-witness-wire',$python,(Join-Path $repoRoot 'native/experiments/alert-cancellation/test_witness.py'))
     Run-Gate 'offline-audit' $python @('-I','native/splat-agent/validation/test_audit_gaps.py')
-    Run-Gate 'python-syntax' $python @('-I','-m','py_compile','native/experiments/alert-cancellation/witness.py','native/experiments/alert-cancellation/workload_fixture.py')
+    Run-Gate 'python-syntax' $python @('-I','-m','py_compile','native/experiments/alert-cancellation/witness.py','native/experiments/alert-cancellation/workload_fixture.py','native/experiments/alert-cancellation/native_witness_run.py')
     $sources=[ordered]@{}
     $sourcePaths=@(Get-ChildItem -LiteralPath 'src/splat-alert-sidecar' -File | Where-Object { $_.Extension -in '.cs','.csproj' })
     $sourcePaths+=@(Get-ChildItem -LiteralPath 'native/experiments/alert-cancellation' -Filter '*.py' -File)
