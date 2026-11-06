@@ -66,6 +66,7 @@ internal static class SelfTest
             Check(!b.Matches(a with { AlertId="event\ninjected" },now));
             FalconChecks.RunAsync(directory,Check).GetAwaiter().GetResult();
             RegistrarChecks.RunAsync(directory,Check).GetAwaiter().GetResult();
+            PilotProofChecks.Run(directory,Check);
             Console.WriteLine($"PASS {assertions} checks: binding compatibility, Falcon schema/identity, HTTP admission, freshness, durable recovery and evidence semantics.");
             return 0;
         }

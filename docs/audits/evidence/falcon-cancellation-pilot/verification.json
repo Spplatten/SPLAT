@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "recorded_utc": "2026-11-06T04:09:18.0937359Z",
+  "base_commit": "35258c586c431a50d0eaf2a9195458aa307ddaea",
+  "registrar_snapshot": "65c2e40dd931cd91ccd5a4b7741f53eea89f4925",
+  "scope": "B cancellation proof harness and C Falcon pilot runner; local tests only",
+  "build": {
+    "configuration": "Release",
+    "command": "packaging/test-alert-sidecar.ps1 -DotNetPath C:/Users/s_pla/AppData/Local/Microsoft/dotnet/dotnet.exe",
+    "assembly_sha256": "3f27f6db8c4123286b96b77bdbd940a4c92bbf2861bd093f6dd34d85bede2c83",
+    "errors": 0,
+    "warnings": 0,
+    "status": "PASS"
+  },
+  "sidecar_checks": {
+    "total": 187,
+    "new_proof_pilot_checks": 49,
+    "limitation": "Real RSA and SQLite; synthetic receipt/witness identities; no live TLS or native operation",
+    "status": "PASS"
+  },
+  "python_witness_contract": {
+    "limitation": "Portable parser/schema tests, not Linux pidfd/cgroup tests",
+    "tests": 10,
+    "command": "python -I native/experiments/alert-cancellation/test_witness.py",
+    "syntax_compilation": "PASS witness.py and workload_fixture.py",
+    "status": "PASS"
+  },
+  "option_b_live": {
+    "receipt_verifier": "Implemented and locally tested",
+    "fault_injection_limit": "Runner covers intake response-body discard and exact replay, not process crash or lost CancelTask response",
+    "native_witness": "Implemented, native execution unproven",
+    "blockers": [
+      "Loopback TCP SocketException 10013",
+      "Wsl/E_ACCESSDENIED"
+    ],
+    "status": "NOT_RUN"
+  },
+  "option_c_live": {
+    "crowdstrike_connector_found": false,
+    "authorized_vendor_event_available": false,
+    "vendor_provenance": "Must be retained independently by the authorized tenant operator",
+    "configured_falcon_credentials": false,
+    "status": "NOT_RUN"
+  },
+  "shipping_enforcement_changes": [],
+  "git": {
+    "registrar_restore": "23 reviewed text files read from 65c2e40; no index/branch writes",
+    "new_work_committed": false,
+    "branch": "main",
+    "restored_historical_trx": "Both ignored TRX files recovered from scratch only after matching their original manifest hashes",
+    "reason": "Git index metadata is read-only"
+  },
+  "source_sha256_exact_worktree": {
+    "src/splat-alert-sidecar/AdmissionIdentity.cs": "77c8445af5fe7af55b1ce06497b2203501fdcd871ae51a12bb1105f001729ea7",
+    "src/splat-alert-sidecar/AlertIngress.cs": "be9d9d0dfec74be4080ac9143d07e5a075a5594a52f8223b2e0375c8161a412f",
+    "src/splat-alert-sidecar/CancellationReceiptProof.cs": "120f817ab22c8b80fac6ed3624f3b55b59dbdc8ef2faca1d75d2a9eefd22fc85",
+    "src/splat-alert-sidecar/ConfigurationFiles.cs": "c8145655a4940beac338dab70b883b01a4a44c8e43f9b5430fc8fde90c6f21b6",
+    "src/splat-alert-sidecar/Contract.cs": "222bb0d2e7915499906a23c929e335115d9d765f8fc830f7810c4cdb04c3ecee",
+    "src/splat-alert-sidecar/Control.cs": "49aa94e93565baa5ef92c83dacbdf4c5a2c2c216d46e4a85f09c83f5f3a5efc0",
+    "src/splat-alert-sidecar/FalconAdapter.cs": "2ff68b4d561539a25cb3cfb1bc6a80e7ef294ed1c9d9c9097c7b591eb09967e8",
+    "src/splat-alert-sidecar/FalconChecks.cs": "f69aacb8923b7860c129451904c3c4214098a499f25f83282001f9e1fb3c7c4a",
+    "src/splat-alert-sidecar/FalconCommands.cs": "844312ef0c3bd8e439f184728f00ed747a2cd73fab9fc4fe990b7f448788e5b5",
+    "src/splat-alert-sidecar/FalconPilot.cs": "8dbdb3b69a7c72a67cae2609113c2a723cfda325476c16bcffa8bea8dde1a506",
+    "src/splat-alert-sidecar/Latch.cs": "483219b224ee2b06f247178b3a222faf65f1a725dc27b84844fdd3c03ccab4e1",
+    "src/splat-alert-sidecar/PilotProofChecks.cs": "114f992b4443d1334b977949609e26ee1a1c40be353e856cb85e0f1a8c627cb3",
+    "src/splat-alert-sidecar/Program.cs": "c33d2925de3fe190042d763ef71f6c70dbcbcde05be43e6ee0ae609e60da003f",
+    "src/splat-alert-sidecar/RegistrarChecks.cs": "f73c47fcdfda8d34da8819d3b2b297a26e8343f9c32e4d5cb561c748d6dad1aa",
+    "src/splat-alert-sidecar/SelfTest.cs": "680b4c478eb7cb35ba9547678dcb1f49463f9f336fea65cd1d4b94b810ddef87",
+    "src/splat-alert-sidecar/splat-alert-sidecar.csproj": "a3714366821ce274c72fb51bc933614a1c1293f0b033913edca82b498d6b21df",
+    "src/splat-alert-sidecar/TrustedAdmissionRegistrar.cs": "fc770a41ab29a8bfaba113ce1d059c9f855c540222042f14ed58e62fdb44559c",
+    "native/experiments/alert-cancellation/test_witness.py": "fe087deab61bb1fd7ed9028678206436f6a96bd4abf6b7c599c1efd4a50113e4",
+    "native/experiments/alert-cancellation/witness.py": "9fc2406a048b8a61a15cbf3397aae47ec923400685fc075b0e6f01d89f052542",
+    "native/experiments/alert-cancellation/workload_fixture.py": "756f25023d3d4721c02ddcddd968df21817a4653e441c16c2713f8d018c6a76f",
+    "src/Directory.Build.props": "6fa39408e68c3a87259c4fee363956231db5466420ef3c0d8dfb93de2034c5bd",
+    "packaging/test-alert-sidecar.ps1": "5b3aa7e7c3747e99b4376115b9735d43aa4fffc373662e1741d3be13596903d5",
+    "packaging/test-focused-regressions.ps1": "ea76aac6cf2bc0e6bfc627eab6b8aa2cb66a4b6939e0896bfe254687c2fea2c1",
+    "docs/FALCON-CANCELLATION-PILOT.md": "14fd456b929e8721c0104ca016ea3f36e076028fb25d9b02c4878d86792d0162"
+  },
+  "log_sha256": {
+    "loopback-preflight.txt": "b37e28de2c7321ae13f36c588bd54d8bb5afe6c12f8f85d84d4c8fe73f530600",
+    "sidecar-gate.txt": "6e13647132607f976ef9b055677cde86b7000ec34c314c2a5ec10a2ceda620d7",
+    "witness-contract-tests.txt": "da44e62b2ddb64dd69d9d65f479cca99f312c32346c58db67fda5269d9d661bc",
+    "wsl-preflight.json": "c6fba7122d68692fa438ac880d385cedc2e9d6d9809897d2af304390f03fe40a"
+  }
+}

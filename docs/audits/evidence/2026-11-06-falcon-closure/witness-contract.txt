@@ -1,0 +1,22 @@
+test_alive_original_process_is_not_drain (__main__.DrainDecisionTests.test_alive_original_process_is_not_drain) ... ok
+test_confirmed_deleted_handle_with_removed_interface (__main__.DrainDecisionTests.test_confirmed_deleted_handle_with_removed_interface) ... ok
+test_empty_held_group_is_drain (__main__.DrainDecisionTests.test_empty_held_group_is_drain) ... ok
+test_missing_path_with_populated_held_group_is_not_drain (__main__.DrainDecisionTests.test_missing_path_with_populated_held_group_is_not_drain) ... ok
+test_permission_denied_is_not_removal (__main__.DrainDecisionTests.test_permission_denied_is_not_removal) ... ok
+test_renamed_handle_is_not_deleted_handle (__main__.DrainDecisionTests.test_renamed_handle_is_not_deleted_handle) ... ok
+test_bare_pid_has_no_authority (__main__.WitnessContractTests.test_bare_pid_has_no_authority) ... ok
+test_boolean_is_not_integer_identity (__main__.WitnessContractTests.test_boolean_is_not_integer_identity) ... ok
+test_command_framing (__main__.WitnessContractTests.test_command_framing) ... ok
+test_duplicate_fields_refused (__main__.WitnessContractTests.test_duplicate_fields_refused) ... ok
+test_each_overlap_rejected (__main__.WitnessContractTests.test_each_overlap_rejected) ... ok
+test_short_stat_refused (__main__.WitnessContractTests.test_short_stat_refused) ... ok
+test_stat_parentheses_and_spaces_do_not_shift_birth_field (__main__.WitnessContractTests.test_stat_parentheses_and_spaces_do_not_shift_birth_field) ... ok
+test_unknown_fields_refused (__main__.WitnessContractTests.test_unknown_fields_refused) ... ok
+test_valid_disjoint_tuple (__main__.WitnessContractTests.test_valid_disjoint_tuple) ... ok
+test_version_boolean_and_numeric_overflow_refused (__main__.WitnessContractTests.test_version_boolean_and_numeric_overflow_refused) ... ok
+test_wrong_pid_refused (__main__.WitnessContractTests.test_wrong_pid_refused) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.003s
+
+OK

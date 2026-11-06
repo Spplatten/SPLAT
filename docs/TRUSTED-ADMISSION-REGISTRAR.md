@@ -220,9 +220,9 @@ The gap references below name the remaining gates in
 | `SensorObservation.Rule`, `AlertId`, `ObservedUnixMs`, `Native` | Approved rule, bounded event identifier, temporal fence and optional exact native cross-check. These are not enrollment authority. Gate 2. |
 | `RegisteredProcess.Sensor`, `NotBeforeUnixMs`, `Live`, `Parent` | Pending sensor join, earliest accepted event, process exit fence, exact enrolled parent. Gate 2 descendants. |
 | `RegisteredTask.Task`, `Root`, tenant/agent/profile/rule | Immutable task scope, independent of the inbound alert. Gate 2. |
-| `State`, `CreatedUnixMs`, `ExpiresUnixMs` | Lifecycle state and admission/expiry window; state is not termination evidence. Gates 2–3. |
+| `State`, `CreatedUnixMs`, `ExpiresUnixMs` | Lifecycle state and admission/expiry window; state is not termination evidence. Gates 2ΓÇô3. |
 | `StartedTimestamp`, `Lifetime` | Monotonic expiry even if wall time stops advancing. Host time only; native clock proof remains separate. |
-| `LineageSequence`, `Processes` | Strict ordered native lifecycle stream and immutable process records. Missing events fence the registration. Producer pending, gates 2–3. |
+| `LineageSequence`, `Processes` | Strict ordered native lifecycle stream and immutable process records. Missing events fence the registration. Producer pending, gates 2ΓÇô3. |
 | `Snapshot.Tasks`, `Index`, `Revision` | Immutable task table, exact sensor lookup including ambiguity/tombstones, publication version. Revision is diagnostic, not a bearer capability. |
 | `AdmissionResolution.Status`, `Task`, `Native`, `Revision` | Exactly one task/native result or an explicit rejection. Revalidation is required for mailbox commit. |
 | `Volatile.Read/Write`, `Interlocked.CompareExchange` | Acquire/release snapshot publication and atomic wall-clock high-water mark. They are memory-ordering primitives, not cryptographic authentication. |
@@ -230,7 +230,7 @@ The gap references below name the remaining gates in
 | `pidfd_open`, `/proc/<pid>/stat` field 22 | Required native capture primitives; not invoked by the new C# table. A remote fd integer conveys no authority. Gate 2 remains open. |
 | `cgroup.procs`, `sched_process_fork` | Existing pre-exec placement and planned native lineage capture respectively. User-space polling is not equivalent. Gate 2 remains open. |
 | Profile SHA-256 | Pins schema bytes only. It does not authenticate the native writer or prove sensor/native correspondence. |
-| Pinned host/collector key or authenticated local IPC | Required before cross-process enrollment. Not supplied here; do not expose writer methods as alert endpoints. Gates 2–3. |
+| Pinned host/collector key or authenticated local IPC | Required before cross-process enrollment. Not supplied here; do not expose writer methods as alert endpoints. Gates 2ΓÇô3. |
 
 ## 7. Falsification matrix and completion decision
 

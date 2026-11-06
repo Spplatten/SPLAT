@@ -10,10 +10,15 @@ using Microsoft.Data.Sqlite;
 using Splat.AlertSidecar;
 
 if (args.Length == 1 && args[0] == "--self-test") return SelfTest.Run();
+if (args.Length == 3 && args[0] == "--self-test-witness-wire") return await WitnessWireChecks.RunAsync(args[1], args[2]);
+if (await FalconPilot.TryRunAsync(args) is { } pilotResult) return pilotResult;
 if (FalconCommands.TryRun(args) is { } checkResult) return checkResult;
 if (args.Length is not (3 or 4))
 {
     Console.Error.WriteLine("Usage: splat-alert-sidecar <admission-binding.json> <mailbox.sqlite> <https-certificate.pfx> [approved-falcon-profile.json]");
+    Console.Error.WriteLine("Proof: --verify-cancellation <expectation.json> <task.json>; --inspect-pilot-context <context.json>");
+    Console.Error.WriteLine("Pilot: --run-falcon-pilot <plan.json> <binding.json> <profile.json> <event.json> <new-output-directory>");
+    Console.Error.WriteLine("Offline: --check-falcon-pilot <plan.json> <binding.json> <profile.json> <event.json>");
     return 2;
 }
 try

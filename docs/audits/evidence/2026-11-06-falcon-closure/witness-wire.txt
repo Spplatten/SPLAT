@@ -1,0 +1,12 @@
+PASS wire: Windows host emits LF-only bytes without BOM
+PASS wire: EOF before delimiter is refused even for valid JSON
+PASS wire: CRLF response refused
+PASS wire: empty EOF refused
+PASS wire: oversized frame refused
+PASS wire: embedded command delimiter refused
+PASS wire: reader cancellation respected
+PASS wire: UTF-8 crosses a real C# to Python process pipe
+PASS wire: real Python witness parser accepts check
+PASS wire: real Python witness parser accepts after
+PASS wire: peer completed despite a 256 KiB stderr burst
+PASS 11 witness wire checks; real process pipes, no WSL/cgroup/Falcon proof.

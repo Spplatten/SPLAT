@@ -1,0 +1,127 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  splat-alert-sidecar -> C:\C_AGENT_BUILDER\src\splat-alert-sidecar\bin\Release\net10.0\splat-alert-sidecar.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:05.29
+PASS Falcon parser, actual HTTP handler/SQLite admission, pressure recovery and legacy compatibility checks.
+PASS registrar: minimal exact composite lookup
+PASS registrar: minimal PID reuse refused
+PASS registrar: minimal ambiguity refused
+PASS registrar: begins in Admitting
+PASS registrar: unknown sensor cannot enroll itself
+PASS registrar: activation without sensor identity refused
+PASS registrar: recycled PID registration refused
+PASS registrar: cross-tenant registration refused
+PASS registrar: bound but not active refused
+PASS registrar: one observation resolves exactly one task
+PASS registrar: native composite field mismatch refused
+PASS registrar: native composite field mismatch refused
+PASS registrar: native composite field mismatch refused
+PASS registrar: native composite field mismatch refused
+PASS registrar: native composite field mismatch refused
+PASS registrar: native composite field mismatch refused
+PASS registrar: sensor composite field mismatch refused
+PASS registrar: sensor composite field mismatch refused
+PASS registrar: sensor composite field mismatch refused
+PASS registrar: sensor composite field mismatch refused
+PASS registrar: pre-admission timestamp refused
+PASS registrar: future timestamp refused
+PASS registrar: wrong rule refused
+PASS registrar: task UUID reuse refused
+PASS registrar: cgroup lifetime shared across tasks refused
+PASS registrar: unbound child sensor refused
+PASS registrar: enrolled child inherits task
+PASS registrar: exited root refused
+PASS registrar: root exit does not erase child
+PASS registrar: grandchild resolves through exact enrolled parent
+PASS registrar: delayed old child event cannot reach recycled PID
+PASS registrar: new generation has independent identity
+PASS registrar: lost fork sequence refused
+PASS registrar: lineage gap fences task
+PASS registrar: cross-boundary child refused
+PASS registrar: escape observation fences registration
+PASS registrar: cross-boundary child refused
+PASS registrar: escape observation fences registration
+PASS registrar: cross-boundary child refused
+PASS registrar: escape observation fences registration
+PASS registrar: unenrolled parent refused
+PASS registrar: lineage capacity fails closed
+PASS registrar: duplicate sensor identity quarantines both tasks
+PASS registrar: ambiguity has no winner
+PASS registrar: both conflicting tasks draining
+PASS registrar: delayed observation rejected
+PASS registrar: exact deadline rejected before sweep
+PASS registrar: expired registrations evicted
+PASS registrar: eviction preserves UUID tombstone
+PASS registrar: wall-clock rollback refused
+PASS registrar: rollback eviction cannot revive identity
+PASS registrar: monotonic expiry independent of wall clock
+PASS registrar: pre-drain snapshot resolves
+PASS registrar: stale resolution cannot commit after drain
+PASS registrar: concurrent readers see complete published snapshot
+PASS registrar: 100000 steady lookups allocate zero managed bytes on this thread
+PASS registrar: fixed-task mailbox rejects another task
+PASS registrar: concurrent publication exposes no active result after drain completes
+PASS registrar: HTTP constructor refuses mailbox for a different binding
+PASS registrar: HTTP cross-tenant event leaves mailbox idle
+PASS registrar: HTTP bare PID leaves mailbox idle
+PASS registrar: HTTP cannot enroll descendant
+PASS registrar: HTTP enrolled child commits cancellation to parent task mailbox
+PASS registrar: HTTP after drain rejected
+PASS 64 registrar checks; synthetic identity producers, no kernel/vendor qualification.
+PASS proof: real RSA signature plus exact invocation accepted
+PASS proof: signed bytes retained without canonical reconstruction
+PASS proof: shipping A2A text-artifact shape extracted and verified
+PASS proof: signature tampering refused
+PASS proof: valid attacker signature cannot replace pinned daemon key
+PASS proof: signed wrong mission refused
+PASS proof: signed wrong cgroup refused
+PASS proof: signed wrong enforcing refused
+PASS proof: signed wrong executionContext refused
+PASS proof: signed wrong executionPolicySha256 refused
+PASS proof: signed wrong effectivePolicySha256 refused
+PASS proof: signed wrong workloadDrained refused
+PASS proof: signed wrong cancellationAccepted refused
+PASS proof: legacy unbound receipt refused
+PASS proof: extra canonical field refused
+PASS proof: duplicate canonical field refused
+PASS proof: unknown canonical escape refused
+PASS proof: missing canonical field refused
+PASS proof: natural completion is not cancellation proof
+PASS proof: missing cancellation request refused
+PASS proof: never-started task cannot prove a kill
+PASS proof: ambiguous artifacts refused
+PASS proof: wrong A2A task refused
+PASS proof: expected context/task mismatch refused
+PASS proof: unsigned host drain flag is insufficient
+PASS proof: one changed signed byte refused
+PASS proof: pilot negative-control construction preserves original event bytes
+PASS proof: reviewed escaped JSON pointer selects only negative-control field
+PASS proof: missing mutation field refused
+PASS proof: A2A omitted nulls match native context identity without rewriting signed bytes
+PASS proof: working control requires exact context and task
+PASS proof: already-canceling control refused
+PASS proof: control context substitution refused
+PASS proof: finished control cannot establish survival
+PASS proof: disjoint pinned pilot identities accepted
+PASS proof: target/control identity overlap refused
+PASS proof: unbounded pilot timeout refused
+PASS proof: missing HTTPS pin refused
+PASS proof: unsupported vendor-origin claim refused
+PASS proof: native evidence schema requires identity and progress
+PASS proof: surviving target descendants refuse proof
+PASS proof: missing control progress refuses proof
+PASS proof: claimed progress with unchanged CPU ticks refused
+PASS proof: only pre-cancellation control progress is insufficient
+PASS proof: witness recycled/wrong control PID refused
+PASS proof: read-only mailbox inspection sees real idle SQLite row
+PASS proof: read-only mailbox identity mismatch refused
+PASS proof: separate SQLite reader sees durably admitted alert
+PASS proof: read-only inspection never creates absent mailbox
+PASS 49 cancellation-proof/pilot checks; synthetic receipts, no native or vendor success claimed.
+PASS 187 checks: binding compatibility, Falcon schema/identity, HTTP admission, freshness, durable recovery and evidence semantics.
+PASS sidecar build and contract checks. Live provider/TLS/native validation is separate.

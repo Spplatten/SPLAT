@@ -36,8 +36,8 @@ browser/contract checks passing. Those are prior-run reports, not fresh results 
 
 The [daemon record](../../native/splat-agent/evidence/daemon-probe.json) contains 90 Boolean
 observations: 84 true and six false. The false observations are the protected-file leak and five
-cross-lease access attempts, where false is the desired outcome. Thus “90/90” in the handoff must
-not be read as “all 90 values are true.” The probe's verdict and its diagnostic observations also
+cross-lease access attempts, where false is the desired outcome. Thus ΓÇ£90/90ΓÇ¥ in the handoff must
+not be read as ΓÇ£all 90 values are true.ΓÇ¥ The probe's verdict and its diagnostic observations also
 have distinct gating semantics; see `native/splat-agent/probe-daemon.sh`.
 
 The [last-hop record](../../native/splat-agent/evidence/last-hop-probe.json) records PASS for the
