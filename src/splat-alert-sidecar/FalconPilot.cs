@@ -93,7 +93,8 @@ internal static class FalconPilot
                 return await RunAsync(args[1], args[2], args[3], args[4], args[5]);
             throw new ArgumentException("Use --verify-cancellation expectation.json task.json, or --run-falcon-pilot plan.json binding.json profile.json event.json NEW-output-directory.");
         }
-        catch (Exception ex) when (ex is IOException or JsonException or InvalidOperationException or ArgumentException
+        // InvalidDataException is not an IOException, and it is how most refusals here are raised.
+        catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or InvalidOperationException or ArgumentException
             or UnauthorizedAccessException or HttpRequestException or OperationCanceledException or System.Security.Cryptography.CryptographicException
             or System.ComponentModel.Win32Exception or KeyNotFoundException or FormatException or SqliteException)
         {
@@ -273,7 +274,7 @@ internal static class FalconPilot
         obj[segments[^1]] = "splat-negative-control-" + Guid.NewGuid().ToString("N");
         return JsonSerializer.SerializeToUtf8Bytes(node);
     }
-    private static async Task<byte[]> ReadBounded(HttpResponseMessage response, CancellationToken ct)
+    internal static async Task<byte[]> ReadBounded(HttpResponseMessage response, CancellationToken ct)
     {
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var memory = new MemoryStream(); byte[] buffer = new byte[8192]; int count;
