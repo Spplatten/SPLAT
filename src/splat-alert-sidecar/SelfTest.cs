@@ -75,6 +75,7 @@ internal static class SelfTest
             FalcoChecks.RunAsync(directory,Check).GetAwaiter().GetResult();
             RegistrarChecks.RunAsync(directory,Check).GetAwaiter().GetResult();
             PilotProofChecks.Run(directory,Check);
+            PilotOrchestratorChecks.Run(directory,Check);
             return assertions;
         }
         finally { Directory.Delete(directory, recursive:true); }
