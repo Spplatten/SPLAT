@@ -20,9 +20,11 @@ internal sealed record A2aCaller(string TenantId, string CallerId, string TokenS
         OperatorAuthenticationMethod.ApiKey, "a2a-https");
 }
 
+// CancellationPilot lets this host load an agent bound to the pilot fixture templates. It is the
+// operator's switch, never inferred from the contract, and a stdio --agent host has no such switch.
 internal sealed record A2aConfiguration(int SchemaVersion, string AgentId, string AgentVersion,
     int Port, string CertificateFile, A2aCaller[] Callers, int MaxConcurrentTasks = 4, int MaxTasks = 512,
-    string? DelegationKeyFile = null, A2aDelegationIssuer[]? DelegationIssuers = null)
+    string? DelegationKeyFile = null, A2aDelegationIssuer[]? DelegationIssuers = null, bool CancellationPilot = false)
 {
     internal const string Extension = "urn:splat:a2a:template-lease:v1";
     internal static readonly JsonSerializerOptions Json = new()

@@ -42,7 +42,9 @@ public static class DerivedTemplateGuard
     /// Why this template is retired or may not be trusted as a derivative of its stated base,
     /// or null when it may be used, including current catalog templates with no stated base.
     /// </summary>
-    public static string? Problem(SingleToolTemplate template)
+    /// <param name="catalog">Where the base must be found: the governed catalog, unless the agent
+    /// compiler was asked for the cancellation-pilot fixtures. Every registry read leaves it null.</param>
+    public static string? Problem(SingleToolTemplate template, IReadOnlyList<SingleToolTemplate>? catalog = null)
     {
         ArgumentNullException.ThrowIfNull(template);
 
@@ -61,7 +63,7 @@ public static class DerivedTemplateGuard
             return $"'{template.TemplateId}' derives from retired template '{template.SourceTemplateId}': {retiredBase}";
         }
 
-        var source = GovernedTemplateCatalog.All
+        var source = (catalog ?? GovernedTemplateCatalog.All)
             .FirstOrDefault(candidate => string.Equals(
                 candidate.TemplateId, template.SourceTemplateId, StringComparison.Ordinal));
 
@@ -102,9 +104,9 @@ public static class DerivedTemplateGuard
     }
 
     /// <summary>Throws when <see cref="Problem"/> has something to say. The registry's entry point.</summary>
-    public static void Validate(SingleToolTemplate template)
+    public static void Validate(SingleToolTemplate template, IReadOnlyList<SingleToolTemplate>? catalog = null)
     {
-        if (Problem(template) is { } problem)
+        if (Problem(template, catalog) is { } problem)
         {
             throw new InvalidOperationException(problem);
         }
