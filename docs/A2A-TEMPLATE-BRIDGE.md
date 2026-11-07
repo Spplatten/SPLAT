@@ -44,6 +44,7 @@ An ordinary test run skips that live proof; a skip is not an enforcement result.
 | `delegationIssuers` | Explicit `{agentId, contractSha256, publicKey}` trust pins; public key is base64 SPKI P-256 |
 | `maxConcurrentTasks` | Defaults to 4, at most 16 |
 | `maxTasks` | Durable task capacity, defaults to 512, at most 4096 |
+| `cancellationPilot` | Defaults to false. True lets this host load an agent bound to the [pilot workload templates](FALCON-CANCELLATION-PILOT.md#pilot-workload-templates); never inferred from the contract |
 
 Unknown/duplicate fields, duplicate credentials or principals, unavailable approval, mismatched
 version and grants outside the manifest refuse startup. Only one host per agent and database may

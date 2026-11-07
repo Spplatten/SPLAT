@@ -11,7 +11,7 @@ and progress by an unrelated control workload after cancellation.
 | Independent receipt verification | [CancellationReceiptProof.cs](../src/splat-alert-sidecar/CancellationReceiptProof.cs) | Real RSA signature tests against synthetic receipt fixtures; not a native execution result. |
 | Live cancellation/pilot runner | [FalconPilot.cs](../src/splat-alert-sidecar/FalconPilot.cs) | Compiled; no live HTTP/native run in this environment. Requires real deployment inputs. |
 | Native observer | [witness.py](../native/experiments/alert-cancellation/witness.py) | Python syntax and portable contract/parser tests passed. On the real kernel (2026-11-06), the [native witness check](#native-witness-check) saw it accept both drains and refuse every constructible bypass. Not yet run inside a SPLAT lease. |
-| Harmless workload fixture | [workload_fixture.py](../native/experiments/alert-cancellation/workload_fixture.py) | Bounded target/descendant/control roles supplied; not executed under a lease here. |
+| Harmless workload fixture | [workload_fixture.py](../native/experiments/alert-cancellation/workload_fixture.py); [pilot workload templates](#pilot-workload-templates) | Bounded target/descendant/control roles supplied. Two pilot-only templates lease them; compiled and import-tested, not executed under a lease here. |
 | Regression evidence | [Current closure manifest](audits/evidence/2026-11-06-falcon-closure/verification.json); [initial harness manifest](audits/evidence/falcon-cancellation-pilot/verification.json) | Names exact source/log hashes and actual gate counts. Initial evidence is historical, not proof of later bytes. |
 
 Option A (`d334e5e`, `65c2e40`) and this B/C work (`c385cf9`) were written in a session that
@@ -132,6 +132,35 @@ This exercises loss of the **intake response body**, duplicate intake and durabl
 It does not claim a sidecar-crash, power-loss or lost-`CancelTask`-response experiment. Those
 remain separate fault-injection runs, with before/after process and receipt evidence required.
 
+### Pilot workload templates
+
+The target and control run as A2A tasks of one approved agent,
+[cancellation-pilot.contract.json](../native/experiments/alert-cancellation/cancellation-pilot.contract.json)
+(skills `pilot_target` and `pilot_control`). Each skill leases one template from
+[GovernedTemplateCatalog.CancellationPilot.cs](../src/MissionController.Infrastructure.Data/Catalog/GovernedTemplateCatalog.CancellationPilot.cs):
+`/usr/bin/python3 -I /usr/local/lib/splat/pilot/workload_fixture.py <role> --seconds 240` in a
+300-second lease with no network. A control that survives the proof exits 0 on its own, before
+its lease deadline.
+
+These templates are not in the catalog. The census does not count them, and the registry refuses
+them as missions. Only these two paths resolve them:
+- `splat-mcp import-agent --cancellation-pilot <contract>`
+- an A2A host whose configuration sets `"cancellationPilot": true`
+
+A stdio `--agent` host cannot load them. Give the pilot host its own `SPLAT_DB_PATH`, so the
+operator's database never holds the pilot agent.
+
+In the guest:
+- Deploy `workload_fixture.py` at that path, root-owned with mode 0644, so the workload can
+  read it but not change it. The jail mounts `/usr` read-only.
+- The ceiling must admit `/usr/bin/` and a 300-second lease. It shortens longer requests rather
+  than refusing them, and a shortened lease would kill the control early.
+
+`AgentManifestCompilerTests` covers the following, but not a run under a lease:
+- the gate: no flag means no compile, import or reload
+- that the registry refuses these templates
+- the compiled lease
+
 ## C: authorized Falcon pilot setup
 
 Use one authorized deployment and a benign detection confined to the public fixture. Prepare
@@ -145,7 +174,9 @@ control should run the `control` role, which performs bounded CPU work so post-c
 progress can be observed. The lease must permit the reviewed interpreter, script and runtime
 dependencies. The harness does not bypass the policy compiler or create broad test leases.
 Both leases must last beyond the planned pilot window. The fixture's own duration is bounded
-to 10–300 seconds and defaults to 120 seconds.
+to 10–300 seconds and defaults to 120 seconds. The
+[pilot workload templates](#pilot-workload-templates) fix both roles at 240 seconds inside
+300-second leases.
 
 Deploy the reviewed observer bytes into the guest under operator-controlled ownership, readable
 by its root observer process and not writable by workloads. Deploy the workload fixture read-only

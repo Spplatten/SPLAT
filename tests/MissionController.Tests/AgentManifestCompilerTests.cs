@@ -9,6 +9,7 @@ using MissionController.Infrastructure.Data;
 using MissionController.Infrastructure.Data.Catalog;
 using MissionController.Infrastructure.Data.Templates;
 using MissionController.Infrastructure.Linux;
+using SplatMcp;
 
 namespace MissionController.Tests;
 
@@ -226,6 +227,65 @@ public sealed class AgentManifestCompilerTests
             }
             await Assert.ThrowsAsync<InvalidOperationException>(() => new SqliteTemplateRegistry(context).GetTemplateByIdAsync(original.TemplateId));
         });
+    }
+
+    private static string PilotContract() => Path.Combine(MissionReplayHarness.RepositoryRoot(),
+        "native", "experiments", "alert-cancellation", "cancellation-pilot.contract.json");
+
+    [Fact]
+    public void CancellationPilotFixturesStayOutOfTheCatalogAndCompileOnlyWhenNamed()
+    {
+        var pilot = GovernedTemplateCatalog.CancellationPilot;
+        Assert.Equal(new[] { "cancellation-pilot-target", "cancellation-pilot-control" }, pilot.Select(t => t.TemplateId));
+        // Outside All: absent from the census, the seeded registry and every base a registry row may name.
+        Assert.DoesNotContain(GovernedTemplateCatalog.All,
+            t => pilot.Any(p => p.TemplateId == t.TemplateId || p.Tool.ToolId == t.Tool.ToolId));
+        foreach (var template in pilot)
+        {
+            Assert.Equal(ToolSubstrate.LinuxLease, template.Tool.Substrate);
+            Assert.Equal("/usr/bin/python3", template.Tool.ExecutablePath);
+            Assert.StartsWith($"-I {GovernedTemplateCatalog.CancellationPilotFixturePath} ", template.Tool.ArgumentsTemplate);
+            // A surviving control must end on its own, inside its lease, never at the deadline.
+            Assert.EndsWith(" --seconds 240", template.Tool.ArgumentsTemplate);
+            Assert.True(template.Tool.TimeoutSeconds > 240);
+            Assert.False(template.EgressRule.ToolProcessNeedsNetwork);
+        }
+
+        string json = File.ReadAllText(PilotContract());
+        Assert.Contains("is not one", Assert.Throws<InvalidOperationException>(() => AgentManifestCompiler.Compile(json)).Message);
+        var compiled = AgentManifestCompiler.Compile(json, includeCancellationPilot: true);
+        Assert.Equal(new[] { "pilot_target", "pilot_control" }, compiled.Project.Stages.Select(s => s.StageId));
+        Assert.Equal(pilot.Select(t => t.TemplateId), compiled.Templates.Select(t => t.SourceTemplateId));
+        Assert.Equal(pilot.Select(t => JsonSerializer.Serialize(t.Tool)), compiled.Templates.Select(t => JsonSerializer.Serialize(t.Tool)));
+        var lease = new TemplatePolicyCompiler(new Resolver()).CompileTemplatePolicy(compiled.Templates[0], Guid.NewGuid(), "/tmp/pilot");
+        Assert.False(lease.AllowNetwork);
+        Assert.Equal("/usr/bin/python3", Assert.Single(lease.AllowedExecInodes).SourcePath);
+    }
+
+    [Fact]
+    public async Task ACancellationPilotAgentLoadsOnlyOnAPilotHostAndNeverRunsAsAMission()
+    {
+        string json = File.ReadAllText(PilotContract());
+        await WithDatabase(async context =>
+        {
+            var importer = new AgentManifestImporter(context);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => importer.ImportAsync(json));
+            var imported = await importer.ImportAsync(json, includeCancellationPilot: true);
+            string id = AgentManifestApproval.AgentIdOf(imported), sha = AgentManifestApproval.Hash(imported);
+            // A host that did not name the pilot cannot even recompile the stored contract.
+            await Assert.ThrowsAsync<InvalidOperationException>(() => importer.LoadApprovedAsync(id, sha));
+            Assert.Equal(sha, (await importer.LoadApprovedAsync(id, sha, includeCancellationPilot: true)).Sha256);
+            // The registry resolves bases in the governed catalog alone, so no mission can launch one.
+            var registry = new SqliteTemplateRegistry(context);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => registry.GetTemplateByIdAsync(imported.Templates[0].TemplateId));
+            Assert.DoesNotContain(await registry.GetAllTemplatesAsync(), t => imported.Templates.Any(p => p.TemplateId == t.TemplateId));
+        });
+
+        Assert.True(Assert.IsType<McpServerCommand.ImportAgent>(
+            McpServerCommand.Parse(new[] { "import-agent", "--cancellation-pilot", PilotContract() })).CancellationPilot);
+        Assert.False(Assert.IsType<McpServerCommand.ImportAgent>(
+            McpServerCommand.Parse(new[] { "import-agent", PilotContract() })).CancellationPilot);
+        Assert.IsType<McpServerCommand.UsageError>(McpServerCommand.Parse(new[] { "import-agent", PilotContract(), "--cancellation-pilot" }));
     }
 
     private static async Task WithDatabase(Func<SqliteStorageContext, Task> action)

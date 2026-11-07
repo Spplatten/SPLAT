@@ -54,7 +54,7 @@ public static class AgentManifestCompiler
         }
         """;
 
-    public static CompiledAgentManifest Compile(string json)
+    public static CompiledAgentManifest Compile(string json, bool includeCancellationPilot = false)
     {
         if (string.IsNullOrWhiteSpace(json) || json.Length > 131072)
             throw new InvalidOperationException("Provide an agent manifest of at most 131,072 characters.");
@@ -83,6 +83,11 @@ public static class AgentManifestCompiler
         if (manifest.Tools is null || manifest.Tools.Count is < 1 or > 6)
             throw new InvalidOperationException("An agent must bind between 1 and 6 tools, in execution order.");
 
+        // The pilot fixtures resolve only for a caller that names the pilot, so a normal import or
+        // A2A host cannot approve an agent bound to one.
+        IReadOnlyList<SingleToolTemplate> catalog = includeCancellationPilot
+            ? GovernedTemplateCatalog.All.Concat(GovernedTemplateCatalog.CancellationPilot).ToList()
+            : GovernedTemplateCatalog.All;
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var templates = new List<SingleToolTemplate>();
         var stages = new List<ProjectStage>();
@@ -94,7 +99,7 @@ public static class AgentManifestCompiler
 
             // Resolve against source, never a database row or the imported tool's descriptive name.
             // A manifest cannot register a new executable by describing it as a harmless reader.
-            var source = GovernedTemplateCatalog.All.SingleOrDefault(t => t.TemplateId == binding.TemplateId)
+            var source = catalog.SingleOrDefault(t => t.TemplateId == binding.TemplateId)
                 ?? throw new InvalidOperationException($"Tool '{binding.Name}' needs a current catalog templateId; '{binding.TemplateId}' is not one.");
             if (source.Tool.Substrate != ToolSubstrate.LinuxLease)
                 throw new InvalidOperationException($"Tool '{binding.Name}' needs a Linux-lease catalog template. '{source.TemplateId}' runs on Windows.");
@@ -118,7 +123,7 @@ public static class AgentManifestCompiler
                 AvailableRemediations = Array.Empty<RemediationAction>()
             };
             template.ValidateStrictRules();
-            DerivedTemplateGuard.Validate(template);
+            DerivedTemplateGuard.Validate(template, catalog);
             templates.Add(template);
             stages.Add(new ProjectStage(binding.Name, binding.Name, template.TemplateId, manifest.Instructions.Trim()));
         }
