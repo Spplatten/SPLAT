@@ -34,6 +34,25 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
     private readonly byte[]? _explicitHmacKey;
     private const string GenesisHash = "0000000000000000000000000000000000000000000000000000000000000000";
 
+    // The statements that rely on an index, hoisted so StorageIndexTests plans these exact strings.
+    // A test planning its own copy would keep passing after the code it vouched for had moved on.
+    internal const string MissionEntriesNewestFirst = "SELECT Id, TimestampUtc, MissionId, TemplateId, Action, Details, OperatorIdentity, PreviousHash, EntryHash, COALESCE(HashVersion, 1), DetailsCommitment, DetailsSalt FROM AuditLedger WHERE MissionId = $mid ORDER BY Id DESC LIMIT $limit;";
+    internal const string MissionEntriesInChainOrder = "SELECT Id, EntryHash, Action FROM AuditLedger WHERE MissionId = $mid ORDER BY Id ASC;";
+    internal const string LegacyUnredactedCount = @"
+                SELECT COUNT(*) FROM AuditLedger
+                WHERE TimestampUtc < $cutoff AND COALESCE(HashVersion, 1) < 2 AND RedactedAtUtc IS NULL;";
+
+    internal static string RedactionStatement(bool apply)
+    {
+        const string redactable =
+            "WHERE TimestampUtc < $cutoff AND COALESCE(HashVersion, 1) >= 2 AND RedactedAtUtc IS NULL";
+        return apply
+            ? $@"UPDATE AuditLedger
+                 SET Details = $marker, DetailsSalt = NULL, RedactedAtUtc = $now
+                 {redactable};"
+            : $"SELECT COUNT(*) FROM AuditLedger {redactable};";
+    }
+
     /// <param name="explicitHmacKey">The operator's key, read from their key file by
     /// <see cref="LedgerKeyFile"/>; null for an unkeyed chain.</param>
     public SqliteChainedAuditLedger(SqliteStorageContext context, byte[]? explicitHmacKey = null)
@@ -248,7 +267,7 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
 
         if (missionId.HasValue)
         {
-            cmd.CommandText = "SELECT Id, TimestampUtc, MissionId, TemplateId, Action, Details, OperatorIdentity, PreviousHash, EntryHash, COALESCE(HashVersion, 1), DetailsCommitment, DetailsSalt FROM AuditLedger WHERE MissionId = $mid ORDER BY Id DESC LIMIT $limit;";
+            cmd.CommandText = MissionEntriesNewestFirst;
             cmd.Parameters.AddWithValue("$mid", missionId.Value.ToString("D"));
         }
         else
@@ -325,7 +344,7 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         {
             // ASC, and every row: the anchor's whole purpose is to be the complete list, so it is the
             // one read in this codebase that takes no limit and no newest-first ordering.
-            missionCmd.CommandText = "SELECT Id, EntryHash, Action FROM AuditLedger WHERE MissionId = $mid ORDER BY Id ASC;";
+            missionCmd.CommandText = MissionEntriesInChainOrder;
             missionCmd.Parameters.AddWithValue("$mid", missionId.ToString("D"));
 
             await using var missionReader = await missionCmd.ExecuteReaderAsync(cancellationToken);
@@ -461,22 +480,13 @@ public sealed class SqliteChainedAuditLedger : IAuditLedger
         int legacySkipped;
         await using (var countCmd = conn.CreateCommand())
         {
-            countCmd.CommandText = @"
-                SELECT COUNT(*) FROM AuditLedger
-                WHERE TimestampUtc < $cutoff AND COALESCE(HashVersion, 1) < 2 AND RedactedAtUtc IS NULL;";
+            countCmd.CommandText = LegacyUnredactedCount;
             countCmd.Parameters.AddWithValue("$cutoff", olderThanUtc.ToString("O"));
             legacySkipped = Convert.ToInt32(await countCmd.ExecuteScalarAsync(cancellationToken));
         }
 
-        const string redactable =
-            "WHERE TimestampUtc < $cutoff AND COALESCE(HashVersion, 1) >= 2 AND RedactedAtUtc IS NULL";
-
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = apply
-            ? $@"UPDATE AuditLedger
-                 SET Details = $marker, DetailsSalt = NULL, RedactedAtUtc = $now
-                 {redactable};"
-            : $"SELECT COUNT(*) FROM AuditLedger {redactable};";
+        cmd.CommandText = RedactionStatement(apply);
         cmd.Parameters.AddWithValue("$cutoff", olderThanUtc.ToString("O"));
         if (apply)
         {

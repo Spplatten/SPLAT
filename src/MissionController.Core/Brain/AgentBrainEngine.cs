@@ -11,9 +11,10 @@ using MissionController.Core.Models;
 namespace MissionController.Core.Brain;
 
 /// <summary>
-/// Layer 2 Cognitive Planning & Autonomous Reasoning Engine ("The Brain").
-/// Drives goal decomposition, multi-hypothesis testing, grounded telemetry verification,
-/// cross-subsystem root-cause synthesis, and autonomous self-healing formulation.
+/// The agent brain. Runs catalog templates as governed missions, one per step, with a model choosing
+/// each next template from the findings so far; grades each step's hypothesis by its mission's
+/// grounded verdict; and collects the remediations those templates declare, running none of them.
+/// The session's summary is appended to the hash-chained audit ledger.
 /// </summary>
 public sealed class AgentBrainEngine : IAgentBrain
 {
@@ -365,7 +366,7 @@ public sealed class AgentBrainEngine : IAgentBrain
             cancellationToken);
 
         var logs = await _auditLedger.GetAuditLogsAsync(sessionId, 1, cancellationToken);
-        string? merkleHash = logs.Count > 0 ? logs[^1].EntryHash : null;
+        string? entryHash = logs.Count > 0 ? logs[^1].EntryHash : null;
 
         // 5. Memory Write-Back: Index completed reasoning session into Semantic Memory for continuous learning
         if (_semanticMemoryIndex != null)
@@ -401,7 +402,7 @@ public sealed class AgentBrainEngine : IAgentBrain
             EvaluatedHypotheses: memory.Hypotheses,
             ExecutedSteps: memory.CompletedSteps,
             AvailableRemediations: memory.AvailableRemediations,
-            AuditLedgerEntryHash: merkleHash,
+            AuditLedgerEntryHash: entryHash,
             TimestampUtc: DateTime.UtcNow);
     }
 

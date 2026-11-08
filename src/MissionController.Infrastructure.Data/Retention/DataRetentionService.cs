@@ -158,18 +158,31 @@ public sealed class DataRetentionService
         }
 
         await using var cmd = conn.CreateCommand();
-
-        // Column name is not user input - it is one of three compile-time literals from SweepAsync.
-        const string predicate = "WHERE CreatedAtUtc < $cutoff AND {0} <> ''";
-        string where = string.Format(CultureInfo.InvariantCulture, predicate, column);
-        cmd.CommandText = apply
-            ? $"UPDATE Missions SET {column} = '' {where};"
-            : $"SELECT COUNT(*) FROM Missions {where};";
+        cmd.CommandText = ScrubStatement(column, apply);
         cmd.Parameters.AddWithValue("$cutoff", cutoffUtc.ToString("O"));
 
         return apply
             ? await cmd.ExecuteNonQueryAsync(cancellationToken)
             : Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+    }
+
+    // Both sweeps build their text here so StorageIndexTests plans the statements that run, not a
+    // copy. Column is never user input: SweepAsync passes one of three compile-time literals.
+    internal static string ScrubStatement(string column, bool apply)
+    {
+        const string predicate = "WHERE CreatedAtUtc < $cutoff AND {0} <> ''";
+        string where = string.Format(CultureInfo.InvariantCulture, predicate, column);
+        return apply
+            ? $"UPDATE Missions SET {column} = '' {where};"
+            : $"SELECT COUNT(*) FROM Missions {where};";
+    }
+
+    internal static string SemanticDeleteStatement(bool apply)
+    {
+        const string where = "WHERE TimestampUtc < $cutoff";
+        return apply
+            ? $"DELETE FROM MissionSemanticIndex {where};"
+            : $"SELECT COUNT(*) FROM MissionSemanticIndex {where};";
     }
 
     private static async Task<int> DeleteSemanticRowsAsync(
@@ -184,10 +197,7 @@ public sealed class DataRetentionService
         }
 
         await using var cmd = conn.CreateCommand();
-        const string where = "WHERE TimestampUtc < $cutoff";
-        cmd.CommandText = apply
-            ? $"DELETE FROM MissionSemanticIndex {where};"
-            : $"SELECT COUNT(*) FROM MissionSemanticIndex {where};";
+        cmd.CommandText = SemanticDeleteStatement(apply);
         cmd.Parameters.AddWithValue("$cutoff", cutoffUtc.ToString("O"));
 
         try

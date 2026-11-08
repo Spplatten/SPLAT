@@ -16,6 +16,10 @@ public sealed class SqliteSemanticMemoryIndex : ISemanticMemoryIndex
     private readonly SqliteStorageContext _context;
     private const int EmbeddingDimension = 128;
 
+    // Read newest-first off IDX_Semantic_Timestamp, stopping at 500, rather than sorting the table.
+    // Hoisted so StorageIndexTests plans this exact text.
+    internal const string RecentDocuments = "SELECT MissionId, TemplateId, Content, VectorJson, TimestampUtc FROM MissionSemanticIndex ORDER BY TimestampUtc DESC LIMIT 500;";
+
     public SqliteSemanticMemoryIndex(SqliteStorageContext context)
     {
         _context = context;
@@ -35,6 +39,7 @@ public sealed class SqliteSemanticMemoryIndex : ISemanticMemoryIndex
                 TimestampUtc TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS IDX_Semantic_Template ON MissionSemanticIndex(TemplateId);
+            CREATE INDEX IF NOT EXISTS IDX_Semantic_Timestamp ON MissionSemanticIndex(TimestampUtc);
         ";
         cmd.ExecuteNonQuery();
     }
@@ -85,7 +90,7 @@ public sealed class SqliteSemanticMemoryIndex : ISemanticMemoryIndex
 
         await using var conn = _context.CreateConnection();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT MissionId, TemplateId, Content, VectorJson, TimestampUtc FROM MissionSemanticIndex ORDER BY TimestampUtc DESC LIMIT 500;";
+        cmd.CommandText = RecentDocuments;
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))

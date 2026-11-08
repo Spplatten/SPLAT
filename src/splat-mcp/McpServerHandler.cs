@@ -416,7 +416,7 @@ public partial class McpServerHandler
             new()
             {
                 Name = "diagnose_system",
-                Description = "Execute a governed diagnostic mission using SPLAT's 1:1:1 sandbox + DLP filter + live AI reasoning stream + Merkle audit.",
+                Description = "Run one catalog template as a governed mission: the template's one tool runs, its output passes the DLP filter, and the template's model analyses it. The result carries the status changes, the scrubbed output and the analysis. Each step is appended to the hash-chained audit ledger; Merkle inclusion proofs come only from export_run_record.",
                 InputSchema = JsonSerializer.Deserialize<JsonElement>(@"
                 {
                     ""type"": ""object"",
@@ -491,7 +491,7 @@ public partial class McpServerHandler
             new()
             {
                 Name = "run_agent_brain",
-                Description = "Execute SPLAT's Layer 2 Cognitive Planning & Autonomous Reasoning Engine ('The Brain'): Decomposes high-level natural language goals, performs multi-hypothesis testing, verifies grounded telemetry, synthesizes cross-subsystem root cause, and formulates self-healing remediations with Merkle ledger commitment.",
+                Description = "Investigate a goal by running catalog templates as governed missions, one per step, up to maxReasoningSteps. A model picks the first template from the goal and each later one from the findings so far; a step's hypothesis counts as confirmed when its mission's grounded verdict is Warning or Critical. Returns the findings, the hypotheses and the remediations those templates declare. It runs none of the remediations. The session's summary is appended to the hash-chained audit ledger.",
                 InputSchema = JsonSerializer.Deserialize<JsonElement>(@"
                 {
                     ""type"": ""object"",
@@ -1321,17 +1321,22 @@ public partial class McpServerHandler
         try
         {
             string content;
+            long bytesRead;
             await using (var stream = new FileStream(handle, FileAccess.Read))
             using (var reader = new StreamReader(stream))
             {
+                // Bytes off the handle, not content.Length: that counts UTF-16 characters, and the
+                // ledger row says bytes.
+                long start = stream.Position;
                 content = await reader.ReadToEndAsync(ct);
+                bytesRead = stream.Position - start;
             }
 
             await AppendScrubbedLogAsync(
                 Guid.NewGuid(),
                 "mcp-tool-fs_read",
                 "AUDITED_FILE_READ",
-                $"Read {content.Length} bytes from '{resolvedPath}'",
+                $"Read {bytesRead} bytes from '{resolvedPath}'",
                 await ResolveActorAsync(ct),
                 ct);
 
@@ -1390,23 +1395,29 @@ public partial class McpServerHandler
 
         try
         {
+            long bytesWritten;
             await using (var stream = new FileStream(handle, FileAccess.Write))
             using (var writer = new StreamWriter(stream))
             {
+                // Measured after the flush, for the same reason as fs_read: the encoder decides the
+                // byte count, and content.Length is characters.
+                long start = stream.Position;
                 await writer.WriteAsync(content.AsMemory(), ct);
+                await writer.FlushAsync(ct);
+                bytesWritten = stream.Position - start;
             }
             await AppendScrubbedLogAsync(
                 Guid.NewGuid(),
                 "mcp-tool-fs_write",
                 "AUDITED_FILE_WRITE",
-                $"Wrote {content.Length} bytes to '{resolvedPath}'",
+                $"Wrote {bytesWritten} bytes to '{resolvedPath}'",
                 await ResolveActorAsync(ct),
                 ct);
 
             return new McpToolCallResult
             {
                 IsError = false,
-                Content = new List<McpContentItem> { new() { Type = "text", Text = $"Successfully wrote {content.Length} bytes to {resolvedPath}" } }
+                Content = new List<McpContentItem> { new() { Type = "text", Text = $"Successfully wrote {bytesWritten} bytes to {resolvedPath}" } }
             };
         }
         catch (Exception ex)
@@ -1884,7 +1895,7 @@ public partial class McpServerHandler
 
         if (!string.IsNullOrWhiteSpace(result.AuditLedgerEntryHash))
         {
-            reportSb.AppendLine($"Merkle Audit Chain Commitment: {result.AuditLedgerEntryHash}");
+            reportSb.AppendLine($"Audit ledger entry hash: {result.AuditLedgerEntryHash}");
         }
 
         return new McpToolCallResult

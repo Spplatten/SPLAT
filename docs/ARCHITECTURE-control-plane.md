@@ -212,7 +212,11 @@ operator before binding anything.
 One SQLite file per host, opened by
 [`SqliteStorageContext`](../src/MissionController.Infrastructure.Data/SqliteStorageContext.cs) with
 per-connection pragmas: WAL, `synchronous = NORMAL`, foreign keys on, and `secure_delete` on — the
-last is a retention prerequisite, since without it deleted bytes survive in free pages.
+last is a retention prerequisite, since without it deleted bytes survive in free pages. Foreign-key
+enforcement constrains nothing yet, because no table declares a foreign key, and the ledger never
+will: it records tool calls and brain sessions that have no mission row. Reads of one mission's
+ledger entries, the retention sweeps and the newest-first memory read each run off an index, and
+[`StorageIndexTests`](../tests/MissionController.Tests/StorageIndexTests.cs) checks those plans.
 
 **The ledger** — [`SqliteChainedAuditLedger`](../src/MissionController.Infrastructure.Data/SqliteChainedAuditLedger.cs).
 Each append runs in a transaction: read the previous entry hash, draw a 256-bit salt, commit to a

@@ -63,6 +63,11 @@ public sealed class SqliteStorageContext
         // with a hex editor long after the retention job claims to have erased it. It is set per
         // connection because a pragma applied only at init would not cover the pooled connections
         // the retention sweep actually deletes through.
+        //
+        // foreign_keys constrains nothing yet: no table declares a foreign key. It stays on so the
+        // first REFERENCES anyone writes is enforced, where SQLite's default would ignore it. The
+        // audit ledger must never gain one: it records tool calls and brain sessions that have no
+        // Missions row, and a cascading delete would cut links out of the hash chain.
         using var cmd = conn.CreateCommand();
         cmd.CommandText =
             "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;";
@@ -182,6 +187,21 @@ public sealed class SqliteStorageContext
                     // Column already exists
                 }
             }
+
+            // After the migrations: the partial index names RedactedAtUtc, which a database older
+            // than that migration has only now. Each index serves statements StorageIndexTests plans.
+            // - Mission: one mission's entries. The rowid ends every index entry, so ORDER BY Id
+            //   in either direction is read off the index without a sort.
+            // - Unredacted: the retention sweep's TimestampUtc range. A row leaves the index when it
+            //   is redacted, so a sweep costs what is left to erase, not the whole history.
+            // - Created: the retention sweep's CreatedAtUtc range over mission payloads.
+            using var indexCmd = conn.CreateCommand();
+            indexCmd.CommandText = @"
+                CREATE INDEX IF NOT EXISTS IDX_AuditLedger_Mission ON AuditLedger(MissionId);
+                CREATE INDEX IF NOT EXISTS IDX_AuditLedger_Unredacted ON AuditLedger(TimestampUtc) WHERE RedactedAtUtc IS NULL;
+                CREATE INDEX IF NOT EXISTS IDX_Missions_Created ON Missions(CreatedAtUtc);
+            ";
+            indexCmd.ExecuteNonQuery();
         }
     }
 }
