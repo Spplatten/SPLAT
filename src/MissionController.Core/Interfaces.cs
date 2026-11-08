@@ -833,9 +833,8 @@ public interface ICognitiveGoalDecomposer
 }
 
 /// <summary>
-/// Layer 2 Cognitive Planning & Autonomous Reasoning Engine ("The Brain").
-/// Orchestrates goal decomposition, working memory synthesis, multi-step ReAct hypotheses evaluation,
-/// evidence grounding, and root-cause self-healing formulation.
+/// Plans and runs a multi-step investigation over the template catalog, one governed mission per
+/// step; see <see cref="Brain.AgentBrainEngine"/>. It recommends remediations and runs none of them.
 /// </summary>
 public interface IAgentBrain
 {

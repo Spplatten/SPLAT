@@ -103,6 +103,12 @@ For Windows sensor tools, read the companion [Windows non-enforcement table](../
 including destination filtering, filesystem scope, desktop UI limits and operator access. The
 Linux results below do not establish those Windows boundaries.
 
+`splat-mcp`'s `fs_read` and `fs_write` are neither leased nor sensor tools. They run inside
+`splat-mcp`'s own process, confined to its workspace root by
+[`WorkspaceGuard`](../../src/splat-mcp/WorkspaceGuard.cs), a user-space check made on the opened
+handle ([`WorkspaceConfinementTests`](../../tests/MissionController.Tests/WorkspaceConfinementTests.cs)).
+No kernel hook sees those reads and writes: a defect in that check is caught by nothing in this file.
+
 | Gap | Consequence |
 | --- | --- |
 | **Host sleep and the lease deadline** | The deadline counts the guest's running time, not wall time. Sleeping the host pauses the WSL VM, and `CLOCK_BOOTTIME` stops with it: across one 212 s Modern Standby on 2026-10-28, it advanced 5.1 s of 215.7 s. A lease grants no extra running time and nothing runs while paused, but its wall-clock end moves by the length of the sleep. The comment in `lease_lsm.bpf.c` was corrected in `d5bb4cad` to name guest `BOOTTIME`. |
