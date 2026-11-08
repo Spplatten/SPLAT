@@ -127,6 +127,15 @@ gRPC, REST and multi-turn task continuation are outside this first profile.
   no workload ran), `termination-verified` (a signed drain receipt) or `unresolved` (dispatched,
   nothing proves the end). A task saved before dispatch was tracked reads as `unresolved`.
   Recovering a receipt after a lost connection needs a daemon receipt lookup and is not implemented.
+- While a task runs, its metadata carries admission evidence that a verifier can pin before any
+  receipt exists:
+  - `executionContextJson`: the exact execution-context bytes this host sent.
+  - `executionPolicySha256`: the requested policy's digest, or `none`.
+  - `installedLease`: what the daemon's LEASE frame stated before the tool ran, namely
+    `cgroupId`, `cgroupPath`, `enforcing` and `effectivePolicySha256`.
+
+  The host refuses a signed receipt whose installed-policy digest differs from the one that frame
+  stated. `A2aBridgeTests` and `BoundLeaseReceiptTests` cover both.
 - The audit chain connects A2A task/caller/version to the bound tool's trace and lease result.
   Bound calls require outcome v2, signing the execution-policy hash, effective native-policy hash,
   receiver contract, authenticated tenant/caller, task, requesting agent/contract, parent and token

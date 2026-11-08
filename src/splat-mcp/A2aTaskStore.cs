@@ -17,7 +17,13 @@ internal sealed record A2aTaskRecord(string Id, string ContextId, string TenantI
     bool? Dispatched = null,
     // For a canceled or interrupted task: not-started (never dispatched), termination-verified (a
     // signed drain receipt), or unresolved (dispatched, and nothing proves how it ended).
-    string? CancellationEvidence = null, bool ReceiptRecovered = false);
+    string? CancellationEvidence = null, bool ReceiptRecovered = false,
+    // The daemon's LEASE frame, recorded while the task runs: admission evidence a cancellation proof
+    // pins before any receipt exists. Null until the guest reports installation, or from a guest that
+    // predates the frame field.
+    A2aInstalledLease? InstalledLease = null);
+
+internal sealed record A2aInstalledLease(ulong CgroupId, string? CgroupPath, bool Enforcing, string? EffectivePolicySha256);
 
 internal sealed class A2aTaskStore
 {

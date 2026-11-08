@@ -1732,6 +1732,9 @@ async fn handle_client(
                     "missionId": mission_id,
                     "cgroupId": cg.cgroup_id,
                     "cgroupPath": cg.path.display().to_string(),
+                    // The digest the signed receipt will carry, stated before the tool runs, so a
+                    // verifier can pin it from admission instead of trusting the receipt it checks.
+                    "effectivePolicySha256": effective_policy_sha256.as_str(),
                     "enforcing": cgroup_is_real && lease_mgr.is_enforcing(),
                     "limitsReadBack": cgroup_is_real,
                     "limits": {

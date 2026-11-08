@@ -447,6 +447,7 @@ impl LeaseManager {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::Duration;
 
     /// Records what reached the kernel, and can be told to fail the way a full or unwritable map
     /// does.
@@ -677,6 +678,7 @@ mod tests {
 mod isolation_tests {
     use super::*;
     use std::collections::HashSet;
+    use std::time::Duration;
 
     /// A stand-in for the four BPF hash maps: a set of the exact key bytes the driver wrote.
     ///

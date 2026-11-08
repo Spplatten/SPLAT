@@ -732,6 +732,22 @@ public interface ILeasedExecutor
         IProgress<string>? stderr = null,
         IProgress<LeaseViolationEvent>? violations = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// The same execution, also reporting the guest's LEASE frame when the lease is installed, before
+    /// the tool's first byte: what a cancellation proof pins as admission evidence while no receipt
+    /// exists yet. An executor without such a frame never reports, which reads as unknown, not absent.
+    /// </summary>
+    Task<ProcessExecutionResult> ExecuteLeasedAsync(
+        LeaseSpec lease,
+        string command,
+        IReadOnlyList<string> argv,
+        IProgress<string>? stdout,
+        IProgress<string>? stderr,
+        IProgress<LeaseViolationEvent>? violations,
+        IProgress<LeaseOutcome>? installed,
+        CancellationToken ct = default)
+        => ExecuteLeasedAsync(lease, command, argv, stdout, stderr, violations, ct);
 }
 
 /// <summary>

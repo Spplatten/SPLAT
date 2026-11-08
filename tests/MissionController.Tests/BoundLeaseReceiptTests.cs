@@ -19,14 +19,18 @@ public sealed class BoundLeaseReceiptTests
     [InlineData("legacy")]
     [InlineData("altered-count")]
     [InlineData("altered-workspace")]
+    [InlineData("admitted-policy-matches")]
+    [InlineData("admitted-policy-differs")]
     public void OnlyAnAuthenticReceiptForThisInvocationConfirmsDrain(string scenario)
     {
         var policy = new ExecutionPolicy(1, "x86_64", ["execve", "exit_group", "write", "close"], []);
         var lease = new LeaseSpec(Guid.NewGuid(), "/tmp/test", false, [], [], false, [], [], 20, new(),
             ExecutionPolicy: policy, ExecutionContext: new("worker", new string('a', 64), "tenant", "caller", "task"));
+        // The installed-policy digest the LEASE frame stated at admission, when the guest sent one.
+        string? admitted = scenario switch { "admitted-policy-matches" => new('c', 64), "admitted-policy-differs" => new('d', 64), _ => null };
         var outcome = new LeaseOutcome(77, "/sys/fs/cgroup/test", true, true, false,
             scenario == "altered-workspace" ? "/another/workspace" : null, false, null, 200000,
-            ViolationsCounted: scenario == "altered-count" ? 1UL : 0UL, ViolationsReported: 0);
+            ViolationsCounted: scenario == "altered-count" ? 1UL : 0UL, ViolationsReported: 0, EffectivePolicySha256: admitted);
         string context = JsonSerializer.Serialize(lease.ExecutionContext, BoundLeaseReceipt.Json);
         string receiptContext = scenario == "other-agent" ? context.Replace("worker", "attacker") : context;
         string filter = scenario == "other-policy" ? new string('b', 64)
@@ -45,7 +49,7 @@ public sealed class BoundLeaseReceiptTests
             outcomeSignature = Convert.ToBase64String(signature), outcomePublicKey = Convert.ToBase64String(publicKey),
             outcomeKeyId = Convert.ToHexStringLower(SHA256.HashData(publicKey)), executionContext = receiptContext,
             executionPolicySha256 = filter, effectivePolicySha256 = effective, workloadDrained = drained, cancellationAccepted = true });
-        if (scenario == "valid")
+        if (scenario is "valid" or "admitted-policy-matches")
         {
             var verified = BoundLeaseReceipt.Verify(lease, outcome, -1, frame, context);
             Assert.True(verified.WorkloadDrained);
