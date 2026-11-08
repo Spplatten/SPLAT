@@ -146,11 +146,17 @@ refusal of a wrong hash, an incomplete set and a substituted map. It restores th
 stops its daemon on exit. Ordinary client runs leave persistence checks unproven; replay records
 always say REPLAY.
 
-> **Re-run under root on 2026-11-05, inside the shipped SPLAT Guest (Debian 13, archive `f238c13a`).** `probe-daemon.sh` records PASS over 90 checks
-> against `d5bb4cad`, the BPF source that ships, at `2026-11-05T05:47:26Z`, and `probe-last-hop.ps1` at
-> `2026-11-05T05:47:31Z`,
-> its control now running as the lease's own UID; the daemon and last-hop evidence below is from those
-> runs. Earlier history, from the 2026-10-12 run against `6fc637d8`: The daemon run
+> **Re-run under root on 2026-11-08 in Ubuntu 26.04.1, on the same kernel, against the daemon built
+> from `dfeed53`.** `probe-daemon.sh` records PASS over the same 90 checks against `d5bb4cad`, the BPF
+> source that ships, at `2026-11-08T07:02:35Z`, and `probe-last-hop.ps1` at `2026-11-08T07:03:02Z`;
+> the daemon and last-hop evidence below is from those runs. The same run's section 23, recorded
+> apart from its verdict, is the native admission validator's first root run
+> ([validation/README.md](validation/README.md)).
+>
+> **Before that, under root on 2026-11-05, inside the shipped SPLAT Guest (Debian 13, archive
+> `f238c13a`):** PASS over the same 90 checks at `2026-11-05T05:47:26Z`, and the last hop at
+> `2026-11-05T05:47:31Z`, its control now running as the lease's own UID. The figures this file quotes
+> for that date come from [those records](evidence/2026-11-05-splat-guest/). Earlier history, from the 2026-10-12 run against `6fc637d8`: The daemon run
 > also checked the mission workspace, the `LEASE` frame and the signed outcome, and their rows above
 > name the checks. The jail is covered now too: the 2026-10-12 run built the shipping `jail.rs`
 > (`53d978f`, 2026-10-11) and its five jail results passed (`jail_*` and

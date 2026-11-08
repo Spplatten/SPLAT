@@ -55,6 +55,22 @@ keys decoded by byte offset. A unit test fails if it imports the writer's encode
 v1 cannot observe a scratch-execution grant, because the child writes it after the check, so
 `enforce` refuses every lease that asks for one.
 
-**Evidence so far:** non-root `cargo test` only. Its first root run is section 23 of
-`probe-daemon.sh` at the next milestone. That run is recorded under `admission_validator` in the
-evidence and kept out of the verdict. `run_842.py` and `run_843.py` do not drive B3N yet.
+**First root run: 2026-11-08T07:02:35Z**, as section 23 of `probe-daemon.sh`, in Ubuntu 26.04.1
+(kernel 6.18.33.2, BPF `d5bb4cad`, daemon from `dfeed53`). All 8 checks held. The run is recorded
+under `admission_validator` in [daemon-probe.json](../evidence/daemon-probe.json), outside the
+verdict.
+- `enforce` admitted a correct lease, which then ran. The frame named all four programs by tag.
+- `enforce` refused a scratch-execution lease as indeterminate.
+- `enforce` with `--research-fault dev-encoding` refused in both directions: the exec grant, and the
+  three default protections. The probe's own protected file sat on an anonymous-device filesystem,
+  where the two encodings agree, so the fault was invisible there.
+- `enforce` with `--research-fault decoy-exec-map` refused on `mapBinding` (`allowedExec`), plus the
+  exec grant the decoy left missing.
+- `audit` admitted, recorded and ran the lease.
+- Each check took about 0.4 ms, against a few map entries.
+
+Not yet done:
+- an audit-mode census of the catalog;
+- a foreign-program run against the `splat-canary` object;
+- the scratch handshake;
+- `run_842.py` and `run_843.py` driving B3N.
