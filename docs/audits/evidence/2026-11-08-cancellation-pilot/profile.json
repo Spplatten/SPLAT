@@ -1,0 +1,1 @@
+{"version":1,"eventType":"SplatSyntheticControl","eventTypePointer":"/event_simpleName","tenantPointer":"/cid","agentPointer":"/aid","processInstancePointer":"/TargetProcessId","rulePointer":"/rule","eventIdPointer":"/id","eventTimePointer":"/timestamp","timeEncoding":"unix-ms"}

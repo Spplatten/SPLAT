@@ -9,10 +9,10 @@ and progress by an unrelated control workload after cancellation.
 | Deliverable | Implementation | Evidence boundary |
 | --- | --- | --- |
 | Independent receipt verification | [CancellationReceiptProof.cs](../src/splat-alert-sidecar/CancellationReceiptProof.cs) | Real RSA signature tests against synthetic receipt fixtures; not a native execution result. |
-| Live cancellation/pilot runner | [FalconPilot.cs](../src/splat-alert-sidecar/FalconPilot.cs) | Compiled; no live HTTP/native run in this environment. Requires real deployment inputs. |
-| Native observer | [witness.py](../native/experiments/alert-cancellation/witness.py) | Python syntax and portable contract/parser tests passed. On the real kernel (2026-11-06), the [native witness check](#native-witness-check) saw it accept both drains and refuse every constructible bypass. Not yet run inside a SPLAT lease. |
-| One-command B run | [run-cancellation-pilot.ps1](../packaging/run-cancellation-pilot.ps1); [PilotOrchestrator.cs](../src/splat-alert-sidecar/PilotOrchestrator.cs) | The [dry run](#one-command-run) passed, with no root, trust or workload, and 18 self-test checks cover the orchestrator's derivations. Not yet run for real. |
-| Harmless workload fixture | [workload_fixture.py](../native/experiments/alert-cancellation/workload_fixture.py); [pilot workload templates](#pilot-workload-templates) | Bounded target/descendant/control roles supplied. Two pilot-only templates lease them; compiled and import-tested, not executed under a lease here. |
+| Live cancellation/pilot runner | [FalconPilot.cs](../src/splat-alert-sidecar/FalconPilot.cs) | Ran live on 2026-11-08 against a synthetic control event in the [B run](#b-run-2026-11-08), over real A2A and sidecar HTTPS. Not yet run against a vendor-originated event. |
+| Native observer | [witness.py](../native/experiments/alert-cancellation/witness.py) | Python syntax and portable contract/parser tests passed. On the real kernel (2026-11-06), the [native witness check](#native-witness-check) saw it accept both drains and refuse every constructible bypass. On 2026-11-08 it observed two SPLAT leases in the [B run](#b-run-2026-11-08): the target exited and its cgroup drained, and the control kept running. |
+| One-command B run | [run-cancellation-pilot.ps1](../packaging/run-cancellation-pilot.ps1); [PilotOrchestrator.cs](../src/splat-alert-sidecar/PilotOrchestrator.cs) | **`PASS_CANCELLATION_CHAIN` on 2026-11-08** in Ubuntu 26.04.1, with a synthetic control event ([B run](#b-run-2026-11-08)). The [dry run](#one-command-run) passed earlier, and 18 self-test checks cover the orchestrator's derivations. |
+| Harmless workload fixture | [workload_fixture.py](../native/experiments/alert-cancellation/workload_fixture.py); [pilot workload templates](#pilot-workload-templates) | Bounded target/descendant/control roles supplied. Two pilot-only templates lease them, and both ran under enforcing leases in the [B run](#b-run-2026-11-08). |
 | Regression evidence | [Current closure manifest](audits/evidence/2026-11-06-falcon-closure/verification.json); [initial harness manifest](audits/evidence/falcon-cancellation-pilot/verification.json) | Names exact source/log hashes and actual gate counts. Initial evidence is historical, not proof of later bytes. |
 
 Option A (`d334e5e`, `65c2e40`) and this B/C work (`c385cf9`) were written in a session that
@@ -205,6 +205,22 @@ A pass is `PASS_CANCELLATION_CHAIN` with `eventOrigin: synthetic-control`. It pr
 the real kernel, not vendor delivery.
 
 `-DryRun` does everything except root, trust and workloads. It passed against Ubuntu on 2026-11-06.
+
+### B run, 2026-11-08
+
+**`PASS_CANCELLATION_CHAIN`** at `2026-11-08T07:13:58Z`, in Ubuntu 26.04.1 on kernel 6.18.33.2, with
+the daemon built from `dfeed53` ([evidence](audits/evidence/2026-11-08-cancellation-pilot/manifest.json)).
+- Both workloads ran under enforcing `cancellation-pilot` leases.
+- The synthetic event was delivered with HTTP 202, and its replay also got 202.
+- The wrong-tenant and wrong-process mutations were each refused with 409, and the mailbox stayed
+  idle after both.
+- The daemon's receipt verified against the independently pinned key. It attests both the
+  cancellation and the drain.
+- The witness saw the target exit and its cgroup drain, while the control was still running and its
+  CPU count still rising.
+
+What it does not prove: the event was synthetic (`eventOrigin: synthetic-control`), so the manifest
+says `vendorOriginIndependentlyVerified: false`. Vendor delivery is C.
 Eighteen self-test checks cover the orchestrator's derivations:
 - procfs parsing
 - choosing the workload root
