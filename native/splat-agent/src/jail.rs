@@ -40,7 +40,7 @@ pub const ROOTS_BASE: &str = "/run/splat/roots";
 /// identity entries rather than requiring host accounts. The other files there
 /// that the workload may not read are denied by their mode or by the inode deny-list, both of which a
 /// bind mount preserves.
-const SYSTEM_DIRS: [&str; 8] = ["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc"];
+pub(crate) const SYSTEM_DIRS: [&str; 8] =["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc"];
 
 /// The device nodes a tool can reasonably need. Each is a bind of the host's node onto an empty
 /// file in the jail's /dev, so nothing else under /dev exists there.

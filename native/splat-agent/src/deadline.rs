@@ -1,8 +1,13 @@
 //! Checked arithmetic for guest-running-time leases; no kernel or filesystem dependencies.
 use std::time::Duration;
 
+/// The lease lifetime a request is held to, in seconds. The admission validator bounds the kernel's
+/// deadline by the same clamp, so a short request is not refused for the floor the writer applied.
+pub const MIN_LEASE_SECONDS: u32 = 5;
+pub const MAX_LEASE_SECONDS: u32 = 300;
+
 pub fn resolve(now: u64, seconds: u32, approved: Option<u64>) -> Result<(u64, Duration), &'static str> {
-    let duration = u64::from(seconds.clamp(5, 300))
+    let duration = u64::from(seconds.clamp(MIN_LEASE_SECONDS, MAX_LEASE_SECONDS))
         .checked_mul(1_000_000_000).ok_or("duration overflow")?;
     let ceiling = now.checked_add(duration).ok_or("deadline overflow")?;
     let deadline = approved.unwrap_or(ceiling);

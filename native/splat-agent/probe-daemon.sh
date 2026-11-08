@@ -911,6 +911,16 @@ cross_lease = dict.fromkeys([
 ], False)
 cross_lease_observations = {}
 
+# The native admission validator (B3N) is off by default, and this is its first measurement. Its
+# results sit under their own evidence key and never enter the verdict, so a defect in the validator
+# cannot withdraw the daemon's standing proof. True means the validator behaved as designed.
+admission_checks = dict.fromkeys([
+    "enforce_admits_a_correct_lease", "admitted_lease_ran", "frame_names_all_four_programs",
+    "scratch_exec_refused_as_indeterminate", "dev_encoding_refused", "decoy_exec_map_refused",
+    "audit_admits_and_records", "daemon_restored",
+], False)
+admission_observations = {"errors": []}
+
 def wait_for(predicate, seconds=10):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -1666,6 +1676,78 @@ except OSError as exc:
         for ws in (b_ws, a_ws):
             shutil.rmtree(ws, ignore_errors=True)
 
+def probe_admission_validator():
+    """Restart the owned daemon under each validator mode, then put it back as it was.
+
+    Runs last, so that if a restart fails here, no gated phase is left without a daemon.
+    """
+    base = list(managed_args)
+    ws = Path(tempfile.mkdtemp(prefix="splat-probe-admission-"))
+    ws.chmod(0o777)
+    secret = ws / "protected"
+    secret.write_text("PROTECTED")
+    admission_observations["root_fs_magic"] = subprocess.run(
+        ["stat", "-f", "-c", "%t", "/"], capture_output=True, text=True).stdout.strip()
+
+    def restart(extra):
+        stop_owned()
+        managed_args[:] = base + extra
+        start_owned()
+
+    def lease(label, **extra):
+        req = {"type": "EXECUTE_TOOL", "missionId": label, "command": "/usr/bin/id", "argv": ["-u"],
+               "allowedExecPaths": ["/usr/bin/id"], "protectedPaths": [str(secret)],
+               "workingDirectory": str(ws), "leaseDurationSeconds": 20}
+        req.update(extra)
+        return call(req, label, settle=6) or []
+
+    def native(msgs):
+        return next((m for m in msgs if m.get("type") == "ADMISSION" and m.get("source") == "native"), {})
+
+    def refused(msgs):
+        return exit_frame(msgs).get("exitCode") == -1 and not had(msgs, "STDOUT")
+
+    try:
+        restart(["--admission-validator", "enforce"])
+        msgs = lease("probe-admission-enforce")
+        frame = admission_observations["enforce"] = native(msgs)
+        admission_checks["enforce_admits_a_correct_lease"] = frame.get("verdict") == "admitted" and frame.get("enforced") is True
+        admission_checks["admitted_lease_ran"] = completed(msgs)
+        programs = frame.get("programs", [])
+        admission_checks["frame_names_all_four_programs"] = len(programs) == 4 and all(p.get("tag") for p in programs)
+
+        # v1 cannot see a scratch grant before spawn, so enforce must refuse it as unconfirmed. The
+        # protected file stays out: a policy path under a copy-on-write workdir is refused earlier.
+        msgs = lease("probe-admission-scratch", protectedPaths=[],
+                     overlayFs={"enableCow": True, "allowScratchExec": True})
+        frame = admission_observations["scratch"] = native(msgs)
+        admission_checks["scratch_exec_refused_as_indeterminate"] = frame.get("verdict") == "indeterminate" and refused(msgs)
+
+        # The guest root sits on a device whose glibc and kernel encodings differ, so the exec grant
+        # the faulty writer installs is not the one the program looks up.
+        restart(["--admission-validator", "enforce", "--research-fault", "dev-encoding"])
+        msgs = lease("probe-admission-dev-encoding")
+        frame = admission_observations["dev_encoding"] = native(msgs)
+        kinds = [r.get("kind") for r in frame.get("reasons", [])]
+        admission_checks["dev_encoding_refused"] = frame.get("verdict") == "refused" and "execGrantMissing" in kinds and refused(msgs)
+
+        restart(["--admission-validator", "enforce", "--research-fault", "decoy-exec-map"])
+        msgs = lease("probe-admission-decoy")
+        frame = admission_observations["decoy"] = native(msgs)
+        bound = any(r.get("kind") == "mapBinding" and r.get("role") == "allowedExec" for r in frame.get("reasons", []))
+        admission_checks["decoy_exec_map_refused"] = frame.get("verdict") == "refused" and bound and refused(msgs)
+
+        restart(["--admission-validator", "audit"])
+        msgs = lease("probe-admission-audit")
+        frame = admission_observations["audit"] = native(msgs)
+        admission_checks["audit_admits_and_records"] = frame.get("enforced") is False and bool(frame.get("snapshotSha256")) and completed(msgs)
+    finally:
+        try:
+            restart([])
+            admission_checks["daemon_restored"] = True
+        finally:
+            shutil.rmtree(ws, ignore_errors=True)
+
 if replay is None and hasattr(os, "geteuid") and os.geteuid() == 0:
     print("\n== 18. CoW: private overlay writes, unchanged lowerdir, teardown ==")
     try:
@@ -1706,6 +1788,11 @@ if replay is None and hasattr(os, "geteuid") and os.geteuid() == 0:
         if repeat > 1:
             feature_observations["expiry_series"] = series
             feature_checks["expiry_series_every_run_held"] = len(series) == repeat and all(r["checks_held"] for r in series)
+        print("\n== 23. Native admission validator: first root run, recorded and never gated ==")
+        try:
+            probe_admission_validator()
+        except Exception as e:
+            admission_observations["errors"].append(str(e))
 for name, passed in feature_checks.items():
     print(f"  {name}: {passed}")
 for error in feature_observations["errors"]:
@@ -1718,6 +1805,10 @@ print(f"  cross-lease /proc/<peer>/cwd link : {cross_lease['proc_cwd_readlinked'
 print(f"  cross-lease /proc/<peer>/root link: {cross_lease['proc_root_readlinked']}")
 print(f"  cross-lease read peer workspace   : {cross_lease['peer_workspace_read']}")
 print(f"  cross-lease wrote peer workspace  : {cross_lease['peer_workspace_written']}")
+for name, held in admission_checks.items():
+    print(f"  admission validator {name} (not gated): {held}")
+for error in admission_observations["errors"]:
+    print("  admission validator error (not gated): " + error)
 daemon_proved_itself = bool(handshakes) and all(proven for _, proven in handshakes)
 daemon_frames_proven = bool(frame_sessions) and all(p for _, p in frame_sessions) and not frame_failures
 
@@ -1756,6 +1847,8 @@ evidence = {
     "recorded_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
     "root_feature_observations": feature_observations,
+    # Never read by the verdict below; see where admission_checks is defined.
+    "admission_validator": {"checks": admission_checks, "observations": admission_observations},
     "results": {
         **feature_checks,
         "permitted_tool_ran": "uid=" in text(allowed),

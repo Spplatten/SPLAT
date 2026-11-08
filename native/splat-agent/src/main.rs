@@ -18,6 +18,8 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
+mod admission;
+mod admission_collect;
 mod auth;
 mod ceiling;
 mod cgroup;
@@ -216,12 +218,35 @@ struct Args {
     #[arg(long)]
     admission_gate: Option<std::path::PathBuf>,
 
-    /// Thesis 8.4.3 only: make this daemon a consistently wrong writer, so the gate's variants can be
+    /// Before each lease's workload is spawned, check inside the daemon that the programs deciding its
+    /// hooks are this daemon's own and that the kernel's maps hold exactly the approved lease. `audit`
+    /// records the verdict and admits; `enforce` refuses any mismatch and anything it cannot observe,
+    /// which includes every approved scratch-execution grant, since the child writes that one. Off
+    /// by default until a root run at a milestone has measured it.
+    #[arg(long, value_enum, default_value_t = admission::AdmissionValidator::Off)]
+    admission_validator: admission::AdmissionValidator,
+
+    /// Thesis 8.4.3 only: make this daemon a consistently wrong writer, so the admission checks can be
     /// compared against it. `dev-encoding` keys inodes with the userspace st_dev (the 2026-09-03
     /// defect); `decoy-exec-map` writes exec grants to a map the enforcing program never reads.
-    /// Both can only refuse what a lease meant to allow, and the gate must be present.
-    #[arg(long, requires = "admission_gate", value_parser = ["dev-encoding", "decoy-exec-map"])]
+    /// `dev-encoding` re-keys protected inodes too, so on a device whose major is not 0 or whose minor
+    /// is 256 or more, those protections fail open. It needs a check that refuses: the gate, or the
+    /// native validator enforcing.
+    #[arg(long, value_parser = ["dev-encoding", "decoy-exec-map"])]
     research_fault: Option<String>,
+}
+
+/// A research fault writes policy nobody asked for, and `dev-encoding` can leave protections open, so
+/// a daemon running one must also run a check that refuses. Auditing records the damage and runs
+/// the work anyway, which is not a check.
+fn check_research_fault(args: &Args) -> Result<()> {
+    if args.research_fault.is_some()
+        && args.admission_gate.is_none()
+        && args.admission_validator != admission::AdmissionValidator::Enforce
+    {
+        bail!("--research-fault needs a refusing admission check: --admission-gate, or --admission-validator enforce");
+    }
+    Ok(())
 }
 
 /// Held from the first policy-map write of a lease until its workload's exec has returned, and by
@@ -272,6 +297,15 @@ static ADMISSION_GATE: std::sync::OnceLock<std::path::PathBuf> = std::sync::Once
 
 /// How long the gate may take. A gate that hangs holds MAP_WRITES, so it cannot be unbounded.
 const ADMISSION_GATE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The native validator's mode and, unless audit mode could not read the kernel at startup, its
+/// collector. Set once, before the listener starts.
+static ADMISSION_VALIDATOR: std::sync::OnceLock<(admission::AdmissionValidator, Option<Arc<admission_collect::Collector>>)> =
+    std::sync::OnceLock::new();
+
+/// The validator reads under MAP_WRITES, so it is bounded as the gate is. A read that times out ends
+/// on its blocking thread after the lock is released, which is harmless: it only reads.
+const ADMISSION_VALIDATOR_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Runs the admission gate over one installed lease. Ok(decision) only on exit 0; the decision is the
 /// gate's stdout, kept verbatim for the caller's record.
@@ -464,6 +498,10 @@ impl BpfMapSync for LiveBpfSync {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
+    check_research_fault(&args)?;
+    if args.admission_validator != admission::AdmissionValidator::Off && args.mock_bpf {
+        bail!("--admission-validator needs enforcing BPF; under --mock-bpf there is nothing to validate");
+    }
 
     if let Some(metadata) = &args.issue_secret {
         return secrets::submit(args.secret_socket.as_deref().expect("required by clap"), metadata);
@@ -571,6 +609,37 @@ async fn main() -> Result<()> {
                         } else {
                             allowed_exec_inodes
                         };
+                        // The validator records the ids the writer will write, read here after the
+                        // decoy substitution, so a decoy is what it compares the programs against.
+                        if args.admission_validator != admission::AdmissionValidator::Off {
+                            let id = |m: &MapHandle| libbpf_rs::MapInfo::new(m.as_fd()).map(|i| i.info.id);
+                            let built = (|| -> Result<admission_collect::Collector> {
+                                let writer = std::collections::BTreeMap::from([
+                                    (admission::Role::LeasedCgroups, id(&leased_cgroups)?),
+                                    (admission::Role::AllowedExec, id(&allowed_exec_inodes)?),
+                                    (admission::Role::ScratchExec, id(&scratch_exec_devs)?),
+                                    (admission::Role::Protected, id(&protected_inodes)?),
+                                    (admission::Role::AllowedIpv4, id(&allowed_connect_ipv4)?),
+                                ]);
+                                let collector = admission_collect::Collector::new(skel, writer)?;
+                                for finding in collector.startup_findings()? {
+                                    warn!("Admission validator: every lease meets this until it is fixed: {finding}");
+                                }
+                                Ok(collector)
+                            })();
+                            let collector = match built {
+                                Ok(collector) => Some(Arc::new(collector)),
+                                Err(e) if args.admission_validator == admission::AdmissionValidator::Enforce => {
+                                    return Err(e.context("the enforcing admission validator cannot read this kernel"));
+                                }
+                                Err(e) => {
+                                    warn!("Admission validator unavailable; each audit verdict will say so: {e:#}");
+                                    None
+                                }
+                            };
+                            let _ = ADMISSION_VALIDATOR.set((args.admission_validator, collector));
+                            info!("Native admission validator: {}", args.admission_validator.as_str());
+                        }
                         bpf_sync = Some(Arc::new(LiveBpfSync {
                             leased_cgroups,
                             protected_inodes,
@@ -1854,10 +1923,11 @@ async fn handle_client(
                     }
                 }
 
-                // The gate runs after the last map write this request makes (the jail's scratch grant
-                // above) and before the fork, under MAP_WRITES, so the state it reads is the state the
-                // exec meets. It is handed the writer's own key bytes so that a byte-readback gate and
-                // a semantic gate see identical input; what each does with them is the experiment.
+                // The gate runs after the parent's last map write and before the fork, under
+                // MAP_WRITES, so the state it reads is the state the exec meets - except a scratch
+                // grant, which the child writes after its overlay mount, during spawn, where no check
+                // here can see it. It is handed the writer's own key bytes so that a byte-readback gate
+                // and a semantic gate see identical input; what each does with them is the experiment.
                 if let Some(gate) = ADMISSION_GATE.get() {
                     let lease = installed.as_ref().expect("successful installation checked above");
                     let keys = lease_map_keys(lease);
@@ -1890,6 +1960,57 @@ async fn handle_client(
                             continue;
                         }
                     }
+                }
+
+                // The native validator, after the gate: an injecting gate variant (thesis 8.4.2) still
+                // meets it, and the gate's frame stays the first ADMISSION frame the harness reads.
+                let mut admission_summary = None;
+                if let Some((mode, collector)) = ADMISSION_VALIDATOR.get() {
+                    let outcome = match collector {
+                        Some(collector) if cgroup_is_real => {
+                            let approval = admission::Approval {
+                                cgroup_id: cg.cgroup_id,
+                                exec_paths: lease_cfg.allowed_exec_paths.clone(),
+                                protected_paths: lease_cfg.protected_paths.clone(),
+                                allow_network: lease_cfg.allow_network,
+                                egress_ips: lease_cfg.allowed_egress_ips.clone(),
+                                egress_ports: lease_cfg.allowed_egress_ports.clone(),
+                                duration_seconds: lease_cfg.lease_duration_seconds,
+                                scratch_exec: allow_scratch_exec,
+                                cow_workdir: enable_cow.then(|| std::path::PathBuf::from(work_dir)),
+                                private_uid: private_uid.is_some(),
+                            };
+                            let collector = Arc::clone(collector);
+                            let cgroup_path = cg.path.clone();
+                            let check = tokio::task::spawn_blocking(move || collector.validate(&approval, &cgroup_path));
+                            match tokio::time::timeout(ADMISSION_VALIDATOR_TIMEOUT, check).await {
+                                Ok(Ok(outcome)) => outcome,
+                                Ok(Err(e)) => admission::Outcome::indeterminate(format!("the validator failed: {e}")),
+                                Err(_) => admission::Outcome::indeterminate("the validator timed out"),
+                            }
+                        }
+                        Some(_) => admission::Outcome::indeterminate("the lease is not installed in a kernel cgroup"),
+                        None => admission::Outcome::indeterminate("the validator could not read the kernel at startup"),
+                    };
+                    let frame = outcome.frame(*mode, &pinning::source_hash());
+                    if *mode == admission::AdmissionValidator::Enforce && !outcome.report.verdict.admitted() {
+                        error!("Refusing to execute for mission {mission_id}: native admission {}: {}",
+                               outcome.report.verdict.label(), outcome.report.verdict.summary());
+                        lease_mgr.revoke_lease(cg.cgroup_id);
+                        let workspace_removed = workspace_created && workload::remove_workspace(ordinary_workload.as_mut(), Path::new(work_dir));
+                        out.send(&frame).await?;
+                        out.send(&serde_json::json!({"type":"STDERR", "data":"SPLAT refused admission: the native admission validator could not confirm the installed lease is the approved one.\n"})).await?;
+                        let mut exit_chunk = serde_json::json!({ "type": "EXIT", "exitCode": -1 });
+                        if workspace_created {
+                            exit_chunk["workspaceRemoved"] = serde_json::json!(workspace_removed);
+                        }
+                        exit_chunk["admission"] = outcome.exit_summary();
+                        out.send(&exit_chunk).await?;
+                        line.clear();
+                        continue;
+                    }
+                    out.send(&frame).await?;
+                    admission_summary = Some(outcome.exit_summary());
                 }
 
                 // Subscribe BEFORE spawning. An exec refused by the LSM fails inside the child, so
@@ -2210,6 +2331,10 @@ async fn handle_client(
                 if workspace_created {
                     exit_chunk["workspaceRemoved"] = serde_json::Value::Bool(workspace_removed);
                 }
+                // Unsigned, like effectivePolicySha256: the signed text stays the v2 sequence.
+                if let Some(summary) = admission_summary {
+                    exit_chunk["admission"] = summary;
+                }
 
                 // Roadmap 2.5: the guest signs what it just reported, so the record cannot claim
                 // more than the guest said. The signed text travels verbatim rather than being
@@ -2282,6 +2407,32 @@ async fn handle_client(
 
     Ok(())
 }
+#[cfg(test)]
+mod admission_flag_tests {
+    use super::{admission::AdmissionValidator, check_research_fault, Args};
+    use clap::Parser;
+
+    fn with_fault(extra: &[&str]) -> Args {
+        let argv = ["splat-agent", "--research-fault", "dev-encoding"].iter().chain(extra);
+        Args::try_parse_from(argv).expect("valid flags")
+    }
+
+    #[test]
+    fn a_research_fault_requires_a_check_that_refuses() {
+        assert!(check_research_fault(&with_fault(&["--admission-gate", "/opt/gate"])).is_ok());
+        assert!(check_research_fault(&with_fault(&["--admission-validator", "enforce"])).is_ok());
+        assert!(check_research_fault(&with_fault(&["--admission-validator", "audit"])).is_err());
+        assert!(check_research_fault(&with_fault(&[])).is_err());
+    }
+
+    #[test]
+    fn the_admission_validator_is_off_by_default() {
+        let args = Args::try_parse_from(["splat-agent"]).expect("no flags");
+        assert_eq!(args.admission_validator, AdmissionValidator::Off);
+        assert!(check_research_fault(&args).is_ok());
+    }
+}
+
 #[cfg(test)]
 mod frame_tests {
     use super::{read_frame, MAX_FRAME_BYTES};

@@ -18,7 +18,7 @@ kernel's installed exec policy catch an unauthorized grant that byte readback ac
 | `workload_a.c`, `workload_x.c` | A is approved and tries to exec X; X is harmless and never approved. Static. |
 | `build_842.sh` | Builds daemon and workloads from a clean tree into a staging directory, with hashes. |
 | `run_842.py` | Runs every condition in randomized blocks in the run guest and writes the evidence bundle. |
-| `run_843.py`, `workload_p.c` | 8.4.3: a missing protection (P opens a file the approval protects), a wrong identity and a decoy map binding (daemon `--research-fault`, gate-only), a write that ignores the daemon's lock, and a no-gate cost baseline. Variant `B2W` reads back through the writer's own map ids. |
+| `run_843.py`, `workload_p.c` | 8.4.3: a missing protection (P opens a file the approval protects), a wrong identity and a decoy map binding (daemon `--research-fault`, which needs a refusing check: the gate, or the native validator enforcing), a write that ignores the daemon's lock, and a no-gate cost baseline. Variant `B2W` reads back through the writer's own map ids. |
 | `run_unified.sh` | The probe (optionally `N` expiry repeats), 8.4.2 and 8.4.3 on one staged binary. |
 | `PROTOCOL.md` | Repetitions, exclusions and pass criteria for milestone run 1, fixed before it. |
 
@@ -37,3 +37,24 @@ the translated-dump hashes it also keeps change per load, because the dump embed
 A gate run is indeterminate, and refuses, when any program other than the daemon's own decides
 `bprm_check_security`. WSL distros share one kernel, so another distro's orphaned SPLAT pins are such
 a program.
+
+## Variant B3N: the same check inside the daemon (implemented, not yet run under root)
+
+`--admission-validator {off,audit,enforce}`, default `off`, runs B3's semantic comparison in the
+daemon itself (`src/admission.rs` decides, `src/admission_collect.rs` reads the kernel), after the
+gate and under the same lock. Beyond what `gate.py` checks, it verifies:
+- the program tag and attach target on all four hooks, not only `bprm_check_security`;
+- that no foreign LSM program sits on any of them;
+- that each program's maps are the ones the writer writes, so the decoy fault is caught as a binding;
+- the deadline against the approved duration;
+- for protected files, that a host submount does not hide them from the jail.
+
+It derives keys independently of the writer: devices from statx's separate major and minor, and
+keys decoded by byte offset. A unit test fails if it imports the writer's encoders.
+
+v1 cannot observe a scratch-execution grant, because the child writes it after the check, so
+`enforce` refuses every lease that asks for one.
+
+**Evidence so far:** non-root `cargo test` only. Its first root run is section 23 of
+`probe-daemon.sh` at the next milestone. That run is recorded under `admission_validator` in the
+evidence and kept out of the verdict. `run_842.py` and `run_843.py` do not drive B3N yet.
