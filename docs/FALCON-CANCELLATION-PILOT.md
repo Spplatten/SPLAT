@@ -11,6 +11,7 @@ and progress by an unrelated control workload after cancellation.
 | Independent receipt verification | [CancellationReceiptProof.cs](../src/splat-alert-sidecar/CancellationReceiptProof.cs) | Real RSA signature tests against synthetic receipt fixtures; not a native execution result. |
 | Live cancellation/pilot runner | [FalconPilot.cs](../src/splat-alert-sidecar/FalconPilot.cs) | Compiled; no live HTTP/native run in this environment. Requires real deployment inputs. |
 | Native observer | [witness.py](../native/experiments/alert-cancellation/witness.py) | Python syntax and portable contract/parser tests passed. On the real kernel (2026-11-06), the [native witness check](#native-witness-check) saw it accept both drains and refuse every constructible bypass. Not yet run inside a SPLAT lease. |
+| One-command B run | [run-cancellation-pilot.ps1](../packaging/run-cancellation-pilot.ps1); [PilotOrchestrator.cs](../src/splat-alert-sidecar/PilotOrchestrator.cs) | The [dry run](#one-command-run) passed, with no root, trust or workload, and 18 self-test checks cover the orchestrator's derivations. Not yet run for real. |
 | Harmless workload fixture | [workload_fixture.py](../native/experiments/alert-cancellation/workload_fixture.py); [pilot workload templates](#pilot-workload-templates) | Bounded target/descendant/control roles supplied. Two pilot-only templates lease them; compiled and import-tested, not executed under a lease here. |
 | Regression evidence | [Current closure manifest](audits/evidence/2026-11-06-falcon-closure/verification.json); [initial harness manifest](audits/evidence/falcon-cancellation-pilot/verification.json) | Names exact source/log hashes and actual gate counts. Initial evidence is historical, not proof of later bytes. |
 
@@ -160,6 +161,57 @@ In the guest:
 - the gate: no flag means no compile, import or reload
 - that the registry refuses these templates
 - the compiled lease
+
+### One-command run
+
+Run B at a milestone, from your own shell:
+
+```powershell
+.\packaging\run-cancellation-pilot.ps1 -Distro Ubuntu -DryRun
+.\packaging\run-cancellation-pilot.ps1 -Distro Ubuntu
+```
+
+Before the real run:
+- `-Distro` must be the default WSL distribution. SPLAT's host reads the daemon token from it, and
+  its leases run there; the script refuses any other.
+- That guest's daemon must be built from this tree, so its LEASE frame states the installed policy,
+  and re-proved (`packaging/reprove-if-stale.ps1`). An older daemon is refused at admission, before
+  any plan is written.
+
+The real run, in order:
+1. Installs the committed `witness.py` and `workload_fixture.py` in the guest as root, mode 0644,
+   and checks the deployed bytes.
+2. Derives the daemon outcome-key pin as root from `/etc/splat/outcome.key`, unless
+   `-DaemonKeySha256` supplies one. The pin never comes from the receipt under test.
+3. Builds the sidecar and `splat-mcp`, then makes two one-day end-entity certificates for
+   127.0.0.1. Windows asks you to trust each one. At the end the run removes them, and Windows asks
+   again.
+4. Imports the pilot agent into a fresh database and starts an A2A host on it.
+5. Runs `splat-alert-sidecar --orchestrate-cancellation-pilot`, which:
+   - admits the control and the target;
+   - pins what `GetTask` states while both run;
+   - reads both workload roots from the guest's cgroup and procfs, checking each cgroup's inode
+     against the ID the daemon reported;
+   - registers the target's sensor and starts a Falcon-mode sidecar holding only that credential;
+   - writes a labelled synthetic event, then runs the unchanged `--check-falcon-pilot` and
+     `--run-falcon-pilot`.
+6. Cancels any pilot task still running, stops both processes and deletes the private keys.
+
+Evidence goes to `private/cancellation-pilot-<stamp>/`:
+- `pilot/evidence` is the runner's evidence directory.
+- `pilot/orchestration.json` records the stage the run reached.
+
+A pass is `PASS_CANCELLATION_CHAIN` with `eventOrigin: synthetic-control`. It proves the chain on
+the real kernel, not vendor delivery.
+
+`-DryRun` does everything except root, trust and workloads. It passed against Ubuntu on 2026-11-06.
+Eighteen self-test checks cover the orchestrator's derivations:
+- procfs parsing
+- choosing the workload root
+- pinning the admission facts
+- the assembled inputs passing the runner's own validation
+
+Its A2A calls and guest reads run only in a real run.
 
 ## C: authorized Falcon pilot setup
 

@@ -15,11 +15,11 @@ namespace MissionController.Tests;
 [Collection(SerialProcessSpawning.Name)]
 public sealed class AlertSidecarSelfTests
 {
-    // What ran on 2026-11-06 once the Falco, admission-registrar and cancellation-proof groups were
-    // merged, the run docs/DECOUPLED-SENSOR-ENFORCEMENT.md cites. A floor, not a pin: a new check must
-    // not fail the suite, but a dropped check group passes every check it still has and is visible
-    // only here.
-    private const int ChecksAtLeast = 256;
+    // What ran on 2026-11-06 once the Falco, admission-registrar, cancellation-proof and pilot
+    // orchestrator groups were merged, the run docs/DECOUPLED-SENSOR-ENFORCEMENT.md cites. A floor, not
+    // a pin: a new check must not fail the suite, but a dropped check group passes every check it still
+    // has and is visible only here.
+    private const int ChecksAtLeast = 274;
 
     [Fact]
     public async Task TheSidecarsOwnChecks_AllRun_AndAllPass()
@@ -30,6 +30,6 @@ public sealed class AlertSidecarSelfTests
         int checks = await Task.Run(SelfTest.Checks).WaitAsync(TimeSpan.FromMinutes(2));
 
         Assert.True(checks >= ChecksAtLeast,
-            $"The sidecar ran {checks} checks where {ChecksAtLeast} ran on 2026-11-05: a check group was dropped.");
+            $"The sidecar ran {checks} checks where {ChecksAtLeast} ran on 2026-11-06: a check group was dropped.");
     }
 }

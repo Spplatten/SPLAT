@@ -12,6 +12,7 @@ using Splat.AlertSidecar;
 if (args.Length == 1 && args[0] == "--self-test") return SelfTest.Run();
 if (args.Length == 3 && args[0] == "--self-test-witness-wire") return await WitnessWireChecks.RunAsync(args[1], args[2]);
 if (await FalconPilot.TryRunAsync(args) is { } pilotResult) return pilotResult;
+if (await PilotOrchestrator.TryRunAsync(args) is { } orchestrated) return orchestrated;
 if (FalconCommands.TryRun(args) is { } checkResult) return checkResult;
 if (FalcoAdapter.TryRun(args) is { } falcoResult) return falcoResult;
 if (args.Length is not (3 or 4))
@@ -20,6 +21,7 @@ if (args.Length is not (3 or 4))
     Console.Error.WriteLine("Proof: --verify-cancellation <expectation.json> <task.json>; --inspect-pilot-context <context.json>");
     Console.Error.WriteLine("Pilot: --run-falcon-pilot <plan.json> <binding.json> <profile.json> <event.json> <new-output-directory>");
     Console.Error.WriteLine("Offline: --check-falcon-pilot <plan.json> <binding.json> <profile.json> <event.json>");
+    Console.Error.WriteLine("Option B: --orchestrate-cancellation-pilot <request.json> <new-run-directory>");
     Console.Error.WriteLine("Falco: --check-falco-event <binding.json> <event.json>");
     return 2;
 }
