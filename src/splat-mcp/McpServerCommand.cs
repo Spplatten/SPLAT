@@ -25,7 +25,7 @@ public abstract record McpServerCommand
 
     public static string Usage => $"""
         Usage: splat-mcp [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>] [--run-record-key <file>]
-               splat-mcp import-agent <reviewed-manifest.json>
+               splat-mcp import-agent [--cancellation-pilot] <reviewed-manifest.json>
                splat-mcp --agent <id> --agent-version <approved-contract-sha256>
                splat-mcp a2a --configuration <approved-a2a.json>
                splat-mcp doctor [--workspace <dir>] [--egress <a.b.c.d:port,...>] [--ledger-key <file>] [--run-record-key <file>]
@@ -91,7 +91,8 @@ public abstract record McpServerCommand
 
           import-agent        Save a reviewed manifest and its compiled templates atomically;
                               print the agent ID and immutable contract version. Does not execute.
-          a2a                 Serve one approved agent over loopback HTTPS using A2A 1.0 JSON-RPC.
+                              --cancellation-pilot also admits the pilot fixture templates.
+          a2a                Serve one approved agent over loopback HTTPS using A2A 1.0 JSON-RPC.
                               Configuration pins the contract and each caller's allowed skills.
           --agent             Serve only this saved agent's tools. Generic execution, filesystem
                               tools and nested orchestration are refused on this endpoint.
@@ -143,9 +144,12 @@ public abstract record McpServerCommand
 
         if (args.Count > 0 && args[0] == "import-agent")
         {
-            if (args.Count != 2 || args[1].StartsWith('-') || !File.Exists(args[1]))
+            // The pilot is named on the command line, never read from the manifest, so a reviewed
+            // contract cannot opt itself into the fixtures.
+            bool pilot = args.Count == 3 && args[1] == "--cancellation-pilot";
+            if (args.Count != (pilot ? 3 : 2) || args[^1].StartsWith('-') || !File.Exists(args[^1]))
                 return new UsageError("import-agent requires one existing reviewed manifest file.");
-            return new ImportAgent(Path.GetFullPath(args[1]));
+            return new ImportAgent(Path.GetFullPath(args[^1]), pilot);
         }
 
         var given = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -426,7 +430,7 @@ public abstract record McpServerCommand
     public sealed record Serve(string? WorkspaceRoot, McpEgressPolicy Egress, string? LedgerKeyPath = null,
         string? RunRecordKeyPath = null, string? AgentId = null, string? AgentVersion = null) : McpServerCommand;
 
-    public sealed record ImportAgent(string Path) : McpServerCommand;
+    public sealed record ImportAgent(string Path, bool CancellationPilot = false) : McpServerCommand;
 
     private static McpServerCommand Built(bool doctor, string? workspaceRoot, McpEgressPolicy egress, string? ledgerKey, string? runRecordKey) =>
         doctor

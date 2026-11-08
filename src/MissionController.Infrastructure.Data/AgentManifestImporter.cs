@@ -6,9 +6,10 @@ namespace MissionController.Infrastructure.Data;
 
 public sealed class AgentManifestImporter(SqliteStorageContext context)
 {
-    public async Task<CompiledAgentManifest> ImportAsync(string json, CancellationToken cancellationToken = default)
+    public async Task<CompiledAgentManifest> ImportAsync(string json, bool includeCancellationPilot = false,
+        CancellationToken cancellationToken = default)
     {
-        var compiled = AgentManifestCompiler.Compile(json);
+        var compiled = AgentManifestCompiler.Compile(json, includeCancellationPilot);
         using var connection = context.CreateConnection();
         using var transaction = connection.BeginTransaction();
         try
@@ -53,7 +54,7 @@ public sealed class AgentManifestImporter(SqliteStorageContext context)
     }
 
     public async Task<AgentManifestApproval> LoadApprovedAsync(string agentId, string sha256,
-        CancellationToken cancellationToken = default)
+        bool includeCancellationPilot = false, CancellationToken cancellationToken = default)
     {
         AgentManifestApproval.ValidateSelection(agentId, sha256);
         using var connection = context.CreateConnection();
@@ -66,7 +67,7 @@ public sealed class AgentManifestImporter(SqliteStorageContext context)
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
             || !string.Equals(reader.GetString(0), sha256, StringComparison.Ordinal))
             throw new InvalidOperationException("The selected agent and approved contract version are not registered.");
-        var compiled = AgentManifestCompiler.Compile(reader.GetString(1));
+        var compiled = AgentManifestCompiler.Compile(reader.GetString(1), includeCancellationPilot);
         reader.Close();
         // Bind the catalog definitions as well as the manifest. A catalog upgrade or mutable registry
         // row must never silently change the executable, arguments, resources or grants approved here.

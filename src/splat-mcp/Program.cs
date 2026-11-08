@@ -68,7 +68,7 @@ public static class Program
             {
                 var context = new SqliteStorageContext(Environment.GetEnvironmentVariable("SPLAT_DB_PATH")
                     ?? SplatDataRoot.Layout.LedgerDatabase);
-                var compiled = await new AgentManifestImporter(context).ImportAsync(await File.ReadAllTextAsync(import.Path));
+                var compiled = await new AgentManifestImporter(context).ImportAsync(await File.ReadAllTextAsync(import.Path), import.CancellationPilot);
                 Console.Out.WriteLine(JsonSerializer.Serialize(new { agentId = AgentManifestApproval.AgentIdOf(compiled),
                     contractSha256 = AgentManifestApproval.Hash(compiled), projectId = compiled.Project.ProjectId }));
                 return 0;
@@ -184,7 +184,7 @@ public static class Program
         {
             try
             {
-                agent = await new AgentManifestImporter(storageContext).LoadApprovedAsync(serve.AgentId!, serve.AgentVersion!, ct);
+                agent = await new AgentManifestImporter(storageContext).LoadApprovedAsync(serve.AgentId!, serve.AgentVersion!, cancellationToken: ct);
             }
             catch (InvalidOperationException ex)
             {

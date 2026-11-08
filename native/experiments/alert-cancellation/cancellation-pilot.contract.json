@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "agentId": "cancellation-pilot",
+  "name": "Cancellation Pilot",
+  "description": "Leases the public-data pilot fixture as a target and a control for the end-to-end cancellation proof.",
+  "instructions": "Run the fixture and report its READY line and how the run ended. The fixture reads no secrets and opens no sockets.",
+  "targetModel": "claude-haiku-4-5",
+  "tools": [
+    { "name": "pilot_target", "templateId": "cancellation-pilot-target" },
+    { "name": "pilot_control", "templateId": "cancellation-pilot-control" }
+  ]
+}

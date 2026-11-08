@@ -48,7 +48,7 @@ internal static class A2aServer
             var chain = await SqliteChainedAuditLedger.InspectAsync(db, key);
             if (chain.Keyed && chain.KeyMatches != true) throw new InvalidOperationException("The configured audit ledger key is required.");
             var context = new SqliteStorageContext(db);
-            var approval = await new AgentManifestImporter(context).LoadApprovedAsync(config.AgentId, config.AgentVersion);
+            var approval = await new AgentManifestImporter(context).LoadApprovedAsync(config.AgentId, config.AgentVersion, config.CancellationPilot);
             var ledger = new SqliteChainedAuditLedger(context, key);
             var revocations = new IncidentRevocationManager(ledger, new SqliteRevocationStore(context));
             using var signer = Environment.GetEnvironmentVariable(RunRecordKeyFile.EnvironmentVariable) is { Length: > 0 } signingFile
