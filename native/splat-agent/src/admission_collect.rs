@@ -18,6 +18,7 @@ use std::time::Instant;
 
 use anyhow::{bail, ensure, Context, Result};
 use libbpf_rs::libbpf_sys as sys;
+use libbpf_rs::skel::Skel;
 
 use crate::admission::{
     self, Approval, Capture, Counts, ExpectedProgram, ForeignLink, Hook, HookObs, Ident, IdentityResolver,
@@ -41,7 +42,7 @@ const CAPTURE_FROM: [(Role, Hook); 5] = [
 
 pub struct Collector {
     profile: KernelProfile,
-    /// This daemon's own four links, duplicated at startup. Never `skel.progs`: on pin reuse those
+    /// This daemon's own links, duplicated at startup. Never `skel.progs`: on pin reuse those
     /// are loaded but unattached copies.
     links: Vec<(Hook, OwnedFd)>,
 }
@@ -55,7 +56,17 @@ impl Collector {
             (Hook::FileOpen, skel.links.splat_file_open.as_ref(), skel.progs.splat_file_open.as_fd()),
             (Hook::SocketConnect, skel.links.splat_socket_connect.as_ref(), skel.progs.splat_socket_connect.as_fd()),
             (Hook::SocketSendmsg, skel.links.splat_socket_sendmsg.as_ref(), skel.progs.splat_socket_sendmsg.as_fd()),
+            (Hook::PtraceAccess, skel.links.splat_ptrace_access.as_ref(), skel.progs.splat_ptrace_access.as_fd()),
+            (Hook::TaskKill, skel.links.splat_task_kill.as_ref(), skel.progs.splat_task_kill.as_fd()),
+            (Hook::TaskSetsched, skel.links.splat_task_setsched.as_ref(), skel.progs.splat_task_setsched.as_fd()),
+            (Hook::TaskSetnice, skel.links.splat_task_setnice.as_ref(), skel.progs.splat_task_setnice.as_fd()),
+            (Hook::TaskSetioprio, skel.links.splat_task_setioprio.as_ref(), skel.progs.splat_task_setioprio.as_fd()),
+            (Hook::TaskSetrlimit, skel.links.splat_task_setrlimit.as_ref(), skel.progs.splat_task_setrlimit.as_fd()),
         ];
+        // A program added to lease_lsm.bpf.c but not to this list would be attached and never
+        // checked, so a foreign program on its hook would pass every admission unseen.
+        ensure!(held.iter().map(|h| h.0).eq(Hook::ALL) && skel.object().progs().count() == held.len(),
+                "the validator's hook list does not cover every program this daemon attaches");
         let vmlinux = vmlinux_btf_obj_id()?;
         let btf = VmlinuxBtf::load()?;
         let mut expected = Vec::new();
@@ -198,7 +209,7 @@ impl Collector {
         Ok((s, fds))
     }
 
-    /// Every LSM link on one of our four targets that is not ours, from the kernel's whole link
+    /// Every LSM link on one of our targets that is not ours, from the kernel's whole link
     /// list. Other distributions share this WSL kernel, and their orphaned links count.
     fn foreign_links(&self) -> Result<Vec<ForeignLink>> {
         let ours: BTreeSet<u32> = self.profile.expected.iter().map(|e| e.link_id).collect();

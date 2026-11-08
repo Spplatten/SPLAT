@@ -65,9 +65,21 @@ pub enum Hook {
     FileOpen,
     SocketConnect,
     SocketSendmsg,
+    PtraceAccess,
+    TaskKill,
+    TaskSetsched,
+    TaskSetnice,
+    TaskSetioprio,
+    TaskSetrlimit,
 }
 
 impl Hook {
+    /// Every hook the daemon attaches, in the order its programs appear in lease_lsm.bpf.c.
+    pub const ALL: [Hook; 10] = [
+        Hook::BprmCheck, Hook::FileOpen, Hook::SocketConnect, Hook::SocketSendmsg, Hook::PtraceAccess,
+        Hook::TaskKill, Hook::TaskSetsched, Hook::TaskSetnice, Hook::TaskSetioprio, Hook::TaskSetrlimit,
+    ];
+
     /// The vmlinux function an LSM program on this hook attaches to.
     pub fn btf_func(self) -> &'static str {
         match self {
@@ -75,16 +87,29 @@ impl Hook {
             Hook::FileOpen => "bpf_lsm_file_open",
             Hook::SocketConnect => "bpf_lsm_socket_connect",
             Hook::SocketSendmsg => "bpf_lsm_socket_sendmsg",
+            Hook::PtraceAccess => "bpf_lsm_ptrace_access_check",
+            Hook::TaskKill => "bpf_lsm_task_kill",
+            Hook::TaskSetsched => "bpf_lsm_task_setscheduler",
+            Hook::TaskSetnice => "bpf_lsm_task_setnice",
+            Hook::TaskSetioprio => "bpf_lsm_task_setioprio",
+            Hook::TaskSetrlimit => "bpf_lsm_task_setrlimit",
         }
     }
 
     /// The maps this hook's program decides with (lease_lsm.bpf.c). It also references the
     /// counters and the ring buffer, which record and decide nothing.
+    ///
+    /// The six task hooks decide with the lease map alone: the other half of their rule is the
+    /// target's cgroup id, read from the task itself, not from any map. That makes the shared lease
+    /// map the whole of what can go wrong with them, and check_bindings already refuses a program
+    /// that reads a different one - such a program would find every actor unleased and allow all.
     pub fn decision_roles(self) -> &'static [Role] {
         match self {
             Hook::BprmCheck => &[Role::LeasedCgroups, Role::AllowedExec, Role::ScratchExec],
             Hook::FileOpen => &[Role::LeasedCgroups, Role::Protected],
             Hook::SocketConnect | Hook::SocketSendmsg => &[Role::LeasedCgroups, Role::AllowedIpv4],
+            Hook::PtraceAccess | Hook::TaskKill | Hook::TaskSetsched | Hook::TaskSetnice
+            | Hook::TaskSetioprio | Hook::TaskSetrlimit => &[Role::LeasedCgroups],
         }
     }
 }
@@ -205,7 +230,7 @@ pub struct HookObs {
     pub map_ids: Vec<u32>,
 }
 
-/// An LSM link on one of our four targets that is not one of our links.
+/// An LSM link on one of our targets that is not one of our links.
 #[derive(Clone, Debug)]
 pub struct ForeignLink {
     pub link_id: u32,
@@ -449,7 +474,7 @@ pub fn lease_keys(walk: &[Vec<u8>], cgid: u64) -> Option<Vec<Vec<u8>>> {
     Some(kept)
 }
 
-/// Are the programs on the four hooks the ones this daemon attached at startup, and is nobody
+/// Are the programs on our hooks the ones this daemon attached at startup, and is nobody
 /// else's program on the same hooks? A later program on the same trampoline receives our return
 /// value and may return 0; whether that can override our denial is not established, so a foreign
 /// program is refused rather than reasoned about.
@@ -504,13 +529,13 @@ pub struct Bindings {
     pub unreadable: Vec<u32>,
 }
 
-/// Does each program decide with the maps the writer writes, laid out as declared, and do all four
+/// Does each program decide with the maps the writer writes, laid out as declared, and do all of them
 /// share one lease map? A program reading another `leased_cgroups` finds no lease there and allows
 /// everything. The decoy-map research fault is caught here: the writer's exec map is not the one
 /// the exec program reads.
 pub fn check_bindings(p: &KernelProfile, s: &Snapshot) -> Bindings {
     let mut b = Bindings::default();
-    // Four programs share the lease map, so one layout fault would otherwise be reported four times.
+    // Every program shares the lease map, so one layout fault would otherwise be reported once per program.
     let push = |found: &mut Vec<Divergence>, d: Divergence| {
         if !found.contains(&d) {
             found.push(d);
@@ -996,7 +1021,7 @@ mod tests {
     const SHADOW: Ident = Ident { dev: SDA2, ino: 2002 };
     const SERVER: [u8; 4] = [93, 184, 216, 34];
     const ROLES: [Role; 5] = [Role::LeasedCgroups, Role::AllowedExec, Role::ScratchExec, Role::Protected, Role::AllowedIpv4];
-    const HOOKS: [Hook; 4] = [Hook::BprmCheck, Hook::FileOpen, Hook::SocketConnect, Hook::SocketSendmsg];
+    const HOOKS: [Hook; 10] = Hook::ALL;
 
     fn id_of(role: Role) -> u32 {
         match role {
@@ -1316,7 +1341,7 @@ mod tests {
     }
 
     #[test]
-    fn a_foreign_program_on_any_of_the_four_hooks_is_refused() {
+    fn a_foreign_program_on_any_of_the_ten_hooks_is_refused() {
         for (i, hook) in HOOKS.into_iter().enumerate() {
             let mut s = snapshot_of(capture());
             s.foreign.push(ForeignLink { link_id: 77, prog_id: 78, target_obj_id: VMLINUX, target_btf_id: 100 + i as u32 });
@@ -1339,7 +1364,31 @@ mod tests {
         s.hooks.pop();
         let found = refusals(&run(&s, &approval(), &resolver()));
         assert!(found.contains(&Divergence::LinkInactive { hook: Hook::FileOpen }));
-        assert!(found.contains(&Divergence::HookMissing { hook: Hook::SocketSendmsg }));
+        assert!(found.contains(&Divergence::HookMissing { hook: Hook::TaskSetrlimit }));
+    }
+
+    #[test]
+    fn every_hook_has_its_own_function_and_the_task_hooks_decide_on_the_lease_map_alone() {
+        let functions: BTreeSet<&str> = Hook::ALL.iter().map(|h| h.btf_func()).collect();
+        assert_eq!(functions.len(), Hook::ALL.len());
+        for hook in &Hook::ALL[4..] {
+            assert_eq!(hook.decision_roles(), &[Role::LeasedCgroups], "{hook:?}");
+        }
+    }
+
+    #[test]
+    fn a_task_hook_reading_another_lease_map_is_refused() {
+        // A signal program that finds no lease there treats every actor as unleased: no isolation.
+        let mut s = snapshot_of(capture());
+        s.maps.insert(20, layout(Role::LeasedCgroups, 20));
+        let task_kill = s.hooks.iter_mut().find(|o| o.hook == Hook::TaskKill).unwrap();
+        task_kill.map_ids.retain(|&id| id != 10);
+        task_kill.map_ids.push(20);
+        let found = refusals(&run(&s, &approval(), &resolver()));
+        assert!(found.contains(&Divergence::LeaseMapNotShared));
+        assert!(found.contains(&Divergence::MapBinding {
+            role: Role::LeasedCgroups, hook: Hook::TaskKill, map_id: 20, writer_id: Some(10),
+        }));
     }
 
     #[test]

@@ -25,12 +25,17 @@
 // this file, frozen at the shape its recorded evidence was produced against. It
 // proves the primitive; this one is the daemon's.
 //
-// Hooks:
-//   bprm_check_security -> only allow-listed executable inodes may exec
-//   (-EPERM) file_open           -> protected inodes cannot be opened by a
-//   leased process  (-EPERM) socket_connect      -> only allow-listed IPv4 /32
-//   destinations are reachable  (-EPERM) socket_sendmsg      -> the same, for a
-//   datagram that names its own destination (-EPERM)
+// Hooks, each refusing with -EPERM:
+//   bprm_check_security - only allow-listed executable inodes may exec
+//   file_open           - protected inodes cannot be opened by a lease
+//   socket_connect      - only allow-listed IPv4 endpoints are reachable
+//   socket_sendmsg      - the same, for a datagram naming its destination
+//   ptrace_access_check - a lease cannot inspect a task outside its cgroup
+//   task_kill           - nor signal one
+//   task_setscheduler   - nor change its scheduling or CPU affinity
+//   task_setnice        - nor its nice value
+//   task_setioprio      - nor its I/O priority
+//   task_setrlimit      - nor its resource limits
 //
 // A process is "leased" iff its current cgroup id is present in leased_cgroups.
 // Anything outside the lease is untouched, so the host and every other workload
@@ -87,6 +92,14 @@ enum splat_hook {
   HOOK_OPEN = 2,
   HOOK_CONNECT = 3,
   HOOK_SENDMSG = 4,
+  // A leased task reaching a task outside its cgroup. Appended, never
+  // renumbered: violation.rs and the C# KernelViolationHook read these values.
+  HOOK_PTRACE = 5,
+  HOOK_SIGNAL = 6,
+  HOOK_SETSCHED = 7,
+  HOOK_SETNICE = 8,
+  HOOK_SETIOPRIO = 9,
+  HOOK_SETRLIMIT = 10,
 };
 
 // One denial, as the daemon reads it: 56 bytes, 8-byte alignment, mirrored by
@@ -102,7 +115,7 @@ struct violation_event {
   __u32 pid;
   __u32 hook;   // enum splat_hook
   __u32 detail; // exec/open: inode number (low 32 bits); connect: destination
-                // IPv4 (network byte order)
+                // IPv4 (network byte order); task hooks: the target's tgid
   char comm[16];
 };
 
@@ -126,6 +139,15 @@ struct {
 
 // cgroup id -> deadline and reserved epoch. The deadline uses guest BOOTTIME;
 // the epoch is not yet checked by the kernel and is not a generation guarantee.
+//
+// BOOTTIME does not advance while the host holds the WSL2 VM in standby, so a
+// deadline measures the guest's running time, not wall time: a host sleep
+// stretches a lease's wall-clock life by the length of the sleep.
+//
+// 256 is the daemon's lease capacity, LEASE_CAPACITY in identities.rs. The
+// session limit and the private UID pool are both sized to it, so no admitted
+// lease lacks an identity and no identity is reserved for a lease this map
+// could never hold.
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
   __uint(max_entries, 256);
@@ -498,4 +520,136 @@ int BPF_PROG(splat_socket_sendmsg, struct socket *sock, struct msghdr *msg,
 
   report(cgid, HOOK_SENDMSG, in.sin_addr.s_addr);
   return -EPERM;
+}
+
+// Cross-lease isolation: a leased task may act on another task only when both
+// are in the SAME cgroup.
+//
+// The four hooks above police what a lease reaches in the filesystem and on
+// the network; none of them sees one task acting on another. The 2026-10-12
+// root run recorded what that left open: two ordinary leases at one uid, and
+// lease A signalled lease B and read B's private workspace through
+// /proc/<pid>/cwd (evidence/lease-isolation-before.json). Per-lease uids now
+// stop that at the DAC check, but DAC holds only while every lease has its own
+// uid and no capability. These hooks run after DAC and decide on the cgroup
+// alone, so a shared uid, a reused one, or CAP_KILL or CAP_SYS_PTRACE inside a
+// lease does not reopen the path.
+//
+// The rule is cross-CGROUP, not cross-lease: another lease and an unleased
+// host process are refused alike. An unleased actor is never policed, which is
+// what lets the daemon reap a lease, and what keeps the cost to the rest of
+// the system at one hash lookup per signal or ptrace check - task_kill and
+// ptrace_access_check fire system-wide, not only for leases.
+//
+// An expired lease is policed identically. The decision does not depend on
+// the deadline, so these denials never carry HOOK_EXPIRED_FLAG ("refused
+// because the lease had expired"). Teardown is never blocked: the reaper is
+// unleased, and cgroup.kill signals with SEND_SIG_PRIV, which skips task_kill.
+//
+// Two things the rule depends on, which the daemon's jail provides because no
+// program here can:
+//   - no CAP_PERFMON in a lease. perf_event_open() on a pid skips the ptrace
+//     check entirely for a CAP_PERFMON caller. The jail empties the bounding
+//     set, so no exec can grant it.
+//   - /proc mounted hidepid=ptraceable. /proc/<pid>/status, cmdline and stat
+//     are world-readable and reach no hook at all; hidepid routes the lookup
+//     itself through ptrace_access_check.
+//
+// Not covered, and listed in SUPPORTED_POLICY.md: SIGIO and SIGURG through a
+// file whose owner was set to another task (file_send_sigiotask sees whoever
+// triggered the I/O, not who set the owner), and the credentials and cgroup id
+// that PIDFD_GET_INFO returns with no LSM hook in its path.
+
+// The target's cgroup v2 id, through the chain bpf_get_current_cgroup_id()
+// reads for the caller: task->cgroups->dfl_cgrp->kn->id. BPF_CORE_READ goes
+// through bpf_probe_read_kernel, so no pointer in the chain has to be trusted;
+// a read that faults yields 0, which is no lease's cgroup, and is refused.
+static __always_inline __u64 task_cgroup_id(struct task_struct *t) {
+  return BPF_CORE_READ(t, cgroups, dfl_cgrp, kn, id);
+}
+
+static __always_inline int guard_cross_cgroup(struct task_struct *target,
+                                              __u32 hook) {
+  __u64 cgid = bpf_get_current_cgroup_id();
+  // Presence, not the deadline: live and expired leases are policed the same.
+  if (!bpf_map_lookup_elem(&leased_cgroups, &cgid))
+    return 0; // Unleased: the host, the daemon, the reaper.
+  if (task_cgroup_id(target) == cgid)
+    return 0; // Its own processes: a lease signals and waits on its children.
+  report(cgid, hook, (__u32)BPF_CORE_READ(target, tgid));
+  return -EPERM;
+}
+
+// PTRACE_ATTACH and SEIZE, process_vm_readv and writev, pidfd_getfd, kcmp,
+// /proc/<pid>/{mem,environ,maps,fd,cwd,root,...} and, under hidepid, every
+// /proc/<pid> lookup all pass through __ptrace_may_access. Threads of one
+// process never reach the hook (same_thread_group returns first), and they
+// share a cgroup, so the set allowed is the same.
+SEC("lsm/ptrace_access_check")
+int BPF_PROG(splat_ptrace_access, struct task_struct *child, unsigned int mode,
+             int ret) {
+  if (ret != 0)
+    return ret;
+  return guard_cross_cgroup(child, HOOK_PTRACE);
+}
+
+// kill, tkill, tgkill, rt_sigqueueinfo, rt_tgsigqueueinfo and
+// pidfd_send_signal, none of which ptrace_access_check sees. A signal the
+// kernel sends for itself (SIGCHLD to the daemon, anything SEND_SIG_PRIV)
+// never comes here, so a lease's exit still reaches its parent.
+SEC("lsm/task_kill")
+int BPF_PROG(splat_task_kill, struct task_struct *p,
+             struct kernel_siginfo *info, int sig, const struct cred *cred,
+             int ret) {
+  if (ret != 0)
+    return ret;
+  // A non-NULL cred is a signal sent for a credential the kernel recorded
+  // earlier - USB async I/O completing, possibly in softirq - so `current` is
+  // whatever task was interrupted, not the sender, and its cgroup says nothing
+  // about who signalled. The jail exposes no USB device, so no lease arms it.
+  if (cred)
+    return 0;
+  return guard_cross_cgroup(p, HOOK_SIGNAL);
+}
+
+// sched_setscheduler, sched_setparam, sched_setattr and sched_setaffinity on
+// another task: degrading or pinning another lease's CPU. Joining a cgroup
+// can call this hook too, but with the joiner's OLD cgroup as the actor, so
+// the daemon's pre-exec child is still unleased when it joins.
+SEC("lsm/task_setscheduler")
+int BPF_PROG(splat_task_setsched, struct task_struct *p, int ret) {
+  if (ret != 0)
+    return ret;
+  return guard_cross_cgroup(p, HOOK_SETSCHED);
+}
+
+// setpriority() on another task. Writing /proc/<pid>/autogroup also calls this
+// hook, but with the WRITER as the task, so that path is judged against the
+// writer's own cgroup and allowed; hidepid is what keeps another lease's
+// /proc/<pid> out of reach.
+SEC("lsm/task_setnice")
+int BPF_PROG(splat_task_setnice, struct task_struct *p, int nice, int ret) {
+  if (ret != 0)
+    return ret;
+  return guard_cross_cgroup(p, HOOK_SETNICE);
+}
+
+// ioprio_set() on another task.
+SEC("lsm/task_setioprio")
+int BPF_PROG(splat_task_setioprio, struct task_struct *p, int ioprio,
+             int ret) {
+  if (ret != 0)
+    return ret;
+  return guard_cross_cgroup(p, HOOK_SETIOPRIO);
+}
+
+// prlimit64() writing another task's limits. task_prlimit, the gate before it,
+// is handed credentials rather than a task, so it cannot be keyed on the
+// target's cgroup; this hook can.
+SEC("lsm/task_setrlimit")
+int BPF_PROG(splat_task_setrlimit, struct task_struct *p,
+             unsigned int resource, struct rlimit *new_rlim, int ret) {
+  if (ret != 0)
+    return ret;
+  return guard_cross_cgroup(p, HOOK_SETRLIMIT);
 }

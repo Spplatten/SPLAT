@@ -7,8 +7,9 @@ This page is a plan. Nothing in it is built.
 
 ## The daemon today
 
-- **Kernel half.** [`lease_lsm.bpf.c`](../native/splat-agent/src/bpf/lease_lsm.bpf.c): 422 lines of C on
-  four LSM hooks (`bprm_check_security`, `file_open`, `socket_connect`, `socket_sendmsg`), compiled by
+- **Kernel half.** [`lease_lsm.bpf.c`](../native/splat-agent/src/bpf/lease_lsm.bpf.c): 649 lines of C on
+  ten LSM hooks (`bprm_check_security`, `file_open`, `socket_connect`, `socket_sendmsg`, and six task
+  hooks for cross-lease isolation from `ptrace_access_check` to `task_setrlimit`), compiled by
   clang through `libbpf-cargo` in [`build.rs`](../native/splat-agent/build.rs).
 - **User half.** `libbpf-rs` 0.24, about 36 call sites across `main.rs`, `pinning.rs` and `jail.rs`.
   Pinning is what keeps the hooks in force after the daemon dies (`pin_ids_after_sigkill` in

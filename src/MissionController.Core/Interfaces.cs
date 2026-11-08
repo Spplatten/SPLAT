@@ -548,7 +548,15 @@ public enum KernelViolationHook
     Open = 2,     // file_open
     Connect = 3,  // socket_connect
     // socket_sendmsg: a datagram naming its own destination, which never reaches socket_connect.
-    SendDatagram = 4
+    SendDatagram = 4,
+    // The cross-lease hooks: a leased task reaching a task outside its own cgroup. The kernel
+    // reports the target's pid as the detail word, and never marks these expired.
+    Ptrace = 5,        // ptrace_access_check: PTRACE_ATTACH, process_vm_readv, /proc/<pid> links
+    Signal = 6,        // task_kill
+    SetScheduler = 7,  // task_setscheduler
+    SetNice = 8,       // task_setnice
+    SetIoPriority = 9, // task_setioprio
+    SetRlimit = 10     // task_setrlimit
 }
 
 public record LeaseViolationEvent(

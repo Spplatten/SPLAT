@@ -21,9 +21,11 @@ The service operator creates a canonical root-owned directory with mode 0700 and
 connected peer's native Linux UID is zero. A non-root daemon or `--mock-bpf` cannot enable it.
 There is no shared-token-only fallback for submitting secret bytes.
 
-`--secret-uid-start` defaults to 200000 and `--secret-uid-count` to 64; the count may be 1–256.
-Reserve that UID/GID range administratively. Startup refuses existing accounts, processes or an
-overlap with the ordinary workload identity. Each active secret step occupies one identity. A
+`--lease-uid-start` (alias `--secret-uid-start`) defaults to 2000000 and `--lease-uid-count` (alias
+`--secret-uid-count`) to 256, the daemon's lease capacity; the count may be 1–256. One pool serves
+ordinary leases and secret steps. Reserve that UID/GID range administratively. Startup refuses
+existing accounts, processes, an overlap with the ordinary workload identity, or an overlap with a
+subordinate ID block in `/etc/subuid` or `/etc/subgid`. Each active secret step occupies one identity. A
 failed drain or incomplete scratch/workspace cleanup quarantines that identity until restart.
 Capacity exhaustion refuses work. Startup drains orphan cgroups before checking identities or
 recovering secret workspaces.
@@ -103,7 +105,7 @@ Secret steps discard stdout/stderr, and their violation frames withhold the proc
 `comm` string. Service logging no longer prints argv. The daemon sends structural lease, denial
 and exit information; it does not attempt to redact arbitrary tool output after accepting it.
 TCP handshakes, idle sessions and frame writes have 10-, 30- and 5-second limits respectively;
-there are at most 128 accepted sessions. Disconnect or pipelining on an active secret session
+there are at most 256 accepted sessions, the lease capacity. Disconnect or pipelining on an active secret session
 ends the step. The deadline reaper kills descendants before removing policy. Drain verification
 reads `cgroup.events` population for the whole subtree; a failed read is not an empty cgroup.
 Duplicate active mission IDs cannot adopt or overwrite an existing cgroup.

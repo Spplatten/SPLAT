@@ -43,7 +43,7 @@ a program.
 `--admission-validator {off,audit,enforce}`, default `off`, runs B3's semantic comparison in the
 daemon itself (`src/admission.rs` decides, `src/admission_collect.rs` reads the kernel), after the
 gate and under the same lock. Beyond what `gate.py` checks, it verifies:
-- the program tag and attach target on all four hooks, not only `bprm_check_security`;
+- the program tag and attach target on all ten hooks, not only `bprm_check_security`;
 - that no foreign LSM program sits on any of them;
 - that each program's maps are the ones the writer writes, so the decoy fault is caught as a binding;
 - the deadline against the approved duration;

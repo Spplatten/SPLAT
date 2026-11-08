@@ -895,19 +895,25 @@ feature_checks = dict.fromkeys([
     "pins_partial_set_refused", "pins_foreign_map_refused",
     "expiry_no_daemon_during_measurement", "expiry_allowed_until_deadline",
     "expiry_exec_denied_without_daemon", "expiry_open_denied_without_daemon", "expiry_overrun_within_1s",
+    # Cross-lease isolation (19 and 19b). True == contained, like every key above; the raw reach
+    # facts keep their own dict, `cross_lease`, with the opposite polarity.
+    "xlease_jail_control_ops_possible", "xlease_jail_peer_unreachable", "xlease_distinct_private_uids",
+    "xhook_unleased_control_reaches_b", "xhook_same_cgroup_allowed", "xhook_root_in_another_lease_refused",
+    "xhook_refused_signal_never_arrived", "xhook_receipts_name_each_hook_and_b",
 ], False)
 feature_observations = {"errors": [], "lifecycle_requested": bool(managed_binary)}
 
 # Cross-lease reach between two ORDINARY leases. True means the operation SUCCEEDED from lease A
 # against lease B - the isolation gap is present. These are kept apart from feature_checks on
 # purpose: feature_checks read True == contained, but here True == reachable, so folding them into
-# the PASS conjunction with that polarity would score a confirmed gap as a clean run. They are raw
-# facts about an area SUPPORTED_POLICY.md's "Not policed" table governs, recorded and never gated,
-# the same shape as udp_violation_frame_reached_the_session below. Initialised False so a non-root
-# or replay run records them False, the rule every other root-only measurement already follows.
+# the PASS conjunction with that polarity would score a confirmed gap as a clean run. They were
+# recorded and never gated while SUPPORTED_POLICY.md listed the area as not policed; the
+# xlease_* feature checks now gate the verdict on their negation, and these stay as the raw facts.
+# Initialised False so a non-root or replay run records them False, the rule every other root-only
+# measurement already follows.
 cross_lease = dict.fromkeys([
     "control_ops_possible", "signal_reaches_peer", "proc_cwd_readlinked",
-    "proc_root_readlinked", "peer_workspace_read", "peer_workspace_written",
+    "proc_root_readlinked", "peer_workspace_read", "peer_workspace_written", "peer_visible_in_proc",
 ], False)
 cross_lease_observations = {}
 
@@ -915,7 +921,7 @@ cross_lease_observations = {}
 # results sit under their own evidence key and never enter the verdict, so a defect in the validator
 # cannot withdraw the daemon's standing proof. True means the validator behaved as designed.
 admission_checks = dict.fromkeys([
-    "enforce_admits_a_correct_lease", "admitted_lease_ran", "frame_names_all_four_programs",
+    "enforce_admits_a_correct_lease", "admitted_lease_ran", "frame_names_all_ten_programs",
     "scratch_exec_refused_as_indeterminate", "dev_encoding_refused", "decoy_exec_map_refused",
     "audit_admits_and_records", "daemon_restored",
 ], False)
@@ -1571,15 +1577,16 @@ def expiry_series_row(outage, reaper, checks):
 
 def probe_cross_lease():
     # Two ORDINARY leases, concurrent. B sleeps in its own ephemeral workspace; A, a second
-    # ordinary lease, reaches for B's process and that workspace. Every ordinary workload runs at
-    # the daemon's one default workload uid - only a secret step is handed a private uid and a
-    # private IPC namespace - and the jail unshares the mount namespace alone, so A and B share one
-    # pid namespace and a procfs mounted with no hidepid. That is enough for A to see B in /proc and,
-    # at the same uid, pass ptrace_may_access(PTRACE_MODE_READ_FSCREDS) for B's magic links.
+    # ordinary lease, reaches for B's process and that workspace, from inside its jail - the view a
+    # real workload has. On 2026-10-12 both ran at one uid on a procfs with no hidepid, and A reached
+    # B (evidence/lease-isolation-before.json). Now each lease has a private uid, the jail's /proc is
+    # hidepid=ptraceable, and the cross-lease hooks refuse anything that gets past both; from in here
+    # the three are not told apart, which is what 19b is for. This phase says only that A cannot
+    # reach B. B's uid is read on the host, since hidepid hides B from A by design.
     #
     # The control is A running the SAME four operations against its OWN process and cwd first: if
     # that fails, a failed peer result is a broken probe rather than isolation, so the peer booleans
-    # are only evidence of a gap when the control says the operations are mechanically possible.
+    # are only evidence of isolation when the control says the operations are mechanically possible.
     feature_observations["cross_lease"] = cross_lease_observations
     secret = "xlease-" + os.urandom(8).hex()
     b_ws = Path(missions_root) / "probe-xlease-b"
@@ -1609,6 +1616,8 @@ time.sleep(14)
             raise RuntimeError("peer lease B never published its pid; A had no target to reach")
         peer_pid = int((b_ws / "pid").read_text().strip())
         cross_lease_observations["peer_pid"] = peer_pid
+        status = Path(f"/proc/{peer_pid}/status").read_text().splitlines()
+        cross_lease_observations["peer_uid_on_host"] = next(l for l in status if l.startswith("Uid:")).split()[1]
         # Values are spliced by name, never %-formatted, so the many % and quotes in A's own print
         # statements cannot collide with the injection.
         a_code = """import os
@@ -1671,10 +1680,172 @@ except OSError as exc:
         # A never held B's secret; reading it back out of out is reach into B's 0700 workspace.
         cross_lease["peer_workspace_read"] = secret in out
         cross_lease["peer_workspace_written"] = "PEER_WRITE_OK" in out and injected_on_host
+        # hidepid=ptraceable: B's /proc entry is not even there for A to read.
+        cross_lease["peer_visible_in_proc"] = "PEER_UID=" in out
+        feature_checks["xlease_jail_control_ops_possible"] = cross_lease["control_ops_possible"]
+        feature_checks["xlease_jail_peer_unreachable"] = not any(
+            cross_lease[k] for k in cross_lease if k != "control_ops_possible")
+        uids = (cross_lease_observations.get("self_uid", ""), cross_lease_observations["peer_uid_on_host"])
+        feature_checks["xlease_distinct_private_uids"] = (
+            all(u.isdigit() and int(u) >= 65536 for u in uids) and uids[0] != uids[1])
     finally:
         worker.join(timeout=25)
         for ws in (b_ws, a_ws):
             shutil.rmtree(ws, ignore_errors=True)
+
+# One script, run as root from three places: no cgroup argument leaves it where the probe runs
+# (unleased); with one, it moves itself into that cgroup before acting. It prints what each
+# operation on B returned: "ok", or the errno's name.
+XLEASE_HELPER = r"""import ctypes, errno, json, os, platform, resource, signal, sys
+args = json.loads(sys.argv[1])
+b = args["pid"]
+libc = ctypes.CDLL(None, use_errno=True)
+class iovec(ctypes.Structure):
+    _fields_ = [("base", ctypes.c_void_p), ("len", ctypes.c_size_t)]
+libc.process_vm_readv.argtypes = [ctypes.c_int, ctypes.POINTER(iovec), ctypes.c_ulong,
+                                  ctypes.POINTER(iovec), ctypes.c_ulong, ctypes.c_ulong]
+libc.process_vm_readv.restype = ctypes.c_ssize_t
+libc.syscall.restype = ctypes.c_long
+L = ctypes.c_long
+PTRACE, IOPRIO_SET = {"x86_64": (101, 251), "aarch64": (117, 30)}[platform.machine()]
+def checked(rc):
+    if rc < 0:
+        raise OSError(ctypes.get_errno(), "syscall")
+def vm_read():
+    buf = ctypes.create_string_buffer(1)
+    local, remote = iovec(ctypes.cast(buf, ctypes.c_void_p), 1), iovec(args["addr"], 1)
+    checked(libc.process_vm_readv(b, ctypes.byref(local), 1, ctypes.byref(remote), 1, 0))
+ops = [
+    ("kill0", lambda: os.kill(b, 0)),
+    ("signal", lambda: os.kill(b, signal.SIGUSR1)),
+    ("proc_cwd", lambda: os.readlink("/proc/%d/cwd" % b)),
+    ("proc_environ", lambda: open("/proc/%d/environ" % b, "rb").close()),
+    ("vm_read", vm_read),
+    ("setpriority", lambda: os.setpriority(os.PRIO_PROCESS, b, args["nice"])),
+    ("setaffinity", lambda: os.sched_setaffinity(b, args["affinity"])),
+    ("ioprio_set", lambda: checked(libc.syscall(L(IOPRIO_SET), L(1), L(b), L(args["ioprio"])))),
+    ("prlimit", lambda: resource.prlimit(b, resource.RLIMIT_NOFILE, tuple(args["nofile"]))),
+]
+if args["seize"]:
+    # Last: a seized B stays traced until this process exits, and exiting detaches it.
+    ops.append(("ptrace_seize", lambda: checked(libc.syscall(L(PTRACE), L(0x4206), L(b), L(0), L(0)))))
+if args["cgroup"]:
+    # Everything is imported and resolved above: from here on this process is policed.
+    with open(args["cgroup"] + "/cgroup.procs", "w") as f:
+        f.write(str(os.getpid()))
+result = {}
+for name, op in ops:
+    try:
+        op()
+        result[name] = "ok"
+    except OSError as e:
+        result[name] = errno.errorcode.get(e.errno, str(e.errno))
+print(json.dumps(result), flush=True)
+"""
+
+def probe_cross_lease_hooks():
+    # The six cross-lease hooks, with every other layer out of the way. Leases A and B sleep; B
+    # counts each SIGUSR1 it receives. The helper above runs as ROOT, outside any jail: it passes
+    # every DAC check (CAP_KILL, CAP_SYS_PTRACE, CAP_SYS_NICE, CAP_SYS_RESOURCE) and Yama below
+    # scope 3, and hidepid is not on its /proc. So when it is refused from inside lease A's cgroup,
+    # nothing but the cgroup rule in lease_lsm.bpf.c can be what refused it. Two controls bound
+    # that reading: the same helper unleased must reach B with every operation, or the probe is
+    # broken; and inside B's own cgroup it must too, or the rule over-blocks a lease's own tasks.
+    import resource
+    obs = feature_observations["cross_lease_hooks"] = {}
+    a_ws, b_ws = Path(missions_root) / "probe-xhook-a", Path(missions_root) / "probe-xhook-b"
+    for ws in (a_ws, b_ws):
+        shutil.rmtree(ws, ignore_errors=True)
+    sleeper = """import os, signal, time
+from pathlib import Path
+def on_usr1(signum, frame):
+    with open('usr1', 'a') as f:
+        f.write('x')
+signal.signal(signal.SIGUSR1, on_usr1)
+Path('pid').write_text(str(os.getpid()))
+end = time.monotonic() + 16
+while time.monotonic() < end:
+    time.sleep(0.05)
+"""
+    frames = {"a": [], "b": []}
+    def lease(tag, ws):
+        return threading.Thread(target=lambda: frames[tag].extend(call({
+            "type": "EXECUTE_TOOL", "missionId": "probe-xhook-" + tag,
+            "command": "/usr/bin/python3", "argv": ["-c", sleeper],
+            "allowedExecPaths": ["/usr/bin/python3"],
+            "workingDirectory": str(ws), "ephemeralWorkspace": True,
+            "leaseDurationSeconds": 24,
+        }, "xhook-" + tag, settle=20.0) or []))
+    workers = [lease("a", a_ws), lease("b", b_ws)]
+    for w in workers:
+        w.start()
+    try:
+        if not wait_for(lambda: (a_ws / "pid").is_file() and (b_ws / "pid").is_file(), seconds=15):
+            raise RuntimeError("the two sleeping leases never published their pids")
+        b = int((b_ws / "pid").read_text().strip())
+        leases = Path("/sys/fs/cgroup/splat_leases")
+        # B's own values, read here as the unleased root probe, so each operation writes back what
+        # B already has. ioprio is the exception: best-effort level 4 is always valid, so EINVAL can
+        # never stand in for a refusal.
+        args = {
+            "pid": b,
+            "addr": int(Path(f"/proc/{b}/maps").read_text().split("-", 1)[0], 16),
+            "nice": os.getpriority(os.PRIO_PROCESS, b),
+            "affinity": sorted(os.sched_getaffinity(b)),
+            "ioprio": (2 << 13) | 4,
+            "nofile": list(resource.prlimit(b, resource.RLIMIT_NOFILE)),
+        }
+        try:
+            scope = Path("/proc/sys/kernel/yama/ptrace_scope").read_text().strip()
+        except OSError:
+            scope = "absent"
+        obs["yama_ptrace_scope"] = scope
+        # Scope 3 refuses every attach, root's included, before this program is consulted.
+        args["seize"] = scope != "3"
+
+        def run_helper(cgroup):
+            done = subprocess.run(
+                ["/usr/bin/python3", "-c", XLEASE_HELPER, json.dumps({**args, "cgroup": str(cgroup or "")})],
+                capture_output=True, text=True, timeout=15)
+            lines = done.stdout.strip().splitlines()
+            if not lines:
+                raise RuntimeError("the root helper printed nothing: " + done.stderr.strip()[-300:])
+            return json.loads(lines[-1])
+
+        def signals_received():
+            got = b_ws / "usr1"
+            return len(got.read_text()) if got.exists() else 0
+
+        # Refused first, so any SIGUSR1 B has counted before a control ran came from inside A.
+        refused = obs["from_lease_a"] = run_helper(leases / "mission_probe-xhook-a")
+        time.sleep(0.5)
+        obs["signals_after_lease_a"] = signals_received()
+        unleased = obs["unleased_control"] = run_helper(None)
+        wait_for(lambda: signals_received() >= 1, seconds=3)
+        obs["signals_after_unleased"] = signals_received()
+        same = obs["same_cgroup_control"] = run_helper(leases / "mission_probe-xhook-b")
+        wait_for(lambda: signals_received() >= 2, seconds=3)
+        obs["signals_after_same_cgroup"] = signals_received()
+
+        operations = set(unleased)
+        feature_checks["xhook_unleased_control_reaches_b"] = (
+            all(v == "ok" for v in unleased.values()) and obs["signals_after_unleased"] == 1)
+        feature_checks["xhook_same_cgroup_allowed"] = (
+            set(same) == operations and all(v == "ok" for v in same.values())
+            and obs["signals_after_same_cgroup"] == 2)
+        # EPERM or EACCES only: ESRCH or ENOENT would mean B was gone, not that it was protected.
+        feature_checks["xhook_root_in_another_lease_refused"] = (
+            set(refused) == operations and all(v in ("EPERM", "EACCES") for v in refused.values()))
+        feature_checks["xhook_refused_signal_never_arrived"] = obs["signals_after_lease_a"] == 0
+    finally:
+        for w in workers:
+            w.join(timeout=30)
+        for ws in (a_ws, b_ws):
+            shutil.rmtree(ws, ignore_errors=True)
+    # The receipt half: lease A's own session carries each refusal, hook by hook, naming B's pid.
+    seen = sorted({m.get("hook") for m in frames["a"] if m.get("type") == "VIOLATION" and m.get("detail") == b})
+    obs["lease_a_violation_hooks_naming_b"] = seen
+    feature_checks["xhook_receipts_name_each_hook_and_b"] = {5, 6, 7, 8, 9, 10} <= set(seen)
 
 def probe_admission_validator():
     """Restart the owned daemon under each validator mode, then put it back as it was.
@@ -1714,7 +1885,7 @@ def probe_admission_validator():
         admission_checks["enforce_admits_a_correct_lease"] = frame.get("verdict") == "admitted" and frame.get("enforced") is True
         admission_checks["admitted_lease_ran"] = completed(msgs)
         programs = frame.get("programs", [])
-        admission_checks["frame_names_all_four_programs"] = len(programs) == 4 and all(p.get("tag") for p in programs)
+        admission_checks["frame_names_all_ten_programs"] = len(programs) == 10 and all(p.get("tag") for p in programs)
 
         # v1 cannot see a scratch grant before spawn, so enforce must refuse it as unconfirmed. The
         # protected file stays out: a policy path under a copy-on-write workdir is refused earlier.
@@ -1764,6 +1935,11 @@ if replay is None and hasattr(os, "geteuid") and os.geteuid() == 0:
         probe_cross_lease()
     except Exception as e:
         feature_observations["errors"].append("cross-lease: " + str(e))
+    print("\n== 19b. Cross-lease hooks: root inside one lease's cgroup against another lease ==")
+    try:
+        probe_cross_lease_hooks()
+    except Exception as e:
+        feature_observations["errors"].append("cross-lease hooks: " + str(e))
     if managed_binary:
         print("\n== 20. Pins: SIGKILL, surviving denials, restart identity, rejected foreign state ==")
         try:
@@ -1805,6 +1981,7 @@ print(f"  cross-lease /proc/<peer>/cwd link : {cross_lease['proc_cwd_readlinked'
 print(f"  cross-lease /proc/<peer>/root link: {cross_lease['proc_root_readlinked']}")
 print(f"  cross-lease read peer workspace   : {cross_lease['peer_workspace_read']}")
 print(f"  cross-lease wrote peer workspace  : {cross_lease['peer_workspace_written']}")
+print(f"  cross-lease peer visible in /proc : {cross_lease['peer_visible_in_proc']}")
 for name, held in admission_checks.items():
     print(f"  admission validator {name} (not gated): {held}")
 for error in admission_observations["errors"]:
@@ -1926,17 +2103,17 @@ evidence = {
         "mission_workspace_gone_from_the_host": workspace_gone_after,
         "mission_workspace_elsewhere_refused": workspace_elsewhere_refused,
         "mission_workspace_removed_on_refusal": workspace_removed_on_refusal,
-        # Cross-lease reach between two ordinary leases. Recorded, never gated into the verdict: True
-        # means lease A reached lease B (the gap is present), the opposite polarity from every check
-        # above, so the PASS conjunction must not read these. The control says the operations are
-        # mechanically possible; the peer booleans are only a finding when it is True. See the note
-        # where `cross_lease` is defined, and the "Not policed" table in SUPPORTED_POLICY.md.
+        # Cross-lease reach between two ordinary leases, as raw facts: True means lease A reached
+        # lease B (the gap is present), the opposite polarity from every check above, so the PASS
+        # conjunction must not read these directly. The xlease_* feature checks gate the verdict on
+        # their negation, with the control required. See the note where `cross_lease` is defined.
         "cross_lease_control_ops_possible": cross_lease["control_ops_possible"],
         "cross_lease_signal_reaches_a_peer_lease": cross_lease["signal_reaches_peer"],
         "cross_lease_peer_proc_cwd_readlinked": cross_lease["proc_cwd_readlinked"],
         "cross_lease_peer_proc_root_readlinked": cross_lease["proc_root_readlinked"],
         "cross_lease_peer_workspace_read_via_proc": cross_lease["peer_workspace_read"],
         "cross_lease_peer_workspace_written_via_proc": cross_lease["peer_workspace_written"],
+        "cross_lease_peer_visible_in_proc": cross_lease["peer_visible_in_proc"],
     },
     "violations": [
         {k: m.get(k) for k in ("hook", "pid", "detail", "detailText", "comm") if k in m}

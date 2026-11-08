@@ -102,6 +102,12 @@ pub fn load<'obj>(object: &'obj mut MaybeUninit<libbpf_rs::OpenObject>) -> Resul
             splat_file_open: Some(reopen(&path, &skel.progs.splat_file_open)?),
             splat_socket_connect: Some(reopen(&path, &skel.progs.splat_socket_connect)?),
             splat_socket_sendmsg: Some(reopen(&path, &skel.progs.splat_socket_sendmsg)?),
+            splat_ptrace_access: Some(reopen(&path, &skel.progs.splat_ptrace_access)?),
+            splat_task_kill: Some(reopen(&path, &skel.progs.splat_task_kill)?),
+            splat_task_setsched: Some(reopen(&path, &skel.progs.splat_task_setsched)?),
+            splat_task_setnice: Some(reopen(&path, &skel.progs.splat_task_setnice)?),
+            splat_task_setioprio: Some(reopen(&path, &skel.progs.splat_task_setioprio)?),
+            splat_task_setrlimit: Some(reopen(&path, &skel.progs.splat_task_setrlimit)?),
         };
     } else {
         let staging = base.join(format!("pending_{hash}"));
@@ -115,6 +121,12 @@ pub fn load<'obj>(object: &'obj mut MaybeUninit<libbpf_rs::OpenObject>) -> Resul
             ("splat_file_open", &mut skel.links.splat_file_open),
             ("splat_socket_connect", &mut skel.links.splat_socket_connect),
             ("splat_socket_sendmsg", &mut skel.links.splat_socket_sendmsg),
+            ("splat_ptrace_access", &mut skel.links.splat_ptrace_access),
+            ("splat_task_kill", &mut skel.links.splat_task_kill),
+            ("splat_task_setsched", &mut skel.links.splat_task_setsched),
+            ("splat_task_setnice", &mut skel.links.splat_task_setnice),
+            ("splat_task_setioprio", &mut skel.links.splat_task_setioprio),
+            ("splat_task_setrlimit", &mut skel.links.splat_task_setrlimit),
         ] {
             link.as_mut().context("missing attached LSM link")?.pin(staging.join(format!("link_{name}")))?;
         }

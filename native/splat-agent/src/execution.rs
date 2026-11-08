@@ -43,12 +43,22 @@ pub fn no_new_privileges() -> std::io::Result<()> {
     Ok(())
 }
 
-/// Prepared on the child stack using only raw syscalls. Separate SysV IPC state plus a socket
-/// filter prevents a secret descriptor from escaping the lease through SCM_RIGHTS or shared IPC.
-pub fn isolate_secret_ipc() -> std::io::Result<()> {
+/// Every leased workload gets its own IPC namespace. SysV shared memory, semaphores and message
+/// queues, and POSIX message queues, are then objects no other lease can list, open or attach to,
+/// and a lease's own leave nothing for the next holder of its UID. mq_notify() matters here too:
+/// it signals the registered process from the SENDER's context with no kill-permission check, so
+/// a queue shared across leases was a signal path the task_kill hook never sees.
+pub fn isolate_ipc() -> std::io::Result<()> {
     if unsafe { libc::unshare(libc::CLONE_NEWIPC) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
+    Ok(())
+}
+
+/// Prepared on the child stack using only raw syscalls. Separate SysV IPC state plus a socket
+/// filter prevents a secret descriptor from escaping the lease through SCM_RIGHTS or shared IPC.
+pub fn isolate_secret_ipc() -> std::io::Result<()> {
+    isolate_ipc()?;
     no_new_privileges()?;
     restrict_secret_sockets()
 }

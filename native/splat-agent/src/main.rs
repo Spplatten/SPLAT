@@ -85,6 +85,25 @@ fn drop_privileges(uid: u32, gid: u32) -> std::io::Result<()> {
             return Ok(());
         }
 
+        // An empty bounding set: no exec can grant this workload a capability, file capabilities
+        // included, whether or not no_new_privileges holds. The cross-lease hooks in
+        // lease_lsm.bpf.c depend on it - perf_event_open() skips the ptrace check entirely for a
+        // CAP_PERFMON caller. Dropping needs CAP_SETPCAP, so it happens before the uid changes.
+        // EINVAL past the kernel's last capability is how the loop finds where that is.
+        for cap in 0..64 {
+            if libc::prctl(libc::PR_CAPBSET_DROP, cap as libc::c_ulong, 0, 0, 0) == 0 {
+                continue;
+            }
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINVAL) && cap > 0 {
+                break;
+            }
+            return Err(error);
+        }
+        if libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_CLEAR_ALL as libc::c_ulong, 0, 0, 0) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
         // Supplementary groups survive setuid, so a workload could keep group membership the
         // target account never had. Clear them while still privileged enough to do so.
         if libc::setgroups(0, std::ptr::null()) != 0 {
@@ -202,9 +221,9 @@ struct Args {
     secret_socket: Option<std::path::PathBuf>,
 
     /// Operator-reserved UID/GID range shared by ordinary leases and pending secret grants.
-    #[arg(long = "lease-uid-start", visible_alias = "secret-uid-start", default_value_t = 200000)]
+    #[arg(long = "lease-uid-start", visible_alias = "secret-uid-start", default_value_t = identities::DEFAULT_LEASE_UID_START)]
     secret_uid_start: u32,
-    #[arg(long = "lease-uid-count", visible_alias = "secret-uid-count", default_value_t = 256)]
+    #[arg(long = "lease-uid-count", visible_alias = "secret-uid-count", default_value_t = identities::LEASE_CAPACITY)]
     secret_uid_count: u32,
 
     /// Issue a grant using public binding metadata from this file and secret bytes from stdin.
@@ -841,7 +860,9 @@ async fn main() -> Result<()> {
     let listener = TcpListener::bind(addr).await.context("bind TCP listener")?;
     info!("SPLAT eBPF daemon listening and ready for requests at {addr}");
 
-    let clients = Arc::new(tokio::sync::Semaphore::new(128));
+    // One session holds at most one lease, so the session limit is the lease capacity: the number
+    // of cgroups the kernel map holds and of private UIDs the pool reserved.
+    let clients = Arc::new(tokio::sync::Semaphore::new(identities::LEASE_CAPACITY as usize));
 
     loop {
         match listener.accept().await {
@@ -1885,7 +1906,7 @@ async fn handle_client(
                                     jail::enter(plan)?;
                                 }
 
-                                if secret_step { execution::isolate_secret_ipc()?; }
+                                if secret_step { execution::isolate_secret_ipc()?; } else { execution::isolate_ipc()?; }
 
                                 // SIGCONT may cross UID boundaries within one session. A private
                                 // session closes that exception while descendants keep job control.
