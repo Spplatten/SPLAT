@@ -150,7 +150,7 @@ pub fn load<'obj>(object: &'obj mut MaybeUninit<libbpf_rs::OpenObject>) -> Resul
     Ok(skel)
 }
 
-fn prog_info(fd: BorrowedFd<'_>) -> Result<(sys::bpf_prog_info, Vec<u32>)> {
+pub(crate) fn prog_info(fd: BorrowedFd<'_>) -> Result<(sys::bpf_prog_info, Vec<u32>)> {
     let mut info = sys::bpf_prog_info::default();
     let mut size = std::mem::size_of_val(&info) as u32;
     if unsafe { sys::bpf_obj_get_info_by_fd(fd.as_raw_fd(), (&mut info as *mut sys::bpf_prog_info).cast(), &mut size) } != 0 {
