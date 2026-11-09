@@ -1144,8 +1144,9 @@ def pin_snapshot(directory):
                 raise RuntimeError("ambiguous pinned object: " + str(path))
             info = info[0]
         snapshot[path.name] = {key: info[key] for key in ("id", "prog_id") if key in info}
-    if len(snapshot) != 12 or not all("id" in info for info in snapshot.values()):
-        raise RuntimeError("expected eight pinned maps and four pinned links")
+    links = sum(name.startswith("link_") for name in snapshot)
+    if (len(snapshot) - links, links) != (8, 10) or not all("id" in info for info in snapshot.values()):
+        raise RuntimeError("expected eight pinned maps and ten pinned links")
     return snapshot
 
 def refuses_owned_start(reason):
@@ -1733,6 +1734,22 @@ if args["cgroup"]:
     # Everything is imported and resolved above: from here on this process is policed.
     with open(args["cgroup"] + "/cgroup.procs", "w") as f:
         f.write(str(os.getpid()))
+# Root without CAP_PERFMON or CAP_SYS_ADMIN, in every position. A perfmon_capable() caller is
+# handed another task's environ and maps by mm_access() after the ptrace check refuses, which is
+# what the 2026-11-09 run measured; a lease never holds either, so this is the root a lease could
+# become, not one with a bypass it cannot have. CAP_SYS_PTRACE, CAP_KILL, CAP_SYS_NICE and
+# CAP_SYS_RESOURCE stay, so DAC and Yama still pass and only the cgroup rule can refuse.
+class CapHeader(ctypes.Structure):
+    _fields_ = [("version", ctypes.c_uint32), ("pid", ctypes.c_int)]
+class CapData(ctypes.Structure):
+    _fields_ = [("effective", ctypes.c_uint32), ("permitted", ctypes.c_uint32), ("inheritable", ctypes.c_uint32)]
+CAPGET, CAPSET = {"x86_64": (125, 126), "aarch64": (90, 91)}[platform.machine()]
+header, caps = CapHeader(0x20080522, 0), (CapData * 2)()
+checked(libc.syscall(L(CAPGET), ctypes.byref(header), caps))
+for cap in (21, 38):  # CAP_SYS_ADMIN, CAP_PERFMON
+    caps[cap // 32].effective &= ~(1 << cap % 32)
+    caps[cap // 32].permitted &= ~(1 << cap % 32)
+checked(libc.syscall(L(CAPSET), ctypes.byref(header), caps))
 result = {}
 for name, op in ops:
     try:
@@ -1740,7 +1757,8 @@ for name, op in ops:
         result[name] = "ok"
     except OSError as e:
         result[name] = errno.errorcode.get(e.errno, str(e.errno))
-print(json.dumps(result), flush=True)
+status = open("/proc/self/status").read()
+print(json.dumps({"ops": result, "capEff": next(l.split()[1] for l in status.splitlines() if l.startswith("CapEff:"))}), flush=True)
 """
 
 def probe_cross_lease_hooks():
@@ -1817,22 +1835,26 @@ while time.monotonic() < end:
             return len(got.read_text()) if got.exists() else 0
 
         # Refused first, so any SIGUSR1 B has counted before a control ran came from inside A.
-        refused = obs["from_lease_a"] = run_helper(leases / "mission_probe-xhook-a")
+        obs["lease_a_cgroup_id"] = (leases / "mission_probe-xhook-a").stat().st_ino
+        obs["from_lease_a"] = run_helper(leases / "mission_probe-xhook-a")
         time.sleep(0.5)
-        obs["signals_after_lease_a"] = signals_received()
-        unleased = obs["unleased_control"] = run_helper(None)
-        wait_for(lambda: signals_received() >= 1, seconds=3)
-        obs["signals_after_unleased"] = signals_received()
-        same = obs["same_cgroup_control"] = run_helper(leases / "mission_probe-xhook-b")
-        wait_for(lambda: signals_received() >= 2, seconds=3)
+        obs["signals_after_lease_a"] = before = signals_received()
+        obs["unleased_control"] = run_helper(None)
+        wait_for(lambda: signals_received() > before, seconds=3)
+        obs["signals_after_unleased"] = after_unleased = signals_received()
+        obs["same_cgroup_control"] = run_helper(leases / "mission_probe-xhook-b")
+        wait_for(lambda: signals_received() > after_unleased, seconds=3)
         obs["signals_after_same_cgroup"] = signals_received()
+        refused, unleased, same = (obs[k]["ops"] for k in ("from_lease_a", "unleased_control", "same_cgroup_control"))
 
+        # Each control is scored on the signal IT sent, so a leak from inside A fails the refusal
+        # checks below and not, as on 2026-11-09, the controls as well.
         operations = set(unleased)
         feature_checks["xhook_unleased_control_reaches_b"] = (
-            all(v == "ok" for v in unleased.values()) and obs["signals_after_unleased"] == 1)
+            all(v == "ok" for v in unleased.values()) and after_unleased == before + 1)
         feature_checks["xhook_same_cgroup_allowed"] = (
             set(same) == operations and all(v == "ok" for v in same.values())
-            and obs["signals_after_same_cgroup"] == 2)
+            and obs["signals_after_same_cgroup"] == after_unleased + 1)
         # EPERM or EACCES only: ESRCH or ENOENT would mean B was gone, not that it was protected.
         feature_checks["xhook_root_in_another_lease_refused"] = (
             set(refused) == operations and all(v in ("EPERM", "EACCES") for v in refused.values()))
@@ -1843,8 +1865,21 @@ while time.monotonic() < end:
         for ws in (a_ws, b_ws):
             shutil.rmtree(ws, ignore_errors=True)
     # The receipt half: lease A's own session carries each refusal, hook by hook, naming B's pid.
+    # On 2026-11-09 it carried none while the kernel refused seven, so A's whole account is kept:
+    # every VIOLATION and the EXIT, whose counted/reported pair says whether the kernel counted them.
+    obs["lease_a_frames"] = [
+        {k: m.get(k) for k in ("type", "hook", "detail", "cgroupId", "exitCode", "violationsReported",
+                               "violationsCounted", "violationsComplete") if k in m}
+        for m in frames["a"] if m.get("type") in ("VIOLATION", "EXIT")]
     seen = sorted({m.get("hook") for m in frames["a"] if m.get("type") == "VIOLATION" and m.get("detail") == b})
     obs["lease_a_violation_hooks_naming_b"] = seen
+    if managed_log is not None:
+        # The daemon logs every record it drains, so this is what reached it from the kernel.
+        # pread, not seek: the daemon shares this file description and writes at its offset.
+        fd = managed_log.fileno()
+        lines = os.pread(fd, os.fstat(fd).st_size, 0).decode(errors="replace").splitlines()
+        obs["daemon_log_cross_lease"] = [line[-240:] for line in lines if "lagged" in line or (
+            "Kernel -EPERM violation" in line and any(f"hook {h:#x}" in line for h in range(5, 11)))][-24:]
     feature_checks["xhook_receipts_name_each_hook_and_b"] = {5, 6, 7, 8, 9, 10} <= set(seen)
 
 def probe_admission_validator():

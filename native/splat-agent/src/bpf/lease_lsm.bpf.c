@@ -549,8 +549,10 @@ int BPF_PROG(splat_socket_sendmsg, struct socket *sock, struct msghdr *msg,
 // Two things the rule depends on, which the daemon's jail provides because no
 // program here can:
 //   - no CAP_PERFMON in a lease. perf_event_open() on a pid skips the ptrace
-//     check entirely for a CAP_PERFMON caller. The jail empties the bounding
-//     set, so no exec can grant it.
+//     check entirely for a CAP_PERFMON caller, and mm_access() hands such a
+//     caller another task's environ and maps after this program refused it
+//     (seen 2026-11-09, from root). The jail empties the bounding set, so no
+//     exec can grant it.
 //   - /proc mounted hidepid=ptraceable. /proc/<pid>/status, cmdline and stat
 //     are world-readable and reach no hook at all; hidepid routes the lookup
 //     itself through ptrace_access_check.
@@ -607,7 +609,16 @@ int BPF_PROG(splat_task_kill, struct task_struct *p,
   // earlier - USB async I/O completing, possibly in softirq - so `current` is
   // whatever task was interrupted, not the sender, and its cgroup says nothing
   // about who signalled. The jail exposes no USB device, so no lease arms it.
-  if (cred)
+  // kill() and every other syscall pass NULL (check_kill_permission).
+  //
+  // The word is read as a number, never tested as `cred`. The verifier types a
+  // hook's pointer arguments as trusted and therefore never NULL, so to it
+  // `if (cred)` is always true; it deleted the cgroup check below as dead code
+  // and this program allowed every signal. The 2026-11-09 root run caught it:
+  // root inside one lease signalled another while every other hook held.
+  __u64 cred_word = 0;
+  bpf_probe_read_kernel(&cred_word, sizeof(cred_word), &ctx[3]);
+  if (cred_word)
     return 0;
   return guard_cross_cgroup(p, HOOK_SIGNAL);
 }
