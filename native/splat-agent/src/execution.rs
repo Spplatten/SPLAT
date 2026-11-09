@@ -43,6 +43,21 @@ pub fn no_new_privileges() -> std::io::Result<()> {
     Ok(())
 }
 
+/// Called only in the fork child: the workload inherits stdin, stdout and stderr and nothing else.
+/// A descriptor it inherits was opened before any hook could judge it, so file_open and connect
+/// never see what it reaches. Every fd above 2 is marked close-on-exec rather than closed, because
+/// std's own pipe that reports a failed exec back to the daemon must live until the exec itself.
+pub fn stdio_only_across_exec() -> std::io::Result<()> {
+    let rc = unsafe {
+        libc::syscall(libc::SYS_close_range, 3 as libc::c_long, libc::c_uint::MAX as libc::c_long,
+            libc::CLOSE_RANGE_CLOEXEC as libc::c_long)
+    };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Prepared on the child stack using only raw syscalls. Separate SysV IPC state plus a socket
 /// filter prevents a secret descriptor from escaping the lease through SCM_RIGHTS or shared IPC.
 pub fn isolate_secret_ipc() -> std::io::Result<()> {
@@ -85,6 +100,27 @@ fn restrict_secret_sockets() -> std::io::Result<()> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A descriptor the daemon holds open without close-on-exec, as the control shows a child
+    /// inheriting it, is not there once the spawn passes through stdio_only_across_exec.
+    #[test]
+    fn a_workload_inherits_stdio_and_nothing_else() {
+        use std::os::unix::process::CommandExt;
+        let leaked = unsafe { libc::dup(2) }; // dup clears close-on-exec, like a careless open
+        assert!(leaked > 2);
+        let probe = format!("test -e /proc/self/fd/{leaked} && echo inherited || echo clean");
+        let run = |guarded: bool| {
+            let mut child = std::process::Command::new("/bin/sh");
+            child.arg("-c").arg(&probe);
+            if guarded {
+                unsafe { child.pre_exec(stdio_only_across_exec); }
+            }
+            String::from_utf8(child.output().unwrap().stdout).unwrap()
+        };
+        assert_eq!(run(false).trim(), "inherited", "the control must show the leak");
+        assert_eq!(run(true).trim(), "clean");
+        unsafe { libc::close(leaked) };
+    }
 
     #[test]
     fn service_environment_does_not_reach_the_child() {
