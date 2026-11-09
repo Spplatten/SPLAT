@@ -112,10 +112,11 @@ struct violation_event {
                   // clock, not wall time
   __u64 seq; // taken from `counters` BEFORE the reservation, so a number never
              // delivered was dropped
-  __u32 pid;
+  __u32 pid;    // the denied process, as its own pid namespace numbers it
   __u32 hook;   // enum splat_hook
   __u32 detail; // exec/open: inode number (low 32 bits); connect: destination
-                // IPv4 (network byte order); task hooks: the target's tgid
+                // IPv4 (network byte order); task hooks: the target process,
+                // numbered as `pid` is
   char comm[16];
 };
 
@@ -244,6 +245,19 @@ static __always_inline enum lease_status check_lease(__u64 cgid) {
   return LEASE_ACTIVE;
 }
 
+// A process id as the task's own pid namespace numbers it, which is the number
+// the daemon, the lease and the operator's `ps` all use. task->tgid and
+// bpf_get_current_pid_tgid() give the kernel's global id instead, and on WSL2
+// every distro runs in a pid namespace of its own, so the two differ there: the
+// 2026-11-09 root run's receipts named lease B as 1208 while B, its pid file
+// and the probe all knew it by another number. On a host whose daemon runs in
+// the initial namespace, level is 0 and this is the global id.
+static __always_inline __u32 task_ns_tgid(struct task_struct *t) {
+  struct pid *pid = BPF_CORE_READ(t, group_leader, thread_pid);
+  unsigned int level = BPF_CORE_READ(pid, level);
+  return BPF_CORE_READ(pid, numbers[level].nr);
+}
+
 static __always_inline void report(__u64 cgid, __u32 hook, __u32 detail) {
   __u32 seq_key = COUNTER_NEXT_SEQ;
   __u32 dropped_key = COUNTER_DROPPED;
@@ -287,7 +301,7 @@ static __always_inline void report(__u64 cgid, __u32 hook, __u32 detail) {
   e->cgroup_id = cgid;
   e->ktime_ns = bpf_ktime_get_ns();
   e->seq = seq;
-  e->pid = bpf_get_current_pid_tgid() >> 32;
+  e->pid = task_ns_tgid((struct task_struct *)bpf_get_current_task());
   e->hook = hook;
   e->detail = detail;
   bpf_get_current_comm(&e->comm, sizeof(e->comm));
@@ -578,7 +592,7 @@ static __always_inline int guard_cross_cgroup(struct task_struct *target,
     return 0; // Unleased: the host, the daemon, the reaper.
   if (task_cgroup_id(target) == cgid)
     return 0; // Its own processes: a lease signals and waits on its children.
-  report(cgid, hook, (__u32)BPF_CORE_READ(target, tgid));
+  report(cgid, hook, task_ns_tgid(target));
   return -EPERM;
 }
 
