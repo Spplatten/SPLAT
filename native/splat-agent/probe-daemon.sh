@@ -1824,6 +1824,8 @@ while time.monotonic() < end:
         if not wait_for(lambda: (a_ws / "pid").is_file() and (b_ws / "pid").is_file(), seconds=15):
             raise RuntimeError("the two sleeping leases never published their pids")
         b = int((b_ws / "pid").read_text().strip())
+        # B's number in this distro's pid namespace, the one the receipts must use to name it.
+        obs["b_pid"] = b
         leases = Path("/sys/fs/cgroup/splat_leases")
         # B's own values, read here as the unleased root probe, so each operation writes back what
         # B already has. ioprio is the exception: best-effort level 4 is always valid, so EINVAL can
