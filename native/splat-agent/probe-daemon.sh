@@ -884,6 +884,7 @@ print(f"  workspace removed on refusal   : {workspace_removed_on_refusal}")
 # These are separate from the historical checks: an older PASS contains no evidence for either
 # feature. Unrun root measurements stay false, and fixture replay never executes this block.
 feature_checks = dict.fromkeys([
+    "fds_inherited_stdio_only",
     "cow_overlay_in_child", "cow_host_unchanged", "cow_no_host_mount", "cow_concurrent_isolation",
     "cow_scratch_removed", "cow_read_only_honored", "cow_bad_options_refused", "cow_inode_overlap_refused",
     "scratch_exec_inside", "scratch_exec_outside_denied", "scratch_exec_default_denied",
@@ -937,6 +938,28 @@ def wait_for(predicate, seconds=10):
 
 def completed(msgs):
     return exit_frame(msgs).get("exitCode") == 0 and (lease_frame(msgs) or {}).get("enforcing") is True
+
+def probe_inherited_fds():
+    # A descriptor the workload inherits was opened by the daemon before any hook ran, so
+    # file_open and connect never judge what it reaches. The daemon now marks every fd above 2
+    # close-on-exec in the child. The workload checks each fd number itself, before it opens
+    # anything: one that answers fstat was inherited.
+    code = ("import os\n"
+            "def held(fd):\n"
+            "    try:\n"
+            "        os.fstat(fd)\n"
+            "        return True\n"
+            "    except OSError:\n"
+            "        return False\n"
+            "print('FDS=' + ','.join(str(fd) for fd in range(1024) if held(fd)), flush=True)\n")
+    msgs = call({
+        "type": "EXECUTE_TOOL", "missionId": "probe-inherited-fds", "command": "/usr/bin/python3",
+        "argv": ["-c", code], "allowedExecPaths": ["/usr/bin/python3"],
+        "workingDirectory": "/tmp", "leaseDurationSeconds": 15,
+    }, "inherited-fds", settle=10.0) or []
+    held = next((part.split("=", 1)[1] for part in stdout_text(msgs).split() if part.startswith("FDS=")), None)
+    feature_observations["inherited_fds"] = held
+    feature_checks["fds_inherited_stdio_only"] = held == "0,1,2"
 
 def probe_cow():
     host_overlays = lambda: {line for line in Path("/proc/self/mountinfo").read_text().splitlines() if " - overlay " in line}
@@ -1965,6 +1988,11 @@ if replay is None and hasattr(os, "geteuid") and os.geteuid() == 0:
         probe_scratch_exec()
     except Exception as e:
         feature_observations["errors"].append("scratch exec: " + str(e))
+    print("\n== 18c. Inherited descriptors: a workload holds stdin, stdout and stderr, nothing else ==")
+    try:
+        probe_inherited_fds()
+    except Exception as e:
+        feature_observations["errors"].append("inherited fds: " + str(e))
     print("\n== 19. Cross-lease reach: one ordinary lease against another's process and workspace ==")
     try:
         probe_cross_lease()

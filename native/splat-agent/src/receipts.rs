@@ -150,6 +150,18 @@ impl Store {
         Ok(())
     }
 
+    /// Forgets the reservation of a mission whose workload was never spawned. Nothing ran, so
+    /// nothing is owed: a lookup answers "unavailable", which claims nothing either way, instead of
+    /// "pending" for the cache's whole retention, and the caller may admit the mission again. A
+    /// record with an outcome is never released.
+    pub fn release(&self, mission: &str, context: &str) -> Result<()> {
+        let mut state = self.0.lock().map_err(|_| anyhow::anyhow!("receipt cache poisoned"))?;
+        let id = key(mission);
+        let Some(record) = state.records.get(&id) else { return Ok(()); };
+        ensure!(record.context == context && record.outcome.is_none(), "receipt identity or completion mismatch");
+        state.remove(&id)
+    }
+
     pub fn lookup(&self, mission: &str, context: &str, policy: &str) -> Result<Value> {
         let state = self.0.lock().map_err(|_| anyhow::anyhow!("receipt cache poisoned"))?;
         let unavailable = serde_json::json!({"type":"RECEIPT_RESPONSE", "status":"unavailable"});
@@ -189,6 +201,22 @@ mod tests {
         assert_eq!(store.lookup("mission", "caller-b", "none").unwrap()["status"], "unavailable");
         assert_eq!(store.lookup("mission", "caller-a", &"a".repeat(64)).unwrap()["status"], "unavailable");
         assert_eq!(store.lookup("missing", "caller-a", "none").unwrap()["status"], "unavailable");
+    }
+
+    #[test]
+    fn a_reservation_refused_before_spawn_is_released_and_may_be_admitted_again() {
+        let directory = Directory::new();
+        let store = Store::open(&directory.0).unwrap();
+        store.reserve("mission", "caller", "none").unwrap();
+        assert!(store.release("mission", "other-caller").is_err(), "only its own caller releases it");
+        store.release("mission", "caller").unwrap();
+        assert_eq!(store.lookup("mission", "caller", "none").unwrap()["status"], "unavailable");
+        assert!(!directory.0.join(format!("{}.json", key("mission"))).exists(), "its file goes with it");
+        store.reserve("mission", "caller", "none").unwrap();
+        store.finish("mission", "caller", &serde_json::json!({"type":"LEASE"}), &serde_json::json!({"type":"EXIT"})).unwrap();
+        assert!(store.release("mission", "caller").is_err(), "a completed outcome is never released");
+        assert_eq!(store.lookup("mission", "caller", "none").unwrap()["status"], "complete");
+        store.release("never-reserved", "caller").unwrap();
     }
 
     #[test]
