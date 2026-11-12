@@ -1,7 +1,7 @@
 {
   "schema": 2,
-  "recordedUtc": "2026-11-11T17:51:03.1377813+00:00",
-  "verdict": "INCOMPLETE",
+  "recordedUtc": "2026-11-12T03:52:16.4962628+00:00",
+  "verdict": "PASS",
   "scope": "Normal VSTest run of console ownership, managed health, and Windows PowerShell packaging tests; WSL and daemon stand-ins only",
   "sourceHashEncoding": "UTF-8 with LF line endings",
   "sourceSha256": {
@@ -16,28 +16,28 @@
     "src/MissionController.UI/KernelLeaseViewModel.cs": "3cd8a6741f5ac2ee206cc8e814543d8db22ae6ca046d6e212aa6fc9ce7bafaf5",
     "tests/MissionController.Tests/BundledWslGuestTests.cs": "66df78aab48f6c7c8e05723c89f872fc4024235badbfa663d7905c3bccb47eef",
     "tests/MissionController.Tests/ManagedSubstrateCheckTests.cs": "2588146c29d7a3d4614ab66ae5fdc41c3dfb84e3d98908e5a521f2623af59d8b",
-    "tests/MissionController.Tests/SplatGuestPackagingTests.cs": "40908b6df6d43e724bb35f61ae1b8dd84a07e16edebb2ce2653ce2e9165d311f",
+    "tests/MissionController.Tests/SplatGuestPackagingTests.cs": "8b393417c68738faeb07791115bc3ca2ecb27141fdfe300fe8be9cd0926e936a",
     "packaging/splat-guest-package.ps1": "a7819a13d849906a64c7e6b78718dd8957ebe71dcbef569997bdff3e12d91628",
     "packaging/test-splat-guest-package.ps1": "fdaa1060389b274fb666cb140ca14f27bc4e89a2195a2abce30d588ef9ac3bee",
     "packaging/verify-community-package.ps1": "580d90a8d286c1f90d0cb7772dd954e874a112a64242f134c859c228c1570cf4",
     "packaging/probe-splat-guest-console.ps1": "7f236fcbf9f9f4d6bf8ad4d486ac6fec8af3c531e40de392da0a91ccd20b99ec"
   },
   "testAssemblySha256": {
-    "MissionController.Tests.dll": "d173a11afcc1e7be13e9a6faee5515581cf0b5d43bb1d883d588c488e5f7b88d",
-    "MissionController.Host.dll": "bf0fea0283a3bbe364df8b8195f198cf2a3bf7145635687ba229052fe9818064",
-    "MissionController.Infrastructure.Linux.dll": "3575acbedb5bdc7619b1997257943ef8d406cbdae277a06776e1187642945ba0",
-    "splat-mcp.dll": "c8d5cf224565aa1ce7bb1ebf94f8bacd199888b54983103efef891a50dc3e472"
+    "MissionController.Tests.dll": "d5383a54fdf96bb5961a565ac1188e99719f2ebf11a7234d701d6584684ea4da",
+    "MissionController.Host.dll": "047d8fd407a668d27061bd2d7952fb1112819322ea2bbe5031e0d4f7423edcd2",
+    "MissionController.Infrastructure.Linux.dll": "9b9780e474e939fcb7adff0842f6489f98f44e500adcfd1e3e426a096e34fbff",
+    "splat-mcp.dll": "c74f4d0e685f35033bbb95a7b0e9450792f93d78d3b098fbaa7173d89ed188cf"
   },
   "buildExitCode": 0,
-  "testExitCode": 1,
-  "resultSha256": "1b3a36cf820d7867bc5e7913973daa162a9f4ad944ad4d9280534c997f3b8965",
-  "checksPassed": 15,
-  "checksFailed": 11,
+  "testExitCode": 0,
+  "resultSha256": "6034a5b445da887b1b85586f90aca81db5c2a27692d3a31fbc88246b9249aaa3",
+  "checksPassed": 26,
+  "checksFailed": 0,
   "checksNotExecuted": 0,
   "groups": {
     "BundledWslGuestTests": {
-      "passed": 11,
-      "failed": 3,
+      "passed": 14,
+      "failed": 0,
       "notExecuted": 0
     },
     "ManagedSubstrateCheckTests": {
@@ -46,8 +46,8 @@
       "notExecuted": 0
     },
     "SplatGuestPackagingTests": {
-      "passed": 0,
-      "failed": 8,
+      "passed": 8,
+      "failed": 0,
       "notExecuted": 0
     }
   },
@@ -86,8 +86,7 @@
     },
     {
       "test": "MissionController.Tests.BundledWslGuestTests.ImportPlan_IsReadOnly_AndApplyImportsOnlyTheReviewedGuestOnce",
-      "outcome": "Failed",
-      "error": "Assert.True() Failure\r\nExpected: True\r\nActual:   False"
+      "outcome": "Passed"
     },
     {
       "test": "MissionController.Tests.BundledWslGuestTests.ManagedAndBundledGuests_CannotBeSelectedTogether",
@@ -95,13 +94,11 @@
     },
     {
       "test": "MissionController.Tests.BundledWslGuestTests.MissingPackageRecords_DoNotRedirectAnOwnedGuestToTheDefaultDistro",
-      "outcome": "Failed",
-      "error": "Importing SPLAT-Lite-b7fac984467f. Recovery receipt: C:\\Users\\s_pla\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{5e528cfb-d6a3-4833-a44b-5594d09a8778}\\Temp\\splat-lite-test-92c97c8d3c7e4b4cac25ca22a630c9d1\\data\\lite-guest\\import.json\r\n\r\nStopped: Access to the path is denied.\r\n"
+      "outcome": "Passed"
     },
     {
       "test": "MissionController.Tests.BundledWslGuestTests.OwnedCommands_AreBoundToTheImportedGuest_AndRejectAReplacedMarker",
-      "outcome": "Failed",
-      "error": "Importing SPLAT-Lite-730d9e73a28e. Recovery receipt: C:\\Users\\s_pla\\AppData\\Local\\Packages\\openai.codex_2p2nqsd0c76g0\\AC\\#!sandbox.{5e528cfb-d6a3-4833-a44b-5594d09a8778}\\Temp\\splat-lite-test-bacd64fa2a0c4691af4863e808a912eb\\data\\lite-guest\\import.json\r\n\r\nStopped: Access to the path is denied.\r\n"
+      "outcome": "Passed"
     },
     {
       "test": "MissionController.Tests.BundledWslGuestTests.PartialImport_IsRecorded_AndCannotBeRetriedOrRemovedAutomatically(initialization: False)",
@@ -129,43 +126,35 @@
     },
     {
       "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"ArchiveTamper\")",
-      "outcome": "Failed",
-      "error": "\r\nAuthorizationManager check failed.\r\n    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecordException\r\n    + FullyQualifiedErrorId : UnauthorizedAccess\r\n"
+      "outcome": "Passed"
     },
     {
       "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"ChangedDuringCopy\")",
-      "outcome": "Failed",
-      "error": "\r\nAuthorizationManager check failed.\r\n    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecordException\r\n    + FullyQualifiedErrorId : UnauthorizedAccess\r\n"
+      "outcome": "Passed"
     },
     {
       "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"FalseSourceClaim\")",
-      "outcome": "Failed",
-      "error": "\r\nAuthorizationManager check failed.\r\n    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecordException\r\n    + FullyQualifiedErrorId : UnauthorizedAccess\r\n"
+      "outcome": "Passed"
     },
     {
       "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"MissingLicense\")",
-      "outcome": "Failed",
-      "error": "\r\nAuthorizationManager check failed.\r\n    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecordException\r\n    + FullyQualifiedErrorId : UnauthorizedAccess\r\n"
+      "outcome": "Passed"
     },
     {
       "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"PackageCount\")",
-      "outcome": "Failed",
-      "error": "\r\nAuthorizationManager check failed.\r\n    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecordException\r\n    + FullyQualifiedErrorId : UnauthorizedAccess\r\n"
+      "outcome": "Passed"
     },
     {
       "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"SourceFiles\")",
-      "outcome": "Failed",
-      "error": "\r\nAuthorizationManager check failed.\r\n    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecordException\r\n    + FullyQualifiedErrorId : UnauthorizedAccess\r\n"
+      "outcome": "Passed"
     },
     {
       "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"SourceVersion\")",
-      "outcome": "Failed",
-      "error": "\r\nAuthorizationManager check failed.\r\n    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecordException\r\n    + FullyQualifiedErrorId : UnauthorizedAccess\r\n"
+      "outcome": "Passed"
     },
     {
       "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"Valid\")",
-      "outcome": "Failed",
-      "error": "\r\nAuthorizationManager check failed.\r\n    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecordException\r\n    + FullyQualifiedErrorId : UnauthorizedAccess\r\n"
+      "outcome": "Passed"
     }
   ],
   "realGuestImported": false,

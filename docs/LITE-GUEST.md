@@ -13,25 +13,28 @@ packages, 137 staged files, and `sourceStatus: NOT_INCLUDED`. The checks reject 
 missing licence records, mismatched source versions, wrong package counts, changes during copying
 and a false claim that source archives were included. These are packaging checks, not a boot test.
 
-`packaging/evidence/lite-guest-console.json` now records a normal, targeted VSTest run after a
-separate build, with source, assembly and raw-result hashes. The 2026-11-11 run is **INCOMPLETE**:
+`packaging/evidence/lite-guest-console.json` records a normal, targeted VSTest run after a
+separate build, with source, assembly and raw-result hashes. The run recorded at
+`2026-11-12T03:52:16Z` on the development host, outside any sandbox, is **PASS** over all 26:
 
 | Test group | Passed | Failed | What was exercised |
 | --- | ---: | ---: | --- |
-| `BundledWslGuestTests` | 11 | 3 | Import plans and guest ownership against a recording WSL stand-in; three cases stop at denied atomic receipt replacement |
+| `BundledWslGuestTests` | 14 | 0 | Import plans, atomic receipt replacement and guest ownership against a recording WSL stand-in |
 | `ManagedSubstrateCheckTests` | 4 | 0 | Cold startup, token-read ordering, wrong-token refusal and authenticated enforcement against a protocol stand-in |
-| `SplatGuestPackagingTests` | 0 | 8 | Windows PowerShell 5.1 rejects script execution with `AuthorizationManager check failed` |
+| `SplatGuestPackagingTests` | 8 | 0 | The eight packaging controls under Windows PowerShell 5.1 |
 
-The separate PowerShell 7 packaging run above passes all eight cases; it does not establish
-PowerShell 5.1 compatibility. The atomic update remains in the implementation. No checks are
-skipped or converted to passing results because this environment refuses an operation.
+Two earlier runs of the same probe were INCOMPLETE, each for a cause outside the code under test;
+[the audit](audits/2026-11-11-lite-guest-ownership.md) keeps both. On 2026-11-11 a sandbox denied
+the receipt replacement and Windows PowerShell script execution (15 of 26). The first run outside
+it, started from PowerShell 7, failed the eight packaging cases (18 of 26): Windows PowerShell
+inherited PS7's module path and lost `Get-FileHash`. The test now starts it without that variable,
+and the eight pass from PowerShell 7 and from a shell that carries no PS7 path. No check was
+skipped or relabelled to reach the verdict.
 Both evidence files hash source as UTF-8 with LF line endings so checkout line endings do not
 change which source the measurement identifies.
 
-The October testhost socket restriction did not reproduce in the November targeted run.
-Automatic approval rejected an attempt to run the remaining cases outside the sandbox because
-escalated permissions are disabled. Receipt replacement, PowerShell 5.1 and the packaged
-executable still require checks in the deployment environment.
+This is one development host, with WSL and the daemon replaced by stand-ins. A clean machine, the
+packaged executable and a real import still require checks in the deployment environment.
 
 There is later native evidence: the [2026-11-05 Debian guest probe](../native/splat-agent/evidence/2026-11-05-splat-guest/daemon-probe.json)
 and [2026-11-08 daemon probe](../native/splat-agent/evidence/daemon-probe.json) record root enforcement
