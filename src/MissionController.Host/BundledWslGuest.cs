@@ -27,6 +27,12 @@ public sealed class BundledWslGuest
     public WslSubstrateHealthChecker Health { get; }
 
     public BundledWslGuest(string linuxDirectory, string dataRoot, SubstrateDoctor.WslRunner? run = null)
+        : this(linuxDirectory, dataRoot, run, 50051)
+    {
+    }
+
+    // A loopback stand-in must use its own ephemeral port, never the operator's daemon.
+    internal BundledWslGuest(string linuxDirectory, string dataRoot, SubstrateDoctor.WslRunner? run, int port)
     {
         _linuxDirectory = Path.GetFullPath(linuxDirectory);
         string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dataRoot));
@@ -35,8 +41,9 @@ public sealed class BundledWslGuest
             Encoding.UTF8.GetBytes(root.ToUpperInvariant())))[..12].ToLowerInvariant();
         _run = run ?? RunProcessAsync;
         var token = new WslAgentToken(ReadTokenAsync);
-        Executor = new WslLeasedExecutor("127.0.0.1", 50051, token, StartDaemonAsync, HoldAwake);
-        Health = new WslSubstrateHealthChecker("127.0.0.1", 50051, token,
+        Executor = new WslLeasedExecutor("127.0.0.1", port, token, StartDaemonAsync, HoldAwake,
+            validateGuest: RequireOwnedAsync);
+        Health = new WslSubstrateHealthChecker("127.0.0.1", port, token,
             connect: Executor.ConnectToDaemonAsync);
     }
 
