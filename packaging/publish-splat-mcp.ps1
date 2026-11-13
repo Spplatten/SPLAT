@@ -127,9 +127,9 @@ Write-Host "[2/6] publishing splat-mcp ($Configuration, $Runtime, self-contained
     --output $publishDir `
     -p:PublishSingleFile=true `
     -p:DebugType=none `
-    '-p:Company=Platten Industries' `
+    '-p:Company=Platten Industries LLC' `
     '-p:Product=SPLAT (AGPL-3.0 / Platten Industries commercial licensing)' `
-    '-p:Copyright=Copyright (C) 2026 Platten Industries. AGPL-3.0 / separate commercial licensing.' `
+    '-p:Copyright=Copyright (C) 2026 Platten Industries LLC. AGPL-3.0 / separate commercial licensing.' `
     '-p:PackageLicenseExpression=AGPL-3.0-only' `
     "-p:SplatAgentBinary=$daemonStage" `
     --nologo
@@ -172,7 +172,7 @@ $daemonArtifact = Join-Path $OutputDir 'splat-agent'
 Copy-Item -LiteralPath $daemonStage -Destination $daemonArtifact -Force
 $manifest = [ordered]@{
     schema = 1; buildStartedUtc = $buildStartedUtc; builtUtc = [DateTimeOffset]::UtcNow.ToString('o')
-    license = 'AGPL-3.0-only'; publisher = 'Platten Industries'
+    license = 'AGPL-3.0-only'; publisher = 'Platten Industries LLC'
     commercialLicense = 'Separate agreement; see COMMERCIAL.md.'
     artifact = 'splat-mcp.exe'; sha256 = $hash.ToLowerInvariant()
     daemonSha256 = (Get-FileHash -LiteralPath $daemonArtifact -Algorithm SHA256).Hash.ToLowerInvariant()

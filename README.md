@@ -288,7 +288,7 @@ plans. In order:
 
 ## License
 
-**[GNU AGPL-3.0](LICENSE)** — © 2026 Platten Industries.
+**[GNU AGPL-3.0](LICENSE)** — © 2026 Platten Industries LLC.
 
 Commercial use is permitted. When conveying covered binaries, modified or unmodified, provide
 Corresponding Source through a method allowed by section 6 and preserve the required notices.
@@ -304,7 +304,7 @@ The Community notices and privacy information do not add restrictions to the AGP
 Third-party components (.NET Runtime, Windows App SDK, Win2D, Microsoft.Data.Sqlite,
 CommunityToolkit, SQLite, the libbpf ecosystem) remain under their own licences.
 
-"SPLAT" and "Platten Industries", and their logos, are marks of Platten Industries. The AGPL grants
+"SPLAT" and "Platten Industries", and their logos, are marks of Platten Industries LLC. The AGPL grants
 copyright and patent permissions, not trademark permissions, and none are granted here. Say your
 build is derived from SPLAT; do not call it SPLAT.
 
