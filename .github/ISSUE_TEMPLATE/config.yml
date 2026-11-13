@@ -5,7 +5,7 @@ contact_links:
     about: Do not open an issue. Email plattenindustries@gmail.com with SECURITY in the subject. Read SECURITY.md first - several weaknesses are already measured and published, and a report that rediscovers one is a confirmation rather than a finding.
   - name: Commercial licensing
     url: https://github.com/Spplatten/SPLAT/blob/main/COMMERCIAL.md
-    about: SPLAT is AGPL-3.0, with a separate commercial licence available from Platten Industries.
+    about: SPLAT is AGPL-3.0, with a separate commercial licence available from Platten Industries LLC.
   - name: Contributing, and the CLA
     url: https://github.com/Spplatten/SPLAT/blob/main/CONTRIBUTING.md
     about: Build commands, the rules the test suite enforces, and what is most useful to work on.

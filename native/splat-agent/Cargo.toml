@@ -2,7 +2,7 @@
 name = "splat-agent"
 version = "0.2.0"
 edition = "2021"
-authors = ["Platten Industries"]
+authors = ["Platten Industries LLC"]
 description = "SPLAT Layer-2 Resident eBPF Daemon & Kernel Containment Substrate"
 
 [dependencies]

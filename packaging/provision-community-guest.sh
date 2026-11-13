@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-only
-# Copyright (C) 2026 Platten Industries. Separate commercial licensing is available; see COMMERCIAL.md.
+# Copyright (C) 2026 Platten Industries LLC. Separate commercial licensing is available; see COMMERCIAL.md.
 set -euo pipefail
 umask 022
 [[ $(id -u) == 0 ]] || { echo 'Guest provisioning requires root.' >&2; exit 1; }

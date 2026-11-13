@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-# Copyright (C) 2026 Platten Industries. Separate commercial licensing is available; see COMMERCIAL.md.
+# Copyright (C) 2026 Platten Industries LLC. Separate commercial licensing is available; see COMMERCIAL.md.
 #requires -Version 5.1
 [CmdletBinding()]
 param(

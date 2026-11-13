@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-# Copyright (C) 2026 Platten Industries. Separate commercial licensing is available; see COMMERCIAL.md.
+# Copyright (C) 2026 Platten Industries LLC. Separate commercial licensing is available; see COMMERCIAL.md.
 #requires -Version 5.1
 [CmdletBinding()]
 param(
@@ -124,7 +124,7 @@ $commit = (& git -C $root rev-parse HEAD | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Could not record the source-reference revision.' }
 $manifest = [ordered]@{
     schema = 1; product = 'SPLAT Community Test Candidate'; version = $Version
-    builtUtc = [DateTimeOffset]::UtcNow.ToString('o'); publisher = 'Platten Industries'
+    builtUtc = [DateTimeOffset]::UtcNow.ToString('o'); publisher = 'Platten Industries LLC'
     license = 'AGPL-3.0-only'; commercialLicense = 'Separate agreement with Platten Industries; see COMMERCIAL.md.'
     thirdPartyLicenseScope = 'Third-party components retain their own licenses.'
     sourceReferenceCommit = $commit; compiledPayloadRebuilt = $false

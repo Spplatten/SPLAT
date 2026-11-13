@@ -1,5 +1,5 @@
 ; SPDX-License-Identifier: AGPL-3.0-only
-; Copyright (C) 2026 Platten Industries. Separate commercial licensing is available; see COMMERCIAL.md.
+; Copyright (C) 2026 Platten Industries LLC. Separate commercial licensing is available; see COMMERCIAL.md.
 #ifndef StageDir
   #error StageDir must be the verified community staging directory.
 #endif
@@ -15,13 +15,13 @@
 AppId={{FE65C0A1-120A-4DFD-B251-CF9533C0BEE0}
 AppName=SPLAT Community Test Candidate
 AppVersion={#AppVersion}
-AppPublisher=Platten Industries
+AppPublisher=Platten Industries LLC
 AppPublisherURL=https://github.com/Spplatten/SPLAT
-AppContact=Sean Patrick Platten, Platten Industries, 27 Pledger Pkwy, LaFayette, GA
+AppContact=Platten Industries LLC, 27 Pledger Pkwy, LaFayette, GA
 AppSupportPhone=706-239-7969
-AppCopyright=Copyright (C) 2026 Platten Industries. AGPL-3.0 / separate commercial licensing.
+AppCopyright=Copyright (C) 2026 Platten Industries LLC. AGPL-3.0 / separate commercial licensing.
 AppComments=Experimental test candidate. {#LicensePreamble}
-VersionInfoCompany=Platten Industries
+VersionInfoCompany=Platten Industries LLC
 ; Keep both grants inside the bootstrap loader's limited version-resource field.
 VersionInfoDescription=SPLAT: AGPL-3.0 / Platten Industries commercial license
 VersionInfoVersion={#AppVersion}
@@ -61,10 +61,10 @@ Source: "{#StageDir}\Linux\rootfs.tar.xz"; DestDir: "{app}\Linux"; Flags: ignore
 ; The welcome and completion panels carry the licensor's identity, so the person who accepted the
 ; grant on the license page has already seen who is granting it and how to reach them.
 WelcomeLabel1=Welcome to SPLAT
-WelcomeLabel2=This installs [name/ver] on your computer.%n%nSPLAT is published by Platten Industries under the GNU Affero General Public License v3.0, with separate commercial licensing available.%n%nLicensor: Sean Patrick Platten, Platten Industries%n27 Pledger Pkwy, LaFayette, GA%n706-239-7969, plattenindustries@gmail.com%n%nThe next pages show the full license and the community testing limits. Read both before continuing.
+WelcomeLabel2=This installs [name/ver] on your computer.%n%nSPLAT is published by Platten Industries LLC under the GNU Affero General Public License v3.0, with separate commercial licensing available.%n%nLicensor: Sean Patrick Platten, Platten Industries%n27 Pledger Pkwy, LaFayette, GA%n706-239-7969, plattenindustries@gmail.com%n%nThe next pages show the full license and the community testing limits. Read both before continuing.
 FinishedHeadingLabel=SPLAT is installed
-FinishedLabel=Setup has finished installing the SPLAT Community Test Candidate.%n%nThis is an experimental test candidate licensed under AGPL-3.0 by Platten Industries. It makes no warranty of security, and installation does not establish the caller-identity boundary described in the testing notes.%n%nQuestions, defects and licensing: Sean Patrick Platten, Platten Industries, 27 Pledger Pkwy, LaFayette, GA, 706-239-7969, plattenindustries@gmail.com.
-FinishedLabelNoIcons=Setup has finished installing the SPLAT Community Test Candidate.%n%nThis is an experimental test candidate licensed under AGPL-3.0 by Platten Industries. It makes no warranty of security, and installation does not establish the caller-identity boundary described in the testing notes.%n%nQuestions, defects and licensing: Sean Patrick Platten, Platten Industries, 27 Pledger Pkwy, LaFayette, GA, 706-239-7969, plattenindustries@gmail.com.
+FinishedLabel=Setup has finished installing the SPLAT Community Test Candidate.%n%nThis is an experimental test candidate licensed under AGPL-3.0 by Platten Industries LLC. It makes no warranty of security, and installation does not establish the caller-identity boundary described in the testing notes.%n%nQuestions, defects and licensing: Sean Patrick Platten, Platten Industries, 27 Pledger Pkwy, LaFayette, GA, 706-239-7969, plattenindustries@gmail.com.
+FinishedLabelNoIcons=Setup has finished installing the SPLAT Community Test Candidate.%n%nThis is an experimental test candidate licensed under AGPL-3.0 by Platten Industries LLC. It makes no warranty of security, and installation does not establish the caller-identity boundary described in the testing notes.%n%nQuestions, defects and licensing: Sean Patrick Platten, Platten Industries, 27 Pledger Pkwy, LaFayette, GA, 706-239-7969, plattenindustries@gmail.com.
 
 [Icons]
 Name: "{group}\SPLAT Community Test"; Filename: "{app}\App\MissionController.UI.exe"; WorkingDir: "{app}\App"

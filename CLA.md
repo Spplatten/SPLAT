@@ -6,7 +6,7 @@
 > it as legal advice, and expect the wording to change before it is first countersigned. If you are
 > contributing on an employer's time, have your employer read it too.
 
-This agreement is between you ("You") and Platten Industries, Sean Patrick Platten, LaFayette,
+This agreement is between you ("You") and Platten Industries LLC, LaFayette,
 Georgia, United States ("the Project"), and it covers any contribution you submit to SPLAT.
 
 ## Why this exists
