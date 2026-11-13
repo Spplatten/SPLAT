@@ -147,15 +147,13 @@ impl JailPlan {
             }
         }
 
-        // /tmp is fresh unless it IS the working directory. A working directory under /tmp lives
+        // /tmp is always fresh, the working directory included. A working directory of exactly /tmp
+        // used to be the host's own /tmp, bound read-write: whatever a lease left there outlived
+        // it, readable by the next lease handed the same UID. A working directory under /tmp lives
         // inside the fresh tmpfs, so its mount point can only be made in the child, after the tmpfs.
         let jail_tmp = root.join("tmp");
-        if workdir == Path::new("/tmp") {
-            plan.mkdir(&jail_tmp)?;
-        } else {
-            plan.mkdir(&jail_tmp)?;
-            plan.tmpfs_tmp = Some(c_path(&jail_tmp));
-        }
+        plan.mkdir(&jail_tmp)?;
+        plan.tmpfs_tmp = Some(c_path(&jail_tmp));
 
         let jail_workdir = root.join(workdir.strip_prefix("/").unwrap_or(workdir));
         if workdir == Path::new("/tmp") {
@@ -177,7 +175,10 @@ impl JailPlan {
                 }
             }
         }
-        plan.workdir_bind = Some(Bind { source: c_path(&host_workdir), target: c_path(&jail_workdir), read_only: read_only_workdir });
+        // The fresh /tmp is itself the working directory then: bound to itself, so readOnlyFs still
+        // has a mount to remount read-only, and the host's /tmp is never the source.
+        let workdir_source = if workdir == Path::new("/tmp") { &jail_workdir } else { &host_workdir };
+        plan.workdir_bind = Some(Bind { source: c_path(workdir_source), target: c_path(&jail_workdir), read_only: read_only_workdir });
         if enable_cow {
             let scratch = host.join(&crate::cow::SCRATCH_BASE[1..]).join(format!("mission_{mission_id}"));
             let workspace = crate::cow::OverlayWorkspace::setup(&host_workdir, &scratch)?;
@@ -586,13 +587,16 @@ mod tests {
     }
 
     #[test]
-    fn tmp_as_the_workdir_is_the_hosts_tmp_and_no_tmpfs_is_mounted() {
+    fn tmp_as_the_workdir_is_a_fresh_tmpfs_and_never_the_hosts_tmp() {
         let host = fake_host();
         let plan = JailPlan::prepare(&base_for(&host), "m-3", Path::new("/tmp"), false, false, &host).expect("prepare");
 
-        assert!(plan.tmpfs_tmp.is_none());
-        let (source, _, read_only) = plan.binds().last().unwrap().clone();
-        assert!(source.ends_with("/tmp") && !read_only);
+        assert!(plan.tmpfs_tmp.is_some());
+        let (source, target, read_only) = plan.binds().last().unwrap().clone();
+        assert_eq!(source, target, "the fresh /tmp is bound to itself");
+        assert!(source.ends_with("mission_m-3/tmp") && !read_only, "{source}");
+        assert!(plan.binds().iter().all(|(source, _, _)| *source != host.join("tmp").to_string_lossy()),
+                "the host's /tmp is no bind's source");
 
         drop(plan);
         let _ = fs::remove_dir_all(&host);
