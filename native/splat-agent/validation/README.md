@@ -57,7 +57,8 @@ v1 cannot observe a scratch-execution grant, because the child writes it after t
 
 **First root run: 2026-11-08T07:02:35Z**, as section 23 of `probe-daemon.sh`, in Ubuntu 26.04.1
 (kernel 6.18.33.2, BPF `d5bb4cad`, daemon from `dfeed53`). All 8 checks held. The run is recorded
-under `admission_validator` in [daemon-probe.json](../evidence/daemon-probe.json), outside the
+under `admission_validator` in
+[2026-11-08-ubuntu/daemon-probe.json](../evidence/2026-11-08-ubuntu/daemon-probe.json), outside the
 verdict.
 - `enforce` admitted a correct lease, which then ran. The frame named all four programs by tag.
 - `enforce` refused a scratch-execution lease as indeterminate.
@@ -68,6 +69,11 @@ verdict.
   exec grant the decoy left missing.
 - `audit` admitted, recorded and ran the lease.
 - Each check took about 0.4 ms, against a few map entries.
+
+**Second root run: 2026-11-09T18:44:27Z**, the same section, against BPF `5e218eb1` and the daemon
+from `3e044a8`, which attaches ten programs. All 8 checks held again, and the frame named all ten
+programs by tag. It is recorded under `admission_validator` in
+[daemon-probe.json](../evidence/daemon-probe.json), outside the verdict.
 
 Not yet done:
 - an audit-mode census of the catalog;
