@@ -24,7 +24,9 @@
       2. Build the daemon in the guest as the default user, touching the BPF source first so the
          kernel program is recompiled rather than reused from a previous build.
       3. Stop the installed unit if it is running, and wait for the port to be free. A daemon that
-         is not this build answering the probes would prove the wrong program.
+         is not this build answering the probes would prove the wrong program. If another kernel
+         program's pins are left and no lease is running, retire them: the daemon will not start
+         beside them.
       4. Let probe-daemon.sh own the fresh root daemon so its SIGKILL/restart checks run without
          competing for the singleton lock; record into this tree's evidence directory.
       5. After that daemon is stopped, start the same binary for the host's last-hop probe.
@@ -219,6 +221,16 @@ Write-Host "   daemon : $bin"
 $daemon = $null
 $daemonLog = Join-Path ([System.IO.Path]::GetTempPath()) ('splat-reprove-daemon-' + [guid]::NewGuid().ToString('N') + '.log')
 $daemonErr = "$daemonLog.err"
+# The daemon pins under /sys/fs/bpf/splat/<sha256 of lease_lsm.bpf.c> (pinning.rs, source_hash).
+$treeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $bpfSource).Hash.ToLowerInvariant()
+$retired = @()
+# Refuses while any lease cgroup is populated: pins that may still police a lease are never idle.
+$idleCheck = @'
+for events in /sys/fs/cgroup/splat_leases/mission_*/cgroup.events; do
+    [ -e "$events" ] || continue
+    grep -qx 'populated 0' "$events" || { echo "BUSY=$events"; exit 3; }
+done
+'@
 
 try {
     Write-Host "[3/8] freeing $Listen" -ForegroundColor Cyan
@@ -231,6 +243,27 @@ try {
         Write-Error "something other than the installed unit is listening on $Listen; the probes would prove the wrong program"
         exit 1
     }
+    # A changed kernel program pins under its own hash, and the daemon refuses to start beside any
+    # other pin set (pinning.rs, select_directory), because live leases may still be policed by it.
+    # With the unit stopped and no lease running, the installed program's pins are idle; retiring
+    # them costs nothing, since the installed unit attaches and pins its program afresh on start.
+    $retire = Invoke-Guest -AsRoot ($idleCheck + "`n" + @'
+base=/sys/fs/bpf/splat
+[ -d "$base" ] || exit 0
+for dir in "$base"/*; do
+    [ -e "$dir" ] || continue
+    [ "$(basename "$dir")" = '__HASH__' ] && continue
+    rm -r -- "$dir" || { echo "FAILED=$dir"; exit 4; }
+    echo "RETIRED=$(basename "$dir")"
+done
+'@).Replace('__HASH__', $treeHash)
+    $retired = @([regex]::Matches($retire.Output, '(?m)^RETIRED=(\S+)') | ForEach-Object { $_.Groups[1].Value })
+    if ($retire.ExitCode -ne 0) {
+        Write-Host $retire.Output
+        Write-Error 'another kernel program''s pins could not be retired (a lease is still running, or the removal failed), so the fresh daemon would refuse to start'
+        exit 1
+    }
+    if ($retired.Count) { Write-Host ('   retired the idle pins of another kernel program: {0}' -f ($retired -join ', ')) }
 
     Write-Host "[4/8] probe-daemon.sh owns the fresh daemon, including SIGKILL and restart" -ForegroundColor Cyan
     # The lifecycle probe must own the only daemon. Starting the driver's instance first
@@ -282,6 +315,16 @@ finally {
     if ($daemon) {
         $null = Invoke-Guest -AsRoot ('pkill -TERM -f ' + "'splat-agent --listen $Listen'" + '; echo "RC=$?"')
         if (-not $daemon.HasExited -and -not $daemon.WaitForExit(10000)) { try { $daemon.Kill() } catch { } }
+    }
+    # Pins retired above belonged to the installed program, which will not start beside this
+    # tree's. Retire this run's once idle, and the unit pins its own program as it did before.
+    if ($retired.Count) {
+        $back = Invoke-Guest -AsRoot ($idleCheck + "`n" + @'
+dir=/sys/fs/bpf/splat/__HASH__
+if [ -d "$dir" ]; then rm -r -- "$dir" || exit 4; fi
+echo "CLEARED"
+'@).Replace('__HASH__', $treeHash)
+        if ($back.Output -notmatch 'CLEARED') { Write-Host "   WARNING: this run's pins are still in place, so the installed unit may refuse to start: $($back.Output)" }
     }
     if ($unitWasActive) {
         $start = Invoke-Guest -AsRoot 'systemctl start splat-agent; echo "RC=$?"'

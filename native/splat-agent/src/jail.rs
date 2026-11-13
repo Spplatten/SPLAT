@@ -428,12 +428,18 @@ pub unsafe fn enter(plan: &JailPlan) -> io::Result<()> {
     for (source, target) in &plan.dev_binds {
         check(libc::mount(source.as_ptr(), target.as_ptr(), none, libc::MS_BIND, null_data))?;
     }
+    // The jail shares the host's pid namespace, so this /proc lists every process on the guest.
+    // /proc/<pid>/status, cmdline and stat are world-readable and pass no LSM hook, which left
+    // another lease's command line and identity readable whatever its UID. hidepid=ptraceable
+    // makes a pid visible only to a caller that may ptrace it, which routes every lookup through
+    // the cross-lease ptrace_access_check program: a lease sees its own processes and no others.
+    // Since Linux 5.8 each procfs mount has its own options, so the host's /proc is unaffected.
     check(libc::mount(
         c"proc".as_ptr(),
         plan.proc_dir.as_ptr(),
         c"proc".as_ptr(),
         libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
-        null_data,
+        c"hidepid=ptraceable".as_ptr().cast(),
     ))?;
 
     check(libc::syscall(libc::SYS_pivot_root, plan.new_root.as_ptr(), plan.old_root.as_ptr()) as libc::c_int)?;

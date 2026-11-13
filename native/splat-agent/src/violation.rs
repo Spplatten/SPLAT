@@ -67,6 +67,14 @@ impl ViolationEvent {
             3 => format!("socket_connect: denied outbound network connection to unapproved IPv4 {}", be_u32_to_ipv4(raw.detail)),
             4 if raw.detail == 0 => "socket_sendmsg: denied outbound datagram (IPv6 destination, or an address too short to hold one)".to_string(),
             4 => format!("socket_sendmsg: denied outbound datagram to unapproved IPv4 {}", be_u32_to_ipv4(raw.detail)),
+            // The task hooks report the target's tgid, so the ledger names whom the lease reached for.
+            // The kernel never marks these expired: the rule is the same before and after a deadline.
+            5 => format!("ptrace_access_check: denied inspecting a task outside the lease (target pid {})", raw.detail),
+            6 => format!("task_kill: denied signalling a task outside the lease (target pid {})", raw.detail),
+            7 => format!("task_setscheduler: denied rescheduling a task outside the lease (target pid {})", raw.detail),
+            8 => format!("task_setnice: denied renicing a task outside the lease (target pid {})", raw.detail),
+            9 => format!("task_setioprio: denied changing the I/O priority of a task outside the lease (target pid {})", raw.detail),
+            10 => format!("task_setrlimit: denied changing the limits of a task outside the lease (target pid {})", raw.detail),
             _ => format!("unspecified kernel hook violation (hook {}, detail {})", raw.hook, raw.detail),
         };
 
@@ -207,6 +215,26 @@ mod tests {
         assert!(!event.detail_text.contains("unapproved IPv4 0.0.0.0"), "{}", event.detail_text);
         assert_eq!(event.comm, "curl");
         assert_eq!((event.ktime_ns, event.seq), (1_000, 9), "the kernel's clock and number survive the decode");
+    }
+
+    /// Each cross-lease hook reads as itself and names the task it was refused, never as an
+    /// unspecified hook or an address: the detail word is a pid for these, not an inode or an IPv4.
+    #[test]
+    fn a_cross_lease_denial_names_its_hook_and_the_target_pid() {
+        let texts: Vec<String> = (5..=10).map(|hook| {
+            let raw = RawViolationEvent {
+                cgroup_id: 7, ktime_ns: 1, seq: 2, pid: 3, hook, detail: 4242,
+                comm: *b"python3\0\0\0\0\0\0\0\0\0",
+            };
+            ViolationEvent::from_raw(&raw).detail_text
+        }).collect();
+        for text in &texts {
+            assert!(text.contains("outside the lease") && text.contains("target pid 4242"), "{text}");
+            assert!(!text.contains("unspecified") && !text.contains("IPv4") && !text.contains("expired"), "{text}");
+        }
+        assert!(texts[0].starts_with("ptrace_access_check") && texts[1].starts_with("task_kill"), "{texts:?}");
+        let distinct: std::collections::BTreeSet<_> = texts.iter().collect();
+        assert_eq!(distinct.len(), 6, "{texts:?}");
     }
 
     #[test]

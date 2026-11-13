@@ -133,7 +133,10 @@ class IsolationProof(runner.Proof):
         self.check('attacker_reads_own_workspace', result.get('own_workspace') is True)
         self.check('attacker_signals_own_child', result.get('own_child_signal') is True)
         # Complete both leases before scoring refusals so a regression still produces all evidence
-        # and restores the service. ESRCH/ENOENT cannot count as isolation: the target was alive.
+        # and restores the service. ESRCH cannot count as isolation: the target was alive, as its
+        # answer to the stop control shows. ENOENT counts for the procfs operations only: the jail's
+        # /proc is hidepid=ptraceable, so a live pid the caller may not ptrace is absent there
+        # rather than forbidden. A signal does not go through /proc and must be refused outright.
         Path(target_request['workingDirectory'], 'stop').write_text('synthetic-control')
         target_frames = target.collect()
         self.check('target_completed', target_frames[-1].get('exitCode') == 0)
@@ -143,8 +146,10 @@ class IsolationProof(runner.Proof):
         self.check('both_workspaces_removed', self.wait_removed(target_request) and self.wait_removed(attack_request))
         for name in ('sibling_signal', 'sibling_continue', 'sibling_cwd', 'sibling_workspace', 'sibling_root_workspace', 'sibling_descriptor'):
             operation = result[name]
+            refusals = (errno.EPERM, errno.EACCES) if name in ('sibling_signal', 'sibling_continue') \
+                else (errno.EPERM, errno.EACCES, errno.ENOENT)
             self.checks[name + '_denied'] = operation.get('allowed') is False \
-                and operation.get('errno') in (errno.EPERM, errno.EACCES)
+                and operation.get('errno') in refusals
         self.checks['target_received_no_sibling_signal'] = observed.get('signals_received') == 0
         assert all(self.checks.values()), 'ordinary sibling lease isolation failed; see recorded operations'
         self.lifecycle()

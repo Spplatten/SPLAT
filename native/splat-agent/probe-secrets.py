@@ -42,8 +42,12 @@ def retire_idle_pins(expected_hash):
         assert list(base.iterdir()) == [directory], "unexpected pin set; refusing retirement"
         assert directory.is_dir() and not directory.is_symlink() and base.resolve() == base
         pins = list(directory.iterdir())
-        assert {path.name for path in pins if path.name.startswith("link_")} == {
-            "link_splat_bprm_check", "link_splat_file_open", "link_splat_socket_connect", "link_splat_socket_sendmsg"}
+        # The installed set is retired, so it may predate the cross-lease hooks: a program from
+        # before them pinned four links, one from after pins ten. Anything else is not ours.
+        four = {"link_splat_bprm_check", "link_splat_file_open", "link_splat_socket_connect", "link_splat_socket_sendmsg"}
+        ten = four | {"link_splat_ptrace_access", "link_splat_task_kill", "link_splat_task_setsched",
+                      "link_splat_task_setnice", "link_splat_task_setioprio", "link_splat_task_setrlimit"}
+        assert {path.name for path in pins if path.name.startswith("link_")} in (four, ten)
         # bpftool 7.7's single-link command tests stale errno on success (src/link.c:do_show).
         # Enumeration has a reliable status and supplies the exact pinned paths to validate.
         links = json.loads(subprocess.check_output(["bpftool", "-j", "-f", "link", "show"]))
@@ -369,12 +373,15 @@ with socket.create_connection(('127.0.0.1',{port}),timeout=15) as connection:
             self.check("sealed_input_resident_and_excluded_from_fork_and_dump", any(
                 all(flag in block.split("VmFlags:", 1)[1].splitlines()[0].split() for flag in ["lo", "dc", "dd"])
                 for block in blocks[1:] if "VmFlags:" in block))
+            # ENOENT counts too: the jail's /proc is hidepid=ptraceable, so a live sibling the lease
+            # may not ptrace is absent rather than forbidden. It cannot stand for a dead target
+            # here - duplicate_mission_cannot_replace_live_cgroup below requires the pid alive after.
             attacker_code = f"""
 import errno, os
 os.read(0,4096)
 for path in ['/proc/{pid}/fd/0','/proc/{pid}/mem','/proc/{pid}/environ']:
     try: open(path,'rb')
-    except OSError as error: assert error.errno in (errno.EACCES,errno.EPERM)
+    except OSError as error: assert error.errno in (errno.EACCES,errno.EPERM,errno.ENOENT)
     else: raise AssertionError('sibling secret accessible')
 """
             sibling = self.grant(second, self.request("secret-proof-sibling", attacker_code), self.secret())

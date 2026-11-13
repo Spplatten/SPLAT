@@ -85,6 +85,25 @@ fn drop_privileges(uid: u32, gid: u32) -> std::io::Result<()> {
             return Ok(());
         }
 
+        // An empty bounding set: no exec can grant this workload a capability, file capabilities
+        // included, whether or not no_new_privileges holds. The cross-lease hooks in
+        // lease_lsm.bpf.c depend on it - perf_event_open() skips the ptrace check entirely for a
+        // CAP_PERFMON caller. Dropping needs CAP_SETPCAP, so it happens before the uid changes.
+        // EINVAL past the kernel's last capability is how the loop finds where that is.
+        for cap in 0..64 {
+            if libc::prctl(libc::PR_CAPBSET_DROP, cap as libc::c_ulong, 0, 0, 0) == 0 {
+                continue;
+            }
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINVAL) && cap > 0 {
+                break;
+            }
+            return Err(error);
+        }
+        if libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_CLEAR_ALL as libc::c_ulong, 0, 0, 0) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
         // Supplementary groups survive setuid, so a workload could keep group membership the
         // target account never had. Clear them while still privileged enough to do so.
         if libc::setgroups(0, std::ptr::null()) != 0 {
@@ -132,6 +151,49 @@ fn string_list(v: &serde_json::Value, key: &str) -> Option<Vec<String>> {
     v.get(key)?
         .as_array()
         .and_then(|a| a.iter().map(|e| e.as_str().map(str::to_string)).collect())
+}
+
+/// A bound mission's receipt reservation, held from admission until its workload is spawned. Every
+/// refusal in between used to `continue` past it, leaving the mission "pending" for the cache's
+/// 24-hour retention: a lookup said it might be running, and a retry was refused as already
+/// admitted. Dropping this releases it; a successful spawn disarms it, because from then on the
+/// workload may have run and its outcome is owed.
+struct UnspawnedReservation {
+    store: receipts::Store,
+    mission: String,
+    context: String,
+    armed: bool,
+}
+
+impl Drop for UnspawnedReservation {
+    fn drop(&mut self) {
+        if self.armed {
+            if let Err(error) = self.store.release(&self.mission, &self.context) {
+                warn!("Could not release the receipt reservation of a mission that never started: {error:#}");
+            }
+        }
+    }
+}
+
+/// The lease's egress exactly as declared, or why it cannot be held: every address a dotted IPv4
+/// quad and every port a whole number from 1 to 65535. Anything else used to vanish without a word.
+/// The writer skipped an address that did not parse and a port past 65535, and a port past u32::MAX
+/// wrapped into range on the way in (4294967376 became 80), so the lease in the kernel was not the
+/// one the caller read back as granted. An absent key is the undeclared check's to refuse.
+fn egress_declaration(parsed: &serde_json::Value) -> std::result::Result<(Vec<String>, Vec<u32>), String> {
+    let ips = string_list(parsed, "allowedEgressIps")
+        .ok_or("allowedEgressIps must be a list of IPv4 addresses as strings")?;
+    if let Some(bad) = ips.iter().find(|ip| violation::ipv4_to_be_u32(ip).is_err()) {
+        return Err(format!("allowedEgressIps entry {bad:?} is not a dotted IPv4 address"));
+    }
+    let mut ports = Vec::new();
+    for entry in parsed.get("allowedEgressPorts").and_then(|v| v.as_array()).into_iter().flatten() {
+        match entry.as_u64().filter(|port| (1..=65535).contains(port)) {
+            Some(port) => ports.push(port as u32),
+            None => return Err(format!("allowedEgressPorts entry {entry} is not a port from 1 to 65535")),
+        }
+    }
+    Ok((ips, ports))
 }
 
 #[derive(Parser, Debug)]
@@ -202,9 +264,9 @@ struct Args {
     secret_socket: Option<std::path::PathBuf>,
 
     /// Operator-reserved UID/GID range shared by ordinary leases and pending secret grants.
-    #[arg(long = "lease-uid-start", visible_alias = "secret-uid-start", default_value_t = 200000)]
+    #[arg(long = "lease-uid-start", visible_alias = "secret-uid-start", default_value_t = identities::DEFAULT_LEASE_UID_START)]
     secret_uid_start: u32,
-    #[arg(long = "lease-uid-count", visible_alias = "secret-uid-count", default_value_t = 256)]
+    #[arg(long = "lease-uid-count", visible_alias = "secret-uid-count", default_value_t = identities::LEASE_CAPACITY)]
     secret_uid_count: u32,
 
     /// Issue a grant using public binding metadata from this file and secret bytes from stdin.
@@ -841,7 +903,9 @@ async fn main() -> Result<()> {
     let listener = TcpListener::bind(addr).await.context("bind TCP listener")?;
     info!("SPLAT eBPF daemon listening and ready for requests at {addr}");
 
-    let clients = Arc::new(tokio::sync::Semaphore::new(128));
+    // One session holds at most one lease, so the session limit is the lease capacity: the number
+    // of cgroups the kernel map holds and of private UIDs the pool reserved.
+    let clients = Arc::new(tokio::sync::Semaphore::new(identities::LEASE_CAPACITY as usize));
 
     loop {
         match listener.accept().await {
@@ -1317,6 +1381,7 @@ async fn handle_client(
                         continue;
                     }
                 };
+                let mut reservation = None;
                 if let Some(context) = execution_context {
                     let reserved = receipt_store.as_ref().context("receipt cache unavailable")
                         .and_then(|store| store.reserve(mission_id, context,
@@ -1326,6 +1391,9 @@ async fn handle_client(
                         out.send(&serde_json::json!({"type":"EXIT", "exitCode":-1})).await?;
                         continue;
                     }
+                    reservation = receipt_store.clone().map(|store| UnspawnedReservation {
+                        store, mission: mission_id.to_string(), context: context.to_string(), armed: true,
+                    });
                 }
                 // Arguments may contain caller data; the service journal is not a transcript.
                 info!("Executing tool for mission {mission_id}");
@@ -1449,12 +1517,28 @@ async fn handle_client(
                 // operator allows it on this host is a separate question, answered in the guest
                 // where a stolen token cannot reach around it.
                 let exec_list = string_list(&parsed, "allowedExecPaths").unwrap_or_default();
-                let egress_ip_list = string_list(&parsed, "allowedEgressIps").unwrap_or_default();
-                let egress_port_list: Vec<u32> = parsed
-                    .get("allowedEgressPorts")
-                    .and_then(|v| v.as_array())
-                    .map(|a| a.iter().filter_map(|p| p.as_u64().map(|n| n as u32)).collect())
-                    .unwrap_or_default();
+                // With the network off nothing below reaches the kernel, so nothing is parsed.
+                let (egress_ip_list, egress_port_list) = if allow_network {
+                    match egress_declaration(&parsed) {
+                        Ok(declared) => declared,
+                        Err(reason) => {
+                            error!("Refusing to execute for mission {mission_id}: malformed egress declaration");
+                            let err_chunk = serde_json::json!({
+                                "type": "STDERR",
+                                "data": format!(
+                                    "SPLAT refused the request: {reason}. An entry the kernel cannot \
+                                     enforce is refused, not dropped.\n"
+                                )
+                            });
+                            out.send(&err_chunk).await?;
+                            out.send(&serde_json::json!({ "type": "EXIT", "exitCode": -1 })).await?;
+                            line.clear();
+                            continue;
+                        }
+                    }
+                } else {
+                    (Vec::new(), Vec::new())
+                };
                 if let Some(c) = &lease_ceiling {
                     let ask = ceiling::Ask {
                         exec_paths: &exec_list,
@@ -1643,12 +1727,8 @@ async fn handle_client(
                     // hear about it - the 1:1:1 rule held on the Windows side and evaporated here.
                     // Empty only where the switch is off and the keys were therefore not required:
                     // an absent key with the network on was refused above.
-                    allowed_egress_ips: string_list(&parsed, "allowedEgressIps").unwrap_or_default(),
-                    allowed_egress_ports: parsed
-                        .get("allowedEgressPorts")
-                        .and_then(|v| v.as_array())
-                        .map(|a| a.iter().filter_map(|p| p.as_u64().map(|n| n as u32)).collect())
-                        .unwrap_or_default(),
+                    allowed_egress_ips: egress_ip_list.clone(),
+                    allowed_egress_ports: egress_port_list.clone(),
                     // Honoured by the jail: the working directory is bound read-only.
                     read_only_fs,
                     // Union, never replacement: a caller may add protected paths but must not be
@@ -1885,12 +1965,14 @@ async fn handle_client(
                                     jail::enter(plan)?;
                                 }
 
-                                if secret_step { execution::isolate_secret_ipc()?; }
+                                if secret_step { execution::isolate_secret_ipc()?; } else { execution::isolate_ipc()?; }
 
                                 // SIGCONT may cross UID boundaries within one session. A private
                                 // session closes that exception while descendants keep job control.
                                 if libc::setsid() < 0 { return Err(std::io::Error::last_os_error()); }
                                 drop_privileges(wl_uid, wl_gid)?;
+                                // Before the seccomp policy, which need not admit close_range.
+                                execution::stdio_only_across_exec()?;
                                 if let Some(policy) = &policy_for_child { policy.apply()?; }
                                 Ok(())
                             });
@@ -2025,7 +2107,11 @@ async fn handle_client(
                 let dropped_before = lease_mgr.dropped_events();
 
                 let mut child = match cmd.spawn() {
-                    Ok(c) => c,
+                    Ok(c) => {
+                        // From here the workload may have run, so its outcome is owed, not released.
+                        if let Some(held) = reservation.as_mut() { held.armed = false; }
+                        c
+                    }
                     Err(e) => {
                         if lease_mgr.is_enforcing() && e.raw_os_error() == Some(libc::EPERM) {
                             // Give the ringbuf a moment to deliver the matching violation rather
@@ -2430,6 +2516,42 @@ mod admission_flag_tests {
         let args = Args::try_parse_from(["splat-agent"]).expect("no flags");
         assert_eq!(args.admission_validator, AdmissionValidator::Off);
         assert!(check_research_fault(&args).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod egress_declaration_tests {
+    use super::egress_declaration;
+    use serde_json::json;
+
+    #[test]
+    fn a_well_formed_declaration_is_returned_as_declared() {
+        let (ips, ports) = egress_declaration(&json!({
+            "allowedEgressIps": ["93.184.216.34", "127.0.0.1"], "allowedEgressPorts": [443, 80]})).unwrap();
+        assert_eq!(ips, ["93.184.216.34", "127.0.0.1"]);
+        assert_eq!(ports, [443, 80]);
+    }
+
+    /// Each of these used to be dropped or rewritten in silence, leaving a lease that was not the one
+    /// the caller asked for. 4294967376 is 2^32 + 80: it used to arrive as port 80.
+    #[test]
+    fn every_entry_the_kernel_cannot_enforce_is_refused_by_name() {
+        for (ips, ports, named) in [
+            (json!(["example.com"]), json!([443]), "\"example.com\""),
+            (json!(["::1"]), json!([443]), "\"::1\""),
+            (json!(["10.0.0"]), json!([443]), "\"10.0.0\""),
+            (json!(["10.0.0.1"]), json!([4294967376u64]), "4294967376"),
+            (json!(["10.0.0.1"]), json!([70000]), "70000"),
+            (json!(["10.0.0.1"]), json!([0]), "entry 0"),
+            (json!(["10.0.0.1"]), json!(["80"]), "\"80\""),
+            (json!(["10.0.0.1"]), json!([-1]), "-1"),
+            (json!(["10.0.0.1"]), json!([1.5]), "1.5"),
+        ] {
+            let reason = egress_declaration(&json!({"allowedEgressIps": ips, "allowedEgressPorts": ports}))
+                .expect_err("must refuse");
+            assert!(reason.contains(named), "{reason}");
+        }
+        assert!(egress_declaration(&json!({"allowedEgressIps": [7], "allowedEgressPorts": [80]})).is_err());
     }
 }
 

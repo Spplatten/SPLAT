@@ -592,6 +592,42 @@ public class DocumentationDriftTests
                   + "daemon, or withdraw the claim.");
     }
 
+    /// <summary>
+    /// The daemon forwards the kernel's hook number untouched and KernelViolationHook names it, so the
+    /// two lists are one fact written in two languages. A hook the program gained without a name here
+    /// would reach the run record as an undefined enum value; one renumbered on either side would
+    /// name the wrong hook in the ledger. Read the kernel's list from the program that ships.
+    /// </summary>
+    [Fact]
+    public void KernelViolationHook_NamesEveryHookTheKernelProgramReports()
+    {
+        string source = File.ReadAllText(Path.Combine(RepositoryRoot(), "native", "splat-agent", "src", "bpf", "lease_lsm.bpf.c"));
+        string body = Regex.Match(source, @"enum splat_hook \{(?<body>[^}]*)\}").Groups["body"].Value;
+        var kernel = Regex.Matches(body, @"HOOK_(?<name>[A-Z_]+)\s*=\s*(?<value>\d+)")
+            .ToDictionary(m => m.Groups["name"].Value, m => int.Parse(m.Groups["value"].Value));
+        var named = new Dictionary<string, KernelViolationHook>
+        {
+            ["EXEC"] = KernelViolationHook.Exec,
+            ["OPEN"] = KernelViolationHook.Open,
+            ["CONNECT"] = KernelViolationHook.Connect,
+            ["SENDMSG"] = KernelViolationHook.SendDatagram,
+            ["PTRACE"] = KernelViolationHook.Ptrace,
+            ["SIGNAL"] = KernelViolationHook.Signal,
+            ["SETSCHED"] = KernelViolationHook.SetScheduler,
+            ["SETNICE"] = KernelViolationHook.SetNice,
+            ["SETIOPRIO"] = KernelViolationHook.SetIoPriority,
+            ["SETRLIMIT"] = KernelViolationHook.SetRlimit,
+        };
+
+        Assert.Equal(named.Keys.Order(), kernel.Keys.Order());
+        foreach (var (name, hook) in named)
+        {
+            Assert.True(kernel[name] == (int)hook, $"HOOK_{name} is {kernel[name]} in the kernel and {(int)hook} in C#.");
+        }
+        // Every member but Unspecified is a hook the kernel reports.
+        Assert.Equal(named.Count + 1, Enum.GetValues<KernelViolationHook>().Length);
+    }
+
     // ---------------------------------------------------------------- evidence helpers
 
     private sealed record KernelProof(string File, string Verdict, string KernelRelease);

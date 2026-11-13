@@ -271,7 +271,7 @@ and a UDP receive timeout, consistent with the earlier seven socket-test failure
 The 2026-11-05 follow-up supersedes the initial sidecar build blocker: the normal Release build
 passed with zero warnings/errors, followed by all 74 checks, including the Falcon parser and real
 HTTP handler with SQLite. These remain in-process tests, not live TLS or vendor delivery evidence.
-The shipping daemon and MCP last hop separately have committed PASS records against `d5bb4cad`;
+The shipping daemon and MCP last hop separately have committed PASS records against `5e218eb1`;
 those records do not prove the experimental hook or the sensor-to-cancellation chain. Current
 checks, provenance and remaining gates are in the
 [reconciliation follow-up](audits/2026-11-05-reconciliation-follow-up.md).

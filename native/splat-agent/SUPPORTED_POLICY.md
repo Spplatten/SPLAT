@@ -43,11 +43,12 @@ to its original binary after the proof; this is not evidence that the new packag
 | IPv4 egress | `socket_connect` | `(cgroup id, address, port)` — the destination must be an endpoint this lease approved. |
 | IPv4 datagrams | `socket_sendmsg` | The same allow-list, for a datagram that names its own destination — a `sendto` on an unconnected socket, which never reaches `socket_connect`. A message with no destination of its own is on a socket `connect` already judged. **Consequence: a leased tool's DNS query is a destination like any other.** A lease with the network on and no resolver on port 53 can reach its addresses by IP and cannot look a name up; `doctor` says so, and nothing adds a resolver on the caller's behalf. |
 | IPv6 egress | `socket_connect`, `socket_sendmsg` | **Denied outright** for a leased process. The lease vocabulary has no v6 allow-list, so there is nothing an address could be checked against. |
+| Reaching another task | `ptrace_access_check`, `task_kill`, `task_setscheduler`, `task_setnice`, `task_setioprio`, `task_setrlimit` | A leased process may inspect, signal or re-tune a task only inside its own cgroup. Another lease and an unleased host process are refused alike, whatever UID or capability the caller holds; an unleased caller is never policed. **Root probe PASS** against `5e218eb1` on 2026-11-09 (`xhook_*`, `xlease_*`). A root process placed in lease A's cgroup was refused all ten operations it tried against lease B: two signal calls, reads of `/proc/<pid>/cwd` and `environ`, `process_vm_readv`, `PTRACE_SEIZE`, `setpriority`, `sched_setaffinity`, `ioprio_set` and `prlimit`. The same process succeeded at all ten unleased and inside B's own cgroup, the refused signal never arrived, and lease A's own session carried a receipt for each refusal, naming B. From inside its jail, whose `/proc` is mounted `hidepid=ptraceable`, lease A could neither see lease B nor reach it. The root process held no `CAP_PERFMON` or `CAP_SYS_ADMIN`, and neither does a lease: the kernel hands a `CAP_PERFMON` caller another task's `environ` after this hook has refused. |
 
 Policy is keyed per lease. Two concurrent missions do not see each other's permissions, and
 revoking one does not remove an entry another still holds.
 
-Hook persistence recorded **PASS under root** against BPF source `d5bb4cad`: all eight maps and four links are pinned under
+Hook persistence recorded **PASS under root** against BPF source `5e218eb1` on 2026-11-09: all eight maps and ten links are pinned under
 `/sys/fs/bpf/splat/<SHA-256 of src/bpf/lease_lsm.bpf.c>`. Restart reuses only that complete set,
 checks map schemas and each hook's program tag, attachment and map IDs, then drains orphan
 workloads before clearing stale policy. A different hash, incomplete set or foreign map refuses
@@ -71,7 +72,8 @@ cgroup, which waits for a daemon to reap it.
 
 | Dimension | Where | What is checked |
 | --- | --- | --- |
-| The workload's root | mount namespace and `pivot_root`, in `pre_exec` | A root holding `/usr`, `/bin`, `/sbin`, `/lib*` and `/etc` read-only, the working directory, a fresh `/tmp`, `/proc` and six device nodes. `/home`, `/root`, `/mnt`, `/var`, `/opt` and `/sys` are absent, not hidden. **Built 2026-09-20. Root probe PASS** against `d5bb4cad` on the 2026-11-05 run, which built the shipping `jail.rs` (`4b3f41c`, 2026-10-15): `/home` and `/mnt` absent with the host holding both as the control (`jail_hides_home_and_mnt`), system directories read-only (`jail_system_dirs_read_only`), the working directory and `/tmp` writable with `/etc` visible (`jail_workdir_and_tmp_writable`), and `readOnlyFs` making the working directory read-only (`read_only_fs_makes_workdir_read_only`). |
+| The workload's root | mount namespace and `pivot_root`, in `pre_exec` | A root holding `/usr`, `/bin`, `/sbin`, `/lib*` and `/etc` read-only, the working directory, a fresh `/tmp`, `/proc` and six device nodes. `/home`, `/root`, `/mnt`, `/var`, `/opt` and `/sys` are absent, not hidden. **Built 2026-09-20. Root probe PASS** against `5e218eb1` on the 2026-11-09 run, which built the shipping `jail.rs` (`3d9b097`, 2026-11-08, which mounts `/proc` with `hidepid=ptraceable`): `/home` and `/mnt` absent with the host holding both as the control (`jail_hides_home_and_mnt`), system directories read-only (`jail_system_dirs_read_only`), the working directory and `/tmp` writable with `/etc` visible (`jail_workdir_and_tmp_writable`), and `readOnlyFs` making the working directory read-only (`read_only_fs_makes_workdir_read_only`). |
+| Inherited descriptors | `pre_exec`, after the privilege drop | Every descriptor above 2 is marked close-on-exec, so a workload starts with stdin, stdout and stderr and nothing else. **Root probe PASS** on the 2026-11-09 run (`fds_inherited_stdio_only`): a leased workload that tested every descriptor number held exactly 0, 1 and 2. What those three reach is the daemon's own pipes, and no hook judges it. |
 | `readOnlyFs` | the same | The working directory bound read-only as well. Refused only by a daemon that is not enforcing, which jails nothing. |
 | `overlayFs.enableCow` | child mount namespace, before the workdir bind | **Root probe PASS** against `d5bb4cad`. The parent prepares private `upper/` and `work/`; the child mounts an overlay on its working-directory target. Writes are discarded after the cgroup drains. `readOnlyFs` still makes the merged view read-only. A mock daemon, missing lowerdir, mount-option separators and inode policy paths overlapping the lowerdir are refused. Executing newly created scratch inodes is not authorized by this feature. |
 | Memory, CPU, PID ceilings | cgroup v2 | Written to `memory.max`, `cpu.max`, `pids.max`, then **read back**; a controller that did not take the clamp fails the request. |
@@ -114,8 +116,11 @@ No kernel hook sees those reads and writes: a defect in that check is caught by 
 | **Host sleep and the lease deadline** | The deadline counts the guest's running time, not wall time. Sleeping the host pauses the WSL VM, and `CLOCK_BOOTTIME` stops with it: across one 212 s Modern Standby on 2026-10-28, it advanced 5.1 s of 215.7 s. A lease grants no extra running time and nothing runs while paused, but its wall-clock end moves by the length of the sleep. The comment in `lease_lsm.bpf.c` was corrected in `d5bb4cad` to name guest `BOOTTIME`. |
 | **AF_UNIX / AF_NETLINK** | Local IPC is untouched. A per-socket allow-list keyed on the socket's inode is the real answer and does not exist. A leased tool can talk to any local daemon socket its uid can reach — including a resolver that answers over one, which is how a name lookup can still succeed on a host where `systemd-resolved` is reached that way rather than over UDP. |
 | **Raw and packet sockets** | Creating one needs `CAP_NET_RAW`, which a workload dropped to `nobody` does not have, so nothing policies it and nothing needs to. Not a claim about a workload that keeps capabilities: this daemon does not run one. |
-| **Inherited file descriptors** | The hooks fire on `open` and `connect`. A descriptor the tool inherits was opened by the daemon, before any of them ran. |
-| **Ordinary sibling leases sharing a UID** | The 2026-10-12 root run in `evidence/lease-isolation-before.json` confirmed a delivered `SIGUSR1` and reads of a synthetic sibling workspace through `/proc/<pid>/cwd`, `/proc/<pid>/root` and `/proc/<pid>/fd`. Separate BPF policy maps did not isolate those operations. A replacement identity boundary requires its own fresh probe. |
+| **Inherited file descriptors** | Closed on 2026-11-09 (**root probe PASS**, `fds_inherited_stdio_only`; see *Inherited descriptors* above): a workload now starts with stdin, stdout and stderr and no other descriptor. Before that, the hooks fired on `open` and `connect` while a descriptor the tool inherited had been opened by the daemon, before any of them ran. |
+| **Ordinary sibling leases sharing a UID** | Closed on 2026-11-09 (**root probe PASS** against `5e218eb1`, `xhook_*` and `xlease_*`; see *Reaching another task* above). The 2026-10-12 root run in `evidence/lease-isolation-before.json` had confirmed a delivered `SIGUSR1` and reads of a synthetic sibling workspace through `/proc/<pid>/cwd`, `/proc/<pid>/root` and `/proc/<pid>/fd`, between two leases at one UID. Each lease now runs at a UID of its own, and the kernel refuses the reach whatever the UID. The three rows below are what remains. |
+| **SIGIO and SIGURG through a shared file** | A process can direct a file's I/O signals at another task with `F_SETOWN`. The kernel sends them from whoever triggered the I/O, through `file_send_sigiotask` rather than `task_kill`, so the cross-lease signal rule does not see them. Policing it needs a program that records who set the owner. |
+| **What a pidfd tells its holder** | `pidfd_open` needs no permission, and `PIDFD_GET_INFO` returns a task's credentials and cgroup id with no LSM hook in its path. A lease that guesses a sibling's pid learns which UID it runs as and which cgroup holds it. |
+| **What a lease leaves for the next holder of its UID** | The pool hands out the lowest free UID, so the next lease usually runs as the last one's. A working directory of exactly `/tmp` is the host's own `/tmp`, not a fresh one, so files a lease leaves there survive it and are readable by that next holder. So are the UID's kernel keyrings. |
 | **Filesystem writes and reads outside the jail's contents** | Closed by the jail since 2026-09-20 (**root probe PASS** against `d5bb4cad` on the 2026-11-05 run — `jail_*` and `read_only_fs_makes_workdir_read_only`): the workload's root holds the system directories read-only, its working directory, a fresh `/tmp`, `/proc` and six device nodes, and nothing else. `/etc` travels whole and read-only; what `nobody` may not read there is still denied by mode, and the inode deny-list still applies inside the jail because bind mounts keep inode identity. Before that run the deny-list was the boundary: on 2026-09-18, `nobody` read a public key in the Windows user's `.ssh` folder through `/mnt/c`. Two things close that today: `/mnt` is absent from the jail, and `splat-mcp provision --apply` now writes the `[automount]` umask of 077 into the guest's `/etc/wsl.conf` when it is missing, which shuts `nobody` out of the Windows drives for anything not jailed once WSL restarts. |
 
 ## What has been proven, and where
@@ -146,12 +151,18 @@ refusal of a wrong hash, an incomplete set and a substituted map. It restores th
 stops its daemon on exit. Ordinary client runs leave persistence checks unproven; replay records
 always say REPLAY.
 
-> **Re-run under root on 2026-11-08 in Ubuntu 26.04.1, on the same kernel, against the daemon built
-> from `dfeed53`.** `probe-daemon.sh` records PASS over the same 90 checks against `d5bb4cad`, the BPF
-> source that ships, at `2026-11-08T07:02:35Z`, and `probe-last-hop.ps1` at `2026-11-08T07:03:02Z`;
-> the daemon and last-hop evidence below is from those runs. The same run's section 23, recorded
-> apart from its verdict, is the native admission validator's first root run
-> ([validation/README.md](validation/README.md)).
+> **Re-run under root on 2026-11-09 in Ubuntu 26.04.1, on kernel 6.18.33.2, against `5e218eb1`, the
+> BPF source that ships, with the daemon built from `3e044a8`.** `probe-daemon.sh` records PASS over
+> 100 checks at `2026-11-09T18:44:27Z`, and `probe-last-hop.ps1` at `2026-11-09T18:45:04Z`; the daemon
+> and last-hop evidence below is from those runs. Ninety of the checks are the ones the rows above
+> cite against `d5bb4cad`, the program before this one, and all of them held again. Ten are new:
+> cross-lease isolation and inherited descriptors. The program has not yet run inside the shipped
+> SPLAT Guest. The run's section 23, recorded apart from its verdict, is the native admission
+> validator's second root run ([validation/README.md](validation/README.md)).
+>
+> **Before that, under root on 2026-11-08 in Ubuntu 26.04.1, against `d5bb4cad` and the daemon built
+> from `dfeed53`:** PASS over 90 checks at `2026-11-08T07:02:35Z`, and the last hop at
+> `2026-11-08T07:03:02Z` ([those records](evidence/2026-11-08-ubuntu/)).
 >
 > **Before that, under root on 2026-11-05, inside the shipped SPLAT Guest (Debian 13, archive
 > `f238c13a`):** PASS over the same 90 checks at `2026-11-05T05:47:26Z`, and the last hop at
@@ -173,7 +184,10 @@ always say REPLAY.
 | Two concurrent leases do not lend each other permissions | same run — B is denied an executable A holds live |
 | An approved host is not approved on every port | same run — `:9999` refused on a lease naming `:80` |
 | IPv6 is denied rather than waved through | same run |
-| The workload runs as an unprivileged per-lease UID, not as the daemon's root | same run — `workload_not_root`, the tool reporting uid `200000` |
+| The workload runs as an unprivileged per-lease UID, not as the daemon's root | same run — `workload_not_root`, the tool reporting uid `2000000` |
+| A lease cannot inspect, signal or re-tune a task outside its own cgroup, even as root | same run — `xhook_root_in_another_lease_refused`, with `xhook_unleased_control_reaches_b` and `xhook_same_cgroup_allowed` as its controls, `xhook_refused_signal_never_arrived`, and `xhook_receipts_name_each_hook_and_b` |
+| From inside its jail a lease can neither see nor reach another | same run — `xlease_jail_peer_unreachable`, with `xlease_jail_control_ops_possible` as its control, and `xlease_distinct_private_uids` |
+| A workload inherits stdin, stdout and stderr and nothing else | same run — `fds_inherited_stdio_only` |
 | Expiry kills the workload rather than unpolicing it | same run — killed 5.5s into a 60s sleep (`expiry_killed_the_workload`) |
 | The kernel vetoes an out-of-lease exec, open and connect, standalone | `../splat-canary/evidence/canary-*.json` — one lease at a time |
 | The daemon refuses to run without live enforcement | `evidence/fail-closed-probe.json` |
