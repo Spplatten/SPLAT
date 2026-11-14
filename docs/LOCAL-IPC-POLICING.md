@@ -157,14 +157,17 @@ first run inside the SPLAT Guest.
 Each refusal is scored on EPERM alone. ENOENT or ECONNREFUSED would mean the peer was not
 there, not that it was refused.
 
-## Decisions for the operator
+## Decisions (operator, 2026-11-13)
 
-1. **Netlink: refuse all (recommended), or allow `NETLINK_ROUTE`?** Refusing all closes the most
-   kernel attack surface and matches what "network off" reads as. It costs `ip`, `hostname -I` and
-   interface enumeration. Allowing `NETLINK_ROUTE` keeps them, and leaks little that `/proc/net`
-   does not already show.
-2. **The symmetric half (recommended: yes).** Refusing host processes that connect into a lease
-   closes impersonation by an abstract name. It is the first rule in the program that judges an
-   unleased caller, though only when the other side is a lease.
-3. **No allow-list in v1 (recommended).** Add one, with the jail binding the socket path, only
-   when a template needs a host socket.
+The operator accepted all three recommendations: "go with your recommendations on #44, obviously
+sockets are not necessary for A.I. agents completing tasks."
+
+1. **Netlink: refuse every family.** A lease cannot create any `AF_NETLINK` socket. Refusing
+   everything closes the most kernel attack surface and matches what "network off" reads as. The
+   cost is `ip`, `hostname -I` and interface enumeration, and it is accepted. `NETLINK_ROUTE` is
+   not carved out.
+2. **The symmetric half: yes.** A host process that connects into a lease is refused, which closes
+   impersonation through an abstract name. This is the first rule in the program that judges an
+   unleased caller, and it does so only when the other side is a lease.
+3. **No allow-list in v1.** One is added, with the jail binding the socket path, only when a
+   template needs a host socket.
