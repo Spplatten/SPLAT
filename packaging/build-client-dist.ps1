@@ -81,6 +81,10 @@ if (-not $commit) { $commit = 'nogit' }
 $dirty = (& git -C $root status --porcelain -- src 2>$null | Out-String).Trim()
 
 Write-Host "[1/8] toolchain: dotnet SDK $sdkVersion, commit $commit$(if ($dirty) { ' (src has uncommitted changes)' })" -ForegroundColor Cyan
+. "$PSScriptRoot\code-signing.ps1"
+# Resolved before the test gate, so a broken identity fails in seconds rather than after the suite.
+$signing = Get-SplatSigningProfile
+$signature = 'UNSIGNED'
 
 # ------------------------------------------------------------------------------------------------
 # Clean stage. Published into a directory this run created, so "nothing unexpected is in App\" is a
@@ -148,6 +152,15 @@ if ($pdbs) {
     $pdbs | Remove-Item -Force
 }
 if (Get-ChildItem $appDir -Recurse -Filter '*.pdb') { Fail 'symbol files survived stripping' }
+
+# Signed before the self-test, so the binaries it opens are the ones that ship.
+if ($signing) {
+    $own = Get-SplatUnsignedOwnBinaries -Directory $appDir -Root $root
+    if (-not $own) { Fail "a signing identity is configured but $appDir holds none of this repository's binaries unsigned" }
+    $signer = Invoke-SplatCodeSigning -Signing $signing -Path $own
+    $signature = "$($signer.Files) binaries signed by $($signer.Subject) ($($signer.Thumbprint))"
+    Write-Host "      $signature" -ForegroundColor Cyan
+}
 
 # ------------------------------------------------------------------------------------------------
 # Self-test. A console that cannot open its pages is not a package, and neither "the process is
@@ -280,6 +293,7 @@ windows appsdk: $appSdk (bundled)
 app files     : $fileCount files, $sizeMb MB
 tests         : $(if ($SkipTests) { 'SKIPPED' } else { 'passed' })
 self-test     : $smoke
+signature     : $signature
 "@ + "`n", $utf8)
 
 $sums = Get-ChildItem $stage -Recurse -File |

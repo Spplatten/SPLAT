@@ -32,6 +32,9 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot\..").Path
 if (-not $OutputDir) { $OutputDir = Join-Path $root 'dist' }
 . "$PSScriptRoot\community-integrity.ps1"
+. "$PSScriptRoot\code-signing.ps1"
+# Resolved before the daemon build, so a broken identity fails in seconds rather than after cargo.
+$signing = Get-SplatSigningProfile
 $buildStartedUtc = [DateTimeOffset]::UtcNow.ToString('o')
 $sourceInputs = @(Get-SplatSourceInventory -Root $root -BuildInputsOnly)
 
@@ -137,6 +140,9 @@ if ($LASTEXITCODE -ne 0) { Write-Error "publish failed with exit code $LASTEXITC
 
 $published = Join-Path $publishDir 'splat-mcp.exe'
 if (-not (Test-Path $published)) { Write-Error "publish reported success but produced no $published"; exit 1 }
+# Signed before the checks below, so the executable they start and search is the one that ships, and
+# before the hash, which then covers the signature. Appending one leaves the single-file bundle intact.
+$signer = if ($signing) { Invoke-SplatCodeSigning -Signing $signing -Path $published } else { $null }
 
 Write-Host "[3/6] checking it is one file and nothing else is required beside it" -ForegroundColor Cyan
 $strays = Get-ChildItem (Split-Path $published) -File | Where-Object { $_.Name -ne 'splat-mcp.exe' }
@@ -175,6 +181,7 @@ $manifest = [ordered]@{
     license = 'AGPL-3.0-only'; publisher = 'Platten Industries LLC'
     commercialLicense = 'Separate agreement; see COMMERCIAL.md.'
     artifact = 'splat-mcp.exe'; sha256 = $hash.ToLowerInvariant()
+    signature = if ($signer) { "$($signer.Subject) ($($signer.Thumbprint))" } else { 'UNSIGNED' }
     daemonSha256 = (Get-FileHash -LiteralPath $daemonArtifact -Algorithm SHA256).Hash.ToLowerInvariant()
     daemonBuildId = $buildId; minimumGlibc = $floor; runtime = $Runtime
     managedBridge = if (Test-Path -LiteralPath (Join-Path $root 'packaging\managed-deployment.ps1')) { 'BUILT_UNPROVEN' } else { 'NOT_INCLUDED' }

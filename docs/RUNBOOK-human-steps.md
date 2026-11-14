@@ -131,7 +131,7 @@ Nothing here changes state. Run them in any order.
 & "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe" test C:\C_AGENT_BUILDER\tests\MissionController.Tests\MissionController.Tests.csproj
 ```
 
-**Completion target:** `Passed! - Failed: 0, Passed: 1196`, on a line ending `(net10.0)`. The live
+**Completion target:** `Passed! - Failed: 0, Passed: 1197`, on a line ending `(net10.0)`. The live
 packaged A2A proof is skipped by default; explicitly select its artifact as described in
 [the A2A guide](A2A-TEMPLATE-BRIDGE.md) before treating this as an all-cases target. All four
 Anthropic tests also skip by default, including when a funded key is stored. Separate explicit
@@ -529,6 +529,52 @@ distro and anything else using WSL, including Docker Desktop.
 > (`/proc/cmdline`), which is world-readable and is what the kernel initialised its LSMs from: a
 > `bpf` named there, with `CONFIG_BPF_LSM=y`, was initialised. When neither source settles it, it
 > prints a real `[FIX]` — how to mount securityfs and read the list yourself.
+
+---
+
+## Part 4 — Code signing (yours: the account and the identity check)
+
+Unsigned, every SPLAT download reads "Unknown publisher", SmartScreen warns on it, and Smart App
+Control can refuse to start it. The build already signs everything once an identity exists:
+`packaging/code-signing.ps1` is used by `build-client-dist.ps1` (the app's own binaries, before the
+self-test), `publish-splat-mcp.ps1` (`splat-mcp.exe`, before its hash), `build-community-installer.ps1`
+(Setup and its uninstaller, at compile, refusing unsigned binaries inside) and `build-msix.ps1` (the
+package, with its manifest Publisher taken from the signature). **No certificate exists yet, so
+nothing has been signed with one; the first signed build is the evidence.** On 2026-11-13 a throwaway
+certificate showed signtool and Inno Setup signing and timestamping through the helper, and a
+signature that does not chain to a trusted root being refused.
+
+**Recommended: Azure Artifact Signing, Public Trust, Basic tier**, with the certificate naming
+Platten Industries LLC. Microsoft holds the key in its HSM, so there is no token to lose. Its
+requirements, from Microsoft Learn as updated October 2026:
+
+1. **A domain the LLC owns.** Organization validation needs a website on it and two mailboxes on it,
+   a monitored primary and a different secondary. A gmail address does not qualify.
+2. **A paid Azure subscription**, pay-as-you-go; free, trial and sponsored ones are refused. Register
+   the `Microsoft.CodeSigning` resource provider, then create an Artifact Signing account on the Basic
+   tier. Billing starts when the account is created, is not prorated, and continues if validation fails.
+3. **Identity validation.** Give yourself the *Artifact Signing Identity Verifier* role, then create
+   an Organization, Public identity validation with the LLC's exact legal name, website, both
+   addresses, its business identifier and address, and your name exactly as on your government ID.
+   Click the emailed link within seven days. Then verify yourself through Microsoft Authenticator and
+   an ID check. Microsoft quotes 1 to 20 business days, and allows three document uploads.
+4. **A certificate profile** of type *Public Trust*, and the *Artifact Signing Certificate Profile
+   Signer* role for yourself.
+5. **This PC.** Install the client tools with `winget install -e --id Microsoft.Azure.ArtifactSigningClientTools`
+   and sign in with `az login`. Write a `metadata.json` outside the repository:
+
+   ```json
+   { "Endpoint": "https://eus.codesigning.azure.net", "CodeSigningAccountName": "<account>", "CertificateProfileName": "<profile>" }
+   ```
+
+   The endpoint must be your account's region. Set `SPLAT_SIGNING_METADATA` to the file's path and
+   run the packaging scripts as usual. Their records then name the signer instead of `UNSIGNED`.
+
+**If organization validation fails**, an individual validation is faster and needs no domain, but
+the certificate names you rather than the LLC. Moving to the LLC later changes the publisher Windows
+shows and the MSIX identity. **An OV certificate from a certificate authority** also works. Its key
+must live on a hardware token or in a cloud HSM. Set `SPLAT_SIGNING_THUMBPRINT` to its thumbprint, and
+`SPLAT_SIGNING_TIMESTAMP` to that authority's timestamp server.
 
 ---
 
