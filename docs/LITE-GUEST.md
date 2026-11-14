@@ -125,3 +125,33 @@ Exercise failed and interrupted imports, changed ownership markers, upgrades, re
 deliberate guest removal. Prove the exact installed daemon and guest archive used by that flow;
 the native records above do not substitute for this installation measurement.
 The source bundle, relinking materials, trusted signing and wider release gates remain open.
+
+`packaging/prove-lite-guest-release.ps1` is the single command for that run. It is unproven: as of
+2026-11-14 it has not run on a clean machine, and no evidence file exists. On the development host
+only its parse under Windows PowerShell 5.1 and PowerShell 7, its plan listing, its read-only
+preflight stage and its guest helpers against an existing Debian guest were exercised.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\prove-lite-guest-release.ps1 -Installer <Setup.exe>
+```
+
+Run it in the desktop session of the machine under test, with a copy of `native\splat-agent` beside
+it. It works through twelve stages in order: preflight, install, import, enforce, kernel-proof,
+restart, sleep, reboot, upgrade, unmount, uninstall and remove-guest. It measures and does not
+drive. The installer refuses a silent run and the import exists only on the Kernel Lease page, so
+the script names the buttons, waits, and then reads the result from WSL, the guest and the installed
+package. The kernel proof runs `probe-daemon.sh` as root against `/opt/splat/splat-agent`, the binary
+the package installed, after checking its hash against the package manifest. Re-running the command
+resumes after the last passed stage; the reboot stage exits 3 and continues after sign-in. The last
+stage unregisters the guest only after its marker matches the receipt and the operator types its name.
+
+Preflight refuses a machine that already has SPLAT installed, a Lite guest registered, or anything
+answering on the daemon port. WSL distributions share one network namespace, so another guest's
+`splat-agent` would answer for the Lite guest; disable that unit first.
+
+The evidence is `lite-guest-release.json` in the run directory, with the probe's own record beside
+it. Its verdict is PASS only when all twelve stages pass, and it always lists what the run does not
+measure: a managed service with a non-administrator operator, recovery from a failed or interrupted
+import, a changed marker refused through the console, a lease executed from the console or
+`splat-mcp`, publisher authentication, and source-bundle completeness. Without `-UpgradeInstaller`
+the upgrade stage re-runs the same installer and records itself as a reinstall.
