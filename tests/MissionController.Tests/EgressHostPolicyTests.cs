@@ -106,6 +106,31 @@ public sealed class EgressHostPolicyTests
         Assert.IsType<McpServerCommand.UsageError>(McpServerCommand.Parse(new[] { "--egress-host" }));
     }
 
+    /// <summary>
+    /// The shipped Claude Code profile denies the four built-in tools its page says it does. This
+    /// checks the file, not Claude Code: whether the app honours it is not something this suite sees.
+    /// </summary>
+    [Fact]
+    public void TheClaudeCodeProfileDeniesTheBuiltInShellAndWebTools()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "MissionController.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        string profiles = Path.Combine(root!.FullName, "packaging", "agent-app-profiles");
+
+        using var settings = JsonDocument.Parse(File.ReadAllText(Path.Combine(profiles, "claude-code", "managed-settings.json")));
+        var permissions = settings.RootElement.GetProperty("permissions");
+        string?[] denied = permissions.GetProperty("deny").EnumerateArray().Select(tool => tool.GetString()).ToArray();
+        string[] promised = ["Bash", "PowerShell", "WebFetch", "WebSearch"];
+        Assert.Equal(promised, denied);
+        Assert.Equal("disable", permissions.GetProperty("disableBypassPermissionsMode").GetString());
+        Assert.False(permissions.TryGetProperty("allow", out _), "a profile that also allows is a wider grant than its page describes");
+
+        string page = File.ReadAllText(Path.Combine(profiles, "README.md"));
+        Assert.All(promised, tool => Assert.Contains($"`{tool}`", page));
+        Assert.Contains("It is not enforcement.", page);
+    }
+
     [Fact]
     public void ALeaseWithoutHostsSerializesAsItDidBeforeTheFieldExisted()
     {

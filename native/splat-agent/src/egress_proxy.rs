@@ -28,6 +28,11 @@ pub const DEFAULT_PORT_START: u16 = 28000;
 /// it a new host is refused and counted, so the list is never silently cut short.
 pub const MAX_HOSTS_PER_LEASE: usize = 64;
 
+/// Connections one lease's proxy holds at once. Every one is a descriptor of the daemon's, which
+/// all leases share, so a lease that opens sockets in a loop must run out of its own allowance
+/// before it can run the daemon out of descriptors.
+const MAX_CONNECTIONS_PER_LEASE: usize = 128;
+
 /// Refusals listed by reason in the unsigned EXIT frame. The signed count has no such limit.
 const MAX_REFUSALS_LISTED: usize = 32;
 const MAX_REQUEST_BYTES: usize = 4096;
@@ -194,6 +199,10 @@ impl LeaseProxy {
                             tokio::time::sleep(Duration::from_millis(50)).await;
                             continue;
                         };
+                        if connections.len() >= MAX_CONNECTIONS_PER_LEASE {
+                            shared.refuse("", "this lease has too many connections open");
+                            continue; // Dropping the stream closes it.
+                        }
                         let shared = shared.clone();
                         connections.spawn(async move { shared.serve(stream).await });
                     }
@@ -679,9 +688,13 @@ mod tests {
         (String::from_utf8(head).unwrap().lines().next().unwrap().to_string(), stream)
     }
 
-    async fn closed(mut stream: TcpStream) -> bool {
+    async fn closed(stream: TcpStream) -> bool {
+        closed_within(stream, 5000).await
+    }
+
+    async fn closed_within(mut stream: TcpStream, millis: u64) -> bool {
         let mut buf = [0u8; 1];
-        matches!(tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buf)).await, Ok(Ok(0)) | Ok(Err(_)))
+        matches!(tokio::time::timeout(Duration::from_millis(millis), stream.read(&mut buf)).await, Ok(Ok(0)) | Ok(Err(_)))
     }
 
     #[tokio::test]
@@ -763,6 +776,40 @@ mod tests {
 
         let record = proxy.finish();
         assert_eq!((record.hosts.len(), record.refused), (MAX_HOSTS_PER_LEASE, 1));
+    }
+
+    #[tokio::test]
+    async fn a_lease_cannot_hold_more_connections_than_its_allowance() {
+        let proxy = proxy_for(&["pypi.org"], shouting_upstream().await).await;
+        // Idle connections: each sits in the handshake wait, holding a slot.
+        let mut held = Vec::new();
+        for _ in 0..MAX_CONNECTIONS_PER_LEASE {
+            held.push(TcpStream::connect((Ipv4Addr::LOCALHOST, proxy.port())).await.unwrap());
+        }
+        // Accepting is asynchronous; the one past the allowance is closed once the others are counted.
+        let mut refused = false;
+        for _ in 0..50 {
+            if closed_within(TcpStream::connect((Ipv4Addr::LOCALHOST, proxy.port())).await.unwrap(), 100).await {
+                refused = true;
+                break;
+            }
+        }
+        assert!(refused, "a connection past the allowance was held open");
+        // Giving slots back makes room again: the cap is on what is open, not on what was ever opened.
+        held.clear();
+        let mut carried = false;
+        for _ in 0..50 {
+            let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, proxy.port())).await.unwrap();
+            stream.write_all(b"CONNECT pypi.org:443 HTTP/1.1\r\n\r\n").await.unwrap();
+            let mut status = [0u8; 12];
+            if stream.read_exact(&mut status).await.is_ok() && &status == b"HTTP/1.1 200" {
+                carried = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(carried, "the proxy never accepted again after its connections closed");
+        assert!(proxy.finish().refused >= 1);
     }
 
     #[tokio::test]

@@ -1,8 +1,20 @@
-# Per-lease hostname egress proxy (design)
+# Per-lease hostname egress proxy
 
-**This page is a plan. Nothing in it is built.** No row of
+**Built, and not proven under root.** No row of
 [SUPPORTED_POLICY.md](../native/splat-agent/SUPPORTED_POLICY.md) changes until a root run proves
-what is built from this page. That run belongs to the v1 proof run, not to this work.
+it. That run belongs to the v1 proof run, not to this work.
+
+| Part | State | Evidence |
+| :--- | :--- | :--- |
+| Rule grammar, CONNECT and SNI parsing, address filter, the proxy end to end on loopback, the 64-host cap, port reuse | Tested without root | `native/splat-agent/src/egress_proxy.rs`, module `tests` |
+| Ceiling `allowedEgressHosts`, the request field, the signed fields | Tested without root | `ceiling.rs`, `outcome.rs` and `egress_declaration_tests` in `main.rs` |
+| `splat-mcp --egress-host`, `run_command`'s `allowedEgressHosts`, the receipt check | Tested without root | `EgressHostPolicyTests`, `McpServerTests` |
+| The daemon's request path: proxy started, map entry installed, environment set, record signed | **Not exercised.** It needs a root-owned ceiling to reach | none yet |
+| A leased tool reaching a real host; a direct connection refused; lease A refused lease B's port | **Not proven** | none yet |
+| The agent app profile | **Not measured** against Claude Code | none |
+
+The rest of this page is the design as built. Where the build differs from the first draft it
+says so under *Differences from the draft*.
 
 ## What is missing today
 
@@ -47,7 +59,8 @@ lease alone, and the proxy carries a connection only to a hostname the operator'
 
 ## The operator's policy
 
-- `splat-mcp --egress-host name[:port]`, repeated. The port defaults to 443.
+- `splat-mcp --egress-host name[:port],...`, one comma-separated list like `--egress`. The port
+  defaults to 443.
 - The ceiling file gains `allowedEgressHosts`, written by `splat-mcp provision --apply`. Absent
   means no lease may name a hostname. Hostname egress is off until the operator turns it on.
 - An entry is an exact name or `*.suffix`. A wildcard matches one or more whole labels below the
@@ -69,7 +82,7 @@ lease alone, and the proxy carries a connection only to a hostname the operator'
 
 ## The client profile
 
-`packaging/client-profiles/` ships one settings file per supported agent app, plus one page saying
+`packaging/agent-app-profiles/` ships one settings file per supported agent app, plus one page saying
 where each goes. The first is Claude Code: a managed-settings file that denies its built-in shell,
 web fetch and web search tools, leaving the SPLAT MCP tools as the only way to run or fetch.
 
@@ -86,8 +99,27 @@ cannot observe whether it is installed, and the receipt says nothing about it.
 - **Tools that ignore the proxy variables** get no network at all. That fails closed.
 - **Encrypted ClientHello** hides the true name. The proxy refuses a ClientHello that carries the
   ECH extension.
+- **Anything unleased in the guest can use a lease's proxy port.** The kernel keeps other leases
+  off it; a process outside every lease is not policed at all and already has the whole network.
+  Such a process could add a host to a lease's receipt. It is root's guest, as everywhere else.
 - **DNS is the daemon's resolver.** A poisoned answer still has to be a public address, and the
   server still has to pass the tool's own certificate check.
+
+## Differences from the draft
+
+- **Upstream is IPv4 only.** The proxy dials public IPv4 addresses and ignores AAAA answers. A
+  host with no IPv4 address is refused.
+- **One non-public answer refuses the name.** The proxy does not try the next address.
+- **Network with no list means hostnames**, when the operator wrote any. A `run_command` that
+  sets `allowNetwork` and names neither hosts nor addresses gets every operator hostname and no
+  pinned address. To get pinned addresses on such a host, name them.
+- **The managed Windows service refuses a lease that names hosts.** Its installer writes the
+  guest ceiling and has no hostname option yet.
+- **A lease can squat a proxy port.** Binding is not policed, so a lease may bind ports in the
+  proxy range. The daemon skips a taken port; 256 squatted ports would deny hostname egress to
+  other leases. Nothing is misrouted by it.
+- **The profile directory** is `packaging/agent-app-profiles/`, because "client" already names
+  the client package in this repository.
 
 ## Proving it
 
