@@ -119,6 +119,10 @@ public static class Program
         Console.Error.WriteLine(serve.Egress.IsEmpty
             ? "splat-mcp: no --egress given; run_command and run_code get no network"
             : $"splat-mcp: run_command and run_code may connect only to {serve.Egress}");
+        if (serve.Egress.HasHosts)
+        {
+            Console.Error.WriteLine($"splat-mcp: by hostname, through the lease's own proxy: {string.Join(", ", serve.Egress.HostRules)}");
+        }
 
         // 1. Data & Storage Layer
         //

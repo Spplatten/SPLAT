@@ -181,6 +181,12 @@ impl Drop for UnspawnedReservation {
 /// The writer skipped an address that did not parse and a port past 65535, and a port past u32::MAX
 /// wrapped into range on the way in (4294967376 became 80), so the lease in the kernel was not the
 /// one the caller read back as granted. An absent key is the undeclared check's to refuse.
+/// Whether the request states `key` at all. A JSON null is not a statement: the bridge serializes
+/// the egress vocabulary a lease does not use as null, and that must read as the key's absence.
+fn declared(parsed: &serde_json::Value, key: &str) -> bool {
+    parsed.get(key).is_some_and(|value| !value.is_null())
+}
+
 /// The lease's hostname rules, empty when it names none. Hostnames and pinned addresses are two
 /// ways onto the network and a lease takes one: with both, the proxy's record of where the lease
 /// went would be true and incomplete, which is the kind of receipt this path exists to prevent.
@@ -188,13 +194,13 @@ fn egress_host_declaration(
     parsed: &serde_json::Value,
     allow_network: bool,
 ) -> std::result::Result<Vec<egress_proxy::HostRule>, String> {
-    if parsed.get("allowedEgressHosts").is_none() {
+    if !declared(parsed, "allowedEgressHosts") {
         return Ok(Vec::new());
     }
     if !allow_network {
         return Err("allowedEgressHosts names hosts, but allowNetwork is false".into());
     }
-    if parsed.get("allowedEgressIps").is_some() || parsed.get("allowedEgressPorts").is_some() {
+    if declared(parsed, "allowedEgressIps") || declared(parsed, "allowedEgressPorts") {
         return Err("the lease names both allowedEgressHosts and pinned addresses; it may name one".into());
     }
     let entries = string_list(parsed, "allowedEgressHosts")
@@ -1520,7 +1526,7 @@ async fn handle_client(
                 }
                 // A lease that names hosts has declared its egress; the pinned lists are then
                 // refused below if present, not demanded here.
-                let names_hosts = parsed.get("allowedEgressHosts").is_some();
+                let names_hosts = declared(&parsed, "allowedEgressHosts");
                 if allow_network && !names_hosts {
                     if string_list(&parsed, "allowedEgressIps").is_none() {
                         undeclared.push("allowedEgressIps");
@@ -2668,6 +2674,9 @@ mod egress_declaration_tests {
     fn a_lease_names_hosts_or_pinned_addresses_and_never_both() {
         use super::egress_host_declaration as hosts;
         assert_eq!(hosts(&json!({}), true), Ok(vec![]), "an absent key names nothing");
+        assert_eq!(hosts(&json!({"allowedEgressHosts": null, "allowedEgressIps": ["1.1.1.1"]}), true), Ok(vec![]),
+            "null is absence: every pinned-address lease from the bridge carries it");
+        assert!(hosts(&json!({"allowedEgressHosts": ["pypi.org"], "allowedEgressIps": null, "allowedEgressPorts": null}), true).is_ok());
         assert_eq!(hosts(&json!({"allowedEgressHosts": []}), true), Ok(vec![]));
         let rules = hosts(&json!({"allowedEgressHosts": ["pypi.org", "*.pythonhosted.org:8443"]}), true).unwrap();
         assert_eq!(rules.iter().map(ToString::to_string).collect::<Vec<_>>(), ["pypi.org:443", "*.pythonhosted.org:8443"]);
