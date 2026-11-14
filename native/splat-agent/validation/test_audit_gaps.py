@@ -147,7 +147,9 @@ class ProgramIdentityTests(unittest.TestCase):
         # that source's hash: a changed BPF source fails here until it is reviewed again.
         source = Path(__file__).resolve().parents[1] / 'src' / 'bpf' / 'lease_lsm.bpf.c'
         self.assertEqual(SHIPPED_PROFILE['bpfSourceSha256'], hashlib.sha256(source.read_bytes()).hexdigest())
-        self.assertEqual(set(observe(gate, profile=SHIPPED_PROFILE)['programs']), {'exec', 'open'})
+        # A null or malformed tag makes the gate refuse every lease (see the missing-tag test below).
+        for role in ('exec', 'open'):
+            self.assertRegex(SHIPPED_PROFILE['programs'][role]['expectedTag'], r'^[0-9a-f]{16}$')
 
     def test_reviewed_programs_admitted(self):
         self.assertEqual(set(observe(gate)['programs']), {'exec', 'open'})
