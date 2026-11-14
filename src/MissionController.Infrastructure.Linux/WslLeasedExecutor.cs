@@ -33,6 +33,9 @@ public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
     /// <summary>What runs when a connection is refused; its exit code says whether the daemon started.</summary>
     private readonly Func<CancellationToken, Task<int>> _startDaemon;
 
+    /// <summary>Revalidates an explicitly selected guest before each connection, even with a cached token.</summary>
+    private readonly Func<CancellationToken, Task>? _validateGuest;
+
     /// <summary>
     /// Held for the whole of a lease, so WSL cannot stop the guest under it. WSL stops a distro about
     /// fifteen seconds after its last Windows-side session ends, and systemd stops the daemon with it:
@@ -87,12 +90,17 @@ public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
     /// What keeps the guest running for the length of a lease; by default an idle wsl.exe session.
     /// Replaceable so that a test against a stand-in daemon never boots the real guest.
     /// </param>
+    /// <param name="validateGuest">
+    /// An optional ownership check for a host bound to a particular guest. It runs before every
+    /// connection, including health and receipt recovery, independently of the cached secret.
+    /// </param>
     public WslLeasedExecutor(
         string host,
         int port,
         WslAgentToken token,
         Func<CancellationToken, Task<int>>? startDaemon = null,
-        Func<IDisposable>? holdGuestAwake = null)
+        Func<IDisposable>? holdGuestAwake = null,
+        Func<CancellationToken, Task>? validateGuest = null)
     {
         ArgumentNullException.ThrowIfNull(token);
         _host = host;
@@ -100,6 +108,7 @@ public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
         _token = token;
         _startDaemon = startDaemon ?? StartInstalledServiceAsync;
         _holdGuestAwake = holdGuestAwake ?? GuestHold.Acquire;
+        _validateGuest = validateGuest;
     }
 
     public Task<ProcessExecutionResult> ExecuteLeasedAsync(
@@ -613,6 +622,12 @@ public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
 
         try
         {
+            if (_validateGuest is not null)
+            {
+                waitingFor = "the selected WSL guest's ownership check";
+                await _validateGuest(budget.Token);
+                waitingFor = $"an answer from {_host}:{_port}";
+            }
             while (true)
             {
                 var client = new TcpClient();

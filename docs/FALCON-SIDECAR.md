@@ -8,6 +8,9 @@ Implementation: `src/splat-alert-sidecar/`. Evidence and limits:
 [reconciliation follow-up](audits/2026-11-05-reconciliation-follow-up.md).
 Architecture: [decoupled sensor enforcement](DECOUPLED-SENSOR-ENFORCEMENT.md).
 
+API-access scope and SPLAT-side licensing/data-handling questions:
+[2026-11-10 decision record](audits/2026-11-10-falcon-api-access-boundary.md).
+
 ## Prepare the admission boundary
 
 The admission owner must establish a relationship between the SPLAT task UUID, native process

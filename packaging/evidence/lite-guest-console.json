@@ -1,38 +1,166 @@
 {
-  "schema": 1,
-  "recordedUtc": "2026-10-22T15:10:33.4313075+00:00",
-  "verdict": "INCOMPLETE",
-  "scope": "Direct invocation of compiled BundledWslGuestTests with a recording WSL stand-in; not a VSTest suite run",
+  "schema": 2,
+  "recordedUtc": "2026-11-12T03:52:16.4962628+00:00",
+  "verdict": "PASS",
+  "scope": "Normal VSTest run of console ownership, managed health, and Windows PowerShell packaging tests; WSL and daemon stand-ins only",
   "sourceHashEncoding": "UTF-8 with LF line endings",
   "sourceSha256": {
-    "src/MissionController.Host/BundledWslGuest.cs": "4a72baa4483991d868b0c5d40f42943b9eb0f8f41f34b466a22af96b33fe54e9",
+    "src/MissionController.Host/BundledWslGuest.cs": "8b7a60a77313b10dbc4be75c0fc44e21344292fded86c82e043e2d7713ef4190",
     "src/MissionController.Host/SubstrateLifecycle.cs": "679439d729b86e2eaf696e0346cbe0077a1e20f12e42fa1e4c3873828b814c30",
+    "src/MissionController.Infrastructure.Linux/WslLeasedExecutor.cs": "0a9955fa2cad4ea2f78e9812c437dc9ec814a543551fc60aea7d03559f53958a",
+    "src/MissionController.Infrastructure.Linux/WslLeasedExecutor.Receipts.cs": "4caddc07543c56873b8ae8ae64c1b1002eac1bc04215e8d753063934b40d4a5e",
+    "src/MissionController.Infrastructure.Linux/WslSubstrateHealthChecker.cs": "bb4c2ec564adee88c6514b620ade1e94262e48a4b9c3f052c0232355bceaf707",
+    "src/MissionController.Infrastructure.Linux/WslAgentToken.cs": "cb04e82df9ab104135efc06e9a435fcce0a353833299404787186514e75a3243",
+    "src/splat-mcp/ManagedBridgeHost.cs": "38f0b736daaad95badb33d5f51475e7e0c2c977cdafdbdc969765044ff09c2c7",
     "src/MissionController.UI/App.xaml.cs": "ef3d1fd78729b753b792c2cc4d76b201dc1169dc16f5fe2fbe1e1b67e3724933",
     "src/MissionController.UI/KernelLeaseViewModel.cs": "3cd8a6741f5ac2ee206cc8e814543d8db22ae6ca046d6e212aa6fc9ce7bafaf5",
-    "tests/MissionController.Tests/BundledWslGuestTests.cs": "f9948f3d9d6962631388fa7311c4192323cded1cafe3bf19fdb859926a423a9a"
+    "tests/MissionController.Tests/BundledWslGuestTests.cs": "66df78aab48f6c7c8e05723c89f872fc4024235badbfa663d7905c3bccb47eef",
+    "tests/MissionController.Tests/ManagedSubstrateCheckTests.cs": "2588146c29d7a3d4614ab66ae5fdc41c3dfb84e3d98908e5a521f2623af59d8b",
+    "tests/MissionController.Tests/SplatGuestPackagingTests.cs": "8b393417c68738faeb07791115bc3ca2ecb27141fdfe300fe8be9cd0926e936a",
+    "packaging/splat-guest-package.ps1": "a7819a13d849906a64c7e6b78718dd8957ebe71dcbef569997bdff3e12d91628",
+    "packaging/test-splat-guest-package.ps1": "fdaa1060389b274fb666cb140ca14f27bc4e89a2195a2abce30d588ef9ac3bee",
+    "packaging/verify-community-package.ps1": "580d90a8d286c1f90d0cb7772dd954e874a112a64242f134c859c228c1570cf4",
+    "packaging/probe-splat-guest-console.ps1": "7f236fcbf9f9f4d6bf8ad4d486ac6fec8af3c531e40de392da0a91ccd20b99ec"
   },
-  "checksPassed": 9,
-  "checks": [
-    "ChangedArchiveAndMetadata_RequireANewPlan",
-    "CorruptArchive_AuthorizesNothing",
-    "ExistingUnownedName_IsNeverAdopted",
-    "ANameClaimedAfterPlanning_PreventsImport",
-    "PartialImport_IsRecorded_AndCannotBeRetriedOrRemovedAutomatically(False)",
-    "PartialImport_IsRecorded_AndCannotBeRetriedOrRemovedAutomatically(True)",
-    "CheckSpendsTheImportPlan_WithoutFallingBackToTheDefaultGuest",
-    "DataRoots_GetDistinctGuestNames_AndLegacyRawImagesDoNotSelectLite",
-    "ManagedAndBundledGuests_CannotBeSelectedTogether"
+  "testAssemblySha256": {
+    "MissionController.Tests.dll": "d5383a54fdf96bb5961a565ac1188e99719f2ebf11a7234d701d6584684ea4da",
+    "MissionController.Host.dll": "047d8fd407a668d27061bd2d7952fb1112819322ea2bbe5031e0d4f7423edcd2",
+    "MissionController.Infrastructure.Linux.dll": "9b9780e474e939fcb7adff0842f6489f98f44e500adcfd1e3e426a096e34fbff",
+    "splat-mcp.dll": "c74f4d0e685f35033bbb95a7b0e9450792f93d78d3b098fbaa7173d89ed188cf"
+  },
+  "buildExitCode": 0,
+  "testExitCode": 0,
+  "resultSha256": "6034a5b445da887b1b85586f90aca81db5c2a27692d3a31fbc88246b9249aaa3",
+  "checksPassed": 26,
+  "checksFailed": 0,
+  "checksNotExecuted": 0,
+  "groups": {
+    "BundledWslGuestTests": {
+      "passed": 14,
+      "failed": 0,
+      "notExecuted": 0
+    },
+    "ManagedSubstrateCheckTests": {
+      "passed": 4,
+      "failed": 0,
+      "notExecuted": 0
+    },
+    "SplatGuestPackagingTests": {
+      "passed": 8,
+      "failed": 0,
+      "notExecuted": 0
+    }
+  },
+  "results": [
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.AChangedOwnershipMarker_RefusesACachedTokenConnectionWhileTheDaemonStillListens",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.AHealthCheckWithWrongOwnership_NeverConnectsOrReadsTheDaemonSecret",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.ANameClaimedAfterPlanning_PreventsImport",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.ChangedArchiveAndMetadata_RequireANewPlan",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.CheckSpendsTheImportPlan_WithoutFallingBackToTheDefaultGuest",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.CorruptArchive_AuthorizesNothing",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.DataRoots_GetDistinctGuestNames_AndLegacyRawImagesDoNotSelectLite",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.ExistingUnownedName_IsNeverAdopted",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.ImportPlan_IsReadOnly_AndApplyImportsOnlyTheReviewedGuestOnce",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.ManagedAndBundledGuests_CannotBeSelectedTogether",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.MissingPackageRecords_DoNotRedirectAnOwnedGuestToTheDefaultDistro",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.OwnedCommands_AreBoundToTheImportedGuest_AndRejectAReplacedMarker",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.PartialImport_IsRecorded_AndCannotBeRetriedOrRemovedAutomatically(initialization: False)",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.BundledWslGuestTests.PartialImport_IsRecorded_AndCannotBeRetriedOrRemovedAutomatically(initialization: True)",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.ManagedSubstrateCheckTests.AColdManagedCheck_StartsTheGuestBeforeReadingItsToken_OutsideTheReplyBudget",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.ManagedSubstrateCheckTests.AFailedDaemonStart_RemainsUnreachable",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.ManagedSubstrateCheckTests.StartingTheGuest_DoesNotSubstituteForAuthenticatedEnforcement(enforcing: False, authentic: True)",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.ManagedSubstrateCheckTests.StartingTheGuest_DoesNotSubstituteForAuthenticatedEnforcement(enforcing: True, authentic: False)",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"ArchiveTamper\")",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"ChangedDuringCopy\")",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"FalseSourceClaim\")",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"MissingLicense\")",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"PackageCount\")",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"SourceFiles\")",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"SourceVersion\")",
+      "outcome": "Passed"
+    },
+    {
+      "test": "MissionController.Tests.SplatGuestPackagingTests.GuestBuildAndInstalledPackage_KeepTheirMeasuredRecords(testCase: \"Valid\")",
+      "outcome": "Passed"
+    }
   ],
-  "checksFailed": 3,
-  "incomplete": {
-    "ImportPlan_IsReadOnly_AndApplyImportsOnlyTheReviewedGuestOnce": "Assert.True() Failure\r\nExpected: True\r\nActual:   False",
-    "OwnedCommands_AreBoundToTheImportedGuest_AndRejectAReplacedMarker": "Importing SPLAT-Lite-f9fbc1d7a790. Recovery receipt: C:\\Users\\s_pla\\AppData\\Local\\Packages\\sandbox.{2159e1bb-393d-4d61-ad01-c254b22a9013}\\AC\\Temp\\splat-lite-test-1c33d9cc046b482cb72fbdee754f8ecc\\data\\lite-guest\\import.json\r\n\r\nStopped: Access to the path is denied.\r\n",
-    "MissingPackageRecords_DoNotRedirectAnOwnedGuestToTheDefaultDistro": "Importing SPLAT-Lite-81c3c8e5ee62. Recovery receipt: C:\\Users\\s_pla\\AppData\\Local\\Packages\\sandbox.{2159e1bb-393d-4d61-ad01-c254b22a9013}\\AC\\Temp\\splat-lite-test-1945e11ca9d04b84975cf7baefc410f3\\data\\lite-guest\\import.json\r\n\r\nStopped: Access to the path is denied.\r\n"
-  },
-  "environmentFinding": "File.Move(source, destination, overwrite: true) was independently reproduced as UnauthorizedAccessException in this sandbox\u0027s temporary directory. Atomic receipt replacement and the three dependent checks remain unproven here.",
   "realGuestImported": false,
   "kernelEnforcementProven": false,
   "cleanMachineTested": false,
+  "uiBuilt": false,
   "upgradeTested": false,
   "uninstallTested": false,
   "distributionReady": false

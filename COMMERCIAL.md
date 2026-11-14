@@ -1,7 +1,7 @@
 # Commercial licensing
 
 SPLAT is published under the **GNU Affero General Public License v3.0** ([LICENSE](LICENSE)).
-Copyright © 2026 Platten Industries LLC. All rights reserved where not granted by that license.
+Copyright © 2026 Platten Industries LLC, sole copyright holder. All rights reserved where not granted by that license.
 
 The AGPL is a deliberate choice rather than a default. Read it before you build on this.
 
@@ -30,7 +30,7 @@ The full license in `LICENSE` governs; this page is a summary.
 - **Ordinary execution:** receiving or running a copy does not require accepting an additional
   SPLAT EULA. Business use alone does not require buying a commercial license.
 
-The AGPL does not require you to submit changes to Platten Industries or automatically disclose
+The AGPL does not require you to submit changes to Platten Industries LLC or automatically disclose
 every independent application or workload that communicates with SPLAT. Whether components form a
 covered combined work depends on their relationship. Source must be offered to the recipients/users
 the license identifies; this is not a blanket obligation to publish all company source.

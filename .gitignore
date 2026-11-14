@@ -90,3 +90,10 @@ native/splat-agent/EXECUTION_POLICY.md
 
 # Local operator manuscripts at repo root
 *.docx
+
+# Upstream contribution checkouts, cloned here for convenience (2026-11-11). Each is its own git
+# repository with its own remotes - psfalcon and rusty-falcon are Spplatten forks of CrowdStrike's,
+# carrying the PSFalcon #539 and Rusty Falcon #215 work. Staging either one would embed a foreign
+# history in SPLAT's, so they are named here rather than left to `git add` to discover.
+psfalcon/
+rusty-falcon/
