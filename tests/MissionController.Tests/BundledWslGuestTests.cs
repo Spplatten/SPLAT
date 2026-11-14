@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using MissionController.Host;
@@ -10,6 +12,7 @@ public sealed class BundledWslGuestTests
 {
     private sealed class Fixture : IDisposable
     {
+        public const string Token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "splat-lite-test-" + Guid.NewGuid().ToString("N"));
         public string Linux => Path.Combine(Root, "Linux");
         public BundledWslGuest Guest { get; }
@@ -19,11 +22,12 @@ public sealed class BundledWslGuestTests
         public string Identity = "";
         public bool FailImport;
         public bool FailInitialize;
+        public int TokenReads;
 
-        public Fixture()
+        public Fixture(int port = 50051)
         {
             WriteArchive("synthetic test bytes, not a bootable image");
-            Guest = new BundledWslGuest(Linux, Path.Combine(Root, "data"), Run);
+            Guest = new BundledWslGuest(Linux, Path.Combine(Root, "data"), Run, port);
             Lifecycle = new SubstrateLifecycle(bundledGuest: Guest, ledgerPath: Path.Combine(Root, "ledger.db"));
         }
 
@@ -54,6 +58,11 @@ public sealed class BundledWslGuestTests
                 Identity = Regex.Match(args[^1], "'[0-9a-f]{32}'").Value.Trim('\'');
             }
             if (args[^1] == "/etc/splat/guest.id") return Task.FromResult((0, Identity));
+            if (args[^1] == "/etc/splat/agent.token")
+            {
+                TokenReads++;
+                return Task.FromResult((0, Token));
+            }
             return Task.FromResult((0, ""));
         }
 
@@ -63,6 +72,19 @@ public sealed class BundledWslGuestTests
             Assert.Equal(SubstrateChange.ImportGuest, Lifecycle.Planned);
             SubstrateReport result = await Lifecycle.ApplyAsync();
             Assert.True(result.Succeeded, result.Text);
+        }
+
+        public void SeedOwnedRegistration()
+        {
+            // This fixture tests connection ownership separately from import/atomic replacement.
+            // The real import path remains covered by the tests above and below.
+            Registered = Guest.Distribution;
+            Identity = Guid.NewGuid().ToString("N");
+            Directory.CreateDirectory(Guest.StateDirectory);
+            File.WriteAllText(Path.Combine(Guest.StateDirectory, "import.json"), JsonSerializer.Serialize(new
+            {
+                Distribution = Registered, Identity, Phase = "ready",
+            }));
         }
 
         public void Dispose() => Directory.Delete(Root, recursive: true);
@@ -217,5 +239,64 @@ public sealed class BundledWslGuestTests
         var selected = BundledWslGuest.BesideApp(Path.Combine(f.Root, "App"), Path.Combine(f.Root, "data"));
         Assert.NotNull(selected);
         Assert.Equal(f.Guest.Distribution, selected.Distribution);
+    }
+
+    [Fact]
+    public async Task AChangedOwnershipMarker_RefusesACachedTokenConnectionWhileTheDaemonStillListens()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var f = new Fixture(((IPEndPoint)listener.LocalEndpoint).Port);
+        f.SeedOwnedRegistration();
+
+        async Task<StandInAgent.Exchange> ServeHealth()
+        {
+            using var server = await listener.AcceptTcpClientAsync(deadline.Token);
+            using var stream = server.GetStream();
+            return await StandInAgent.ServeAsync(stream, Fixture.Token, new[]
+            {
+                "{\"type\":\"HEALTH_RESPONSE\",\"bpfLsmActive\":true,\"cgroupV2Active\":true," +
+                "\"overlayFsSupported\":true,\"kernelVersion\":\"test-kernel\",\"enforcing\":true,\"activeLeaseCount\":0}",
+            }, deadline.Token);
+        }
+        // Two proven exchanges with one token read establish that the second used the cache.
+        for (int i = 0; i < 2; i++)
+        {
+            var exchange = ServeHealth();
+            var health = await f.Guest.Health.CheckHealthAsync(deadline.Token);
+            Assert.True((await exchange).Proven);
+            Assert.True(health.Authenticated && health.Enforcing, health.Message);
+        }
+        Assert.Equal(1, f.TokenReads);
+        f.Commands.Clear();
+
+        f.Identity = new string('0', 32);
+        var refusal = await Assert.ThrowsAsync<IOException>(() => f.Guest.Executor.ConnectToDaemonAsync(deadline.Token));
+        Assert.Contains("ownership marker", refusal.Message);
+        Assert.Single(f.Commands);
+        Assert.Equal("/etc/splat/guest.id", f.Commands[0][^1]);
+        Assert.Equal(1, f.TokenReads);
+        Assert.False(listener.Pending());
+        Assert.DoesNotContain(f.Commands, c => c.Contains("/bin/systemctl"));
+    }
+
+    [Fact]
+    public async Task AHealthCheckWithWrongOwnership_NeverConnectsOrReadsTheDaemonSecret()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var f = new Fixture(((IPEndPoint)listener.LocalEndpoint).Port);
+        f.SeedOwnedRegistration();
+        f.Identity = new string('0', 32);
+
+        var health = await f.Guest.Health.CheckHealthAsync(deadline.Token);
+
+        Assert.False(health.DaemonReachable);
+        Assert.Contains("ownership marker", health.Message);
+        Assert.Single(f.Commands);
+        Assert.Equal("/etc/splat/guest.id", f.Commands[0][^1]);
+        Assert.False(listener.Pending());
     }
 }

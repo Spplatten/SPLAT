@@ -20,6 +20,10 @@ public sealed class SplatGuestPackagingTests
             UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
         };
+        // A pwsh 7 parent hands its module path down through dotnet and the test host. Windows
+        // PowerShell then resolves PS7's Utility module and loses Get-FileHash, failing all eight
+        // cases for a reason unrelated to packaging; without the variable it composes its own.
+        start.Environment.Remove("PSModulePath");
         foreach (string argument in new[] { "-NoProfile", "-NonInteractive", "-File",
             Path.Combine(MissionReplayHarness.RepositoryRoot(), "packaging", "test-splat-guest-package.ps1"), "-Case", testCase })
             start.ArgumentList.Add(argument);
