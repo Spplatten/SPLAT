@@ -142,9 +142,12 @@ class TraceEvidenceTests(unittest.TestCase):
 
 
 class ProgramIdentityTests(unittest.TestCase):
-    def test_unreviewed_shipped_profile_refuses_admission(self):
-        with self.assertRaisesRegex(gate.Indeterminate, 'no valid expected tag'):
-            observe(gate, profile=SHIPPED_PROFILE)
+    def test_shipped_profile_is_reviewed_for_the_source_in_this_tree(self):
+        # Reviewed tags certify only the program they were reviewed against, so the profile pins
+        # that source's hash: a changed BPF source fails here until it is reviewed again.
+        source = Path(__file__).resolve().parents[1] / 'src' / 'bpf' / 'lease_lsm.bpf.c'
+        self.assertEqual(SHIPPED_PROFILE['bpfSourceSha256'], hashlib.sha256(source.read_bytes()).hexdigest())
+        self.assertEqual(set(observe(gate, profile=SHIPPED_PROFILE)['programs']), {'exec', 'open'})
 
     def test_reviewed_programs_admitted(self):
         self.assertEqual(set(observe(gate)['programs']), {'exec', 'open'})

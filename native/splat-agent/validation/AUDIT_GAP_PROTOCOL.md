@@ -27,8 +27,8 @@ daemon's final expiry check; B3 additionally checks expiry when validation finis
 baseline retains duration-based leases. Report this difference when comparing baseline cost.
 
 The frozen 2026-10-27 apparatus had exec tag `debffec9428e2ccf` and open tag `1caf221233c125e0`.
-Those are historical evidence, not expected tags for this merged build. Both expected tags in the
-shipped profile are deliberately null pending native review, so the gate currently refuses admission.
+Those are historical evidence, not expected tags for this merged build. Step 2 below set the shipped
+profile's tags on 2026-11-13, for BPF `5e218eb1`; until then both were null and the gate refused.
 Names, hook attachment, daemon ownership and map layouts remain necessary. A missing, malformed or
 unequal tag refuses admission. Do not auto-update the
 profile from an unreviewed loaded program. BPF tags are limited program fingerprints, not signatures

@@ -2,9 +2,11 @@
 
 **Integration status, 2026-10-28:** the audit fixes and research apparatus are now integrated with
 the working tree's 16-byte `lease_state { deadline_ns, epoch }` ABI. Native verification is pending.
-`profile.json` deliberately leaves both expected program tags null: the historical 8-byte-build
-tags cannot certify this build. The gate refuses until tags for the reviewed merged build are
-recorded. The epoch is retained but not used by the current kernel as a generation guarantee.
+Since 2026-11-13 `profile.json` names reviewed tags for BPF `5e218eb1`: exec `c748f2896421d7e6` and
+open `deb61f797da89f40`, the programs the no-gate lifecycle probe loaded in the 2026-11-09 root run.
+Its `reviewStatus` says what was reviewed, by whom, and what was not. The historical 8-byte-build
+tags certify nothing here, and `test_audit_gaps.py` fails while the profile names a source other
+than the one in this tree, so a kernel change needs a new review before the gate admits. The epoch is retained but not used by the current kernel as a generation guarantee.
 See `AUDIT_GAP_PROTOCOL.md` for the authority contract and remaining validation.
 
 **Research harness, not a product feature.** It runs one experiment: does semantic validation of the
