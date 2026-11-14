@@ -24,6 +24,7 @@ mod auth;
 mod ceiling;
 mod cgroup;
 mod cow;
+mod egress_proxy;
 mod execution;
 mod execution_policy;
 mod identities;
@@ -180,6 +181,27 @@ impl Drop for UnspawnedReservation {
 /// The writer skipped an address that did not parse and a port past 65535, and a port past u32::MAX
 /// wrapped into range on the way in (4294967376 became 80), so the lease in the kernel was not the
 /// one the caller read back as granted. An absent key is the undeclared check's to refuse.
+/// The lease's hostname rules, empty when it names none. Hostnames and pinned addresses are two
+/// ways onto the network and a lease takes one: with both, the proxy's record of where the lease
+/// went would be true and incomplete, which is the kind of receipt this path exists to prevent.
+fn egress_host_declaration(
+    parsed: &serde_json::Value,
+    allow_network: bool,
+) -> std::result::Result<Vec<egress_proxy::HostRule>, String> {
+    if parsed.get("allowedEgressHosts").is_none() {
+        return Ok(Vec::new());
+    }
+    if !allow_network {
+        return Err("allowedEgressHosts names hosts, but allowNetwork is false".into());
+    }
+    if parsed.get("allowedEgressIps").is_some() || parsed.get("allowedEgressPorts").is_some() {
+        return Err("the lease names both allowedEgressHosts and pinned addresses; it may name one".into());
+    }
+    let entries = string_list(parsed, "allowedEgressHosts")
+        .ok_or("allowedEgressHosts must be a list of host rules as strings")?;
+    egress_proxy::parse_rules(&entries)
+}
+
 fn egress_declaration(parsed: &serde_json::Value) -> std::result::Result<(Vec<String>, Vec<u32>), String> {
     let ips = string_list(parsed, "allowedEgressIps")
         .ok_or("allowedEgressIps must be a list of IPv4 addresses as strings")?;
@@ -269,6 +291,11 @@ struct Args {
     #[arg(long = "lease-uid-count", visible_alias = "secret-uid-count", default_value_t = identities::LEASE_CAPACITY)]
     secret_uid_count: u32,
 
+    /// First of the 256 loopback ports the per-lease egress proxies listen on.
+    #[arg(long = "egress-proxy-port-start", default_value_t = egress_proxy::DEFAULT_PORT_START,
+        value_parser = clap::value_parser!(u16).range(1024..=65279))]
+    egress_proxy_port_start: u16,
+
     /// Issue a grant using public binding metadata from this file and secret bytes from stdin.
     #[arg(long, requires = "secret_socket")]
     issue_secret: Option<std::path::PathBuf>,
@@ -355,6 +382,7 @@ fn research_approved_deadline(mission: &str) -> Result<u64> {
     Ok(deadline)
 }
 
+static EGRESS_PROXY_PORT_START: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
 static ADMISSION_GATE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
 /// How long the gate may take. A gate that hangs holds MAP_WRITES, so it cannot be unbounded.
@@ -560,6 +588,7 @@ impl BpfMapSync for LiveBpfSync {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
+    let _ = EGRESS_PROXY_PORT_START.set(args.egress_proxy_port_start);
     check_research_fault(&args)?;
     if args.admission_validator != admission::AdmissionValidator::Off && args.mock_bpf {
         bail!("--admission-validator needs enforcing BPF; under --mock-bpf there is nothing to validate");
@@ -1288,6 +1317,8 @@ async fn handle_client(
                     // Whether a ceiling bounds every lease here; without one the token alone
                     // authorizes whatever a request names.
                     "ceiling": lease_ceiling.is_some(),
+                    // Whether a lease here can reach the network by hostname at all.
+                    "egressHosts": lease_ceiling.as_ref().is_some_and(|c| c.names_egress_hosts()),
                     "explicitEnvironment": true,
                     "secretStdinSupported": secret_broker.is_some() && lease_mgr.is_enforcing(),
                     "boundReceiptLookup": receipt_store.is_some() && outcome_signer.is_some() && lease_mgr.is_enforcing()
@@ -1487,7 +1518,10 @@ async fn handle_client(
                 if string_list(&parsed, "allowedExecPaths").is_none() {
                     undeclared.push("allowedExecPaths");
                 }
-                if allow_network {
+                // A lease that names hosts has declared its egress; the pinned lists are then
+                // refused below if present, not demanded here.
+                let names_hosts = parsed.get("allowedEgressHosts").is_some();
+                if allow_network && !names_hosts {
                     if string_list(&parsed, "allowedEgressIps").is_none() {
                         undeclared.push("allowedEgressIps");
                     }
@@ -1518,7 +1552,17 @@ async fn handle_client(
                 // where a stolen token cannot reach around it.
                 let exec_list = string_list(&parsed, "allowedExecPaths").unwrap_or_default();
                 // With the network off nothing below reaches the kernel, so nothing is parsed.
-                let (egress_ip_list, egress_port_list) = if allow_network {
+                let egress_host_rules = match egress_host_declaration(&parsed, allow_network) {
+                    Ok(rules) => rules,
+                    Err(reason) => {
+                        error!("Refusing to execute for mission {mission_id}: malformed egress host declaration");
+                        out.send(&serde_json::json!({ "type": "STDERR", "data": format!("SPLAT refused the request: {reason}.\n") })).await?;
+                        out.send(&serde_json::json!({ "type": "EXIT", "exitCode": -1 })).await?;
+                        line.clear();
+                        continue;
+                    }
+                };
+                let (egress_ip_list, egress_port_list) = if allow_network && !names_hosts {
                     match egress_declaration(&parsed) {
                         Ok(declared) => declared,
                         Err(reason) => {
@@ -1563,6 +1607,53 @@ async fn handle_client(
                     }
                 }
                 let duration_sec = lease_ceiling.as_ref().map_or(duration_sec, |c| c.clamp_duration(duration_sec));
+
+                // 0.47 Hostname egress. Only a ceiling can name hosts, so a host without one has
+                // none to offer: the token alone must not be able to open the network by name.
+                let lease_proxy = if egress_host_rules.is_empty() {
+                    None
+                } else {
+                    let within = match &lease_ceiling {
+                        Some(c) => c.check_hosts(&egress_host_rules),
+                        None => Err("this host has no lease ceiling, and only a ceiling names egress hosts".to_string()),
+                    };
+                    if let Err(reason) = within {
+                        error!("Refusing to execute for mission {mission_id}: outside the egress host ceiling: {reason}");
+                        let reason = format!("outside this host's lease ceiling: {reason}");
+                        out.send(&serde_json::json!({ "type": "STDERR", "data": format!("SPLAT refused the request: {reason}.\n") })).await?;
+                        out.send(&serde_json::json!({ "type": "EXIT", "exitCode": -1 })).await?;
+                        line.clear();
+                        continue;
+                    }
+                    // Listening before the cgroup exists, so the port the lease's map entry names
+                    // is one this daemon already holds. Dropped, and so closed, at every refusal
+                    // below and when the connection's handler returns.
+                    let start = EGRESS_PROXY_PORT_START.get().copied().unwrap_or(egress_proxy::DEFAULT_PORT_START);
+                    match egress_proxy::LeaseProxy::start(start, identities::LEASE_CAPACITY as u16, egress_host_rules.clone()).await {
+                        Ok(proxy) => Some(proxy),
+                        Err(e) => {
+                            error!("Refusing to execute for mission {mission_id}: {e:#}");
+                            let reason = format!("the lease's egress proxy could not start ({e})");
+                            out.send(&serde_json::json!({ "type": "STDERR", "data": format!("SPLAT refused the request: {reason}.\n") })).await?;
+                            out.send(&serde_json::json!({ "type": "EXIT", "exitCode": -1 })).await?;
+                            line.clear();
+                            continue;
+                        }
+                    }
+                };
+                // The kernel's whole view of this lease's network: one loopback port, its own.
+                let (egress_ip_list, egress_port_list) = match &lease_proxy {
+                    Some(proxy) => (vec!["127.0.0.1".to_string()], vec![u32::from(proxy.port())]),
+                    None => (egress_ip_list, egress_port_list),
+                };
+                // Set by the daemon, never taken from the request: execution::environment refuses
+                // a proxy variable a caller names, because that one could point anywhere.
+                let mut environment = environment;
+                if let Some(proxy) = &lease_proxy {
+                    for name in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
+                        environment.insert(name.to_string(), proxy.url());
+                    }
+                }
 
                 // Refuse invalid research authority before acquiring a secret, UID, workspace or cgroup.
                 let approved_deadline_boot_ns = if ADMISSION_GATE.get().is_some() {
@@ -1729,6 +1820,7 @@ async fn handle_client(
                     // an absent key with the network on was refused above.
                     allowed_egress_ips: egress_ip_list.clone(),
                     allowed_egress_ports: egress_port_list.clone(),
+                    allowed_egress_hosts: egress_host_rules.iter().map(ToString::to_string).collect(),
                     // Honoured by the jail: the working directory is bound read-only.
                     read_only_fs,
                     // Union, never replacement: a caller may add protected paths but must not be
@@ -1876,7 +1968,7 @@ async fn handle_client(
                 // the cgroup and the clamps its controllers took, whether the lease is policed at
                 // all, the jail, the workspace, and the uid the tool will run as. The bridge writes
                 // these into the mission's record as what the guest held, not what was asked.
-                let lease_frame = serde_json::json!({
+                let mut lease_frame = serde_json::json!({
                     "type": "LEASE",
                     "missionId": mission_id,
                     "cgroupId": cg.cgroup_id,
@@ -1900,6 +1992,11 @@ async fn handle_client(
                     "secretStdin": secret_step,
                     "processOutput": if secret_step { "discarded" } else { "streamed" },
                 });
+                // Present only for a lease with a proxy, so every other LEASE frame is unchanged.
+                if let Some(proxy) = &lease_proxy {
+                    lease_frame["egressHosts"] = serde_json::json!(lease_cfg.allowed_egress_hosts);
+                    lease_frame["egressProxyPort"] = serde_json::json!(proxy.port());
+                }
                 if let Some(secret) = &mut step_secret {
                     secret.arm_cleanup(&cg, lease_mgr.clone(), jail_plan.clone());
                 }
@@ -2362,6 +2459,9 @@ async fn handle_client(
                 if cgroup_is_real {
                     cg.kill_all().context("drain workload before removing overlay scratch")?;
                 }
+                // After the drain: nothing of the lease is left to open a connection the record
+                // would miss. This also closes the listener and whatever it still carried.
+                let egress_record = lease_proxy.map(egress_proxy::LeaseProxy::finish);
                 // Command retains the pre_exec closure's Arc after spawn. Release both owners
                 // only after draining descendants, before reporting EXIT and scratch teardown.
                 drop(cmd);
@@ -2427,6 +2527,13 @@ async fn handle_client(
                 // rebuilt from the fields above - three implementations have to agree on the exact
                 // bytes, and "rebuild the canonical form" is where that agreement goes wrong. The
                 // public key rides along so a bundle verifies without a second call to this host.
+                if let Some(record) = &egress_record {
+                    exit_chunk["egressHosts"] = serde_json::json!(record.hosts);
+                    exit_chunk["egressRefused"] = serde_json::json!(record.refused);
+                    // Unsigned: reasons are for the operator to read, the count above is the claim.
+                    exit_chunk["egressRefusals"] = serde_json::json!(record.refusals);
+                }
+
                 if let Some(signer) = outcome_signer.as_ref() {
                     let mut canonical = outcome::canonical_outcome(
                         &mission_id,
@@ -2449,6 +2556,9 @@ async fn handle_client(
                         exit_chunk["effectivePolicySha256"] = serde_json::json!(effective_policy_sha256);
                         exit_chunk["workloadDrained"] = serde_json::json!(cgroup_is_real);
                         exit_chunk["cancellationAccepted"] = serde_json::json!(cancellation_accepted);
+                    }
+                    if let Some(record) = &egress_record {
+                        outcome::egress_fields(&mut canonical, &record.hosts, record.refused);
                     }
                     exit_chunk["outcomeCanonical"] = serde_json::Value::from(canonical.clone());
                     exit_chunk["outcomeSignature"] = serde_json::Value::from(signer.sign(&canonical));
@@ -2552,6 +2662,29 @@ mod egress_declaration_tests {
             assert!(reason.contains(named), "{reason}");
         }
         assert!(egress_declaration(&json!({"allowedEgressIps": [7], "allowedEgressPorts": [80]})).is_err());
+    }
+
+    #[test]
+    fn a_lease_names_hosts_or_pinned_addresses_and_never_both() {
+        use super::egress_host_declaration as hosts;
+        assert_eq!(hosts(&json!({}), true), Ok(vec![]), "an absent key names nothing");
+        assert_eq!(hosts(&json!({"allowedEgressHosts": []}), true), Ok(vec![]));
+        let rules = hosts(&json!({"allowedEgressHosts": ["pypi.org", "*.pythonhosted.org:8443"]}), true).unwrap();
+        assert_eq!(rules.iter().map(ToString::to_string).collect::<Vec<_>>(), ["pypi.org:443", "*.pythonhosted.org:8443"]);
+
+        for (request, named) in [
+            (json!({"allowedEgressHosts": ["pypi.org"], "allowedEgressIps": []}), "may name one"),
+            (json!({"allowedEgressHosts": ["pypi.org"], "allowedEgressPorts": [443]}), "may name one"),
+            (json!({"allowedEgressHosts": "pypi.org"}), "must be a list"),
+            (json!({"allowedEgressHosts": ["pypi.org", 7]}), "must be a list"),
+            (json!({"allowedEgressHosts": ["1.2.3.4"]}), "\"1.2.3.4\""),
+            (json!({"allowedEgressHosts": ["PyPI.org"]}), "\"PyPI.org\""),
+        ] {
+            let reason = hosts(&request, true).expect_err("must refuse");
+            assert!(reason.contains(named), "{reason}");
+        }
+        let off = hosts(&json!({"allowedEgressHosts": ["pypi.org"]}), false).unwrap_err();
+        assert!(off.contains("allowNetwork is false"), "{off}");
     }
 }
 

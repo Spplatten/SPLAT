@@ -220,6 +220,16 @@ pub fn bound_outcome(legacy: &str, policy: &str, context: &str, effective: &str,
     text
 }
 
+/// What the lease's egress proxy carried, appended to whichever outcome version precedes it.
+///
+/// Only a lease that had a proxy gets these, so every other lease signs the bytes it always did.
+/// The list needs no escaping beyond `field`'s own: a host the proxy carried passed `is_hostname`,
+/// which admits neither a comma nor a separator.
+pub fn egress_fields(text: &mut String, hosts: &[String], refused: u64) {
+    field(text, "egressHosts", &hosts.join(","));
+    field(text, "egressRefused", &refused.to_string());
+}
+
 pub fn validate_context(request: &serde_json::Value, enforcing: bool, signing: bool) -> Result<Option<&str>> {
     if request["type"] != "EXECUTE_BOUND" {
         if !request["executionContext"].is_null() { bail!("bound context requires EXECUTE_BOUND"); }
@@ -322,6 +332,18 @@ mod tests {
         assert_eq!(base64(b"foob"), "Zm9vYg==");
         assert_eq!(base64(b"fooba"), "Zm9vYmE=");
         assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn egress_fields_follow_every_other_field_and_an_empty_list_is_still_stated() {
+        let base = canonical_outcome("m-1", 7, true, 65534, 0, Some(0), 0, 0, None, None);
+        let mut carried = base.clone();
+        egress_fields(&mut carried, &["files.pythonhosted.org:443".into(), "pypi.org:443".into()], 2);
+        assert_eq!(carried, format!("{base}|egressHosts=files.pythonhosted.org:443,pypi.org:443|egressRefused=2"));
+        // "reached nothing" is a claim too, and the signature has to cover it.
+        let mut idle = base.clone();
+        egress_fields(&mut idle, &[], 0);
+        assert_eq!(idle, format!("{base}|egressHosts=|egressRefused=0"));
     }
 
     #[test]
