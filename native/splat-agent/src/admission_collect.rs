@@ -62,6 +62,9 @@ impl Collector {
             (Hook::TaskSetnice, skel.links.splat_task_setnice.as_ref(), skel.progs.splat_task_setnice.as_fd()),
             (Hook::TaskSetioprio, skel.links.splat_task_setioprio.as_ref(), skel.progs.splat_task_setioprio.as_fd()),
             (Hook::TaskSetrlimit, skel.links.splat_task_setrlimit.as_ref(), skel.progs.splat_task_setrlimit.as_fd()),
+            (Hook::UnixConnect, skel.links.splat_unix_connect.as_ref(), skel.progs.splat_unix_connect.as_fd()),
+            (Hook::UnixSend, skel.links.splat_unix_send.as_ref(), skel.progs.splat_unix_send.as_fd()),
+            (Hook::SocketCreate, skel.links.splat_socket_create.as_ref(), skel.progs.splat_socket_create.as_fd()),
         ];
         // A program added to lease_lsm.bpf.c but not to this list would be attached and never
         // checked, so a foreign program on its hook would pass every admission unseen.

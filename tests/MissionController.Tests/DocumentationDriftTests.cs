@@ -617,6 +617,9 @@ public class DocumentationDriftTests
             ["SETNICE"] = KernelViolationHook.SetNice,
             ["SETIOPRIO"] = KernelViolationHook.SetIoPriority,
             ["SETRLIMIT"] = KernelViolationHook.SetRlimit,
+            ["UNIX_CONNECT"] = KernelViolationHook.UnixConnect,
+            ["UNIX_SEND"] = KernelViolationHook.UnixSend,
+            ["NETLINK"] = KernelViolationHook.Netlink,
         };
 
         Assert.Equal(named.Keys.Order(), kernel.Keys.Order());

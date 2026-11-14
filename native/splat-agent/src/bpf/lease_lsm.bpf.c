@@ -36,10 +36,14 @@
 //   task_setnice        - nor its nice value
 //   task_setioprio      - nor its I/O priority
 //   task_setrlimit      - nor its resource limits
+//   unix_stream_connect - no AF_UNIX stream between two cgroups, one leased
+//   unix_may_send       - nor an AF_UNIX datagram
+//   socket_create       - a lease cannot create an AF_NETLINK socket
 //
 // A process is "leased" iff its current cgroup id is present in leased_cgroups.
 // Anything outside the lease is untouched, so the host and every other workload
-// are unaffected.
+// are unaffected - with one exception, the two AF_UNIX hooks: they also refuse
+// an unleased process reaching INTO a lease, and judge nothing else it does.
 
 #include "vmlinux.h"
 #include <bpf/bpf_core_read.h>
@@ -51,6 +55,7 @@ char LICENSE[] SEC("license") =
 
 #define AF_INET 2
 #define AF_INET6 10
+#define AF_NETLINK 16
 #define EPERM 1
 
 struct lease_state {
@@ -100,6 +105,11 @@ enum splat_hook {
   HOOK_SETNICE = 8,
   HOOK_SETIOPRIO = 9,
   HOOK_SETRLIMIT = 10,
+  // Local IPC. For the two AF_UNIX hooks the record is filed under the LEASE
+  // involved, which is the peer's cgroup when the caller is unleased.
+  HOOK_UNIX_CONNECT = 11,
+  HOOK_UNIX_SEND = 12,
+  HOOK_NETLINK = 13,
 };
 
 // One denial, as the daemon reads it: 56 bytes, 8-byte alignment, mirrored by
@@ -116,7 +126,8 @@ struct violation_event {
   __u32 hook;   // enum splat_hook
   __u32 detail; // exec/open: inode number (low 32 bits); connect: destination
                 // IPv4 (network byte order); task hooks: the target process,
-                // numbered as `pid` is
+                // numbered as `pid` is; AF_UNIX hooks: the peer socket's inode
+                // number (low 32 bits); netlink: the protocol asked for
   char comm[16];
 };
 
@@ -431,10 +442,9 @@ int BPF_PROG(splat_socket_connect, struct socket *sock,
     return -EPERM;
   }
 
-  // Anything else - AF_UNIX, AF_NETLINK - is NOT policed by this hook and is
-  // documented as such in SUPPORTED_POLICY.md. Denying local IPC wholesale
-  // would break name resolution and logging for the shipped catalogue; claiming
-  // it is contained when it is not would be worse than both.
+  // AF_UNIX is not judged here. This hook sees the address, before the path
+  // lookup; unix_stream_connect and unix_may_send below see the peer the lookup
+  // resolved to, so a symlink cannot point a judged name somewhere else.
   if (family != AF_INET)
     return 0;
 
@@ -500,8 +510,8 @@ int BPF_PROG(splat_socket_sendmsg, struct socket *sock, struct msghdr *msg,
   struct sockaddr_in in = {};
   if (namelen < (int)sizeof(in)) {
     // Too short to hold an IPv4 destination. It may still be an AF_UNIX path,
-    // which this hook does not police, so read only the family and decide on
-    // that.
+    // which unix_may_send judges by its peer, so read only the family and
+    // decide on that.
     sa_family_t short_family = 0;
     if (bpf_probe_read_kernel(&short_family, sizeof(short_family), name) != 0)
       return 0;
@@ -521,7 +531,7 @@ int BPF_PROG(splat_socket_sendmsg, struct socket *sock, struct msghdr *msg,
     return -EPERM;
   }
   if (in.sin_family != AF_INET)
-    return 0; // AF_UNIX and the rest: documented as not policed.
+    return 0; // AF_UNIX: unix_may_send judges the resolved peer.
 
   struct lease_ipv4_key k = {};
   k.cgroup_id = cgid;
@@ -677,4 +687,103 @@ int BPF_PROG(splat_task_setrlimit, struct task_struct *p,
   if (ret != 0)
     return ret;
   return guard_cross_cgroup(p, HOOK_SETRLIMIT);
+}
+
+// Local IPC: an AF_UNIX connection or datagram between two DIFFERENT cgroups
+// is refused when either side is leased (docs/LOCAL-IPC-POLICING.md).
+//
+// It is the cross-cgroup rule above, applied to socket peers. Pathname sockets
+// were already mostly out of reach, because the jail exposes no directory a
+// host daemon listens in. Abstract names were not: they belong to the network
+// namespace, which every lease shares with the guest because egress policing
+// depends on it, so every abstract listener in the guest was one connect()
+// away, and two leases could open a channel the task hooks never saw.
+//
+// The rule is SYMMETRIC, and this is the one place the program judges an
+// unleased caller: nothing outside a lease may connect or send into it. Without
+// that half a lease could bind an abstract name a host tool expects and be
+// handed what the tool sends. Unleased-to-unleased traffic is never judged,
+// and both hooks fire system-wide - unix_may_send on every datagram, every
+// /dev/log line included - so the common path is one probe-read chain and at
+// most two hash lookups.
+//
+// Like the task hooks, the decision does not depend on the deadline, so these
+// denials never carry HOOK_EXPIRED_FLAG.
+//
+// Not covered (docs/LOCAL-IPC-POLICING.md, "What stays open"): a lease binding
+// an abstract name before the host daemon that wants it - it receives nothing,
+// but the daemon's bind fails - and /proc/net. A stream a lease inherited
+// already connected is not judged either, since no hook sees a stream send;
+// the daemon hands a workload stdin, stdout and stderr and nothing else.
+
+// The cgroup a socket was CREATED in: sk_cgrp_data is set once, by
+// cgroup_sk_alloc(), to its creator's default-hierarchy cgroup, and kn->id is
+// the id bpf_get_current_cgroup_id() returns. So the peer names its own lease
+// and the rule needs no map of its own. A read that faults yields 0, which is
+// no cgroup's id: a leased caller is then refused and an unleased one allowed.
+static __always_inline __u64 sock_cgroup_id(struct sock *sk) {
+  return BPF_CORE_READ(sk, sk_cgrp_data.cgroup, kn, id);
+}
+
+static __always_inline int guard_unix_peer(struct sock *peer, __u32 hook) {
+  __u64 actor = bpf_get_current_cgroup_id();
+  __u64 other = sock_cgroup_id(peer);
+  if (actor == other)
+    return 0; // One cgroup: a lease talking to itself, or two host processes.
+  // Presence, not the deadline, as guard_cross_cgroup reads it.
+  int actor_leased = bpf_map_lookup_elem(&leased_cgroups, &actor) != NULL;
+  if (!actor_leased && !bpf_map_lookup_elem(&leased_cgroups, &other))
+    return 0; // Neither side is a lease.
+  // Filed under the lease involved, so its session carries the receipt even
+  // when the refused caller was a host process; pid and comm name that caller.
+  report(actor_leased ? actor : other, hook,
+         (__u32)BPF_CORE_READ(peer, sk_socket, file, f_inode, i_ino));
+  return -EPERM;
+}
+
+// SOCK_STREAM and SOCK_SEQPACKET connect(), pathname and abstract, from a
+// syscall or io_uring. `other` is the listener the lookup resolved to, held
+// under its state lock; this program does not sleep. socketpair(2) never comes
+// here.
+SEC("lsm/unix_stream_connect")
+int BPF_PROG(splat_unix_connect, struct sock *sock, struct sock *other,
+             struct sock *newsk, int ret) {
+  if (ret != 0)
+    return ret;
+  return guard_unix_peer(other, HOOK_UNIX_CONNECT);
+}
+
+// SOCK_DGRAM: connect(), and every send, to a named peer or a connected one.
+// `other` is never tested for NULL - the verifier would delete the branch, as
+// it did in task_kill - and its sock is read with a probe read, not trusted.
+SEC("lsm/unix_may_send")
+int BPF_PROG(splat_unix_send, struct socket *sock, struct socket *other,
+             int ret) {
+  if (ret != 0)
+    return ret;
+  return guard_unix_peer(BPF_CORE_READ(other, sk), HOOK_UNIX_SEND);
+}
+
+// A lease cannot create an AF_NETLINK socket, whatever the protocol. It holds
+// no capability, so everything that changes kernel state was already refused;
+// what this closes is the read-only dumps (every interface, address and socket
+// in the guest) and the parser of every netlink family as attack surface. The
+// cost is `ip`, `hostname -I` and getifaddrs(), accepted by the operator on
+// 2026-11-13; getaddrinfo() falls back and still resolves.
+//
+// A socket the kernel opens for itself (kern != 0) is not a lease's request,
+// whatever task it happened to be created under.
+SEC("lsm/socket_create")
+int BPF_PROG(splat_socket_create, int family, int type, int protocol, int kern,
+             int ret) {
+  if (ret != 0)
+    return ret;
+  if (family != AF_NETLINK || kern)
+    return 0;
+  __u64 cgid = bpf_get_current_cgroup_id();
+  // Presence, not the deadline: an expired lease gets no netlink either.
+  if (!bpf_map_lookup_elem(&leased_cgroups, &cgid))
+    return 0;
+  report(cgid, HOOK_NETLINK, (__u32)protocol);
+  return -EPERM;
 }
