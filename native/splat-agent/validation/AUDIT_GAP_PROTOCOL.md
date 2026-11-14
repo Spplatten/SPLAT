@@ -1,6 +1,8 @@
 # Audit-gap candidate: contract and native acceptance
 
 Status: integrated into the shared working tree; offline checks do not establish native enforcement.
+Step 2 ran natively as milestone run 2 on 2026-11-14 and passed (`README.md`). Step 3's additional
+native cases have no driver yet, so the audit is not closed.
 Research commit `06d2665788f6de588439c4b5a53402fa0d431216` supplied the apparatus; the audit candidate
 supplied the fixes. The merge retains the working tree's 16-byte deadline/epoch map value. It also
 adds the research expiry-denial flag to the working BPF program so the lifecycle probe can distinguish
