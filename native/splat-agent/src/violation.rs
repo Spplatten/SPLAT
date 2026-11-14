@@ -75,6 +75,11 @@ impl ViolationEvent {
             8 => format!("task_setnice: denied renicing a task outside the lease (target pid {})", raw.detail),
             9 => format!("task_setioprio: denied changing the I/O priority of a task outside the lease (target pid {})", raw.detail),
             10 => format!("task_setrlimit: denied changing the limits of a task outside the lease (target pid {})", raw.detail),
+            // Filed under the lease involved. `pid` and `comm` are the refused caller, which is a host
+            // process when something outside reached in, so the text cannot say which side acted.
+            11 => format!("unix_stream_connect: denied an AF_UNIX connection across the lease boundary (peer socket inode {})", raw.detail),
+            12 => format!("unix_may_send: denied an AF_UNIX datagram across the lease boundary (peer socket inode {})", raw.detail),
+            13 => format!("socket_create: denied an AF_NETLINK socket inside the lease (protocol {})", raw.detail),
             _ => format!("unspecified kernel hook violation (hook {}, detail {})", raw.hook, raw.detail),
         };
 
@@ -235,6 +240,23 @@ mod tests {
         assert!(texts[0].starts_with("ptrace_access_check") && texts[1].starts_with("task_kill"), "{texts:?}");
         let distinct: std::collections::BTreeSet<_> = texts.iter().collect();
         assert_eq!(distinct.len(), 6, "{texts:?}");
+    }
+
+    /// The local-IPC hooks name themselves and their own detail word: a socket inode or a netlink
+    /// protocol, never a target pid, and never which side acted, which the record does not carry.
+    #[test]
+    fn a_local_ipc_denial_names_its_hook_and_its_own_detail() {
+        let text = |hook| ViolationEvent::from_raw(&RawViolationEvent {
+            cgroup_id: 7, ktime_ns: 1, seq: 2, pid: 3, hook, detail: 4242,
+            comm: *b"python3\0\0\0\0\0\0\0\0\0",
+        }).detail_text;
+        let (connect, send, netlink) = (text(11), text(12), text(13));
+        assert!(connect.starts_with("unix_stream_connect") && connect.contains("peer socket inode 4242"), "{connect}");
+        assert!(send.starts_with("unix_may_send") && send.contains("peer socket inode 4242"), "{send}");
+        assert!(netlink.starts_with("socket_create") && netlink.contains("protocol 4242"), "{netlink}");
+        for text in [&connect, &send, &netlink] {
+            assert!(!text.contains("unspecified") && !text.contains("target pid") && !text.contains("expired"), "{text}");
+        }
     }
 
     #[test]

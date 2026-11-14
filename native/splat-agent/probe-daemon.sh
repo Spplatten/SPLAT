@@ -901,6 +901,10 @@ feature_checks = dict.fromkeys([
     "xlease_jail_control_ops_possible", "xlease_jail_peer_unreachable", "xlease_distinct_private_uids",
     "xhook_unleased_control_reaches_b", "xhook_same_cgroup_allowed", "xhook_root_in_another_lease_refused",
     "xhook_refused_signal_never_arrived", "xhook_receipts_name_each_hook_and_b",
+    # Local IPC (19c): AF_UNIX across a lease boundary in both directions, and netlink in a lease.
+    "ipc_host_controls_work", "ipc_same_lease_allowed", "ipc_lease_to_host_refused",
+    "ipc_lease_to_lease_refused", "ipc_host_into_lease_refused", "ipc_netlink_refused_in_lease",
+    "ipc_getaddrinfo_survives_netlink_refusal", "ipc_receipts_in_each_lease_session",
 ], False)
 feature_observations = {"errors": [], "lifecycle_requested": bool(managed_binary)}
 
@@ -922,7 +926,7 @@ cross_lease_observations = {}
 # results sit under their own evidence key and never enter the verdict, so a defect in the validator
 # cannot withdraw the daemon's standing proof. True means the validator behaved as designed.
 admission_checks = dict.fromkeys([
-    "enforce_admits_a_correct_lease", "admitted_lease_ran", "frame_names_all_ten_programs",
+    "enforce_admits_a_correct_lease", "admitted_lease_ran", "frame_names_every_program",
     "scratch_exec_refused_as_indeterminate", "dev_encoding_refused", "decoy_exec_map_refused",
     "audit_admits_and_records", "daemon_restored",
 ], False)
@@ -1907,6 +1911,213 @@ while time.monotonic() < end:
             "Kernel -EPERM violation" in line and any(f"hook {h:#x}" in line for h in range(5, 11)))][-24:]
     feature_checks["xhook_receipts_name_each_hook_and_b"] = {5, 6, 7, 8, 9, 10} <= set(seen)
 
+# Runs inside an ordinary lease, in its jail. Role "a" binds an abstract stream listener and an
+# abstract datagram receiver, reaches both from a forked child (the same-lease control), then
+# tries the host's two names and two netlink protocols. Role "b" tries a's two names. Abstract
+# names are used throughout because they are what crosses the jail: they belong to the network
+# namespace, which a lease shares with the guest. chr(0), not an escape, so that no NUL byte
+# travels in the argv this script is passed in.
+IPC_WORKLOAD = """import errno, json, os, socket, sys, time
+from pathlib import Path
+PREFIX = chr(0) + 'splat-probe-' + sys.argv[2] + '-'
+def attempt(op):
+    try:
+        op()
+        return 'ok'
+    except OSError as e:
+        return errno.errorcode.get(e.errno, str(e.errno))
+def stream(name, payload):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(2)
+        s.connect(PREFIX + name)
+        s.sendall(payload)
+def dgram(name, payload):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
+        s.sendto(payload, PREFIX + name)
+def netlink(protocol):
+    socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, protocol).close()
+def publish(name, value):
+    Path(name + '.tmp').write_text(json.dumps(value))
+    os.replace(name + '.tmp', name)
+def until_bound(op):
+    # Not there yet reads as ECONNREFUSED; a refusal has to be told apart from that.
+    end = time.monotonic() + 10
+    while True:
+        result = attempt(op)
+        if result not in ('ECONNREFUSED', 'ENOENT') or time.monotonic() > end:
+            return result
+        time.sleep(0.1)
+if sys.argv[1] == 'b':
+    publish('attempts.json', {
+        'to_lease_a_stream': until_bound(lambda: stream('a', b'lease-b')),
+        'to_lease_a_dgram': until_bound(lambda: dgram('ad', b'lease-b')),
+    })
+    sys.exit(0)
+listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+listener.bind(PREFIX + 'a')
+listener.listen(8)
+listener.setblocking(False)
+receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+receiver.bind(PREFIX + 'ad')
+receiver.setblocking(False)
+child = os.fork()
+if child == 0:
+    publish('own.json', {'stream': attempt(lambda: stream('a', b'own')), 'dgram': attempt(lambda: dgram('ad', b'own'))})
+    os._exit(0)
+os.waitpid(child, 0)
+publish('attempts.json', {
+    'to_host_stream': attempt(lambda: stream('host', b'lease-a')),
+    'to_host_dgram': attempt(lambda: dgram('hostd', b'lease-a')),
+    'netlink_route': attempt(lambda: netlink(0)),
+    'netlink_sock_diag': attempt(lambda: netlink(4)),
+    'getaddrinfo_addrconfig': attempt(lambda: socket.getaddrinfo('localhost', 80, flags=socket.AI_ADDRCONFIG)),
+})
+got = {'stream': [], 'dgram': []}
+end = time.monotonic() + 16
+while time.monotonic() < end and not Path('done').exists():
+    try:
+        conn, _ = listener.accept()
+        conn.settimeout(1)
+        got['stream'].append(conn.recv(64).decode())
+        conn.close()
+    except OSError:
+        pass
+    try:
+        got['dgram'].append(receiver.recv(64).decode())
+    except OSError:
+        pass
+    publish('received.json', got)
+    time.sleep(0.05)
+"""
+
+def probe_local_ipc():
+    # Local IPC (docs/LOCAL-IPC-POLICING.md): no AF_UNIX connection or datagram between two cgroups
+    # when either is leased, in both directions, and no AF_NETLINK socket inside a lease. Two
+    # ordinary leases run the workload above; this process, unleased, is the host side.
+    #
+    # Every refusal is scored on EPERM alone, and on the receiver having received nothing.
+    # ECONNREFUSED would mean the peer was not there, not that it was refused, so each refused
+    # name is one a control reached in the same run: the host's by this process, lease A's by A's
+    # own child.
+    obs = feature_observations["local_ipc"] = {}
+    nonce = os.urandom(6).hex()
+    prefix = chr(0) + "splat-probe-" + nonce + "-"
+    a_ws, b_ws = Path(missions_root) / "probe-ipc-a", Path(missions_root) / "probe-ipc-b"
+    for ws in (a_ws, b_ws):
+        shutil.rmtree(ws, ignore_errors=True)
+
+    def attempt(op):
+        try:
+            op()
+            return "ok"
+        except OSError as e:
+            return errno.errorcode.get(e.errno, str(e.errno))
+    def stream(name, payload):
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(2)
+            s.connect(prefix + name)
+            s.sendall(payload)
+    def dgram(name, payload):
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
+            s.sendto(payload, prefix + name)
+    def read_json(path):
+        return json.loads(path.read_text()) if path.is_file() else {}
+
+    host_listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    host_receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    frames = {"a": [], "b": []}
+    def lease(tag, ws):
+        return threading.Thread(target=lambda: frames[tag].extend(call({
+            "type": "EXECUTE_TOOL", "missionId": "probe-ipc-" + tag,
+            "command": "/usr/bin/python3", "argv": ["-c", IPC_WORKLOAD, tag, nonce],
+            "allowedExecPaths": ["/usr/bin/python3"],
+            "workingDirectory": str(ws), "ephemeralWorkspace": True,
+            "leaseDurationSeconds": 24,
+        }, "ipc-" + tag, settle=20.0) or []))
+    workers = [lease("a", a_ws), lease("b", b_ws)]
+    try:
+        # Bound before either lease starts, so a name the lease is refused is never a name absent.
+        host_listener.bind(prefix + "host")
+        host_listener.listen(8)
+        host_listener.setblocking(False)
+        host_receiver.bind(prefix + "hostd")
+        host_receiver.setblocking(False)
+        for w in workers:
+            w.start()
+        if not wait_for(lambda: (a_ws / "attempts.json").is_file() and (b_ws / "attempts.json").is_file(), seconds=20):
+            raise RuntimeError("the two leases never published what they attempted")
+        obs["lease_a"] = a = read_json(a_ws / "attempts.json")
+        obs["lease_a_own_child"] = own = read_json(a_ws / "own.json")
+        obs["lease_b"] = b = read_json(b_ws / "attempts.json")
+
+        # The symmetric half: this process is unleased, and lease A is listening on both names.
+        obs["host_into_lease_a"] = into = {
+            "stream": attempt(lambda: stream("a", b"host")), "dgram": attempt(lambda: dgram("ad", b"host"))}
+        obs["host_controls"] = controls = {
+            "stream": attempt(lambda: stream("host", b"control")), "dgram": attempt(lambda: dgram("hostd", b"control")),
+            "netlink_route": attempt(lambda: socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, 0).close())}
+
+        # Read while A is alive: its workspace goes with its lease. Half a second covers anything
+        # the kernel let through to A's queues that A has not drained yet.
+        time.sleep(0.5)
+        obs["lease_a_received"] = a_got = read_json(a_ws / "received.json")
+        (a_ws / "done").write_text("")
+        host_got = {"stream": [], "dgram": []}
+        while True:
+            try:
+                conn, _ = host_listener.accept()
+            except OSError:
+                break
+            conn.settimeout(1)
+            host_got["stream"].append(conn.recv(64).decode())
+            conn.close()
+        while True:
+            try:
+                host_got["dgram"].append(host_receiver.recv(64).decode())
+            except OSError:
+                break
+        obs["host_received"] = host_got
+
+        # A received its own child and nothing else: not lease B, and not this process.
+        a_clean = a_got == {"stream": ["own"], "dgram": ["own"]}
+        host_clean = host_got == {"stream": ["control"], "dgram": ["control"]}
+        feature_checks["ipc_host_controls_work"] = all(v == "ok" for v in controls.values()) and len(controls) == 3
+        feature_checks["ipc_same_lease_allowed"] = own == {"stream": "ok", "dgram": "ok"} and a_clean
+        feature_checks["ipc_lease_to_host_refused"] = (
+            a.get("to_host_stream") == "EPERM" and a.get("to_host_dgram") == "EPERM" and host_clean)
+        feature_checks["ipc_lease_to_lease_refused"] = (
+            b == {"to_lease_a_stream": "EPERM", "to_lease_a_dgram": "EPERM"} and a_clean)
+        feature_checks["ipc_host_into_lease_refused"] = into == {"stream": "EPERM", "dgram": "EPERM"} and a_clean
+        feature_checks["ipc_netlink_refused_in_lease"] = (
+            a.get("netlink_route") == "EPERM" and a.get("netlink_sock_diag") == "EPERM")
+        feature_checks["ipc_getaddrinfo_survives_netlink_refusal"] = a.get("getaddrinfo_addrconfig") == "ok"
+    finally:
+        for w in workers:
+            if w.is_alive():
+                w.join(timeout=30)
+        host_listener.close()
+        host_receiver.close()
+        for ws in (a_ws, b_ws):
+            shutil.rmtree(ws, ignore_errors=True)
+    # The receipt half. A refusal is filed under the lease involved, so lease A's session carries
+    # its own four (stream, datagram, two netlink protocols) AND the two this process was refused
+    # reaching in, which name this process as the caller; lease B's carries its two.
+    me = os.getpid()
+    def violations(tag):
+        return [m for m in frames[tag] if m.get("type") == "VIOLATION"]
+    for tag in ("a", "b"):
+        obs["lease_%s_frames" % tag] = [
+            {k: m.get(k) for k in ("type", "hook", "pid", "detail", "comm", "exitCode", "violationsReported",
+                                   "violationsCounted", "violationsComplete") if k in m}
+            for m in frames[tag] if m.get("type") in ("VIOLATION", "EXIT")]
+    a_own = {m.get("hook") for m in violations("a") if m.get("pid") != me}
+    a_netlink = {m.get("detail") for m in violations("a") if m.get("hook") == 13}
+    a_from_host = {m.get("hook") for m in violations("a") if m.get("pid") == me}
+    b_own = {m.get("hook") for m in violations("b")}
+    obs["probe_pid"] = me
+    feature_checks["ipc_receipts_in_each_lease_session"] = (
+        {11, 12, 13} <= a_own and {0, 4} <= a_netlink and {11, 12} <= a_from_host and {11, 12} <= b_own)
+
 def probe_admission_validator():
     """Restart the owned daemon under each validator mode, then put it back as it was.
 
@@ -1945,7 +2156,8 @@ def probe_admission_validator():
         admission_checks["enforce_admits_a_correct_lease"] = frame.get("verdict") == "admitted" and frame.get("enforced") is True
         admission_checks["admitted_lease_ran"] = completed(msgs)
         programs = frame.get("programs", [])
-        admission_checks["frame_names_all_ten_programs"] = len(programs) == 10 and all(p.get("tag") for p in programs)
+        # Ten until the local-IPC hooks; the key no longer carries the number, so it cannot go stale.
+        admission_checks["frame_names_every_program"] = len(programs) == 13 and all(p.get("tag") for p in programs)
 
         # v1 cannot see a scratch grant before spawn, so enforce must refuse it as unconfirmed. The
         # protected file stays out: a policy path under a copy-on-write workdir is refused earlier.
@@ -2005,6 +2217,11 @@ if replay is None and hasattr(os, "geteuid") and os.geteuid() == 0:
         probe_cross_lease_hooks()
     except Exception as e:
         feature_observations["errors"].append("cross-lease hooks: " + str(e))
+    print("\n== 19c. Local IPC: AF_UNIX across a lease boundary, both directions, and netlink in a lease ==")
+    try:
+        probe_local_ipc()
+    except Exception as e:
+        feature_observations["errors"].append("local IPC: " + str(e))
     if managed_binary:
         print("\n== 20. Pins: SIGKILL, surviving denials, restart identity, rejected foreign state ==")
         try:
