@@ -50,6 +50,12 @@ DisableWelcomePage=no
 UninstallDisplayIcon={app}\App\MissionController.UI.exe
 CloseApplications=no
 RestartApplications=no
+#ifdef SignToolName
+; Defined by build-community-installer.ps1 (with /S) only when a signing identity is configured.
+; Inno signs Setup and the uninstaller inside it, and a failed signature fails the compile.
+SignTool={#SignToolName}
+SignedUninstaller=yes
+#endif
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Excludes: "Linux\rootfs.tar.xz"; Flags: ignoreversion recursesubdirs createallsubdirs

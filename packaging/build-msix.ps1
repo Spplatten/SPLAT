@@ -57,9 +57,13 @@ if ($LASTEXITCODE -ne 0) {
 
 # 3. Verify / Generate Enterprise Code-Signing Certificate
 Write-Host "`n[2/4] Verifying Enterprise Code-Signing Certificate..." -ForegroundColor Yellow
-$Cert = Get-ChildItem "Cert:\CurrentUser\My" | Where-Object { $_.Subject -eq $CertSubject } | Select-Object -First 1
+# A configured identity (code-signing.ps1) replaces the self-signed certificate outright: a publicly
+# trusted package needs no .cer pushed into TrustedPeople, and install-enterprise.ps1 runs without one.
+. "$ScriptRoot\code-signing.ps1"
+$Signing = Get-SplatSigningProfile
+$Cert = if (-not $Signing) { Get-ChildItem "Cert:\CurrentUser\My" | Where-Object { $_.Subject -eq $CertSubject } | Select-Object -First 1 }
 
-if (-not $Cert) {
+if (-not $Signing -and -not $Cert) {
     Write-Host "Generating self-signed Enterprise Code-Signing Certificate..." -ForegroundColor Gray
     $Cert = New-SelfSignedCertificate `
         -Type Custom `
@@ -72,8 +76,14 @@ if (-not $Cert) {
 
 # Export public CER for silent Intune/SCCM trust
 $CerPath = "$OutputDir\Enterprise.MissionController.cer"
-Export-Certificate -Cert $Cert -FilePath $CerPath -Force | Out-Null
-Write-Host "Exported Enterprise Certificate to $CerPath" -ForegroundColor Green
+if ($Cert) {
+    Export-Certificate -Cert $Cert -FilePath $CerPath -Force | Out-Null
+    Write-Host "Exported Enterprise Certificate to $CerPath" -ForegroundColor Green
+} elseif (Test-Path $CerPath) {
+    # install-enterprise.ps1 trusts whatever .cer sits beside it, and an earlier self-signed build's
+    # key is not the one this package is signed with.
+    Remove-Item $CerPath -Force
+}
 
 # 4. Create AppX / MSIX Package Layout
 Write-Host "`n[3/4] Structuring MSIX Package Layout..." -ForegroundColor Yellow
@@ -86,6 +96,17 @@ New-Item -ItemType Directory -Path $PackageLayout -Force | Out-Null
 Copy-Item -Path "$PublishDir\*" -Destination $PackageLayout -Recurse -Force
 Copy-Item -Path "$ProjectRoot\src\MissionController.UI\Package.appxmanifest" -Destination "$PackageLayout\AppxManifest.xml" -Force
 & "$ScriptRoot\write-distribution-license.ps1" -Destination $PackageLayout
+if ($Signing) {
+    # MSIX refuses a package whose manifest Publisher is not its signer's subject (0x8007000B), and that
+    # subject is whatever the validated identity reads as. It is taken from a signature rather than
+    # typed: the application's own binaries are signed first and the manifest follows them.
+    $Own = Get-SplatUnsignedOwnBinaries -Directory $PackageLayout -Root $ProjectRoot
+    if (-not $Own) { Write-Error "No unsigned binary of this repository is in $PackageLayout to sign."; exit 1 }
+    $Inner = Invoke-SplatCodeSigning -Signing $Signing -Path $Own
+    [xml]$Manifest = Get-Content -LiteralPath "$PackageLayout\AppxManifest.xml" -Raw
+    $Manifest.Package.Identity.Publisher = $Inner.Subject
+    $Manifest.Save("$PackageLayout\AppxManifest.xml")
+}
 
 # Create Assets directory with placeholder logos if not present
 $AssetsDir = "$PackageLayout\Assets"
@@ -98,7 +119,7 @@ Write-Host "`n[4/4] Generating Signed Enterprise Package Bundle..." -ForegroundC
 $MsixPath = "$OutputDir\Enterprise.MissionController.msix"
 
 $MakeAppx = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter "makeappx.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-$SignTool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+$SignTool = if ($Signing) { $Signing.SignTool } else { (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter "signtool.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
 
 # What this run actually produced, decided by what actually happened rather than by which branch was
 # entered. The banner at the bottom reads these, because a pipeline whose last line is an
@@ -134,7 +155,8 @@ if ($MakeAppx -and (Test-Path $MakeAppx)) {
         exit 1
     }
 
-    & $SignTool sign /fd SHA256 /a /sha1 $Cert.Thumbprint $MsixPath
+    $SignArgs = if ($Signing) { @('/tr', $Signing.Timestamp, '/td', 'SHA256') + $Signing.Arguments } else { @('/a', '/sha1', $Cert.Thumbprint) }
+    & $SignTool sign /fd SHA256 @SignArgs $MsixPath
     if ($LASTEXITCODE -ne 0) {
         Write-Error "signtool sign failed with exit code $LASTEXITCODE. $MsixPath is NOT signed."
         exit 1
@@ -153,6 +175,8 @@ if ($MakeAppx -and (Test-Path $MakeAppx)) {
         Write-Error "After signing, $MsixPath carries no signer certificate."
         exit 1
     }
+    # A publicly trusted identity has no trust bootstrap to wait for: it reads Valid and timestamped.
+    if ($Signing) { Assert-SplatSigned -Path $MsixPath | Out-Null }
     $Signed = $true
     Write-Host "Generated Signed MSIX Package: $MsixPath" -ForegroundColor Green
 } else {

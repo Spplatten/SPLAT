@@ -21,6 +21,9 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 . "$PSScriptRoot\community-integrity.ps1"
 . "$PSScriptRoot\splat-guest-package.ps1"
+. "$PSScriptRoot\code-signing.ps1"
+# Resolved before anything is staged, so a broken identity fails in seconds rather than after the copy.
+$signing = Get-SplatSigningProfile
 $guestBuild = $null
 if ($GuestBuildDirectory) {
     if ($RootfsPath -or $RootfsSha256) { throw 'Use GuestBuildDirectory or raw RootfsPath/RootfsSha256, not both.' }
@@ -39,6 +42,16 @@ foreach ($path in @($McpBinary, $DaemonBinary, $CompilerPath)) {
 foreach ($marker in @('MissionController.UI.exe', 'MissionController.UI.dll', 'MissionController.UI.pri',
     'MissionController.UI.runtimeconfig.json', 'coreclr.dll', 'hostfxr.dll', 'Microsoft.Graphics.Canvas.dll', 'e_sqlite3.dll')) {
     if (-not (Test-Path -LiteralPath (Join-Path $payload $marker) -PathType Leaf)) { throw "Incomplete Windows payload: $marker" }
+}
+if ($signing) {
+    # A signed installer around unsigned binaries is half a release: Windows judges each executable it
+    # starts (Smart App Control, App Control policies), not the installer that put it there.
+    $unsigned = @(Get-SplatUnsignedOwnBinaries -Directory $payload -Root $root)
+    if ((Get-AuthenticodeSignature -LiteralPath $McpBinary).Status -eq 'NotSigned') { $unsigned += $McpBinary }
+    if ($unsigned) {
+        throw ("A signing identity is configured but these binaries are unsigned; rebuild them with " +
+            "build-client-dist.ps1 and publish-splat-mcp.ps1 under the same identity: $($unsigned -join ', ')")
+    }
 }
 if ($RootfsPath -and -not $RootfsSha256) { throw 'A rootfs requires its expected publisher SHA-256.' }
 if ($RootfsSha256 -and -not $RootfsPath) { throw 'A rootfs checksum requires its archive.' }
@@ -136,7 +149,9 @@ $manifest = [ordered]@{
     rootfsIncluded = [bool]$RootfsPath; tests = $testSummary
     guestBuild = if ($guestBuild) { [ordered]@{ name = $guestBuild.name; base = $guestBuild.base
         snapshot = $guestBuild.snapshot; packageCount = $guestBuild.packageCount; sourceStatus = $guestBuild.sourceStatus } } else { $null }
-    distributionReady = $false; installerSignature = 'UNSIGNED'; cleanMachineInstallation = 'NOT_TESTED'
+    distributionReady = $false; cleanMachineInstallation = 'NOT_TESTED'
+    # Names the identity the compile signs with; the compile fails rather than ship the installer unsigned.
+    installerSignature = if ($signing) { "$($signing.Kind): $($signing.Identity)" } else { 'UNSIGNED' }
     secondaryPrincipalBridge = if ($mcpBuild) { $mcpBuild.managedBridge } else { 'NOT_ATTESTED' }; roadmap24Closed = $false
     mcpSha256 = (Get-FileHash -LiteralPath (Join-Path $stage 'Tools\splat-mcp.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     mcpBuildManifestIncluded = [bool]$mcpBuild
@@ -150,12 +165,15 @@ $sums = @(Get-ChildItem -LiteralPath $stage -Recurse -File | ForEach-Object {
 })
 [IO.File]::WriteAllText((Join-Path $stage 'SHA256SUMS.txt'), (($sums | Sort-Object) -join "`n") + "`n", $utf8)
 & "$PSScriptRoot\verify-community-package.ps1" -PackagePath $stage | Out-Null
-& $CompilerPath /Qp "/DStageDir=$stage" "/DOutputDir=$output" "/DAppVersion=$Version" "$PSScriptRoot\splat-community.iss"
+$innoSigning = if ($signing) { @("/Ssplatsign=$(Get-SplatInnoSignCommand -Signing $signing)", '/DSignToolName=splatsign') } else { @() }
+& $CompilerPath /Qp @innoSigning "/DStageDir=$stage" "/DOutputDir=$output" "/DAppVersion=$Version" "$PSScriptRoot\splat-community.iss"
 if ($LASTEXITCODE -ne 0) { throw "Installer compilation failed (exit $LASTEXITCODE)." }
 $installer = Join-Path $output "SPLAT-Community-$Version-Setup.exe"
 if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Compiler reported success without producing the installer.' }
+$installerSigner = if ($signing) { Assert-SplatSigned -Path $installer } else { $null }
 $description = [Diagnostics.FileVersionInfo]::GetVersionInfo($installer).FileDescription
 if ($description -notmatch 'AGPL-3.0' -or $description -notmatch 'Platten Industries') { throw 'The installer lost its license metadata.' }
 $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText("$installer.sha256", "$hash  $([IO.Path]::GetFileName($installer))`n", $utf8)
-[pscustomobject]@{ installer = $installer; sha256 = $hash; windowsFiles = $inventory.Count; distributionReady = $false }
+[pscustomobject]@{ installer = $installer; sha256 = $hash; windowsFiles = $inventory.Count; distributionReady = $false
+    signer = if ($installerSigner) { "$($installerSigner.Subject) ($($installerSigner.Thumbprint))" } else { 'UNSIGNED' } }
