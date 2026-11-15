@@ -17,6 +17,8 @@ public sealed record ManagedLeaseRequest(LeaseSpec Lease, string Command, IReadO
             || !Command.StartsWith('/') || Lease.MissionId == Guid.Empty
             || !Lease.EphemeralWorkspace || Lease.OverlayFs is { EnableCow: true } or { AllowScratchExec: true }
             || Lease.WorkingDirectory != $"{LinuxLeaseSubstrate.DefaultMissionsRoot}/{Lease.MissionId:N}"
+            // The managed service's ceiling is written by its installer, which names no hosts yet.
+            || Lease.AllowedEgressHosts is not null
             || Lease.AllowedExecInodes is not { Count: 1 }
             || Lease.AllowedExecInodes[0]?.SourcePath != Command
             || Lease.ProtectedInodes is null || Lease.AllowedEgressIps is null || Lease.AllowedEgressPorts is null

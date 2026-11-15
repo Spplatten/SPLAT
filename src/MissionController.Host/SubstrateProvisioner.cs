@@ -573,6 +573,13 @@ public static class SubstrateProvisioner
             document["allowedEgress"] = egress.ToString().Split(", ");
         }
 
+        // Left out when the operator named none, which the daemon reads as "no lease may name a
+        // hostname" - the opposite default to allowedEgress, and the safe one for a new way out.
+        if (egress.HasHosts)
+        {
+            document["allowedEgressHosts"] = egress.HostRules;
+        }
+
         return JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true });
     }
 
@@ -584,6 +591,10 @@ public static class SubstrateProvisioner
         string egressNote = egress.IsEmpty
             ? "egress not bounded by it - pass --egress to provision to bound the network from inside the guest too"
             : $"egress bounded to {egress}";
+        if (egress.HasHosts)
+        {
+            egressNote += $"; hostnames through the lease proxy: {string.Join(", ", egress.HostRules)}";
+        }
 
         var (readExit, current) = await wsl(new[] { "-e", "sh", "-c", $"cat {CeilingPath} 2>/dev/null" }, ct);
         if (readExit == 0 && current.ReplaceLineEndings("\n").Trim() == wanted.ReplaceLineEndings("\n").Trim())

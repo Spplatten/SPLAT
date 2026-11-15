@@ -337,6 +337,7 @@ public partial class McpServerHandler
                         ""workingDirectory"": { ""type"": ""string"", ""description"": ""Working directory inside sandbox"", ""default"": ""/tmp"" },
                         ""allowNetwork"": { ""type"": ""boolean"", ""description"": ""Request network egress. Granted only inside this host's operator egress policy (splat-mcp --egress a.b.c.d:port,...), and refused when the host has none. The ports come from that policy, not from the caller."", ""default"": false },
                         ""allowedEgressIps"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""IPv4 addresses to request, each of which must be in the operator's egress policy; omit to request every address it approves. Refused if sent without allowNetwork."" },
+                        ""allowedEgressHosts"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Hostnames to request, as name[:port] or *.suffix[:port] (port 443 unless given), each inside the operator's egress host policy (splat-mcp --egress-host). The command then reaches them only through an HTTPS proxy SPLAT sets in its environment, and every host reached is written into the signed receipt. Not combinable with allowedEgressIps. With allowNetwork and neither list, a host with an egress host policy grants all of it."" },
                         ""timeoutSeconds"": { ""type"": ""integer"", ""description"": ""Lease lifespan in seconds (5-300)"", ""default"": 30 },
                         ""readOnlyFs"": { ""type"": ""boolean"", ""description"": ""NOT ENFORCED - the guest daemon establishes no mount namespace for the workload, so it REFUSES this request rather than accepting a boundary it cannot impose. Leave false."", ""default"": false },
                         ""traceId"": { ""type"": ""string"", ""description"": ""Optional external orchestrator trace id (LangSmith/OpenTelemetry run id). Correlated into the chained audit ledger and echoed in the auditAnchor result item."" },
@@ -804,6 +805,15 @@ public partial class McpServerHandler
                 }
             }
         }
+        // Null when the caller sent no list at all, which is a different request from an empty one
+        // only in that it lets the operator's policy choose the vocabulary.
+        List<string>? egressHosts = null;
+        if (args.TryGetProperty("allowedEgressHosts", out var hostsProp) && hostsProp.ValueKind == JsonValueKind.Array)
+        {
+            egressHosts = hostsProp.EnumerateArray()
+                .Select(el => el.ValueKind == JsonValueKind.String ? el.GetString() : null)
+                .Where(host => !string.IsNullOrWhiteSpace(host)).Select(host => host!).ToList();
+        }
         var missionId = approvedLease?.MissionId ?? Guid.NewGuid();
 
         // A Windows-only install has no Linux lease to author. Refused here, the record says nothing ran
@@ -838,11 +848,31 @@ public partial class McpServerHandler
         // part of the operator's policy, and anything else is refused before a lease is requested.
         IReadOnlyList<string> leaseAddresses = Array.Empty<string>();
         IReadOnlyList<uint> leasePorts = Array.Empty<uint>();
+        // Hostnames, when the lease reaches the network through the daemon's proxy instead of
+        // pinned addresses. A lease takes one of the two; the daemon refuses a request stating both.
+        IReadOnlyList<string>? leaseHosts = null;
         string? egressRefusal = null;
         if (approvedLease is not null)
         {
             leaseAddresses = approvedLease.AllowedEgressIps;
             leasePorts = approvedLease.AllowedEgressPorts;
+            leaseHosts = approvedLease.AllowedEgressHosts;
+        }
+        else if (allowNetwork && egressHosts is not null && egressIps.Count > 0)
+        {
+            egressRefusal = "the request names both allowedEgressHosts and allowedEgressIps. A lease reaches the network one way; name one.";
+        }
+        else if (allowNetwork && (egressHosts is not null || (egressIps.Count == 0 && _egressPolicy.HasHosts)))
+        {
+            // Asked for by name, or asked for network with no list on a host whose operator wrote
+            // hostnames: the proxy, whose record of where the lease went is signed.
+            var hosts = _egressPolicy.AuthorizeHosts(egressHosts ?? new List<string>());
+            egressRefusal = hosts.Refusal;
+            leaseHosts = hosts.Refusal is null ? hosts.Rules : null;
+        }
+        else if (egressHosts is { Count: > 0 })
+        {
+            egressRefusal = "allowedEgressHosts names hosts, but allowNetwork is false. Set allowNetwork to request them.";
         }
         else if (allowNetwork)
         {
@@ -865,7 +895,7 @@ public partial class McpServerHandler
                 missionId,
                 ledgerTool,
                 "EGRESS_REQUEST_REFUSED",
-                $"Command='{command}' RequestedEgress='{string.Join(",", egressIps)}' | {egressRefusal}",
+                $"Command='{command}' RequestedEgress='{string.Join(",", egressIps.Concat(egressHosts ?? new List<string>()))}' | {egressRefusal}",
                 refusedActor,
                 ct);
 
@@ -877,7 +907,7 @@ public partial class McpServerHandler
             // The caller named a working directory; nothing was provisioned at it, and the bundle's
             // cleanup group has to say that rather than report on a boundary that never existed.
             refusedFacts.WorkspacePath = null;
-            refusedFacts.DeclaredEgress = $"requested {string.Join(",", egressIps)}, refused by the operator's egress policy";
+            refusedFacts.DeclaredEgress = $"requested {string.Join(",", egressIps.Concat(egressHosts ?? new List<string>()))}, refused by the operator's egress policy";
             refusedFacts.Admission = $"Refused: {egressRefusal}";
             refusedFacts.ExecutionState = "Refused";
             refusedFacts.TerminalReason = egressRefusal;
@@ -923,7 +953,8 @@ public partial class McpServerHandler
             // The record's own defaults, restated here as literals until 2026-09-23: two copies of
             // one policy on this side of the wire, beside the daemon's ceilings in main.rs and the
             // operator's in policy.json, each of which may only lower what this asks for.
-            Limits: new LeaseResourceLimits());
+            Limits: new LeaseResourceLimits(),
+            AllowedEgressHosts: leaseHosts);
 
         var violations = new BoundedViolationLog();
         var violationProgress = new SynchronousProgress<LeaseViolationEvent>(violations.Add);
@@ -993,7 +1024,9 @@ public partial class McpServerHandler
 
         facts.TemplateSha256 = MissionRunFacts.HashLease(lease);
         facts.DeclaredEgress = allowNetwork
-            ? $"{string.Join(",", leaseAddresses)}:{string.Join(",", leasePorts)} (the operator's egress policy, as far as the caller asked for it)"
+            ? lease.AllowedEgressHosts is { } declaredHosts
+                ? $"hosts {string.Join(",", declaredHosts)} through the lease's egress proxy (the operator's egress host policy, as far as the caller asked for it)"
+                : $"{string.Join(",", leaseAddresses)}:{string.Join(",", leasePorts)} (the operator's egress policy, as far as the caller asked for it)"
             : "none: the caller asked for no network";
         facts.NetworkDenialRequested = !allowNetwork;
         facts.RequestedMemoryBytes = (long)Math.Min(lease.Limits.MaxMemoryBytes, (ulong)long.MaxValue);

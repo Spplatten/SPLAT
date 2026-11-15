@@ -791,6 +791,52 @@ public class McpServerTests
         Assert.Contains(ledger.Logs, log => log.action == "EGRESS_REQUEST_REFUSED");
     }
 
+    /// <summary>
+    /// Hostnames are the operator's too. A caller may ask for names inside --egress-host and gets a
+    /// lease that names hosts and no pinned address; anything outside it, or both vocabularies at
+    /// once, is refused before a lease is requested.
+    /// </summary>
+    [Fact]
+    public async Task RunCommand_GrantsHostnamesInsideTheOperatorsHostPolicyAndRefusesTheRest()
+    {
+        var policy = McpEgressPolicy.Parse("127.0.0.1:443").WithHosts("pypi.org,*.pythonhosted.org");
+        async Task<(bool Refused, LeaseSpec? Lease)> Run(object arguments)
+        {
+            var executor = new MockLeasedExecutor();
+            var handler = new McpServerHandler(executor, new TemplatePolicyCompiler(), new MockAuditLedger(), egressPolicy: policy);
+            var response = await handler.ProcessMessageAsync(FsCall(24, "run_command", arguments));
+            using var doc = JsonDocument.Parse(response.Result!.Value.GetRawText());
+            return (doc.RootElement.TryGetProperty("isError", out var error) && error.GetBoolean(), executor.LastLease);
+        }
+
+        var asked = await Run(new { command = "/usr/bin/pip", allowNetwork = true, allowedEgressHosts = new[] { "files.pythonhosted.org" } });
+        Assert.Equal(new[] { "files.pythonhosted.org:443" }, asked.Lease!.AllowedEgressHosts);
+        Assert.Empty(asked.Lease.AllowedEgressIps);
+        Assert.Empty(asked.Lease.AllowedEgressPorts);
+
+        // Network with no list, on a host whose operator wrote hostnames: all of them, by name.
+        var unspecified = await Run(new { command = "/usr/bin/pip", allowNetwork = true });
+        Assert.Equal(new[] { "pypi.org:443", "*.pythonhosted.org:443" }, unspecified.Lease!.AllowedEgressHosts);
+        Assert.Empty(unspecified.Lease.AllowedEgressIps);
+
+        // A pinned address is still asked for by address, and gets no hostnames with it.
+        var pinned = await Run(new { command = "/usr/bin/curl", allowNetwork = true, allowedEgressIps = new[] { "127.0.0.1" } });
+        Assert.Null(pinned.Lease!.AllowedEgressHosts);
+        Assert.Equal(new[] { "127.0.0.1" }, pinned.Lease.AllowedEgressIps);
+
+        foreach (object refused in new object[]
+        {
+            new { command = "/usr/bin/pip", allowNetwork = true, allowedEgressHosts = new[] { "evil.net" } },
+            new { command = "/usr/bin/pip", allowNetwork = true, allowedEgressHosts = new[] { "pypi.org" }, allowedEgressIps = new[] { "127.0.0.1" } },
+            new { command = "/usr/bin/pip", allowNetwork = false, allowedEgressHosts = new[] { "pypi.org" } },
+        })
+        {
+            var outcome = await Run(refused);
+            Assert.True(outcome.Refused);
+            Assert.Null(outcome.Lease);
+        }
+    }
+
     [Fact]
     public async Task RunCommand_RefusesAnAddressTheEgressPolicyDoesNotName()
     {
