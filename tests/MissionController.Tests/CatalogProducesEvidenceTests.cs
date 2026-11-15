@@ -63,6 +63,39 @@ public class CatalogProducesEvidenceTests
         "The system cannot find the file specified",
     };
 
+    /// <summary>
+    /// The tool's own failure, read from its error stream alone - never from what it printed.
+    ///
+    /// These phrases mean "the thing I was asked to run did not run". Several of them are also
+    /// ordinary English that a *working* tool can quote: on 2026-11-13 this test failed on
+    /// <c>sysops-event-triage</c>, which exited 0 with 8609 characters of real event-log evidence
+    /// and was called a refusal because one Windows Firewall event (Id 2042) carried the line
+    /// <c>Error:\tAccess is denied.</c> in its own Message body, at column 26. The scan was over
+    /// stdout and stderr concatenated, so the verdict moved with the contents of the machine's
+    /// event log instead of with any code, and it reproduced in isolation - which is why
+    /// "run it alone before believing it" did not clear it.
+    ///
+    /// The stream is the discriminator, and it was measured rather than assumed. Driven through
+    /// this same launcher and jail, each failure class puts its diagnostic on stderr and leaves
+    /// stdout empty: a missing executable under cmd ("is not recognized as an internal or external
+    /// command"), a missing cmdlet under PowerShell ("The term '...'" / CommandNotFoundException),
+    /// and a denied read under cmd ("Access is denied."). PowerShell routes a mid-script cmdlet
+    /// error there too, which is where <c>secops-tls-cipher-audit</c> and
+    /// <c>sysops-boot-performance</c> report theirs. No template's payload can reach stderr, and
+    /// <see cref="EveryTemplate_IsRunOnceOutsideTheContainer_AndSaysWhetherItProducedEvidence"/>
+    /// alone cannot prove the narrowing still fires, because today no catalog tool is broken - so
+    /// <see cref="ABrokenTool_IsStillCaught_AfterTheScanNarrowedToStandardError"/> is the control
+    /// that keeps this honest. Delete that test and this one stops discriminating silently.
+    ///
+    /// Raw stderr, not <see cref="Payload"/>: that normaliser replaces a line holding nothing but a
+    /// label with a space, and a bare "Usage:" is exactly such a line.
+    /// </summary>
+    private const string CmdExe = @"C:\Windows\System32\cmd.exe";
+    private const string PowerShellExe = @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+
+    private static string? OwnFailure(string standardError)
+        => NotEvidence.FirstOrDefault(n => standardError.Contains(n, StringComparison.Ordinal));
+
     [Fact]
     public async Task EveryTemplate_IsRunOnceOutsideTheContainer_AndSaysWhetherItProducedEvidence()
     {
@@ -95,7 +128,7 @@ public class CatalogProducesEvidenceTests
 
                     string text = Payload(run.StandardOutput + run.StandardError);
                     bool exitOk = template.Tool.AllowedExitCodes.Contains(run.ExitCode);
-                    string? refusal = NotEvidence.FirstOrDefault(n => text.Contains(n, StringComparison.Ordinal));
+                    string? refusal = OwnFailure(run.StandardError);
 
                     // Timed out comes first: the launcher kills the job with exit code 99, and read
                     // as an exit code that looked like a tool breaking its contract when it was a
@@ -131,6 +164,53 @@ public class CatalogProducesEvidenceTests
         _out.WriteLine($"{bad.Count} of {all.Count} produced no usable evidence: {string.Join(",", bad)}");
 
         Assert.Equal(ProduceNoEvidence.OrderBy(s => s, StringComparer.Ordinal), bad);
+    }
+
+    /// <summary>
+    /// The control for <see cref="OwnFailure"/>. The test above passes when every catalog tool
+    /// works, which is also what it would report if the refusal scan had stopped matching
+    /// anything at all - so on its own it cannot tell a narrowed detector from a disabled one.
+    ///
+    /// This drives three tools that really are broken through the same launcher, jail and
+    /// restricted token, and asserts each is still caught. It is the measurement that earns
+    /// reading stderr alone: every one of them leaves stdout empty, so nothing here would have
+    /// been found by a scan of what the tool printed.
+    /// </summary>
+    [Fact]
+    public async Task ABrokenTool_IsStillCaught_AfterTheScanNarrowedToStandardError()
+    {
+        var jails = new NtAclJailManager();
+        var launcher = new SuspendedProcessLauncher(new RestrictedTokenProvider());
+        var missionId = Guid.NewGuid();
+        string jail = await jails.ProvisionJailAsync(missionId);
+        try
+        {
+            foreach (var (what, executable, arguments) in new[]
+            {
+                ("a missing executable", CmdExe, "/c no_such_tool_xyz.exe --help"),
+                ("a missing cmdlet", PowerShellExe, "-NoProfile -Command \"Get-NoSuchCmdletXyz\""),
+                ("a denied read", CmdExe, @"/c type C:\Windows\System32\config\SAM"),
+            })
+            {
+                using var job = new Win32JobSandbox($"BrokenTool_{Guid.NewGuid():N}");
+                var run = await launcher.LaunchSuspendedInJobAsync(
+                    executable, arguments, jail, job,
+                    dropAdminPrivileges: true, timeoutSeconds: 30, denyNetworkAccess: false);
+
+                string? caught = OwnFailure(run.StandardError);
+                _out.WriteLine($"{what,-22} exit {run.ExitCode,3} stdout {run.StandardOutput.Length,4} chars  caught: {caught ?? "NOTHING"}");
+
+                Assert.False(run.TimedOut, $"{what} timed out rather than failing");
+                Assert.NotNull(caught);
+                Assert.True(
+                    string.IsNullOrWhiteSpace(run.StandardOutput),
+                    $"{what} wrote to stdout, so the stream is no longer the discriminator: {Trim(run.StandardOutput)}");
+            }
+        }
+        finally
+        {
+            await jails.DrainAndCleanupJailAsync(jail);
+        }
     }
 
     /// <summary>
