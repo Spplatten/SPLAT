@@ -43,11 +43,13 @@ def retire_idle_pins(expected_hash):
         assert directory.is_dir() and not directory.is_symlink() and base.resolve() == base
         pins = list(directory.iterdir())
         # The installed set is retired, so it may predate the cross-lease hooks: a program from
-        # before them pinned four links, one from after pins ten. Anything else is not ours.
+        # before them pinned four links, one from after pins ten, and one with the local-IPC hooks
+        # thirteen. Anything else is not ours.
         four = {"link_splat_bprm_check", "link_splat_file_open", "link_splat_socket_connect", "link_splat_socket_sendmsg"}
         ten = four | {"link_splat_ptrace_access", "link_splat_task_kill", "link_splat_task_setsched",
                       "link_splat_task_setnice", "link_splat_task_setioprio", "link_splat_task_setrlimit"}
-        assert {path.name for path in pins if path.name.startswith("link_")} in (four, ten)
+        thirteen = ten | {"link_splat_unix_connect", "link_splat_unix_send", "link_splat_socket_create"}
+        assert {path.name for path in pins if path.name.startswith("link_")} in (four, ten, thirteen)
         # bpftool 7.7's single-link command tests stale errno on success (src/link.c:do_show).
         # Enumeration has a reliable status and supplies the exact pinned paths to validate.
         links = json.loads(subprocess.check_output(["bpftool", "-j", "-f", "link", "show"]))

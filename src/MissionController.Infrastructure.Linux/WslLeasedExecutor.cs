@@ -198,8 +198,11 @@ public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
                 argv,
                 workingDirectory = lease.WorkingDirectory,
                 allowNetwork = lease.AllowNetwork,
-                allowedEgressIps = lease.AllowedEgressIps,
-                allowedEgressPorts = lease.AllowedEgressPorts,
+                allowedEgressIps = lease.AllowedEgressHosts is null ? lease.AllowedEgressIps : null,
+                allowedEgressPorts = lease.AllowedEgressHosts is null ? lease.AllowedEgressPorts : null,
+                // One way onto the network per lease. The daemon refuses a request that states both, and
+                // reads a null as the key's absence.
+                allowedEgressHosts = lease.AllowedEgressHosts,
                 readOnlyFs = lease.ReadOnlyFs,
                 // The compiled policy, as PATHS. The lease carries InodeIdentifierModel, but a
                 // Windows-side inode number means nothing in the guest - TemplatePolicyCompiler
@@ -421,6 +424,14 @@ public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
                                     ? prop.GetString()
                                     : null;
 
+                            IReadOnlyList<string>? egressHosts =
+                                root.TryGetProperty("egressHosts", out var hostsProp) && hostsProp.ValueKind == JsonValueKind.Array
+                                    ? hostsProp.EnumerateArray().Select(host => host.GetString() ?? string.Empty).ToArray()
+                                    : null;
+                            ulong? egressRefused =
+                                root.TryGetProperty("egressRefused", out var refusedProp)
+                                && refusedProp.TryGetUInt64(out ulong refusedValue) ? refusedValue : null;
+
                             string? signedOutcome = Text("outcomeCanonical");
                             string? outcomeSignature = Text("outcomeSignature");
                             string? outcomeKeyId = Text("outcomeKeyId");
@@ -438,6 +449,8 @@ public partial class WslLeasedExecutor : ILeasedExecutor, ILeaseReceiptLookup
                                     OutcomeSignature = outcomeSignature,
                                     OutcomeKeyId = outcomeKeyId,
                                     OutcomePublicKey = outcomePublicKey,
+                                    EgressHosts = egressHosts,
+                                    EgressRefused = egressRefused,
                                 };
                             }
 

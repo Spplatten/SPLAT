@@ -132,6 +132,11 @@ pub struct LeaseConfig {
     pub allow_network: bool,
     pub allowed_egress_ips: Vec<String>,
     pub allowed_egress_ports: Vec<u32>,
+    /// The hostname rules this lease's egress proxy serves. With these set, the two fields above
+    /// hold the proxy's own loopback endpoint and nothing else. Skipped when empty so a lease
+    /// without a proxy hashes to the effective-policy digest it always had.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_egress_hosts: Vec<String>,
     pub read_only_fs: bool,
     pub protected_paths: Vec<String>,
     pub allowed_exec_paths: Vec<String>,
@@ -489,6 +494,7 @@ mod tests {
             allow_network: false,
             allowed_egress_ips: vec![],
             allowed_egress_ports: vec![],
+            allowed_egress_hosts: vec![],
             read_only_fs: false,
             protected_paths: protected.into_iter().map(str::to_string).collect(),
             allowed_exec_paths: vec!["/bin/sh".to_string()],

@@ -108,6 +108,9 @@ pub fn load<'obj>(object: &'obj mut MaybeUninit<libbpf_rs::OpenObject>) -> Resul
             splat_task_setnice: Some(reopen(&path, &skel.progs.splat_task_setnice)?),
             splat_task_setioprio: Some(reopen(&path, &skel.progs.splat_task_setioprio)?),
             splat_task_setrlimit: Some(reopen(&path, &skel.progs.splat_task_setrlimit)?),
+            splat_unix_connect: Some(reopen(&path, &skel.progs.splat_unix_connect)?),
+            splat_unix_send: Some(reopen(&path, &skel.progs.splat_unix_send)?),
+            splat_socket_create: Some(reopen(&path, &skel.progs.splat_socket_create)?),
         };
     } else {
         let staging = base.join(format!("pending_{hash}"));
@@ -127,6 +130,9 @@ pub fn load<'obj>(object: &'obj mut MaybeUninit<libbpf_rs::OpenObject>) -> Resul
             ("splat_task_setnice", &mut skel.links.splat_task_setnice),
             ("splat_task_setioprio", &mut skel.links.splat_task_setioprio),
             ("splat_task_setrlimit", &mut skel.links.splat_task_setrlimit),
+            ("splat_unix_connect", &mut skel.links.splat_unix_connect),
+            ("splat_unix_send", &mut skel.links.splat_unix_send),
+            ("splat_socket_create", &mut skel.links.splat_socket_create),
         ] {
             link.as_mut().context("missing attached LSM link")?.pin(staging.join(format!("link_{name}")))?;
         }
