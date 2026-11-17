@@ -541,8 +541,9 @@ self-test), `publish-splat-mcp.ps1` (`splat-mcp.exe`, before its hash), `build-c
 (Setup and its uninstaller, at compile, refusing unsigned binaries inside) and `build-msix.ps1` (the
 package, with its manifest Publisher taken from the signature). **Platten Industries LLC was validated on
 2026-11-16, and the client package was built signed the next day from main at 008c25e**
-(`packaging/evidence/first-signed-client.json`). The installer, `splat-mcp.exe` and the MSIX have not
-been built signed yet. On 2026-11-13 a throwaway
+(`packaging/evidence/first-signed-client.json`). `splat-mcp.exe` and the community installer were
+built signed around that payload the same day (`packaging/evidence/first-signed-installer.json`). The
+MSIX has not been built signed, and the signed installer has not been run. On 2026-11-13 a throwaway
 certificate showed signtool and Inno Setup signing and timestamping through the helper, and a
 signature that does not chain to a trusted root being refused.
 
