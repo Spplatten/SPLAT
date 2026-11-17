@@ -539,8 +539,10 @@ Control can refuse to start it. The build already signs everything once an ident
 `packaging/code-signing.ps1` is used by `build-client-dist.ps1` (the app's own binaries, before the
 self-test), `publish-splat-mcp.ps1` (`splat-mcp.exe`, before its hash), `build-community-installer.ps1`
 (Setup and its uninstaller, at compile, refusing unsigned binaries inside) and `build-msix.ps1` (the
-package, with its manifest Publisher taken from the signature). **No certificate exists yet, so
-nothing has been signed with one; the first signed build is the evidence.** On 2026-11-13 a throwaway
+package, with its manifest Publisher taken from the signature). **Platten Industries LLC was validated on
+2026-11-16, and the client package was built signed the next day from main at 008c25e**
+(`packaging/evidence/first-signed-client.json`). The installer, `splat-mcp.exe` and the MSIX have not
+been built signed yet. On 2026-11-13 a throwaway
 certificate showed signtool and Inno Setup signing and timestamping through the helper, and a
 signature that does not chain to a trusted root being refused.
 
