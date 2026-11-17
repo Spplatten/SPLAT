@@ -73,6 +73,12 @@ public abstract record McpServerCommand
                               gets any network. With provision, the same list is written into
                               the guest's lease ceiling (/etc/splat/policy.json), which bounds
                               every lease from inside the guest, whoever holds the token.
+          --egress-host <list> The only hostnames a run_command or run_code lease may reach by
+                              name, as name[:port] or *.suffix[:port] separated by commas; the
+                              port defaults to 443. The daemon carries them through a proxy of
+                              the lease's own and signs every host reached into the receipt.
+                              It takes effect only once `provision --apply --egress-host` has
+                              written the same list into the guest's lease ceiling.
           --ledger-key <file> The operator's key for the audit ledger: a file of 32 to 4096
                               bytes, read and never written or printed. With it every new
                               entry is HMAC-SHA256 under the key, and a keyed ledger is never
@@ -191,7 +197,7 @@ public abstract record McpServerCommand
 
             if (option is "--agent" or "--agent-version" && (doctor || provision || unmount || retain))
                 return new UsageError("Agent binding options apply only to the MCP server.");
-            if (option is not ("--workspace" or "--egress" or "--ledger-key" or "--run-record-key" or "--manifest" or "--agent" or "--agent-version"))
+            if (option is not ("--workspace" or "--egress" or "--egress-host" or "--ledger-key" or "--run-record-key" or "--manifest" or "--agent" or "--agent-version"))
             {
                 return arg.StartsWith('-')
                     ? new UsageError($"unknown option '{arg}'.")
@@ -216,6 +222,7 @@ public abstract record McpServerCommand
                     "--ledger-key" => "--ledger-key needs the key file's path.",
                     "--run-record-key" => "--run-record-key needs the key file's path.",
                     "--agent" or "--agent-version" => $"{option} needs a value.",
+                    "--egress-host" => "--egress-host needs a list of host rules, such as pypi.org,*.pythonhosted.org.",
                     _ => "--egress needs a list of a.b.c.d:port endpoints.",
                 });
             }
@@ -241,11 +248,23 @@ public abstract record McpServerCommand
             }
         }
 
+        if (given.TryGetValue("--egress-host", out string? hostList))
+        {
+            try
+            {
+                egress = egress.WithHosts(hostList);
+            }
+            catch (FormatException ex)
+            {
+                return new UsageError($"--egress-host: {ex.Message}");
+            }
+        }
+
         if (unmount)
         {
             // Nothing else belongs to unmounting: it removes what a manifest records, and no option
             // here can widen or narrow that without making the record and the act disagree.
-            string? extra = given.Keys.FirstOrDefault(key => key is "--workspace" or "--egress" or "--ledger-key" or "--run-record-key");
+            string? extra = given.Keys.FirstOrDefault(key => key is "--workspace" or "--egress" or "--egress-host" or "--ledger-key" or "--run-record-key");
             if (extra is not null)
             {
                 return new UsageError($"`unmount` takes only --apply and --manifest; {extra} belongs to the server or to `doctor`.");
@@ -273,7 +292,7 @@ public abstract record McpServerCommand
             // --workspace confine a served tool; naming them here would suggest the sweep is bounded by
             // them, which it is not. --ledger-key IS taken: the audit chain's redaction runs against the
             // ledger this host would otherwise open with that key.
-            string? foreign = given.Keys.FirstOrDefault(key => key is "--workspace" or "--egress" or "--manifest" or "--run-record-key");
+            string? foreign = given.Keys.FirstOrDefault(key => key is "--workspace" or "--egress" or "--egress-host" or "--manifest" or "--run-record-key");
             if (foreign is not null)
             {
                 return new UsageError($"`retain` takes only --apply and --ledger-key; {foreign} belongs to the server or to another subcommand.");
@@ -289,7 +308,7 @@ public abstract record McpServerCommand
             string? irrelevant = given.Keys.FirstOrDefault(key => key is "--workspace" or "--ledger-key" or "--run-record-key");
             return irrelevant is null
                 ? new Provision(given.ContainsKey("--apply"), egress)
-                : new UsageError($"`provision` takes only --apply and --egress; {irrelevant} belongs to the server or to `doctor`.");
+                : new UsageError($"`provision` takes only --apply and --egress or --egress-host; {irrelevant} belongs to the server or to `doctor`.");
         }
 
         string? ledgerKey = null;

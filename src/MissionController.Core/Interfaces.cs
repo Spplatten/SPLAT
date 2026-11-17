@@ -604,7 +604,12 @@ public record LeaseSpec(
     ExecutionPolicy? ExecutionPolicy = null,
     bool RequireEnforcing = false,
     IReadOnlyDictionary<string, IReadOnlyList<string>>? ResolvedEgressHosts = null,
-    LeaseExecutionContext? ExecutionContext = null);
+    LeaseExecutionContext? ExecutionContext = null,
+    // Hostname rules (name[:port] or *.suffix[:port]) for the daemon's per-lease egress proxy. A
+    // lease names these or AllowedEgressIps, never both. Left out of the serialized lease when
+    // null, so a lease without them hashes as it did before the field existed.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? AllowedEgressHosts = null);
 
 /// <summary>
 /// What the daemon reported about the lease it installed, from its <c>LEASE</c> and <c>EXIT</c> frames:
@@ -657,7 +662,12 @@ public record LeaseOutcome(
     string? ExecutionPolicySha256 = null,
     string? ExecutionContextSha256 = null,
     string? EffectivePolicySha256 = null,
-    bool? WorkloadDrained = null);
+    bool? WorkloadDrained = null,
+    // What the lease's egress proxy carried and turned away, from the EXIT frame. Null for a lease
+    // that had no proxy. The same two values are fields of SignedOutcome; these copies are for
+    // reading, and BoundLeaseReceipt refuses a frame whose copies differ from what was signed.
+    IReadOnlyList<string>? EgressHosts = null,
+    ulong? EgressRefused = null);
 
 /// <summary>
 /// What the daemon reported about a lease, in the vocabulary the run record reads. Every line is read
@@ -709,6 +719,12 @@ public static class LeaseControls
         if (lease.ExecutionContextSha256 is { } context)
             controls.Add($"agent-context:sha256={context} effective-policy:sha256={lease.EffectivePolicySha256} (verified signed outcome v2)");
         if (lease.WorkloadDrained == true) controls.Add("workload:drained (verified signed outcome v2)");
+
+        if (lease.EgressHosts is { } carried)
+        {
+            controls.Add($"egress-proxy:carried={(carried.Count == 0 ? "none" : string.Join(",", carried))} refused={lease.EgressRefused ?? 0}"
+                + (lease.SignedOutcome is null ? " (unsigned)" : " (in the guest-signed outcome)"));
+        }
 
         if (lease.Workspace is { } workspace)
         {

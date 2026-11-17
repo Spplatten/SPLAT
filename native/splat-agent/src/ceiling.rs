@@ -21,6 +21,8 @@ use std::path::{Component, Path};
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
+use crate::egress_proxy::{self, HostRule};
+
 pub const DEFAULT_PATH: &str = "/etc/splat/policy.json";
 
 #[derive(Deserialize)]
@@ -37,6 +39,11 @@ struct PolicyFile {
     /// means no lease may reach the network at all.
     #[serde(default)]
     allowed_egress: Option<Vec<String>>,
+    /// `name[:port]` or `*.suffix[:port]` rules for the per-lease egress proxy. Absent means no
+    /// lease may name a hostname: reaching the network by name is off until the operator says
+    /// which names, unlike `allowedEgress`, whose absence leaves pinned addresses unbounded.
+    #[serde(default)]
+    allowed_egress_hosts: Vec<String>,
     /// Unioned into every lease's protected paths. Each must resolve on the guest, or every lease
     /// is refused - which is the fail-closed shape a missing deny entry demands.
     #[serde(default)]
@@ -60,6 +67,7 @@ pub struct Ceiling {
     exec_prefixes: Vec<String>,
     allow_scratch_exec: bool,
     egress: Option<BTreeSet<(Ipv4Addr, u16)>>,
+    egress_hosts: Vec<HostRule>,
     protected: Vec<String>,
     max_duration: Option<u32>,
     pub max_memory_bytes: Option<u64>,
@@ -131,8 +139,13 @@ impl Ceiling {
             }
         };
 
+        // A rule that does not parse stops the daemon, as a bad endpoint does. Skipping it would
+        // start a host whose operator believes a name is allowed that never will be.
+        let egress_hosts = egress_proxy::parse_rules(&file.allowed_egress_hosts).map_err(anyhow::Error::msg)?;
+
         let limits = file.limits.unwrap_or_default();
         Ok(Self {
+            egress_hosts,
             exec_prefixes,
             allow_scratch_exec: file.allow_scratch_exec,
             egress,
@@ -178,6 +191,14 @@ impl Ceiling {
         Ok(())
     }
 
+    /// Whether every hostname rule a lease asks for sits inside the operator's.
+    pub fn check_hosts(&self, asked: &[HostRule]) -> std::result::Result<(), String> {
+        match egress_proxy::first_outside(&self.egress_hosts, asked) {
+            Some(rule) => Err(format!("host {rule} is outside the egress host ceiling")),
+            None => Ok(()),
+        }
+    }
+
     pub fn check_scratch_exec(&self, requested: bool) -> std::result::Result<(), String> {
         if requested && !self.allow_scratch_exec {
             return Err("scratch execution is outside the exec ceiling (allowScratchExec is false)".into());
@@ -205,6 +226,10 @@ impl Ceiling {
 
     pub fn pids_ceiling(&self, daemon: u32) -> u32 {
         self.max_pids.map_or(daemon, |m| m.min(daemon))
+    }
+
+    pub fn names_egress_hosts(&self) -> bool {
+        !self.egress_hosts.is_empty()
     }
 
     pub fn bounds_egress(&self) -> bool {
@@ -279,6 +304,26 @@ mod tests {
         let ips = strings(&["127.0.0.1", "1.1.1.1"]);
         let err = c.check(&Ask { exec_paths: &exec, allow_network: true, egress_ips: &ips, egress_ports: &[80, 443] }).unwrap_err();
         assert!(err.contains("127.0.0.1:443") && err.contains("egress ceiling"), "{err}");
+    }
+
+    #[test]
+    fn hostnames_are_off_until_the_ceiling_names_them_and_a_request_must_sit_inside() {
+        let rules = |items: &[&str]| egress_proxy::parse_rules(&strings(items)).unwrap();
+        let silent = Ceiling::parse(POLICY).unwrap();
+        let err = silent.check_hosts(&rules(&["pypi.org"])).unwrap_err();
+        assert!(err.contains("pypi.org:443") && err.contains("egress host ceiling"), "{err}");
+
+        let named = Ceiling::parse(
+            r#"{"schema":1,"allowedExecPrefixes":["/bin/"],"allowedEgressHosts":["pypi.org","*.pythonhosted.org"]}"#,
+        ).unwrap();
+        assert_eq!(named.check_hosts(&rules(&["pypi.org", "files.pythonhosted.org"])), Ok(()));
+        assert!(named.check_hosts(&rules(&["pypi.org:80"])).is_err(), "another port");
+        assert!(named.check_hosts(&rules(&["evil.net"])).is_err());
+
+        // A rule the proxy could not hold stops the daemon; it is never skipped.
+        assert!(Ceiling::parse(
+            r#"{"schema":1,"allowedExecPrefixes":["/bin/"],"allowedEgressHosts":["pypi.org","1.2.3.4"]}"#
+        ).is_err());
     }
 
     #[test]

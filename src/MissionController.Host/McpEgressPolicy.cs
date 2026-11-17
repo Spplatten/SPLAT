@@ -23,10 +23,92 @@ namespace MissionController.Host;
 public sealed class McpEgressPolicy
 {
     private readonly IReadOnlyDictionary<string, SortedSet<uint>> _portsByAddress;
+    private readonly IReadOnlyList<EgressHostRule> _hostRules;
 
-    private McpEgressPolicy(IReadOnlyDictionary<string, SortedSet<uint>> portsByAddress)
+    private McpEgressPolicy(IReadOnlyDictionary<string, SortedSet<uint>> portsByAddress, IReadOnlyList<EgressHostRule>? hostRules = null)
     {
         _portsByAddress = portsByAddress;
+        _hostRules = hostRules ?? Array.Empty<EgressHostRule>();
+    }
+
+    /// <summary>Whether the operator named any hostname a lease may reach through its egress proxy.</summary>
+    public bool HasHosts => _hostRules.Count > 0;
+
+    /// <summary>The hostname rules, each as <c>name:port</c> or <c>*.suffix:port</c>, in the order given.</summary>
+    public IReadOnlyList<string> HostRules => _hostRules.Select(rule => rule.ToString()).ToArray();
+
+    /// <summary>
+    /// This policy with the hostname rules in <paramref name="spec"/>, separated like endpoints. One
+    /// malformed rule refuses the list, and so does a list that names nothing, for the reasons
+    /// <see cref="Parse"/> gives.
+    /// </summary>
+    public McpEgressPolicy WithHosts(string spec)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+
+        var rules = new List<EgressHostRule>();
+        foreach (string entry in spec.Split(new[] { ',', ';', ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!EgressHostRule.TryParse(entry, out EgressHostRule rule))
+            {
+                throw new FormatException($"'{entry}' is not a host rule. Write each one as name, name:port, *.suffix or *.suffix:port, in lower case, and never as an address.");
+            }
+
+            if (!rules.Contains(rule))
+            {
+                rules.Add(rule);
+            }
+        }
+
+        if (rules.Count == 0)
+        {
+            throw new FormatException("the list names no hosts. Write each one as name or *.suffix, with an optional :port.");
+        }
+
+        return new McpEgressPolicy(_portsByAddress, rules);
+    }
+
+    /// <summary>
+    /// The hostname rules one lease is granted, or why it gets none. An empty request means every
+    /// rule the operator wrote. A requested rule must sit inside one of the operator's: the same
+    /// name and port, or a name below one of their wildcards.
+    /// </summary>
+    public EgressHostDecision AuthorizeHosts(IReadOnlyList<string> requestedRules)
+    {
+        ArgumentNullException.ThrowIfNull(requestedRules);
+
+        if (!HasHosts)
+        {
+            return EgressHostDecision.Refused(
+                "this host has no operator egress host policy, so a request to reach a hostname is refused. " +
+                "Which names a leased command may reach is the operator's decision (splat-mcp --egress-host).");
+        }
+
+        if (requestedRules.Count == 0)
+        {
+            return new EgressHostDecision(HostRules, null);
+        }
+
+        var granted = new List<string>();
+        var outside = new List<string>();
+        foreach (string requested in requestedRules)
+        {
+            if (EgressHostRule.TryParse(requested.Trim(), out EgressHostRule rule) && _hostRules.Any(allowed => allowed.Covers(rule)))
+            {
+                if (!granted.Contains(rule.ToString()))
+                {
+                    granted.Add(rule.ToString());
+                }
+            }
+            else
+            {
+                outside.Add(requested);
+            }
+        }
+
+        return outside.Count > 0
+            ? EgressHostDecision.Refused($"{string.Join(", ", outside)} {(outside.Count == 1 ? "is" : "are")} not in this host's egress host policy.")
+            : new EgressHostDecision(granted, null);
     }
 
     /// <summary>No endpoints: every request for network is refused.</summary>
@@ -186,6 +268,12 @@ public sealed class McpEgressPolicy
         address = string.Join('.', octets);
         return true;
     }
+}
+
+/// <summary>The hostname rules one lease may name, or the reason it may name none.</summary>
+public sealed record EgressHostDecision(IReadOnlyList<string> Rules, string? Refusal)
+{
+    public static EgressHostDecision Refused(string reason) => new(Array.Empty<string>(), reason);
 }
 
 /// <summary>The addresses and ports one lease may name, or the reason it may name none.</summary>
