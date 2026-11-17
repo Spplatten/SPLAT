@@ -71,13 +71,17 @@ pub enum Hook {
     TaskSetnice,
     TaskSetioprio,
     TaskSetrlimit,
+    UnixConnect,
+    UnixSend,
+    SocketCreate,
 }
 
 impl Hook {
     /// Every hook the daemon attaches, in the order its programs appear in lease_lsm.bpf.c.
-    pub const ALL: [Hook; 10] = [
+    pub const ALL: [Hook; 13] = [
         Hook::BprmCheck, Hook::FileOpen, Hook::SocketConnect, Hook::SocketSendmsg, Hook::PtraceAccess,
         Hook::TaskKill, Hook::TaskSetsched, Hook::TaskSetnice, Hook::TaskSetioprio, Hook::TaskSetrlimit,
+        Hook::UnixConnect, Hook::UnixSend, Hook::SocketCreate,
     ];
 
     /// The vmlinux function an LSM program on this hook attaches to.
@@ -93,6 +97,9 @@ impl Hook {
             Hook::TaskSetnice => "bpf_lsm_task_setnice",
             Hook::TaskSetioprio => "bpf_lsm_task_setioprio",
             Hook::TaskSetrlimit => "bpf_lsm_task_setrlimit",
+            Hook::UnixConnect => "bpf_lsm_unix_stream_connect",
+            Hook::UnixSend => "bpf_lsm_unix_may_send",
+            Hook::SocketCreate => "bpf_lsm_socket_create",
         }
     }
 
@@ -103,13 +110,17 @@ impl Hook {
     /// target's cgroup id, read from the task itself, not from any map. That makes the shared lease
     /// map the whole of what can go wrong with them, and check_bindings already refuses a program
     /// that reads a different one - such a program would find every actor unleased and allow all.
+    ///
+    /// The three local-IPC hooks are the same case: the peer's cgroup id is read from the peer
+    /// socket, the netlink rule from the hook's own arguments.
     pub fn decision_roles(self) -> &'static [Role] {
         match self {
             Hook::BprmCheck => &[Role::LeasedCgroups, Role::AllowedExec, Role::ScratchExec],
             Hook::FileOpen => &[Role::LeasedCgroups, Role::Protected],
             Hook::SocketConnect | Hook::SocketSendmsg => &[Role::LeasedCgroups, Role::AllowedIpv4],
             Hook::PtraceAccess | Hook::TaskKill | Hook::TaskSetsched | Hook::TaskSetnice
-            | Hook::TaskSetioprio | Hook::TaskSetrlimit => &[Role::LeasedCgroups],
+            | Hook::TaskSetioprio | Hook::TaskSetrlimit | Hook::UnixConnect | Hook::UnixSend
+            | Hook::SocketCreate => &[Role::LeasedCgroups],
         }
     }
 }
@@ -1021,7 +1032,7 @@ mod tests {
     const SHADOW: Ident = Ident { dev: SDA2, ino: 2002 };
     const SERVER: [u8; 4] = [93, 184, 216, 34];
     const ROLES: [Role; 5] = [Role::LeasedCgroups, Role::AllowedExec, Role::ScratchExec, Role::Protected, Role::AllowedIpv4];
-    const HOOKS: [Hook; 10] = Hook::ALL;
+    const HOOKS: [Hook; 13] = Hook::ALL;
 
     fn id_of(role: Role) -> u32 {
         match role {
@@ -1341,7 +1352,7 @@ mod tests {
     }
 
     #[test]
-    fn a_foreign_program_on_any_of_the_ten_hooks_is_refused() {
+    fn a_foreign_program_on_any_hook_is_refused() {
         for (i, hook) in HOOKS.into_iter().enumerate() {
             let mut s = snapshot_of(capture());
             s.foreign.push(ForeignLink { link_id: 77, prog_id: 78, target_obj_id: VMLINUX, target_btf_id: 100 + i as u32 });
@@ -1364,11 +1375,11 @@ mod tests {
         s.hooks.pop();
         let found = refusals(&run(&s, &approval(), &resolver()));
         assert!(found.contains(&Divergence::LinkInactive { hook: Hook::FileOpen }));
-        assert!(found.contains(&Divergence::HookMissing { hook: Hook::TaskSetrlimit }));
+        assert!(found.contains(&Divergence::HookMissing { hook: Hook::SocketCreate }));
     }
 
     #[test]
-    fn every_hook_has_its_own_function_and_the_task_hooks_decide_on_the_lease_map_alone() {
+    fn every_hook_has_its_own_function_and_the_task_and_ipc_hooks_decide_on_the_lease_map_alone() {
         let functions: BTreeSet<&str> = Hook::ALL.iter().map(|h| h.btf_func()).collect();
         assert_eq!(functions.len(), Hook::ALL.len());
         for hook in &Hook::ALL[4..] {
