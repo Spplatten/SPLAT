@@ -19,7 +19,9 @@ Local administrators are outside that proposed boundary.
 
 Run the Setup executable interactively. It presents the full AGPL-3.0 and the Platten Industries
 commercial-license option, and installs the compiled payload under Program Files. Its hash is
-supplied beside it. This candidate is unsigned; a checksum is not publisher authentication.
+supplied beside it. A candidate built on or after 2026-11-17 is signed by Platten Industries LLC
+(`packaging/evidence/first-signed-installer.json`); an earlier one is unsigned, and a checksum is
+not publisher authentication. Check the publisher Windows shows before you run it.
 Installation does not create a Windows account, change certificate trust, select a default WSL
 distro, stop existing workloads, or remove WSL data on uninstall.
 

@@ -1,0 +1,78 @@
+{
+  "what": "First build signed with a publicly trusted certificate: packaging/build-client-dist.ps1 from a clean clone of main, SPLAT_SIGNING_METADATA set",
+  "commit": "008c25e",
+  "builtUtc": "2026-11-17T04:01:02Z",
+  "service": "Azure Artifact Signing, Public Trust certificate profile",
+  "signerSubject": "CN=Platten Industries LLC, O=Platten Industries LLC, L=La Fayette, S=Georgia, C=US",
+  "signerThumbprint": "1E71C94C22ECB796D3D5173B4058C40814AAA25D",
+  "signerNotAfterUtc": "2026-11-20 03:43:49Z",
+  "issuer": "CN=Microsoft ID Verified CS AOC CA 03, O=Microsoft Corporation, C=US",
+  "timestampAuthority": "CN=Microsoft Public RSA Time Stamping Authority, OU=nShield TSS ESN:7A00-05E0-D947, OU=Microsoft America Operations, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+  "suite": "Failed 0, Passed 1192, Skipped 6, Total 1198",
+  "selfTest": "10 of 10 pages opened and loaded",
+  "packageZipSha256": "a1ed3bea8e89409ffe24d2532a2380bb5b1e689fffbd45cf7ed9a615b42757ee",
+  "notCovered": [
+    "splat-mcp.exe",
+    "the Inno Setup installer and its uninstaller",
+    "the MSIX package",
+    "SmartScreen reputation"
+  ],
+  "binaries": [
+    {
+      "file": "MissionController.Core.dll",
+      "sha256": "755fcfa1cab3483d96b355a717516a3970c0d97907580d8b7a61ef65bad5699f",
+      "status": "Valid",
+      "signatureType": "Authenticode",
+      "timestamped": true
+    },
+    {
+      "file": "MissionController.Host.dll",
+      "sha256": "aa088d1dff5b2d4c8b436d645b09ed73845b669b162609b7fda4e8a1ed56cff9",
+      "status": "Valid",
+      "signatureType": "Authenticode",
+      "timestamped": true
+    },
+    {
+      "file": "MissionController.Infrastructure.Data.dll",
+      "sha256": "dc1474f77d33ad3c8232ac387000530c626aa7df74af594a555975962e5e7beb",
+      "status": "Valid",
+      "signatureType": "Authenticode",
+      "timestamped": true
+    },
+    {
+      "file": "MissionController.Infrastructure.Linux.dll",
+      "sha256": "b43b807cbb968e77fb86cf05c07a688abce5ed855eaa6d4c7c8a9d67fe399c5f",
+      "status": "Valid",
+      "signatureType": "Authenticode",
+      "timestamped": true
+    },
+    {
+      "file": "MissionController.Infrastructure.Network.dll",
+      "sha256": "ad6bf6b4c4e79ba65d6faa28e324f22bca0eb56693b26ff9c5b077def52a3653",
+      "status": "Valid",
+      "signatureType": "Authenticode",
+      "timestamped": true
+    },
+    {
+      "file": "MissionController.Infrastructure.Windows.dll",
+      "sha256": "bf1c958822eabf86ef3237b2742f128282b30b9bdacbbffe92573cf44b329758",
+      "status": "Valid",
+      "signatureType": "Authenticode",
+      "timestamped": true
+    },
+    {
+      "file": "MissionController.UI.dll",
+      "sha256": "6e46af5919d8a90430d1dc91e8ca58da54d4444c696f7d1730062286301e6f8f",
+      "status": "Valid",
+      "signatureType": "Authenticode",
+      "timestamped": true
+    },
+    {
+      "file": "MissionController.UI.exe",
+      "sha256": "bbc5c43e9fd893c11e5eb852956d3f2971160e012b593f3fe746a3a4d3300619",
+      "status": "Valid",
+      "signatureType": "Authenticode",
+      "timestamped": true
+    }
+  ]
+}

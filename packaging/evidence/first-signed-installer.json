@@ -1,0 +1,39 @@
+{
+  "what": "First community installer built signed: publish-splat-mcp.ps1 then build-community-installer.ps1 from a clean clone, SPLAT_SIGNING_METADATA set",
+  "commit": "261977d",
+  "commitNote": "008c25e (main) plus one documentation commit; no source file differs",
+  "recordedUtc": "2026-11-17T17:27:45.0975800+00:00",
+  "service": "Azure Artifact Signing, Public Trust certificate profile",
+  "signerSubject": "CN=Platten Industries LLC, O=Platten Industries LLC, L=La Fayette, S=Georgia, C=US",
+  "issuer": "CN=Microsoft ID Verified CS AOC CA 03, O=Microsoft Corporation, C=US",
+  "installer": {
+    "file": "SPLAT-Community-0.2.0-Setup.exe",
+    "bytes": 170392592,
+    "sha256": "4bbca73891f57313f0a5038034b5a53ee1f035c19ae56ad14eb070a48643b361",
+    "status": "Valid",
+    "signatureType": "Authenticode",
+    "timestamped": true,
+    "signerThumbprint": "1E71C94C22ECB796D3D5173B4058C40814AAA25D"
+  },
+  "splatMcp": {
+    "file": "Tools/splat-mcp.exe",
+    "sha256": "ded49196ebf317d8bf119aa72eeabb88e985398b33b8180f09608b6e2bb13453",
+    "status": "Valid",
+    "signatureType": "Authenticode",
+    "timestamped": true,
+    "daemonBuildId": "188b7cd159f7b056598dccd8df9b16edcdc089ff"
+  },
+  "payload": {
+    "ownBinariesSigned": 8,
+    "clientEvidence": "packaging/evidence/first-signed-client.json",
+    "guestArchiveSha256": "9c5fab831ffbb821166c0426574fede9f5b48f26f741d1a2ac31829efee4ace5",
+    "verifier": "verify-community-package.ps1: PASS, 779 files"
+  },
+  "notCovered": [
+    "the uninstaller was not read back: Inno signs it inside Setup and fails the compile otherwise, but it was not extracted",
+    "the installer was not run, so the installed tree is unmeasured",
+    "the MSIX package",
+    "SmartScreen reputation",
+    "no test-results file was passed to the installer build"
+  ]
+}
