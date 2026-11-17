@@ -130,11 +130,20 @@ Without root, in the daemon's own test suite, against listeners on loopback:
 - a full proxied connection in non-enforcing mode, and the receipt fields it produces;
 - the port pool: exhaustion, reuse after revoke.
 
-Under root, in the v1 proof run:
-- a leased tool reaches an allowed host through the proxy;
-- the same tool is refused a direct connection to that host's address;
-- lease A is refused lease B's proxy port;
-- the signed receipt lists the host, and verifies.
+Under root, in the v1 proof run (`packaging/run-v1-proof.ps1`), as section 19d of
+[probe-daemon.sh](../native/splat-agent/probe-daemon.sh), whose `egress_*` checks are written but
+**not yet run under root**:
+- a leased tool reaches an allowed host through the proxy (`egress_allowed_host_fetched`), and the
+  proxy refuses a name outside the lease's rules (`egress_unlisted_host_refused`);
+- the same tool is refused a direct connection to that host's address (`egress_direct_dial_refused`),
+  with the unleased probe reaching it as the control (`egress_host_control_reaches`);
+- lease A is refused lease B's proxy port (`egress_peer_proxy_refused`);
+- the signed receipt lists the host and the refusal, verifies, and an edited copy does not
+  (`egress_receipt_signed_lists_host`).
+
+The section runs only when the probe owns its daemon (`SPLAT_PROBE_DAEMON`), because only a ceiling
+names egress hosts and the probe writes its own. The host is `example.com` unless
+`SPLAT_PROBE_EGRESS_HOST` names another; the guest must reach it on 443.
 
 ## Order of work
 

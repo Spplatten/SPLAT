@@ -84,6 +84,9 @@ if replay_path:
     print()
 
 managed_binary = os.environ.get("SPLAT_PROBE_DAEMON") if replay is None else None
+# The public HTTPS host section 19d fetches through a lease's proxy. Any name with a public IPv4
+# address that answers TLS on 443 will do; the probe resolves it itself first, as the control.
+EGRESS_HOST = os.environ.get("SPLAT_PROBE_EGRESS_HOST", "example.com")
 managed_process = None
 managed_log = None
 managed_args = None
@@ -143,6 +146,9 @@ if managed_binary:
     probe_policy = json.loads(policy_path.read_text()) if policy_path.exists() else {
         "schema": 1, "allowedExecPrefixes": ["/"]}
     probe_policy["allowScratchExec"] = True
+    # Section 19d's host, added to whatever the installed ceiling names: only a ceiling can grant
+    # hostname egress, so without this the proxy would be refused before it ever started.
+    probe_policy["allowedEgressHosts"] = sorted(set(probe_policy.get("allowedEgressHosts", [])) | {EGRESS_HOST})
     managed_policy = tempfile.NamedTemporaryFile(mode="w", prefix="splat-probe-policy-", suffix=".json")
     json.dump(probe_policy, managed_policy)
     managed_policy.flush()
@@ -905,6 +911,13 @@ feature_checks = dict.fromkeys([
     "ipc_host_controls_work", "ipc_same_lease_allowed", "ipc_lease_to_host_refused",
     "ipc_lease_to_lease_refused", "ipc_host_into_lease_refused", "ipc_netlink_refused_in_lease",
     "ipc_getaddrinfo_survives_netlink_refusal", "ipc_receipts_in_each_lease_session",
+    # Hostname egress (19d, docs/EGRESS-PROXY.md): a lease's proxy carries an allowed host and
+    # nothing else, the kernel admits only that lease's own proxy port, and the receipt is signed.
+    "egress_host_control_reaches", "egress_allowed_host_fetched", "egress_unlisted_host_refused",
+    "egress_direct_dial_refused", "egress_peer_proxy_refused", "egress_receipt_signed_lists_host",
+    # Private /tmp (19e, #43): a lease whose working directory is /tmp gets a fresh tmpfs.
+    "tmp_lease_wrote_its_tmp", "tmp_host_file_invisible_in_lease", "tmp_lease_file_absent_on_host",
+    "tmp_next_lease_starts_empty",
 ], False)
 feature_observations = {"errors": [], "lifecycle_requested": bool(managed_binary)}
 
@@ -2118,6 +2131,205 @@ def probe_local_ipc():
     feature_checks["ipc_receipts_in_each_lease_session"] = (
         {11, 12, 13} <= a_own and {0, 4} <= a_netlink and {11, 12} <= a_from_host and {11, 12} <= b_own)
 
+# Runs inside a lease that names EGRESS_HOST. Role "b" only publishes its own proxy port and waits.
+# Role "a" fetches the host through its proxy, asks the proxy for a name outside its rules, dials
+# the host's address directly, then dials lease B's proxy port once the probe hands it over.
+# TLS is not verified: the jail need not carry a CA bundle, and the property here is which
+# connections the kernel and the proxy carry, not the host's certificate. SNI is still sent,
+# because the proxy refuses a ClientHello that does not name the host it was asked for.
+EGRESS_WORKLOAD = r"""import errno, json, os, socket, ssl, sys, time
+from pathlib import Path
+role, host, address = sys.argv[1], sys.argv[2], sys.argv[3]
+proxy = os.environ.get('HTTPS_PROXY', '')
+here = Path('.')
+def errname(e):
+    return errno.errorcode.get(e.errno, str(e.errno)) if e.errno else type(e).__name__
+def proxy_port():
+    return int(proxy.rsplit(':', 1)[1].strip('/'))
+def publish(name, value):
+    tmp = here / (name + '.tmp')
+    tmp.write_text(json.dumps(value))
+    tmp.rename(here / name)
+def via_proxy(target):
+    s = socket.create_connection(('127.0.0.1', proxy_port()), timeout=10)
+    s.sendall(('CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n' % (target, target)).encode())
+    head = b''
+    while b'\r\n\r\n' not in head:
+        chunk = s.recv(1024)
+        if not chunk:
+            break
+        head += chunk
+    return s, head.split(b'\r\n', 1)[0].decode(errors='replace')
+def wait(path, seconds):
+    deadline = time.time() + seconds
+    while not path.exists() and time.time() < deadline:
+        time.sleep(0.1)
+r = {'proxy': proxy}
+if role == 'b':
+    publish('port.json', {'port': proxy_port()})
+else:
+    r['own_port'] = proxy_port()
+    try:
+        s, status = via_proxy(host + ':443')
+        r['connect_status'] = status
+        if status.split()[1:2] == ['200']:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with ctx.wrap_socket(s, server_hostname=host) as t:
+                t.sendall(('GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n' % host).encode())
+                r['fetch_status'] = t.recv(4096).split(b'\r\n', 1)[0].decode(errors='replace')
+        else:
+            s.close()
+    except Exception as e:
+        r['fetch_error'] = repr(e)
+    try:
+        s, status = via_proxy('unlisted.' + host + ':443')
+        s.close()
+        r['unlisted_status'] = status
+    except Exception as e:
+        r['unlisted_status'] = repr(e)
+    try:
+        socket.create_connection((address, 443), timeout=5).close()
+        r['direct'] = 'ok'
+    except OSError as e:
+        r['direct'] = errname(e)
+    wait(here / 'peer.json', 20)
+    try:
+        peer = json.loads((here / 'peer.json').read_text())['port']
+        r['peer_port'] = peer
+        try:
+            socket.create_connection(('127.0.0.1', peer), timeout=5).close()
+            r['peer'] = 'ok'
+        except OSError as e:
+            r['peer'] = errname(e)
+    except Exception as e:
+        r['peer'] = 'no peer port: ' + repr(e)
+    publish('result.json', r)
+wait(here / 'done', 40)
+"""
+
+def probe_egress_proxy():
+    # docs/EGRESS-PROXY.md, PR #50's four root measurements. Every refusal has a control in the
+    # same run: the host is reachable from this unleased process, and lease A's own proxy carried
+    # it, so a refused direct dial or peer port is the kernel and not an unreachable address.
+    obs = feature_observations["egress_proxy"] = {"host": EGRESS_HOST}
+    addresses = sorted({ai[4][0] for ai in socket.getaddrinfo(EGRESS_HOST, 443, socket.AF_INET, socket.SOCK_STREAM)})
+    obs["addresses"] = addresses
+    if not addresses:
+        raise RuntimeError(EGRESS_HOST + " has no IPv4 address from this guest")
+    address = addresses[0]
+    try:
+        socket.create_connection((address, 443), timeout=10).close()
+        feature_checks["egress_host_control_reaches"] = True
+    except OSError as e:
+        obs["control_error"] = str(e)
+        raise RuntimeError("the guest itself cannot reach %s:443 (%s); nothing below would measure the lease" % (address, e))
+
+    a_ws, b_ws = Path(missions_root) / "probe-egress-a", Path(missions_root) / "probe-egress-b"
+    for ws in (a_ws, b_ws):
+        shutil.rmtree(ws, ignore_errors=True)
+    frames = {"a": [], "b": []}
+    def lease(tag, ws):
+        return threading.Thread(target=lambda: frames[tag].extend(call({
+            "type": "EXECUTE_TOOL", "missionId": "probe-egress-" + tag,
+            "command": "/usr/bin/python3", "argv": ["-c", EGRESS_WORKLOAD, tag, EGRESS_HOST, address],
+            "allowedExecPaths": ["/usr/bin/python3"],
+            "allowNetwork": True, "allowedEgressHosts": [EGRESS_HOST],
+            "workingDirectory": str(ws), "ephemeralWorkspace": True,
+            "leaseDurationSeconds": 60,
+        }, "hostegress-" + tag, settle=30.0) or []))
+    workers = {"a": lease("a", a_ws), "b": lease("b", b_ws)}
+    a = {}
+    try:
+        # B first, so its proxy port is held for the whole of A's attempt on it.
+        workers["b"].start()
+        if not wait_for(lambda: (b_ws / "port.json").is_file(), seconds=20):
+            raise RuntimeError("lease B never published its proxy port")
+        obs["lease_b_port"] = b_port = json.loads((b_ws / "port.json").read_text())["port"]
+        workers["a"].start()
+        if not wait_for(lambda: a_ws.is_dir(), seconds=20):
+            raise RuntimeError("lease A's workspace never appeared")
+        (a_ws / "peer.json").write_text(json.dumps({"port": b_port}))
+        if not wait_for(lambda: (a_ws / "result.json").is_file(), seconds=60):
+            raise RuntimeError("lease A never published what it attempted")
+        obs["lease_a"] = a = json.loads((a_ws / "result.json").read_text())
+    finally:
+        for ws in (a_ws, b_ws):
+            if ws.is_dir():
+                (ws / "done").write_text("")
+        for w in workers.values():
+            if w.is_alive():
+                w.join(timeout=60)
+        for ws in (a_ws, b_ws):
+            shutil.rmtree(ws, ignore_errors=True)
+
+    status = lambda key: (a.get(key) or "").split()[1:2]
+    feature_checks["egress_allowed_host_fetched"] = (
+        status("connect_status") == ["200"] and (a.get("fetch_status") or "").startswith("HTTP/1."))
+    feature_checks["egress_unlisted_host_refused"] = status("unlisted_status") == ["403"]
+    feature_checks["egress_direct_dial_refused"] = a.get("direct") == "EPERM"
+    feature_checks["egress_peer_proxy_refused"] = (
+        a.get("peer") == "EPERM" and a.get("peer_port") == b_port != a.get("own_port"))
+
+    # The receipt: the host carried, and the one refusal, inside the bytes the guest signed - and
+    # an edit naming another host must not verify, or the signature proves nothing.
+    done = exit_frame(frames["a"])
+    obs["lease_a_exit"] = {k: done.get(k) for k in ("exitCode", "egressHosts", "egressRefused", "egressRefusals", "outcomeCanonical")}
+    canonical, signature, key = done.get("outcomeCanonical"), done.get("outcomeSignature"), done.get("outcomePublicKey")
+    carried = EGRESS_HOST + ":443"
+    feature_checks["egress_receipt_signed_lists_host"] = bool(
+        canonical and signature and key
+        and done.get("egressHosts") == [carried] and (done.get("egressRefused") or 0) >= 1
+        and ("|egressHosts=" + carried + "|") in canonical
+        and rsa_pkcs1_verifies(key, canonical.encode("utf-8"), signature)
+        and not rsa_pkcs1_verifies(key, canonical.replace(carried, "unlisted." + carried).encode("utf-8"), signature))
+
+# Runs in a lease whose working directory is /tmp, and reports on stdout: the workspace is that
+# private /tmp, so nothing written there is readable once the lease is gone - which is the point.
+TMP_WORKLOAD = r"""import json, os, sys
+from pathlib import Path
+nonce, mode = sys.argv[1], sys.argv[2]
+mine = Path('/tmp/splat-probe-lease-' + nonce)
+r = {'cwd': os.getcwd(), 'sees_host_file': os.path.exists('/tmp/splat-probe-host-' + nonce),
+     'sees_lease_file': mine.exists()}
+if mode == 'write':
+    mine.write_text('lease')
+    r['wrote'] = mine.read_text() == 'lease'
+print('TMPRESULT ' + json.dumps(r))
+"""
+
+def probe_private_tmp():
+    # #43: a working directory of /tmp used to be the host's own /tmp, bound read-write, so what one
+    # lease left there the next could read. Two leases in turn; this process is the host side and
+    # its own file is the control that the host's /tmp really holds something to hide.
+    obs = feature_observations["private_tmp"] = {}
+    nonce = os.urandom(6).hex()
+    host_file = Path("/tmp/splat-probe-host-" + nonce)
+    lease_file = Path("/tmp/splat-probe-lease-" + nonce)
+    def lease(mode):
+        msgs = call({
+            "type": "EXECUTE_TOOL", "missionId": "probe-tmp-" + mode,
+            "command": "/usr/bin/python3", "argv": ["-c", TMP_WORKLOAD, nonce, mode],
+            "allowedExecPaths": ["/usr/bin/python3"], "workingDirectory": "/tmp",
+        }, "tmp-" + mode, settle=8.0) or []
+        line = next((l for l in stdout_text(msgs).splitlines() if l.startswith("TMPRESULT ")), None)
+        return json.loads(line[len("TMPRESULT "):]) if line else {}
+    try:
+        host_file.write_text("host")
+        obs["host_control"] = host_has_it = host_file.is_file()
+        obs["first"] = first = lease("write")
+        obs["lease_file_on_host"] = on_host = lease_file.exists()
+        obs["second"] = second = lease("read")
+    finally:
+        host_file.unlink(missing_ok=True)
+        lease_file.unlink(missing_ok=True)
+    feature_checks["tmp_lease_wrote_its_tmp"] = first.get("cwd") == "/tmp" and first.get("wrote") is True
+    feature_checks["tmp_host_file_invisible_in_lease"] = (
+        host_has_it and first.get("sees_host_file") is False and second.get("sees_host_file") is False)
+    feature_checks["tmp_lease_file_absent_on_host"] = first.get("wrote") is True and not on_host
+    feature_checks["tmp_next_lease_starts_empty"] = first.get("wrote") is True and second.get("sees_lease_file") is False
+
 def probe_admission_validator():
     """Restart the owned daemon under each validator mode, then put it back as it was.
 
@@ -2222,7 +2434,19 @@ if replay is None and hasattr(os, "geteuid") and os.geteuid() == 0:
         probe_local_ipc()
     except Exception as e:
         feature_observations["errors"].append("local IPC: " + str(e))
+    print("\n== 19e. Private /tmp: a lease working in /tmp sees a fresh tmpfs, never the host's ==")
+    try:
+        probe_private_tmp()
+    except Exception as e:
+        feature_observations["errors"].append("private /tmp: " + str(e))
     if managed_binary:
+        # Only the owned daemon runs under a ceiling this probe wrote, and only a ceiling names
+        # egress hosts; against an installed daemon these checks stay False rather than guess.
+        print("\n== 19d. Hostname egress: the lease's own proxy, an allowed host, and nothing else ==")
+        try:
+            probe_egress_proxy()
+        except Exception as e:
+            feature_observations["errors"].append("egress proxy: " + str(e))
         print("\n== 20. Pins: SIGKILL, surviving denials, restart identity, rejected foreign state ==")
         try:
             probe_pins()
