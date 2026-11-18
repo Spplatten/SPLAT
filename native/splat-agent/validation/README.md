@@ -1,10 +1,13 @@
 # Live-state validation experiment 8.4.2
 
 **Integration status, 2026-10-28:** the audit fixes and research apparatus are now integrated with
-the working tree's 16-byte `lease_state { deadline_ns, epoch }` ABI. Native verification is pending.
-`profile.json` deliberately leaves both expected program tags null: the historical 8-byte-build
-tags cannot certify this build. The gate refuses until tags for the reviewed merged build are
-recorded. The epoch is retained but not used by the current kernel as a generation guarantee.
+the working tree's 16-byte `lease_state { deadline_ns, epoch }` ABI. Step 2's native run is milestone
+run 2 (2026-11-14, PASS, below); the additional native cases of step 3 are still pending.
+Since 2026-11-13 `profile.json` names reviewed tags for BPF `5e218eb1`: exec `c748f2896421d7e6` and
+open `deb61f797da89f40`, the programs the no-gate lifecycle probe loaded in the 2026-11-09 root run.
+Its `reviewStatus` says what was reviewed, by whom, and what was not. The historical 8-byte-build
+tags certify nothing here, and `test_audit_gaps.py` fails while the profile names a source other
+than the one in this tree, so a kernel change needs a new review before the gate admits. The epoch is retained but not used by the current kernel as a generation guarantee.
 See `AUDIT_GAP_PROTOCOL.md` for the authority contract and remaining validation.
 
 **Research harness, not a product feature.** It runs one experiment: does semantic validation of the
@@ -74,6 +77,23 @@ verdict.
 from `3e044a8`, which attaches ten programs. All 8 checks held again, and the frame named all ten
 programs by tag. It is recorded under `admission_validator` in
 [daemon-probe.json](../evidence/daemon-probe.json), outside the verdict.
+
+**Third root run: 2026-11-14T00:51:08Z**, the same section, inside the shipped SPLAT Guest
+(`SplatGuestCheck`, Debian 13), against BPF `5e218eb1` and the daemon from `00c1eae`. All 8 checks
+held, and the frame named all ten programs by tag
+([2026-11-14-splat-guest/daemon-probe.json](../evidence/2026-11-14-splat-guest/daemon-probe.json)).
+
+## Milestone run 2: 2026-11-14, PASS
+
+One `run_unified.sh` in `SplatGuestCheck` on the build of `00c1eae`, as registered in `PROTOCOL.md`:
+- The lifecycle probe passed, including all 30 registered expiry repeats.
+- 8.4.2 classified all 160 runs as expected. A mutated grant passed B2 in 20 of 20 and was refused by B3 in 20 of 20.
+- 8.4.3 classified all 320 runs as expected, plus 60 no-gate baselines.
+- No policy entry was left behind, and all three parts ran one binary on one BPF source.
+
+The gate admitted every correct lease under B3, which it does only when both reviewed tags match.
+The bundle is kept with the thesis evidence, outside this repository. The run does not close the
+audit, because step 3's cases have no driver yet.
 
 Not yet done:
 - an audit-mode census of the catalog;

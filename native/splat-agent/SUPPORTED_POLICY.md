@@ -156,9 +156,15 @@ always say REPLAY.
 > 100 checks at `2026-11-09T18:44:27Z`, and `probe-last-hop.ps1` at `2026-11-09T18:45:04Z`; the daemon
 > and last-hop evidence below is from those runs. Ninety of the checks are the ones the rows above
 > cite against `d5bb4cad`, the program before this one, and all of them held again. Ten are new:
-> cross-lease isolation and inherited descriptors. The program has not yet run inside the shipped
-> SPLAT Guest. The run's section 23, recorded apart from its verdict, is the native admission
-> validator's second root run ([validation/README.md](validation/README.md)).
+> cross-lease isolation and inherited descriptors. The run's section 23, recorded apart from its
+> verdict, is the native admission validator's second root run ([validation/README.md](validation/README.md)).
+>
+> **The same program inside the shipped SPLAT Guest, under root on 2026-11-14** (Debian 13, archive
+> `9c5fab83`), with the daemon built from `00c1eae`, which carries the `/tmp` jail change:
+> `probe-daemon.sh` records PASS over 101 checks at `2026-11-14T00:51:08Z`, including its 30-run
+> expiry series ([that record](evidence/2026-11-14-splat-guest/daemon-probe.json)). No last-hop run went
+> with it, and no check measures the `/tmp` change, so the row on what a lease leaves behind stands.
+> The rows above cite the Ubuntu run.
 >
 > **Before that, under root on 2026-11-08 in Ubuntu 26.04.1, against `d5bb4cad` and the daemon built
 > from `dfeed53`:** PASS over 90 checks at `2026-11-08T07:02:35Z`, and the last hop at

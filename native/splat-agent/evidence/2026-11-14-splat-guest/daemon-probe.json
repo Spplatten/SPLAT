@@ -1,0 +1,1700 @@
+{
+  "schema": 4,
+  "bpf_source_sha256": "5e218eb155e971516c21dffbdd10a4cf4ea80fd789dac56a3a9d221c98557d2d",
+  "kernel_release": "6.18.33.2-microsoft-standard-WSL2",
+  "guest_os": "Debian GNU/Linux 13 (trixie)",
+  "daemon_binary_sha256": "1b29eb16a1eb98393e5e1972dcb3f46836440daf60cca3ea7984b52c819a56b9",
+  "protocol_version": 3,
+  "recorded_utc": "2026-11-14T00:51:08Z",
+  "subject": "splat-agent daemon (end-to-end over the JSON protocol)",
+  "root_feature_observations": {
+    "errors": [],
+    "lifecycle_requested": true,
+    "scratch_exec_frames": [
+      {
+        "cgroupId": 6303,
+        "cgroupPath": "/sys/fs/cgroup/splat_leases/mission_probe-exec-splat-probe-exec-vltuq153",
+        "effectivePolicySha256": "27c6c3e5b32e3621339db45758ee516489dd689dda5de5e083581f32bfe0df57",
+        "enforcing": true,
+        "environmentMode": "explicit",
+        "jailed": true,
+        "limits": {
+          "maxCpuPercent": 50,
+          "maxMemoryBytes": 268435456,
+          "maxPids": 100
+        },
+        "limitsReadBack": true,
+        "missionId": "probe-exec-splat-probe-exec-vltuq153",
+        "processOutput": "streamed",
+        "readOnlyFs": false,
+        "secretStdin": false,
+        "type": "LEASE",
+        "workloadUid": 2000000,
+        "workspace": "/tmp/splat-probe-exec-vltuq153",
+        "workspaceCreated": false
+      },
+      {
+        "data": "SCRATCH_INSIDE\n",
+        "type": "STDOUT"
+      },
+      {
+        "cgroupId": 6303,
+        "comm": "python3",
+        "detail": 3,
+        "detailText": "bprm_check_security: denied execution of unleased binary (inode 3)",
+        "hook": 1,
+        "ktimeNs": 49729396288,
+        "pid": 351,
+        "seq": 11,
+        "timestampMs": 1794617008595,
+        "type": "VIOLATION"
+      },
+      {
+        "cgroupId": 6303,
+        "comm": "python3",
+        "detail": 3,
+        "detailText": "bprm_check_security: denied execution of unleased binary (inode 3)",
+        "hook": 1,
+        "ktimeNs": 49730097708,
+        "pid": 352,
+        "seq": 12,
+        "timestampMs": 1794617008596,
+        "type": "VIOLATION"
+      },
+      {
+        "data": "SCRATCH_OUTSIDE_DENIED\n",
+        "type": "STDOUT"
+      },
+      {
+        "cgroupId": 6303,
+        "comm": "python3",
+        "detail": 3,
+        "detailText": "bprm_check_security: denied execution of unleased binary (inode 3)",
+        "hook": 1,
+        "ktimeNs": 49773937726,
+        "pid": 354,
+        "seq": 13,
+        "timestampMs": 1794617008639,
+        "type": "VIOLATION"
+      },
+      {
+        "data": "SCRATCH_FD_SCOPED\n",
+        "type": "STDOUT"
+      },
+      {
+        "exitCode": 0,
+        "outcomeCanonical": "splat-lease-outcome/1|mission=probe-exec-splat-probe-exec-vltuq153|cgroup=6303|enforcing=true|uid=2000000|exit=0|counted=3|reported=3|dropped=0|workspace=|workspaceRemoved=n/a",
+        "outcomeKeyId": "b0f2222744b3f2542a43d0a3e90caa71cdb99908d9e0c624ea712e5f1547a505",
+        "outcomePublicKey": "MIIBCgKCAQEAxiezMIDUE8fH4L52bvqMzvcnYf5ke86ezXkVrIoVk3Lr4p7AiBDoXZc6KXDjG4fXCEtRtdwf//WQ+VUkYJqzWRjtt1oDPUURlZESvTRWjokSaPCstBzxFwiMwn8EW7SLY5jK/CEaieosnzNkVykLJy06gcAzP1AAns9qrcJq1zVmSeyjsby2RRraqqpylFZhYP4UKtIuLDlYy2jlo6gbK3NiC2rHn0RypIBGy7Rxwhufy7wwEKnwf89yyEtzLWKQPXBWnY81VgqqE/fh/TAGkjvsQw7R8rQ3X3I+f+pEVQVR+Wbt5MBYm8mL6fWw8zx/V4ZkYx86VoJes7oRjSMQ0QIDAQAB",
+        "outcomeSignature": "dqahAhQON51bK0CszacZNSMX4Gyl1TnDhrLLn+eipsYuMK3iE8yPseSGCLyJ0oFW9kevkz7qqLt2WaWsm+M784azloGbvZ96YCUBzIgrIx/SKvvqeFTp/ohdUjIoSSmeOYsW8JhgpocxzUMvGHhaQvjNiSilEv2JL0QAUTBIy30fYlZUvwZmavqvxfzT0jh2RHLKBm7U7/EY1b0e8OjaxuF1btJEXa+5cvOQxfRJiF/BdBR3yGtQZbGWt/KhaMz32aAPVo4lBg/a6AxdeFzd6nt3YHzXXW0g9M+3lHxwvVxlkATdXYOPi0PPGmTExarVlSjDUCfRfqImhnCM9zoHww==",
+        "type": "EXIT",
+        "violationsComplete": true,
+        "violationsCounted": 3,
+        "violationsDropped": 0,
+        "violationsReported": 3
+      }
+    ],
+    "inherited_fds": "0,1,2",
+    "cross_lease": {
+      "peer_pid": 396,
+      "peer_uid_on_host": "2000000",
+      "attacker_stdout": "CONTROL_OK\n SELF_UID=2000001\n PEER_STATUS_FAIL=2\n KILL0_FAIL=1\n LINK_cwd_FAIL=2\n LINK_root_FAIL=2\n PEER_READ_FAIL=2\n PEER_WRITE_FAIL=2\n",
+      "injected_file_present_on_host": false,
+      "self_uid": "2000001"
+    },
+    "cross_lease_hooks": {
+      "b_pid": 401,
+      "yama_ptrace_scope": "1",
+      "lease_a_cgroup_id": 6533,
+      "from_lease_a": {
+        "ops": {
+          "kill0": "EPERM",
+          "signal": "EPERM",
+          "proc_cwd": "EACCES",
+          "proc_environ": "EACCES",
+          "vm_read": "EPERM",
+          "setpriority": "EPERM",
+          "setaffinity": "EPERM",
+          "ioprio_set": "EPERM",
+          "prlimit": "EPERM",
+          "ptrace_seize": "EPERM"
+        },
+        "capEff": "000001bfffdfffff"
+      },
+      "signals_after_lease_a": 0,
+      "unleased_control": {
+        "ops": {
+          "kill0": "ok",
+          "signal": "ok",
+          "proc_cwd": "ok",
+          "proc_environ": "ok",
+          "vm_read": "ok",
+          "setpriority": "ok",
+          "setaffinity": "ok",
+          "ioprio_set": "ok",
+          "prlimit": "ok",
+          "ptrace_seize": "ok"
+        },
+        "capEff": "000001bfffdfffff"
+      },
+      "signals_after_unleased": 1,
+      "same_cgroup_control": {
+        "ops": {
+          "kill0": "ok",
+          "signal": "ok",
+          "proc_cwd": "ok",
+          "proc_environ": "ok",
+          "vm_read": "ok",
+          "setpriority": "ok",
+          "setaffinity": "ok",
+          "ioprio_set": "ok",
+          "prlimit": "ok",
+          "ptrace_seize": "ok"
+        },
+        "capEff": "000001bfffdfffff"
+      },
+      "signals_after_same_cgroup": 2,
+      "lease_a_frames": [
+        {
+          "type": "VIOLATION",
+          "hook": 6,
+          "detail": 401,
+          "cgroupId": 6533
+        },
+        {
+          "type": "VIOLATION",
+          "hook": 6,
+          "detail": 401,
+          "cgroupId": 6533
+        },
+        {
+          "type": "VIOLATION",
+          "hook": 5,
+          "detail": 401,
+          "cgroupId": 6533
+        },
+        {
+          "type": "VIOLATION",
+          "hook": 5,
+          "detail": 401,
+          "cgroupId": 6533
+        },
+        {
+          "type": "VIOLATION",
+          "hook": 5,
+          "detail": 401,
+          "cgroupId": 6533
+        },
+        {
+          "type": "VIOLATION",
+          "hook": 8,
+          "detail": 401,
+          "cgroupId": 6533
+        },
+        {
+          "type": "VIOLATION",
+          "hook": 7,
+          "detail": 401,
+          "cgroupId": 6533
+        },
+        {
+          "type": "VIOLATION",
+          "hook": 9,
+          "detail": 401,
+          "cgroupId": 6533
+        },
+        {
+          "type": "VIOLATION",
+          "hook": 10,
+          "detail": 401,
+          "cgroupId": 6533
+        },
+        {
+          "type": "VIOLATION",
+          "hook": 5,
+          "detail": 401,
+          "cgroupId": 6533
+        },
+        {
+          "type": "EXIT",
+          "exitCode": 0,
+          "violationsReported": 10,
+          "violationsCounted": 10,
+          "violationsComplete": true
+        }
+      ],
+      "lease_a_violation_hooks_naming_b": [
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "daemon_log_cross_lease": [
+        "\u001b[2m2026-11-14T00:43:47.035813Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Kernel -EPERM violation (cgroup 6533, hook 0x6, ktime 68169826077 ns, seq 15): task_kill: denied signalling a task outside the lease (target pid 401)",
+        "\u001b[2m2026-11-14T00:43:47.035846Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Kernel -EPERM violation (cgroup 6533, hook 0x6, ktime 68169857557 ns, seq 16): task_kill: denied signalling a task outside the lease (target pid 401)",
+        "\u001b[2m2026-11-14T00:43:47.035849Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Kernel -EPERM violation (cgroup 6533, hook 0x5, ktime 68169868395 ns, seq 17): ptrace_access_check: denied inspecting a task outside the lease (target pid 401)",
+        "\u001b[2m2026-11-14T00:43:47.035851Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Kernel -EPERM violation (cgroup 6533, hook 0x5, ktime 68169876685 ns, seq 18): ptrace_access_check: denied inspecting a task outside the lease (target pid 401)",
+        "\u001b[2m2026-11-14T00:43:47.035855Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Kernel -EPERM violation (cgroup 6533, hook 0x5, ktime 68169903443 ns, seq 19): ptrace_access_check: denied inspecting a task outside the lease (target pid 401)",
+        "\u001b[2m2026-11-14T00:43:47.035857Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Kernel -EPERM violation (cgroup 6533, hook 0x8, ktime 68169908785 ns, seq 20): task_setnice: denied renicing a task outside the lease (target pid 401)",
+        "\u001b[2m2026-11-14T00:43:47.035858Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Kernel -EPERM violation (cgroup 6533, hook 0x7, ktime 68169913641 ns, seq 21): task_setscheduler: denied rescheduling a task outside the lease (target pid 401)",
+        "14T00:43:47.035859Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Kernel -EPERM violation (cgroup 6533, hook 0x9, ktime 68169919151 ns, seq 22): task_setioprio: denied changing the I/O priority of a task outside the lease (target pid 401)",
+        "26-11-14T00:43:47.035861Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Kernel -EPERM violation (cgroup 6533, hook 0xa, ktime 68169923418 ns, seq 23): task_setrlimit: denied changing the limits of a task outside the lease (target pid 401)",
+        "\u001b[2m2026-11-14T00:43:47.035862Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Kernel -EPERM violation (cgroup 6533, hook 0x5, ktime 68169926513 ns, seq 24): ptrace_access_check: denied inspecting a task outside the lease (target pid 401)"
+      ]
+    },
+    "pin_directory": "/sys/fs/bpf/splat/5e218eb155e971516c21dffbdd10a4cf4ea80fd789dac56a3a9d221c98557d2d",
+    "pin_ids_before": {
+      "link_splat_bprm_check": {
+        "id": 11,
+        "prog_id": 80
+      },
+      "link_splat_file_open": {
+        "id": 12,
+        "prog_id": 81
+      },
+      "link_splat_ptrace_access": {
+        "id": 15,
+        "prog_id": 84
+      },
+      "link_splat_socket_connect": {
+        "id": 13,
+        "prog_id": 82
+      },
+      "link_splat_socket_sendmsg": {
+        "id": 14,
+        "prog_id": 83
+      },
+      "link_splat_task_kill": {
+        "id": 16,
+        "prog_id": 85
+      },
+      "link_splat_task_setioprio": {
+        "id": 19,
+        "prog_id": 88
+      },
+      "link_splat_task_setnice": {
+        "id": 18,
+        "prog_id": 87
+      },
+      "link_splat_task_setrlimit": {
+        "id": 20,
+        "prog_id": 89
+      },
+      "link_splat_task_setsched": {
+        "id": 17,
+        "prog_id": 86
+      },
+      "map_allowed_connect_ipv4": {
+        "id": 35
+      },
+      "map_allowed_exec_inodes": {
+        "id": 33
+      },
+      "map_counters": {
+        "id": 30
+      },
+      "map_leased_cgroups": {
+        "id": 31
+      },
+      "map_protected_inodes": {
+        "id": 32
+      },
+      "map_scratch_exec_devs": {
+        "id": 34
+      },
+      "map_violation_counts": {
+        "id": 37
+      },
+      "map_violations": {
+        "id": 36
+      }
+    },
+    "daemon_binary_sha256": "1b29eb16a1eb98393e5e1972dcb3f46836440daf60cca3ea7984b52c819a56b9",
+    "pin_control_distinct_inode": true,
+    "pin_workload_before": {
+      "allowed": true,
+      "exec_denied": true,
+      "file_denied": true
+    },
+    "pin_workload_after": {
+      "allowed": true,
+      "exec_denied": true,
+      "file_denied": true
+    },
+    "pin_ids_after_sigkill": {
+      "link_splat_bprm_check": {
+        "id": 11,
+        "prog_id": 80
+      },
+      "link_splat_file_open": {
+        "id": 12,
+        "prog_id": 81
+      },
+      "link_splat_ptrace_access": {
+        "id": 15,
+        "prog_id": 84
+      },
+      "link_splat_socket_connect": {
+        "id": 13,
+        "prog_id": 82
+      },
+      "link_splat_socket_sendmsg": {
+        "id": 14,
+        "prog_id": 83
+      },
+      "link_splat_task_kill": {
+        "id": 16,
+        "prog_id": 85
+      },
+      "link_splat_task_setioprio": {
+        "id": 19,
+        "prog_id": 88
+      },
+      "link_splat_task_setnice": {
+        "id": 18,
+        "prog_id": 87
+      },
+      "link_splat_task_setrlimit": {
+        "id": 20,
+        "prog_id": 89
+      },
+      "link_splat_task_setsched": {
+        "id": 17,
+        "prog_id": 86
+      },
+      "map_allowed_connect_ipv4": {
+        "id": 35
+      },
+      "map_allowed_exec_inodes": {
+        "id": 33
+      },
+      "map_counters": {
+        "id": 30
+      },
+      "map_leased_cgroups": {
+        "id": 31
+      },
+      "map_protected_inodes": {
+        "id": 32
+      },
+      "map_scratch_exec_devs": {
+        "id": 34
+      },
+      "map_violation_counts": {
+        "id": 37
+      },
+      "map_violations": {
+        "id": 36
+      }
+    },
+    "pin_ids_after_restart": {
+      "link_splat_bprm_check": {
+        "id": 11,
+        "prog_id": 80
+      },
+      "link_splat_file_open": {
+        "id": 12,
+        "prog_id": 81
+      },
+      "link_splat_ptrace_access": {
+        "id": 15,
+        "prog_id": 84
+      },
+      "link_splat_socket_connect": {
+        "id": 13,
+        "prog_id": 82
+      },
+      "link_splat_socket_sendmsg": {
+        "id": 14,
+        "prog_id": 83
+      },
+      "link_splat_task_kill": {
+        "id": 16,
+        "prog_id": 85
+      },
+      "link_splat_task_setioprio": {
+        "id": 19,
+        "prog_id": 88
+      },
+      "link_splat_task_setnice": {
+        "id": 18,
+        "prog_id": 87
+      },
+      "link_splat_task_setrlimit": {
+        "id": 20,
+        "prog_id": 89
+      },
+      "link_splat_task_setsched": {
+        "id": 17,
+        "prog_id": 86
+      },
+      "map_allowed_connect_ipv4": {
+        "id": 35
+      },
+      "map_allowed_exec_inodes": {
+        "id": 33
+      },
+      "map_counters": {
+        "id": 30
+      },
+      "map_leased_cgroups": {
+        "id": 31
+      },
+      "map_protected_inodes": {
+        "id": 32
+      },
+      "map_scratch_exec_devs": {
+        "id": 34
+      },
+      "map_violation_counts": {
+        "id": 37
+      },
+      "map_violations": {
+        "id": 36
+      }
+    },
+    "pin_startup_refusals": {
+      "foreign or incomplete BPF pin set": {
+        "exit_code": 1,
+        "log": "\u001b[2m2026-11-14T00:44:03.489811Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Starting SPLAT Resident eBPF Containment Daemon on 127.0.0.1:50051\n\u001b[2m2026-11-14T00:44:03.489873Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Initializing in-kernel BPF-LSM capability lease skeleton...\n\u001b[2m2026-11-14T00:44:03.490123Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Failed to establish pinned BPF-LSM enforcement: foreign or incomplete BPF pin set: /sys/fs/bpf/splat/0000000000000000000000000000000000000000000000000000000000000000 (expected 5e218eb155e971516c21dffbdd10a4cf4ea80fd789dac56a3a9d221c98557d2d)\n\u001b[2m2026-11-14T00:44:03.490151Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Refusing to start: BPF-LSM enforcement could not be verified. Check the kernel and pin-set error above; --mock-bpf explicitly runs without containment.\n"
+      },
+      "incomplete BPF pin set": {
+        "exit_code": 1,
+        "log": "\u001b[2m2026-11-14T00:44:03.505232Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Starting SPLAT Resident eBPF Containment Daemon on 127.0.0.1:50051\n\u001b[2m2026-11-14T00:44:03.505292Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Initializing in-kernel BPF-LSM capability lease skeleton...\n\u001b[2m2026-11-14T00:44:03.505749Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Failed to establish pinned BPF-LSM enforcement: incomplete BPF pin set at /sys/fs/bpf/splat/5e218eb155e971516c21dffbdd10a4cf4ea80fd789dac56a3a9d221c98557d2d\n\u001b[2m2026-11-14T00:44:03.505758Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Refusing to start: BPF-LSM enforcement could not be verified. Check the kernel and pin-set error above; --mock-bpf explicitly runs without containment.\n"
+      },
+      "pinned hook does not match": {
+        "exit_code": 1,
+        "log": "\u001b[2m2026-11-14T00:44:03.517126Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Starting SPLAT Resident eBPF Containment Daemon on 127.0.0.1:50051\n\u001b[2m2026-11-14T00:44:03.517193Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Initializing in-kernel BPF-LSM capability lease skeleton...\n\u001b[2m2026-11-14T00:44:03.564737Z\u001b[0m \u001b[33m WARN\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Failed to establish pinned BPF-LSM enforcement: pinned hook does not match this program and its maps: /sys/fs/bpf/splat/5e218eb155e971516c21dffbdd10a4cf4ea80fd789dac56a3a9d221c98557d2d/link_splat_bprm_check\n\u001b[2m2026-11-14T00:44:03.564763Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2msplat_agent\u001b[0m\u001b[2m:\u001b[0m Refusing to start: BPF-LSM enforcement could not be verified. Check the kernel and pin-set error above; --mock-bpf explicitly runs without containment.\n"
+      }
+    },
+    "expiry_outage": {
+      "deadline_ns": 92814432750,
+      "ready": {
+        "phase": "ready",
+        "exec_ok": true,
+        "open_ok": true,
+        "connect_ok": true,
+        "send_ok": true
+      },
+      "done": {
+        "phase": "done",
+        "allowed_after_kill": true,
+        "first_exec_denied_ns": 92814837802,
+        "first_open_denied_ns": 92814851610,
+        "last_open_allowed_start_ns": 92814431246,
+        "first_open_denied_end_ns": 92814462935,
+        "connect_after": false,
+        "send_after": false
+      },
+      "overrun_ms": 0.405052,
+      "lease_seconds": 8,
+      "kill_boot_ns": 84919994845,
+      "outage_before_deadline_ms": 7894.437905,
+      "bracket_us": 31.689,
+      "boot_minus_mono_ns": -278,
+      "kernel_first_open_refusal_boot_ns": 92814435987,
+      "kernel_first_exec_refusal_boot_ns": null,
+      "kernel_open_refusal_after_deadline_us": 3.237,
+      "kernel_counted_denials": 5,
+      "drained_denials": 5,
+      "ring_drops_during_outage": 0,
+      "drained_by_hook": {
+        "0x102": 3,
+        "0x103": 1,
+        "0x104": 1
+      },
+      "kernel_connect_refusal_after_deadline_us": 20584.468,
+      "kernel_sendmsg_refusal_after_deadline_us": 20677.648,
+      "restart_listening_ms": 50.81526,
+      "restart_to_orphan_drained_ms": 50.891062
+    },
+    "expiry_reaper": {
+      "deadline_ns": 97899332306,
+      "emptied_boot_ns": 98895720214,
+      "deadline_to_processes_ended_ms": 996.387908,
+      "reaper_tick_ms": 1000
+    },
+    "expiry_series": [
+      {
+        "outage_before_deadline_ms": 7894.437905,
+        "bracket_us": 31.689,
+        "kernel_open_refusal_after_deadline_us": 3.237,
+        "kernel_connect_refusal_after_deadline_us": 20584.468,
+        "kernel_sendmsg_refusal_after_deadline_us": 20677.648,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.891062,
+        "reaper_deadline_to_processes_ended_ms": 996.387908,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7843.787302,
+        "bracket_us": 59.035,
+        "kernel_open_refusal_after_deadline_us": 8.228,
+        "kernel_connect_refusal_after_deadline_us": 21198.093,
+        "kernel_sendmsg_refusal_after_deadline_us": 21271.074,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 101.91901,
+        "reaper_deadline_to_processes_ended_ms": 983.588447,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7793.859064,
+        "bracket_us": 70.871,
+        "kernel_open_refusal_after_deadline_us": 9.16,
+        "kernel_connect_refusal_after_deadline_us": 21503.124,
+        "kernel_sendmsg_refusal_after_deadline_us": 21586.519,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 153.337734,
+        "reaper_deadline_to_processes_ended_ms": 953.054973,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7738.92088,
+        "bracket_us": 1089.933,
+        "kernel_open_refusal_after_deadline_us": 214.905,
+        "kernel_connect_refusal_after_deadline_us": 63065.68,
+        "kernel_sendmsg_refusal_after_deadline_us": 63212.118,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 154.308271,
+        "reaper_deadline_to_processes_ended_ms": 979.948686,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7947.666926,
+        "bracket_us": 114.634,
+        "kernel_open_refusal_after_deadline_us": 5.863,
+        "kernel_connect_refusal_after_deadline_us": 21322.181,
+        "kernel_sendmsg_refusal_after_deadline_us": 21452.421,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 102.574793,
+        "reaper_deadline_to_processes_ended_ms": 988.889551,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.077864,
+        "bracket_us": 50.444,
+        "kernel_open_refusal_after_deadline_us": 7.025,
+        "kernel_connect_refusal_after_deadline_us": 20914.361,
+        "kernel_sendmsg_refusal_after_deadline_us": 20993.164,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 101.912902,
+        "reaper_deadline_to_processes_ended_ms": 981.303967,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.571787,
+        "bracket_us": 23.116,
+        "kernel_open_refusal_after_deadline_us": 2.18,
+        "kernel_connect_refusal_after_deadline_us": 20575.679,
+        "kernel_sendmsg_refusal_after_deadline_us": 20614.569,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.504027,
+        "reaper_deadline_to_processes_ended_ms": 991.451259,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.961765,
+        "bracket_us": 44.91,
+        "kernel_open_refusal_after_deadline_us": 3.71,
+        "kernel_connect_refusal_after_deadline_us": 20464.817,
+        "kernel_sendmsg_refusal_after_deadline_us": 20483.686,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.613897,
+        "reaper_deadline_to_processes_ended_ms": 992.152925,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.465226,
+        "bracket_us": 23.783,
+        "kernel_open_refusal_after_deadline_us": 1.98,
+        "kernel_connect_refusal_after_deadline_us": 20454.07,
+        "kernel_sendmsg_refusal_after_deadline_us": 20479.894,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.648501,
+        "reaper_deadline_to_processes_ended_ms": 991.727945,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.793287,
+        "bracket_us": 28.97,
+        "kernel_open_refusal_after_deadline_us": 3.797,
+        "kernel_connect_refusal_after_deadline_us": 20720.55,
+        "kernel_sendmsg_refusal_after_deadline_us": 20754.295,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.636959,
+        "reaper_deadline_to_processes_ended_ms": 992.136284,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7947.475908,
+        "bracket_us": 22.078,
+        "kernel_open_refusal_after_deadline_us": 2.688,
+        "kernel_connect_refusal_after_deadline_us": 20562.554,
+        "kernel_sendmsg_refusal_after_deadline_us": 20589.977,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.873482,
+        "reaper_deadline_to_processes_ended_ms": 991.883438,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.906228,
+        "bracket_us": 22.084,
+        "kernel_open_refusal_after_deadline_us": 2.349,
+        "kernel_connect_refusal_after_deadline_us": 20759.315,
+        "kernel_sendmsg_refusal_after_deadline_us": 20781.809,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.611564,
+        "reaper_deadline_to_processes_ended_ms": 992.365325,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.401299,
+        "bracket_us": 33.657,
+        "kernel_open_refusal_after_deadline_us": 3.989,
+        "kernel_connect_refusal_after_deadline_us": 20649.332,
+        "kernel_sendmsg_refusal_after_deadline_us": 20683.672,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.649904,
+        "reaper_deadline_to_processes_ended_ms": 993.170495,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.276533,
+        "bracket_us": 22.965,
+        "kernel_open_refusal_after_deadline_us": 2.934,
+        "kernel_connect_refusal_after_deadline_us": 20608.129,
+        "kernel_sendmsg_refusal_after_deadline_us": 20631.62,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.503786,
+        "reaper_deadline_to_processes_ended_ms": 994.426042,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7947.500769,
+        "bracket_us": 56.676,
+        "kernel_open_refusal_after_deadline_us": 6.474,
+        "kernel_connect_refusal_after_deadline_us": 20996.1,
+        "kernel_sendmsg_refusal_after_deadline_us": 21060.895,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 153.288975,
+        "reaper_deadline_to_processes_ended_ms": 956.592072,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7895.011837,
+        "bracket_us": 28.639,
+        "kernel_open_refusal_after_deadline_us": 2.354,
+        "kernel_connect_refusal_after_deadline_us": 20739.385,
+        "kernel_sendmsg_refusal_after_deadline_us": 20776.967,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.777763,
+        "reaper_deadline_to_processes_ended_ms": 996.400106,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.362335,
+        "bracket_us": 22.343,
+        "kernel_open_refusal_after_deadline_us": 1.875,
+        "kernel_connect_refusal_after_deadline_us": 20560.541,
+        "kernel_sendmsg_refusal_after_deadline_us": 20584.368,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.554451,
+        "reaper_deadline_to_processes_ended_ms": 992.516475,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.483383,
+        "bracket_us": 32.522,
+        "kernel_open_refusal_after_deadline_us": 4.73,
+        "kernel_connect_refusal_after_deadline_us": 20815.803,
+        "kernel_sendmsg_refusal_after_deadline_us": 20844.43,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.589334,
+        "reaper_deadline_to_processes_ended_ms": 992.611862,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7947.681039,
+        "bracket_us": 30.3,
+        "kernel_open_refusal_after_deadline_us": 2.729,
+        "kernel_connect_refusal_after_deadline_us": 20609.22,
+        "kernel_sendmsg_refusal_after_deadline_us": 20632.029,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.978447,
+        "reaper_deadline_to_processes_ended_ms": 993.328265,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.2234,
+        "bracket_us": 93.358,
+        "kernel_open_refusal_after_deadline_us": 39.746,
+        "kernel_connect_refusal_after_deadline_us": 20776.622,
+        "kernel_sendmsg_refusal_after_deadline_us": 20828.875,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.932191,
+        "reaper_deadline_to_processes_ended_ms": 999.32687,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7894.163174,
+        "bracket_us": 72.399,
+        "kernel_open_refusal_after_deadline_us": 9.806,
+        "kernel_connect_refusal_after_deadline_us": 21508.228,
+        "kernel_sendmsg_refusal_after_deadline_us": 21594.547,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 102.639325,
+        "reaper_deadline_to_processes_ended_ms": 996.818601,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7896.95507,
+        "bracket_us": 197.343,
+        "kernel_open_refusal_after_deadline_us": 52.225,
+        "kernel_connect_refusal_after_deadline_us": 21509.608,
+        "kernel_sendmsg_refusal_after_deadline_us": 21557.22,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 101.349222,
+        "reaper_deadline_to_processes_ended_ms": 953.712667,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7896.486311,
+        "bracket_us": 29.977,
+        "kernel_open_refusal_after_deadline_us": 2.183,
+        "kernel_connect_refusal_after_deadline_us": 20811.881,
+        "kernel_sendmsg_refusal_after_deadline_us": 20844.839,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.76402,
+        "reaper_deadline_to_processes_ended_ms": 993.232337,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.180217,
+        "bracket_us": 47.549,
+        "kernel_open_refusal_after_deadline_us": 2.658,
+        "kernel_connect_refusal_after_deadline_us": 20723.061,
+        "kernel_sendmsg_refusal_after_deadline_us": 20742.524,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 51.226891,
+        "reaper_deadline_to_processes_ended_ms": 991.438298,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.208745,
+        "bracket_us": 25.639,
+        "kernel_open_refusal_after_deadline_us": 2.581,
+        "kernel_connect_refusal_after_deadline_us": 20480.996,
+        "kernel_sendmsg_refusal_after_deadline_us": 20511.794,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.613362,
+        "reaper_deadline_to_processes_ended_ms": 994.896147,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7947.842305,
+        "bracket_us": 28.712,
+        "kernel_open_refusal_after_deadline_us": 3.232,
+        "kernel_connect_refusal_after_deadline_us": 20582.187,
+        "kernel_sendmsg_refusal_after_deadline_us": 20637.081,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.709578,
+        "reaper_deadline_to_processes_ended_ms": 991.935116,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7897.615087,
+        "bracket_us": 34.84,
+        "kernel_open_refusal_after_deadline_us": 4.113,
+        "kernel_connect_refusal_after_deadline_us": 20520.27,
+        "kernel_sendmsg_refusal_after_deadline_us": 20559.99,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.68765,
+        "reaper_deadline_to_processes_ended_ms": 1000.119226,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.722794,
+        "bracket_us": 37.357,
+        "kernel_open_refusal_after_deadline_us": 3.661,
+        "kernel_connect_refusal_after_deadline_us": 20750.133,
+        "kernel_sendmsg_refusal_after_deadline_us": 20782.373,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.607024,
+        "reaper_deadline_to_processes_ended_ms": 994.363875,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.616095,
+        "bracket_us": 37.632,
+        "kernel_open_refusal_after_deadline_us": 4.544,
+        "kernel_connect_refusal_after_deadline_us": 20770.027,
+        "kernel_sendmsg_refusal_after_deadline_us": 20803.227,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 51.084492,
+        "reaper_deadline_to_processes_ended_ms": 990.971871,
+        "checks_held": true,
+        "failed_checks": []
+      },
+      {
+        "outage_before_deadline_ms": 7948.519849,
+        "bracket_us": 24.036,
+        "kernel_open_refusal_after_deadline_us": 2.422,
+        "kernel_connect_refusal_after_deadline_us": 20485.444,
+        "kernel_sendmsg_refusal_after_deadline_us": 20513.112,
+        "kernel_counted_denials": 5,
+        "drained_denials": 5,
+        "ring_drops_during_outage": 0,
+        "restart_to_orphan_drained_ms": 50.752671,
+        "reaper_deadline_to_processes_ended_ms": 993.493279,
+        "checks_held": true,
+        "failed_checks": []
+      }
+    ]
+  },
+  "admission_validator": {
+    "checks": {
+      "enforce_admits_a_correct_lease": true,
+      "admitted_lease_ran": true,
+      "frame_names_all_ten_programs": true,
+      "scratch_exec_refused_as_indeterminate": true,
+      "dev_encoding_refused": true,
+      "decoy_exec_map_refused": true,
+      "audit_admits_and_records": true,
+      "daemon_restored": true
+    },
+    "observations": {
+      "errors": [],
+      "root_fs_magic": "ef53",
+      "enforce": {
+        "admitted": true,
+        "attempts": 1,
+        "bpfSourceSha256": "5e218eb155e971516c21dffbdd10a4cf4ea80fd789dac56a3a9d221c98557d2d",
+        "counts": {
+          "exec": 1,
+          "ipv4": 0,
+          "mapOccupancy": {
+            "allowedExec": 1,
+            "allowedIpv4": 0,
+            "protected": 3
+          },
+          "protected": 3
+        },
+        "decision": "the installed lease is the approved one",
+        "enforced": true,
+        "indeterminate": [],
+        "mapIds": {
+          "allowedExec": 33,
+          "allowedIpv4": 35,
+          "leasedCgroups": 31,
+          "protected": 32,
+          "scratchExec": 34
+        },
+        "mode": "enforce",
+        "notes": [],
+        "programs": [
+          {
+            "hook": "bprmCheck",
+            "linkId": 11,
+            "progId": 80,
+            "tag": "c748f2896421d7e6"
+          },
+          {
+            "hook": "fileOpen",
+            "linkId": 12,
+            "progId": 81,
+            "tag": "deb61f797da89f40"
+          },
+          {
+            "hook": "socketConnect",
+            "linkId": 13,
+            "progId": 82,
+            "tag": "abbae16ea78e9adf"
+          },
+          {
+            "hook": "socketSendmsg",
+            "linkId": 14,
+            "progId": 83,
+            "tag": "dca691bdecf5b41c"
+          },
+          {
+            "hook": "ptraceAccess",
+            "linkId": 15,
+            "progId": 84,
+            "tag": "b6afb29933e2a643"
+          },
+          {
+            "hook": "taskKill",
+            "linkId": 16,
+            "progId": 85,
+            "tag": "179d8c81decb8aab"
+          },
+          {
+            "hook": "taskSetsched",
+            "linkId": 17,
+            "progId": 86,
+            "tag": "a6dceb93ddf7d648"
+          },
+          {
+            "hook": "taskSetnice",
+            "linkId": 18,
+            "progId": 87,
+            "tag": "1824d4172bd2dd23"
+          },
+          {
+            "hook": "taskSetioprio",
+            "linkId": 19,
+            "progId": 88,
+            "tag": "9fd35044e5444b62"
+          },
+          {
+            "hook": "taskSetrlimit",
+            "linkId": 20,
+            "progId": 89,
+            "tag": "98fd8aa2d68e065c"
+          }
+        ],
+        "reasons": [],
+        "snapshotSha256": "26b429fff7122dd7c46960672e74adeb8f14f4cea2ec078ac9ec1d5e63846b63",
+        "source": "native",
+        "timingNs": {
+          "collect": 101274,
+          "decide": 99492,
+          "total": 200766
+        },
+        "type": "ADMISSION",
+        "validator": "splat-native/1",
+        "verdict": "admitted"
+      },
+      "scratch": {
+        "admitted": false,
+        "attempts": 1,
+        "bpfSourceSha256": "5e218eb155e971516c21dffbdd10a4cf4ea80fd789dac56a3a9d221c98557d2d",
+        "counts": {
+          "exec": 1,
+          "ipv4": 0,
+          "mapOccupancy": {
+            "allowedExec": 1,
+            "allowedIpv4": 0,
+            "protected": 2
+          },
+          "protected": 2
+        },
+        "decision": "the installed lease could not be confirmed: the scratch-execution grant is written by the child after its overlay mount, so it cannot be observed before spawn",
+        "enforced": true,
+        "indeterminate": [
+          "the scratch-execution grant is written by the child after its overlay mount, so it cannot be observed before spawn"
+        ],
+        "mapIds": {
+          "allowedExec": 33,
+          "allowedIpv4": 35,
+          "leasedCgroups": 31,
+          "protected": 32,
+          "scratchExec": 34
+        },
+        "mode": "enforce",
+        "notes": [],
+        "programs": [
+          {
+            "hook": "bprmCheck",
+            "linkId": 11,
+            "progId": 80,
+            "tag": "c748f2896421d7e6"
+          },
+          {
+            "hook": "fileOpen",
+            "linkId": 12,
+            "progId": 81,
+            "tag": "deb61f797da89f40"
+          },
+          {
+            "hook": "socketConnect",
+            "linkId": 13,
+            "progId": 82,
+            "tag": "abbae16ea78e9adf"
+          },
+          {
+            "hook": "socketSendmsg",
+            "linkId": 14,
+            "progId": 83,
+            "tag": "dca691bdecf5b41c"
+          },
+          {
+            "hook": "ptraceAccess",
+            "linkId": 15,
+            "progId": 84,
+            "tag": "b6afb29933e2a643"
+          },
+          {
+            "hook": "taskKill",
+            "linkId": 16,
+            "progId": 85,
+            "tag": "179d8c81decb8aab"
+          },
+          {
+            "hook": "taskSetsched",
+            "linkId": 17,
+            "progId": 86,
+            "tag": "a6dceb93ddf7d648"
+          },
+          {
+            "hook": "taskSetnice",
+            "linkId": 18,
+            "progId": 87,
+            "tag": "1824d4172bd2dd23"
+          },
+          {
+            "hook": "taskSetioprio",
+            "linkId": 19,
+            "progId": 88,
+            "tag": "9fd35044e5444b62"
+          },
+          {
+            "hook": "taskSetrlimit",
+            "linkId": 20,
+            "progId": 89,
+            "tag": "98fd8aa2d68e065c"
+          }
+        ],
+        "reasons": [],
+        "snapshotSha256": "3ad758d4425b5c8e6bd289934641255f6c6e7e00b39b343babaec766ad7e9b0b",
+        "source": "native",
+        "timingNs": {
+          "collect": 143145,
+          "decide": 36493,
+          "total": 179638
+        },
+        "type": "ADMISSION",
+        "validator": "splat-native/1",
+        "verdict": "indeterminate"
+      },
+      "dev_encoding": {
+        "admitted": false,
+        "attempts": 1,
+        "bpfSourceSha256": "5e218eb155e971516c21dffbdd10a4cf4ea80fd789dac56a3a9d221c98557d2d",
+        "counts": {
+          "exec": 1,
+          "ipv4": 0,
+          "mapOccupancy": {
+            "allowedExec": 1,
+            "allowedIpv4": 0,
+            "protected": 3
+          },
+          "protected": 3
+        },
+        "decision": "6 divergence(s) between the installed and the approved lease; the first: {\"kind\":\"execGrantExcess\",\"ident\":{\"dev\":2112,\"ino\":649}}",
+        "enforced": true,
+        "indeterminate": [],
+        "mapIds": {
+          "allowedExec": 33,
+          "allowedIpv4": 35,
+          "leasedCgroups": 31,
+          "protected": 32,
+          "scratchExec": 34
+        },
+        "mode": "enforce",
+        "notes": [],
+        "programs": [
+          {
+            "hook": "bprmCheck",
+            "linkId": 11,
+            "progId": 80,
+            "tag": "c748f2896421d7e6"
+          },
+          {
+            "hook": "fileOpen",
+            "linkId": 12,
+            "progId": 81,
+            "tag": "deb61f797da89f40"
+          },
+          {
+            "hook": "socketConnect",
+            "linkId": 13,
+            "progId": 82,
+            "tag": "abbae16ea78e9adf"
+          },
+          {
+            "hook": "socketSendmsg",
+            "linkId": 14,
+            "progId": 83,
+            "tag": "dca691bdecf5b41c"
+          },
+          {
+            "hook": "ptraceAccess",
+            "linkId": 15,
+            "progId": 84,
+            "tag": "b6afb29933e2a643"
+          },
+          {
+            "hook": "taskKill",
+            "linkId": 16,
+            "progId": 85,
+            "tag": "179d8c81decb8aab"
+          },
+          {
+            "hook": "taskSetsched",
+            "linkId": 17,
+            "progId": 86,
+            "tag": "a6dceb93ddf7d648"
+          },
+          {
+            "hook": "taskSetnice",
+            "linkId": 18,
+            "progId": 87,
+            "tag": "1824d4172bd2dd23"
+          },
+          {
+            "hook": "taskSetioprio",
+            "linkId": 19,
+            "progId": 88,
+            "tag": "9fd35044e5444b62"
+          },
+          {
+            "hook": "taskSetrlimit",
+            "linkId": 20,
+            "progId": 89,
+            "tag": "98fd8aa2d68e065c"
+          }
+        ],
+        "reasons": [
+          {
+            "ident": {
+              "dev": 2112,
+              "ino": 649
+            },
+            "kind": "execGrantExcess"
+          },
+          {
+            "ident": {
+              "dev": 8388672,
+              "ino": 649
+            },
+            "kind": "execGrantMissing",
+            "path": "/usr/bin/id"
+          },
+          {
+            "ident": {
+              "dev": 8388672,
+              "ino": 182
+            },
+            "kind": "protectionMissing",
+            "path": "/etc/shadow"
+          },
+          {
+            "ident": {
+              "dev": 8388672,
+              "ino": 499
+            },
+            "kind": "protectionMissing",
+            "path": "/etc/sudoers"
+          },
+          {
+            "ident": {
+              "dev": 2112,
+              "ino": 182
+            },
+            "kind": "protectionExtra"
+          },
+          {
+            "ident": {
+              "dev": 2112,
+              "ino": 499
+            },
+            "kind": "protectionExtra"
+          }
+        ],
+        "snapshotSha256": "16136a5b15af271897418daf700d1557a08e61bd0efaf884b8c9941c83d5916a",
+        "source": "native",
+        "timingNs": {
+          "collect": 141953,
+          "decide": 104196,
+          "total": 246149
+        },
+        "type": "ADMISSION",
+        "validator": "splat-native/1",
+        "verdict": "refused"
+      },
+      "decoy": {
+        "admitted": false,
+        "attempts": 1,
+        "bpfSourceSha256": "5e218eb155e971516c21dffbdd10a4cf4ea80fd789dac56a3a9d221c98557d2d",
+        "counts": {
+          "exec": 0,
+          "ipv4": 0,
+          "mapOccupancy": {
+            "allowedExec": 0,
+            "allowedIpv4": 0,
+            "protected": 3
+          },
+          "protected": 3
+        },
+        "decision": "2 divergence(s) between the installed and the approved lease; the first: {\"kind\":\"mapBinding\",\"role\":\"allowedExec\",\"hook\":\"bprmCheck\",\"mapId\":33,\"writerId\":39}",
+        "enforced": true,
+        "indeterminate": [],
+        "mapIds": {
+          "allowedExec": 33,
+          "allowedIpv4": 35,
+          "leasedCgroups": 31,
+          "protected": 32,
+          "scratchExec": 34
+        },
+        "mode": "enforce",
+        "notes": [],
+        "programs": [
+          {
+            "hook": "bprmCheck",
+            "linkId": 11,
+            "progId": 80,
+            "tag": "c748f2896421d7e6"
+          },
+          {
+            "hook": "fileOpen",
+            "linkId": 12,
+            "progId": 81,
+            "tag": "deb61f797da89f40"
+          },
+          {
+            "hook": "socketConnect",
+            "linkId": 13,
+            "progId": 82,
+            "tag": "abbae16ea78e9adf"
+          },
+          {
+            "hook": "socketSendmsg",
+            "linkId": 14,
+            "progId": 83,
+            "tag": "dca691bdecf5b41c"
+          },
+          {
+            "hook": "ptraceAccess",
+            "linkId": 15,
+            "progId": 84,
+            "tag": "b6afb29933e2a643"
+          },
+          {
+            "hook": "taskKill",
+            "linkId": 16,
+            "progId": 85,
+            "tag": "179d8c81decb8aab"
+          },
+          {
+            "hook": "taskSetsched",
+            "linkId": 17,
+            "progId": 86,
+            "tag": "a6dceb93ddf7d648"
+          },
+          {
+            "hook": "taskSetnice",
+            "linkId": 18,
+            "progId": 87,
+            "tag": "1824d4172bd2dd23"
+          },
+          {
+            "hook": "taskSetioprio",
+            "linkId": 19,
+            "progId": 88,
+            "tag": "9fd35044e5444b62"
+          },
+          {
+            "hook": "taskSetrlimit",
+            "linkId": 20,
+            "progId": 89,
+            "tag": "98fd8aa2d68e065c"
+          }
+        ],
+        "reasons": [
+          {
+            "hook": "bprmCheck",
+            "kind": "mapBinding",
+            "mapId": 33,
+            "role": "allowedExec",
+            "writerId": 39
+          },
+          {
+            "ident": {
+              "dev": 8388672,
+              "ino": 649
+            },
+            "kind": "execGrantMissing",
+            "path": "/usr/bin/id"
+          }
+        ],
+        "snapshotSha256": "5c8dff112c76bd11a42f757ff52359861889750e1d7facfe8aa0e96c2c4e0698",
+        "source": "native",
+        "timingNs": {
+          "collect": 105224,
+          "decide": 40483,
+          "total": 145707
+        },
+        "type": "ADMISSION",
+        "validator": "splat-native/1",
+        "verdict": "refused"
+      },
+      "audit": {
+        "admitted": true,
+        "attempts": 1,
+        "bpfSourceSha256": "5e218eb155e971516c21dffbdd10a4cf4ea80fd789dac56a3a9d221c98557d2d",
+        "counts": {
+          "exec": 1,
+          "ipv4": 0,
+          "mapOccupancy": {
+            "allowedExec": 1,
+            "allowedIpv4": 0,
+            "protected": 3
+          },
+          "protected": 3
+        },
+        "decision": "the installed lease is the approved one",
+        "enforced": false,
+        "indeterminate": [],
+        "mapIds": {
+          "allowedExec": 33,
+          "allowedIpv4": 35,
+          "leasedCgroups": 31,
+          "protected": 32,
+          "scratchExec": 34
+        },
+        "mode": "audit",
+        "notes": [],
+        "programs": [
+          {
+            "hook": "bprmCheck",
+            "linkId": 11,
+            "progId": 80,
+            "tag": "c748f2896421d7e6"
+          },
+          {
+            "hook": "fileOpen",
+            "linkId": 12,
+            "progId": 81,
+            "tag": "deb61f797da89f40"
+          },
+          {
+            "hook": "socketConnect",
+            "linkId": 13,
+            "progId": 82,
+            "tag": "abbae16ea78e9adf"
+          },
+          {
+            "hook": "socketSendmsg",
+            "linkId": 14,
+            "progId": 83,
+            "tag": "dca691bdecf5b41c"
+          },
+          {
+            "hook": "ptraceAccess",
+            "linkId": 15,
+            "progId": 84,
+            "tag": "b6afb29933e2a643"
+          },
+          {
+            "hook": "taskKill",
+            "linkId": 16,
+            "progId": 85,
+            "tag": "179d8c81decb8aab"
+          },
+          {
+            "hook": "taskSetsched",
+            "linkId": 17,
+            "progId": 86,
+            "tag": "a6dceb93ddf7d648"
+          },
+          {
+            "hook": "taskSetnice",
+            "linkId": 18,
+            "progId": 87,
+            "tag": "1824d4172bd2dd23"
+          },
+          {
+            "hook": "taskSetioprio",
+            "linkId": 19,
+            "progId": 88,
+            "tag": "9fd35044e5444b62"
+          },
+          {
+            "hook": "taskSetrlimit",
+            "linkId": 20,
+            "progId": 89,
+            "tag": "98fd8aa2d68e065c"
+          }
+        ],
+        "reasons": [],
+        "snapshotSha256": "309be960ceb903ff47e8d58126a349f4e6e2ffa50755f28e81a3e69a296c55cc",
+        "source": "native",
+        "timingNs": {
+          "collect": 186255,
+          "decide": 63126,
+          "total": 249381
+        },
+        "type": "ADMISSION",
+        "validator": "splat-native/1",
+        "verdict": "admitted"
+      }
+    }
+  },
+  "results": {
+    "fds_inherited_stdio_only": true,
+    "cow_overlay_in_child": true,
+    "cow_host_unchanged": true,
+    "cow_no_host_mount": true,
+    "cow_concurrent_isolation": true,
+    "cow_scratch_removed": true,
+    "cow_read_only_honored": true,
+    "cow_bad_options_refused": true,
+    "cow_inode_overlap_refused": true,
+    "scratch_exec_inside": true,
+    "scratch_exec_outside_denied": true,
+    "scratch_exec_default_denied": true,
+    "scratch_exec_other_lease_denied": true,
+    "scratch_exec_fd_scoped": true,
+    "scratch_exec_map_removed": true,
+    "scratch_exec_layer_removed": true,
+    "scratch_exec_requires_cow": true,
+    "scratch_exec_ceiling_refused": true,
+    "pins_survive_sigkill": true,
+    "pins_exec_denied_during_outage": true,
+    "pins_file_denied_during_outage": true,
+    "pins_allowed_exec_during_outage": true,
+    "pins_no_daemon_during_measurement": true,
+    "pins_same_ids_after_restart": true,
+    "pins_restart_enforces": true,
+    "pins_orphans_drained": true,
+    "pins_wrong_hash_refused": true,
+    "pins_partial_set_refused": true,
+    "pins_foreign_map_refused": true,
+    "expiry_no_daemon_during_measurement": true,
+    "expiry_allowed_until_deadline": true,
+    "expiry_exec_denied_without_daemon": true,
+    "expiry_open_denied_without_daemon": true,
+    "expiry_overrun_within_1s": true,
+    "xlease_jail_control_ops_possible": true,
+    "xlease_jail_peer_unreachable": true,
+    "xlease_distinct_private_uids": true,
+    "xhook_unleased_control_reaches_b": true,
+    "xhook_same_cgroup_allowed": true,
+    "xhook_root_in_another_lease_refused": true,
+    "xhook_refused_signal_never_arrived": true,
+    "xhook_receipts_name_each_hook_and_b": true,
+    "expiry_every_kernel_denial_drained": true,
+    "expiry_deadline_within_open_bracket": true,
+    "expiry_kernel_stamp_within_bracket": true,
+    "expiry_connect_denied_without_daemon": true,
+    "expiry_sendmsg_denied_without_daemon": true,
+    "expiry_restart_drains_the_orphan": true,
+    "expiry_reaper_ends_processes_within_a_tick": true,
+    "expiry_series_every_run_held": true,
+    "permitted_tool_ran": true,
+    "protected_inode_control_could_read_it": true,
+    "protected_inode_leaked": false,
+    "protected_inode_violation": true,
+    "unleased_second_exec_blocked": true,
+    "egress_permitted_destination_allowed": true,
+    "egress_unleased_destination_blocked": true,
+    "egress_denied_when_network_off": true,
+    "every_request_completed": true,
+    "workload_not_root": true,
+    "workload_uid_reported": "2000000",
+    "concurrent_lease_isolation_held": true,
+    "unapproved_port_refused": true,
+    "ipv6_refused": true,
+    "expiry_killed_the_workload": true,
+    "expiry_elapsed_seconds": 5.4,
+    "undeclared_egress_refused": true,
+    "undeclared_exec_list_refused": true,
+    "health_check_answers_a_token_holder": true,
+    "unauthenticated_health_check_refused": true,
+    "daemon_proved_it_holds_the_token": true,
+    "protocol_2_token_in_the_clear_refused": true,
+    "daemon_frames_proven": true,
+    "udp_outside_the_lease_blocked": true,
+    "udp_violation_frame_reached_the_session": true,
+    "udp_inside_the_lease_allowed": true,
+    "refusal_receipt_counts_the_denial": true,
+    "refusal_receipt_says_it_is_complete": true,
+    "a_clean_lease_reports_zero_refusals": true,
+    "lease_outcome_is_signed_by_the_guest": true,
+    "lease_outcome_signature_verifies": true,
+    "an_edited_outcome_fails_the_signature": true,
+    "jail_control_host_has_home_and_mnt": true,
+    "jail_hides_home_and_mnt": true,
+    "jail_system_dirs_read_only": true,
+    "jail_workdir_and_tmp_writable": true,
+    "read_only_fs_makes_workdir_read_only": true,
+    "lease_frame_reports_enforcing": true,
+    "mission_workspace_made_and_removed": true,
+    "mission_workspace_frame_says_created": true,
+    "mission_workspace_path_announced": true,
+    "mission_workspace_tool_wrote_in_it": true,
+    "mission_workspace_exit_says_removed": true,
+    "mission_workspace_gone_from_the_host": true,
+    "mission_workspace_elsewhere_refused": true,
+    "mission_workspace_removed_on_refusal": true,
+    "cross_lease_control_ops_possible": true,
+    "cross_lease_signal_reaches_a_peer_lease": false,
+    "cross_lease_peer_proc_cwd_readlinked": false,
+    "cross_lease_peer_proc_root_readlinked": false,
+    "cross_lease_peer_workspace_read_via_proc": false,
+    "cross_lease_peer_workspace_written_via_proc": false,
+    "cross_lease_peer_visible_in_proc": false
+  },
+  "violations": [
+    {
+      "hook": 2,
+      "pid": 317,
+      "detail": 91,
+      "detailText": "file_open: denied access to protected sensitive file (inode 91)",
+      "comm": "cat"
+    },
+    {
+      "hook": 1,
+      "pid": 319,
+      "detail": 607,
+      "detailText": "bprm_check_security: denied execution of unleased binary (inode 607)",
+      "comm": "sh"
+    },
+    {
+      "hook": 1,
+      "pid": 319,
+      "detail": 607,
+      "detailText": "bprm_check_security: denied execution of unleased binary (inode 607)",
+      "comm": "sh"
+    },
+    {
+      "hook": 3,
+      "pid": 321,
+      "detail": 16843009,
+      "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 1.1.1.1",
+      "comm": "curl"
+    },
+    {
+      "hook": 3,
+      "pid": 322,
+      "detail": 16777343,
+      "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 127.0.0.1",
+      "comm": "curl"
+    },
+    {
+      "hook": 1,
+      "pid": 328,
+      "detail": 566,
+      "detailText": "bprm_check_security: denied execution of unleased binary (inode 566)",
+      "comm": "sh"
+    },
+    {
+      "hook": 1,
+      "pid": 328,
+      "detail": 566,
+      "detailText": "bprm_check_security: denied execution of unleased binary (inode 566)",
+      "comm": "sh"
+    },
+    {
+      "hook": 3,
+      "pid": 329,
+      "detail": 16777343,
+      "detailText": "socket_connect: denied outbound network connection to unapproved IPv4 127.0.0.1",
+      "comm": "curl"
+    },
+    {
+      "hook": 3,
+      "pid": 330,
+      "detail": 0,
+      "detailText": "socket_connect: denied outbound network connection (IPv6 destination, or IPv4 0.0.0.0)",
+      "comm": "curl"
+    },
+    {
+      "hook": 4,
+      "pid": 333,
+      "detail": 16843009,
+      "detailText": "socket_sendmsg: denied outbound datagram to unapproved IPv4 1.1.1.1",
+      "comm": "python3"
+    }
+  ],
+  "verdict": "PASS"
+}

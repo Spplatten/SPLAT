@@ -1,18 +1,18 @@
 {
-  "bpfSourceSha256": "d5bb4cad4c3397f1e12c0ca7952b10c1b2a2694b777ec84d30266d21b2b0af80",
+  "bpfSourceSha256": "5e218eb155e971516c21dffbdd10a4cf4ea80fd789dac56a3a9d221c98557d2d",
   "fragment": "exec authority of splat_bprm_check and the protected-file denials of splat_file_open; connect and sendmsg are captured by nothing here",
   "programs": {
     "exec": {
       "name": "splat_bprm_check",
       "progType": "lsm",
       "attachFunc": "bpf_lsm_bprm_check_security",
-      "expectedTag": null
+      "expectedTag": "c748f2896421d7e6"
     },
     "open": {
       "name": "splat_file_open",
       "progType": "lsm",
       "attachFunc": "bpf_lsm_file_open",
-      "expectedTag": null
+      "expectedTag": "deb61f797da89f40"
     }
   },
   "maps": {
@@ -45,5 +45,5 @@
       "value": 1
     }
   },
-  "reviewStatus": "native-review-required; historical 8-byte-build tags do not certify this 16-byte build"
+  "reviewStatus": "reviewed 2026-11-13 for BPF 5e218eb1. Both tags are the programs the daemon built from 3e044a8 (binary f1b471f0) loaded in the no-gate lifecycle probe of the 2026-11-09T18:44:27Z root run, as its native validator recorded them with all ten links owned by that daemon. At source, both programs decide as they did under d5bb4cad, with the maps and layouts above; report(), inlined into each, now records the namespace pid, which is why the tags changed. Reviewed by the implementation owner, not independently, and the translated dumps were not compared. A changed BPF source needs a new review."
 }

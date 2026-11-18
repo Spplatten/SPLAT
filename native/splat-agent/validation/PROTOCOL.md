@@ -6,6 +6,14 @@ commit; they are not results for this revision. Apply the additional acceptance 
 `AUDIT_GAP_PROTOCOL.md`, and label a new bundle separately. Native execution of this revision is
 pending. The condition counts below remain the registered counts for the existing experiments.
 
+**Milestone run 2, registered 2026-11-13, before it ran.** Run 1's scope, repetitions, timeouts,
+exclusions and pass criteria, unchanged, on the build `profile.json` names: BPF `5e218eb1`, which
+attaches ten programs, with the audit-gap revision above. The gated variants check the two reviewed
+tags; a staged program that loads with another tag is indeterminate, and that fails the verdict
+rather than being excluded. Run 2 does not run the additional native cases in
+`AUDIT_GAP_PROTOCOL.md`, which no driver automates yet, so it cannot close that audit. Its bundle is
+labelled separately from run 1's.
+
 Fixed before the run. The commit that adds this file is its timestamp; `build_842.sh` stages it, so
 the bundle's `SHA256SUMS` binds the run to it. A change after the run is a protocol revision and
 produces a separately labelled dataset.
