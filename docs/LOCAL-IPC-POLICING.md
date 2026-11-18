@@ -1,6 +1,8 @@
 # Local IPC policing: AF_UNIX and AF_NETLINK (design)
 
-**This page is a plan. Nothing in it is built.** It is work queue item 3, the last large row in
+**Built on 2026-11-14, and not proven.** The three programs, their receipts and the probe section
+exist in the tree; no kernel has loaded them, so nothing on this page is enforcement yet. See
+*What is built and what has been checked* below. It is work queue item 3, the last large row in
 the *Not policed* table of [SUPPORTED_POLICY.md](../native/splat-agent/SUPPORTED_POLICY.md). That
 row stays as it is until a root run proves what is built from this page.
 
@@ -156,6 +158,48 @@ first run inside the SPLAT Guest.
 
 Each refusal is scored on EPERM alone. ENOENT or ECONNREFUSED would mean the peer was not
 there, not that it was refused.
+
+## What is built and what has been checked
+
+Built on 2026-11-14, as this page describes, with these differences:
+- A lease that inherited a stream already connected is not judged, because no hook sees a stream
+  send. The daemon hands a workload stdin, stdout and stderr only (`fds_inherited_stdio_only`).
+- The admission check `frame_names_all_ten_programs` is now `frame_names_every_program` and
+  expects thirteen.
+
+The proof is section 19c of [probe-daemon.sh](../native/splat-agent/probe-daemon.sh). Two
+ordinary leases run in their jails and the probe itself is the host side. Eight checks gate the
+verdict:
+
+| Check | What it requires |
+| --- | --- |
+| `ipc_host_controls_work` | the probe reached its own stream and datagram names and created a netlink socket |
+| `ipc_same_lease_allowed` | lease A's forked child reached A's stream and datagram names |
+| `ipc_lease_to_host_refused` | A got EPERM on both host names, and the host received only its own control |
+| `ipc_lease_to_lease_refused` | B got EPERM on both of A's names, and A received only its own child |
+| `ipc_host_into_lease_refused` | the probe got EPERM on both of A's names, and A received only its own child |
+| `ipc_netlink_refused_in_lease` | A got EPERM creating `NETLINK_ROUTE` and `NETLINK_SOCK_DIAG` sockets |
+| `ipc_getaddrinfo_survives_netlink_refusal` | `getaddrinfo("localhost", AI_ADDRCONFIG)` succeeded inside A |
+| `ipc_receipts_in_each_lease_session` | A's session carried hooks 11, 12 and 13 (protocols 0 and 4) for itself and 11 and 12 naming the probe's pid; B's carried 11 and 12 |
+
+The probe does not exercise `SOCK_SEQPACKET`, a pathname socket, or a host process in a second
+unleased cgroup. It does not measure the cost of `unix_may_send`.
+
+Checked without root, on 2026-11-14, in Ubuntu 26.04.1 on kernel 6.18.33.2:
+- The program compiles (clang, `-mcpu=v3`) and the daemon builds against its skeleton. The
+  source hash is `d1480388`.
+- The daemon's unit tests pass, 171 of 171, with the validator's hook list at thirteen.
+- `bpf_lsm_unix_stream_connect`, `bpf_lsm_unix_may_send` and `bpf_lsm_socket_create` are in the
+  running kernel's BTF.
+- The probe's workload, run with no lease and no hooks, delivered on every path: lease B's and
+  the host's payloads reached A, A's reached the host, and both netlink sockets opened. So each
+  of the six refusal checks is false without the hooks, and the probe can fail.
+
+Not checked, because each needs root: that the verifier accepts the three programs, that they
+attach, that `sk_cgrp_data` names the creator's cgroup as the rule assumes, and every refusal
+above. The recorded daemon and last-hop proofs name `5e218eb1`, so they no longer describe the
+program in this tree, and `DocumentationDriftTests` fails on the README's two claims until the
+root run records new evidence.
 
 ## Decisions (operator, 2026-11-13)
 

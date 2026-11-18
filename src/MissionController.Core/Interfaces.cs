@@ -556,7 +556,13 @@ public enum KernelViolationHook
     SetScheduler = 7,  // task_setscheduler
     SetNice = 8,       // task_setnice
     SetIoPriority = 9, // task_setioprio
-    SetRlimit = 10     // task_setrlimit
+    SetRlimit = 10,    // task_setrlimit
+    // Local IPC. The two AF_UNIX hooks refuse a socket between two cgroups when either is leased,
+    // so the refused caller may be a host process reaching in; the detail word is the peer
+    // socket's inode. Netlink's is the protocol number.
+    UnixConnect = 11,  // unix_stream_connect
+    UnixSend = 12,     // unix_may_send
+    Netlink = 13       // socket_create(AF_NETLINK)
 }
 
 public record LeaseViolationEvent(
